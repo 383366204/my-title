@@ -1,0 +1,20 @@
+{
+  "name": "my-title",
+  "version": "1.0.0",
+  "description": "电商选品标题生成工具 - 关键词 → GLM提取 → 1688搜索 → 相关性过滤 → 生成淘宝标题",
+  "main": "src/index.js",
+  "bin": {
+    "my-title": "bin/cli.js"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": ["ecommerce", "title", "generator", "1688", "taobao"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "commander": "^12.0.0",
+    "axios": "^1.6.0",
+    "dotenv": "^16.4.0"
+  }
+}
