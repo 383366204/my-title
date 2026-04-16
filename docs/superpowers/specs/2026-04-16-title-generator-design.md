@@ -36,7 +36,8 @@
 | F6 | 三段式结构 | P0 | 标题结构：核心词 + 属性词 + 场景词 |
 | F7 | 违禁词过滤 | P0 | 过滤极限词、虚假描述词 |
 | F8 | 产品相关性过滤 | P0 | 根据用户修饰词过滤不匹配的搜索结果 |
-| F9 | 多标题输出 | P1 | 输出 3-5 个候选标题供用户选择 |
+| F9 | 修饰词刚性判断 | P0 | AI 判断修饰词是否强制匹配（rigid/optional） |
+| F10 | 多标题输出 | P1 | 输出 3-5 个候选标题供用户选择 |
 
 ### 2.2 非功能需求
 
@@ -143,9 +144,12 @@ class GLMClient {
   }
 
   /**
-   * 提取核心词和修饰词
+   * 提取核心词、修饰词和修饰词刚性程度
    * @param {string} input - 用户输入的关键词
-   * @returns {Promise<{coreWord: string, modifierWords: Array<string>}>} 核心词和修饰词
+   * @returns {Promise<{
+   *   coreWord: string,
+   *   modifiers: Array<{word: string, rigidity: 'rigid'|'optional'}>
+   * }>} 核心词和带刚性程度的修饰词
    */
   async extractCoreAndModifiers(input) {}
 }
@@ -153,31 +157,37 @@ class GLMClient {
 
 **Prompt 设计**:
 ```
-你是一个电商标题分析助手。请从以下关键词中提取：
-1. 核心商品词（1-2个词，代表商品类别）
-2. 修饰词/属性词（材质、风格、颜色、人群等描述词）
+你是一个电商标题分析助手。请从以下用户关键词中提取：
+
+1. **核心商品词** - 1-2个词，代表商品类别（如项链、裙子）
+2. **修饰词列表** - 每个修饰词标注刚性程度：
+   - "rigid" = 强制匹配（不满足则产品不对，必须剔除）
+   - "optional" = 可选匹配（只用于描述，不强制）
+
+判断规则：
+- 材质 → rigid（如"纯银"必须是纯银材质）
+- 颜色 → rigid（如"黑色"必须是黑色）
+- 规格尺寸 → rigid（如"XL"必须是XL）
+- 目标人群 → rigid（如"女款"必须是女款）
+- 风格 → optional（如"ins风"是风格描述，不强制）
+- 流行词 → optional（如"高级感"、"网红"是描述性词，不强制）
+- 时间/季节 → optional（如"2026新款"、"夏季"不强制）
 
 以 JSON 格式输出：
 {
   "coreWord": "核心词",
-  "modifierWords": ["修饰词1", "修饰词2", ...]
+  "modifiers": [
+    {"word": "修饰词1", "rigidity": "rigid"},
+    {"word": "修饰词2", "rigidity": "optional"}
+  ]
 }
 
 只输出 JSON，不要输出任何解释。
 
-关键词：纯银项链女高级感夏季
+用户关键词：纯银项链女高级感夏季
 ```
 
-**响应处理**: 解析 JSON 返回，提取 coreWord 和 modifierWords
-
-**修饰词分类**:
-| 类别 | 示例 | 过滤优先级 |
-|------|------|-----------|
-| 材质 | 纯银、925银、合金、不锈钢 | 高（必须匹配） |
-| 风格 | 韩版、欧美、简约、日系 | 中 |
-| 颜色 | 黑色、白色、金色、银色 | 中 |
-| 人群 | 女、男、青少年、中老年 | 低 |
-| 场景 | 通勤、约会、派对、日常 | 低 |
+**响应处理**: 解析 JSON 返回，提取 coreWord 和带刚性程度的修饰词列表
 
 ### 4.2 1688 Client (`src/alibaba1688-client.js`)
 
@@ -255,20 +265,37 @@ async function extractCoreAndModifiers(input) {
 /**
  * 降级提取（当 GLM API 失败时）
  * @param {string} input - 用户输入
- * @returns {{coreWord: string, modifierWords: Array<string>}}
+ * @returns {{
+ *   coreWord: string,
+ *   modifiers: Array<{word: string, rigidity: 'rigid'|'optional'}>
+ * }}
  */
 function fallbackExtract(input) {
-  // 取第一个词作为核心词，其余作为修饰词
+  // 取最后一个词作为核心词（通常输入是修饰词+核心词）
   const words = input.split(/\s+/).filter(Boolean);
+  if (words.length === 0) {
+    return {
+      coreWord: input,
+      modifiers: []
+    };
+  }
+  
+  const coreWord = words.pop();
+  const modifiers = words.map(word => {
+    // 降级规则：材质/颜色词视为 rigid，其他视为 optional
+    const rigidPatterns = /纯银|合金|纯棉|羊毛|真丝|真皮|不锈钢|黄铜|金色|银色|黑色|白色|红色|蓝色|女|男|女款|男款|XL|L|M|S|加大/;
+    const rigidity = rigidPatterns.test(word) ? 'rigid' : 'optional';
+    return { word, rigidity };
+  });
+  
   return {
-    coreWord: words[0] || input,
-    modifierWords: words.slice(1)
+    coreWord,
+    modifiers
   };
 }
-```
 
 **错误处理**:
-- API 调用失败 → 降级使用 fallbackExtract
+- API 调用失败 → 降级使用 fallbackExtract（基于简单规则判断刚性）
 - 超时 → 降级使用 fallbackExtract
 - 返回格式异常 → 降级使用 fallbackExtract
 
@@ -300,31 +327,73 @@ async function search1688(coreWord, modifierWords = []) {
 }
 
 /**
- * 产品相关性过滤
+ * 产品相关性过滤，基于修饰词刚性程度
  * @param {Array<object>} products - 商品列表
- * @param {Array<string>} modifierWords - 修饰词列表
+ * @param {Array<{word: string, rigidity: 'rigid'|'optional'}>} modifiers - 修饰词列表
  * @returns {Array<object>} 过滤后的商品列表
  */
-function filterRelevantProducts(products, modifierWords) {
+function filterRelevantProducts(products, modifiers) {
+  const rigidModifiers = modifiers
+    .filter(m => m.rigidity === 'rigid')
+    .map(m => m.word);
+  
   return products.filter(product => {
     const title = product.subject || '';
     const description = product.description || '';
-    const combinedText = title + ' ' + description;
+    const combinedText = (title + ' ' + description).toLowerCase();
     
-    // 检查商品是否包含至少一个修饰词
-    // 如果修饰词是"纯银"，则商品标题或描述中应包含"纯银"
-    return modifierWords.some(word => combinedText.includes(word));
+    // 刚性修饰词：所有刚性修饰词必须匹配（至少一个必须出现，如果有多个刚性词）
+    // 也就是说，如果有刚性修饰词，商品必须包含至少一个刚性修饰词
+    // 如果没有刚性修饰词，所有商品都保留
+    if (rigidModifiers.length === 0) {
+      return true;
+    }
+    
+    return rigidModifiers.some(word => 
+      combinedText.includes(word.toLowerCase())
+    );
   });
 }
 ```
 
 **相关性过滤逻辑**:
 
-| 用户修饰词 | 过滤条件 | 示例 |
-|-----------|----------|------|
-| 材质词 | 商品标题/描述中必须包含该材质 | "纯银" → 商品必须包含"纯银" |
-| 风格词 | 商品标题/描述中应包含该风格 | "韩版" → 商品应包含"韩版" |
-| 颜色词 | 商品标题/描述中应包含该颜色 | "黑色" → 商品应包含"黑色" |
+首先由 GLM 判断每个修饰词的刚性程度，然后根据刚性程度应用不同的过滤策略：
+
+| 刚性程度 | 定义 | 过滤条件 | 示例 |
+|-----------|----------|----------|------|
+| **强制** (rigid) | 必须满足，否则商品品类错误 | 商品必须包含该词 | 纯银 → 商品必须包含"纯银" |
+| **可选** (optional) | 描述商品属性，不强制但建议有 | 不强制匹配，不剔除 | 高级感 → 不需要强制包含"高级感" |
+
+**AI 判断规则** (由 GLM 执行):
+
+| 词类型 | 刚性程度 | 理由 |
+|--------|----------|------|
+| 材质词 (纯银、925银、合金、纯棉) | 强制 | 材质不匹配的产品完全不对 |
+| 颜色词 (黑色、白色、金色) | 强制 | 颜色不匹配客户不会购买 |
+| 规格词 (XL、长款、中长款、加厚) | 强制 | 规格不匹配产品不对 |
+| 人群词 (女、男、学生、中老年) | 强制 | 目标人群不对 |
+| 风格词 (ins风、韩版、欧美、复古) | 可选 | 风格是主观判断，不影响产品品类正确 |
+| 款式词 (新款、经典款、简约、小众) | 可选 | 款式描述不影响产品正确性 |
+| 流行词 (网红、爆款、高级感、ins) | 可选 | 这些词用于标题吸引力，不是产品属性 |
+| 时间词 (2026、夏季、秋季) | 可选 | 季节性描述不影响产品正确性 |
+
+**GLM Prompt**:
+```
+你是一个电商修饰词分类助手。请判断用户输入中每个修饰词的刚性程度：
+- 刚性程度分为"rigid"(强制匹配，不匹配则产品错误)和"optional"(可选，不强制匹配)
+- 输出 JSON 格式: {"modifiers": [{"word": "词", "rigidity": "rigid|optional"}]}
+
+用户关键词：纯银项链女高级感
+输出：
+{
+  "modifiers": [
+    {"word": "纯银", "rigidity": "rigid"},
+    {"word": "女", "rigidity": "rigid"},
+    {"word": "高级感", "rigidity": "optional"}
+  ]
+}
+```
 
 **返回数据结构**:
 ```javascript
@@ -439,11 +508,18 @@ sequenceDiagram
     User->>CLI: my-title "纯银项链女高级感"
     CLI->>Main: run(input)
     Main->>GLM: extractCoreAndModifiers(input)
-    GLM-->>Main: {coreWord: "项链", modifierWords: ["纯银", "女", "高级感"]}
+    GLM-->>Main: {
+      coreWord: "项链",
+      modifiers: [
+        {word: "纯银", rigidity: "rigid"},
+        {word: "女", rigidity: "rigid"},
+        {word: "高级感", rigidity: "optional"}
+      ]
+    }
     Main->>API1688: searchOffers("项链")
     API1688-->>Main: [商品列表]
-    Main->>Filter: filterRelevantProducts(products, ["纯银", "女", "高级感"])
-    Note over Filter: 过滤掉不包含"纯银"的商品
+    Main->>Filter: filterRelevantProducts(products, modifiers)
+    Note over Filter: 只过滤刚性修饰词: "纯银"必须匹配, "高级感"不强制
     Filter-->>Main: [过滤后的商品列表]
     Main->>Generator: generateTitles(input, coreWord, filteredProducts)
     Generator-->>Main: ["纯银项链女高级感...", "纯银项链女...", ...]
