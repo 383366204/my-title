@@ -35,7 +35,8 @@
 | F5 | 长度控制 | P0 | 确保标题不超过 60 字符（默认），部分类目可达 128 字符 |
 | F6 | 三段式结构 | P0 | 标题结构：核心词 + 属性词 + 场景词 |
 | F7 | 违禁词过滤 | P0 | 过滤极限词、虚假描述词 |
-| F8 | 多标题输出 | P1 | 输出 3-5 个候选标题供用户选择 |
+| F8 | 产品相关性过滤 | P0 | 根据用户修饰词过滤不匹配的搜索结果 |
+| F9 | 多标题输出 | P1 | 输出 3-5 个候选标题供用户选择 |
 
 ### 2.2 非功能需求
 
@@ -142,23 +143,41 @@ class GLMClient {
   }
 
   /**
-   * 提取核心词
+   * 提取核心词和修饰词
    * @param {string} input - 用户输入的关键词
-   * @returns {Promise<string>} 核心词
+   * @returns {Promise<{coreWord: string, modifierWords: Array<string>}>} 核心词和修饰词
    */
-  async extractCoreWord(input) {}
+  async extractCoreAndModifiers(input) {}
 }
 ```
 
 **Prompt 设计**:
 ```
-你是一个电商标题分析助手。请从以下关键词中提取最核心的商品词（1-2个词）。
-只输出核心词本身，不要输出任何解释。
+你是一个电商标题分析助手。请从以下关键词中提取：
+1. 核心商品词（1-2个词，代表商品类别）
+2. 修饰词/属性词（材质、风格、颜色、人群等描述词）
+
+以 JSON 格式输出：
+{
+  "coreWord": "核心词",
+  "modifierWords": ["修饰词1", "修饰词2", ...]
+}
+
+只输出 JSON，不要输出任何解释。
 
 关键词：纯银项链女高级感夏季
 ```
 
-**响应处理**: 直接取返回文本作为核心词
+**响应处理**: 解析 JSON 返回，提取 coreWord 和 modifierWords
+
+**修饰词分类**:
+| 类别 | 示例 | 过滤优先级 |
+|------|------|-----------|
+| 材质 | 纯银、925银、合金、不锈钢 | 高（必须匹配） |
+| 风格 | 韩版、欧美、简约、日系 | 中 |
+| 颜色 | 黑色、白色、金色、银色 | 中 |
+| 人群 | 女、男、青少年、中老年 | 低 |
+| 场景 | 通勤、约会、派对、日常 | 低 |
 
 ### 4.2 1688 Client (`src/alibaba1688-client.js`)
 
@@ -215,52 +234,97 @@ class Alibaba1688Client {
 
 ### 4.3 Extract Core (`src/extract-core.js`)
 
-**职责**: 调用 GLM 提取核心词，处理异常情况
+**职责**: 调用 GLM 提取核心词和修饰词，处理异常情况
 
 **接口设计**:
 ```javascript
 /**
- * 从输入关键词中提取核心商品词
+ * 从输入关键词中提取核心商品词和修饰词
  * @param {string} input - 用户输入
- * @returns {Promise<string>} 核心词
+ * @returns {Promise<{coreWord: string, modifierWords: Array<string>}>} 核心词和修饰词
  */
-async function extractCoreWord(input) {
+async function extractCoreAndModifiers(input) {
   const client = new GLMClient({
     apiKey: process.env.GLM_API_KEY,
     apiBase: process.env.GLM_API_BASE
   });
   
-  return await client.extractCoreWord(input);
+  return await client.extractCoreAndModifiers(input);
+}
+
+/**
+ * 降级提取（当 GLM API 失败时）
+ * @param {string} input - 用户输入
+ * @returns {{coreWord: string, modifierWords: Array<string>}}
+ */
+function fallbackExtract(input) {
+  // 取第一个词作为核心词，其余作为修饰词
+  const words = input.split(/\s+/).filter(Boolean);
+  return {
+    coreWord: words[0] || input,
+    modifierWords: words.slice(1)
+  };
 }
 ```
 
 **错误处理**:
-- API 调用失败 → 降级返回输入的第一个词
-- 超时 → 降级返回输入的第一个词
-- 返回为空 → 降级返回输入的第一个词
+- API 调用失败 → 降级使用 fallbackExtract
+- 超时 → 降级使用 fallbackExtract
+- 返回格式异常 → 降级使用 fallbackExtract
 
 ### 4.4 Search 1688 (`src/search-1688.js`)
 
-**职责**: 使用核心词搜索 1688 商品，提取标题
+**职责**: 使用核心词搜索 1688 商品，提取标题，并根据用户输入的修饰词进行产品相关性过滤
 
 **接口设计**:
 ```javascript
 /**
- * 搜索 1688 商品
+ * 搜索 1688 商品并进行相关性过滤
  * @param {string} coreWord - 核心词
- * @returns {Promise<Array<string>>} 商品标题列表
+ * @param {Array<string>} modifierWords - 修饰词列表（从用户输入提取）
+ * @returns {Promise<Array<object>>} 过滤后的商品列表
  */
-async function search1688(coreWord) {
+async function search1688(coreWord, modifierWords = []) {
   const client = new Alibaba1688Client(process.env.ALI_1688_AK);
   const result = await client.searchOffers(coreWord);
   
-  // 提取标题
-  return Object.values(result.model.data)
-    .map(item => item.subject)
-    .filter(Boolean)
-    .slice(0, 20);
+  // 提取商品列表
+  let products = Object.values(result.model.data);
+  
+  // 产品相关性过滤：如果用户输入了修饰词，则过滤不匹配的商品
+  if (modifierWords.length > 0) {
+    products = filterRelevantProducts(products, modifierWords);
+  }
+  
+  return products;
+}
+
+/**
+ * 产品相关性过滤
+ * @param {Array<object>} products - 商品列表
+ * @param {Array<string>} modifierWords - 修饰词列表
+ * @returns {Array<object>} 过滤后的商品列表
+ */
+function filterRelevantProducts(products, modifierWords) {
+  return products.filter(product => {
+    const title = product.subject || '';
+    const description = product.description || '';
+    const combinedText = title + ' ' + description;
+    
+    // 检查商品是否包含至少一个修饰词
+    // 如果修饰词是"纯银"，则商品标题或描述中应包含"纯银"
+    return modifierWords.some(word => combinedText.includes(word));
+  });
 }
 ```
+
+**相关性过滤逻辑**:
+
+| 用户修饰词 | 过滤条件 | 示例 |
+|-----------|----------|------|
+| 材质词 | 商品标题/描述中必须包含该材质 | "纯银" → 商品必须包含"纯银" |
+| 风格词 | 商品标题/描述中应包含该风格 | "韩版" → 商品应包含"韩版" |
+| 颜色词 | 商品标题/描述中应包含该颜色 | "黑色" → 商品应包含"黑色" |
 
 **返回数据结构**:
 ```javascript
@@ -272,6 +336,7 @@ async function search1688(coreWord) {
         subject: "纯银项链女高级感 夏季锁骨链女款简约",
         price: "99.00",
         image: "https://...",
+        description: "材质: 纯银 925银...", // 用于过滤判断
         // ... 其他字段
       }
     }
@@ -368,18 +433,39 @@ sequenceDiagram
     participant Main
     participant GLM
     participant API1688
+    participant Filter
     participant Generator
 
     User->>CLI: my-title "纯银项链女高级感"
     CLI->>Main: run(input)
-    Main->>GLM: extractCoreWord(input)
-    GLM-->>Main: "项链"
+    Main->>GLM: extractCoreAndModifiers(input)
+    GLM-->>Main: {coreWord: "项链", modifierWords: ["纯银", "女", "高级感"]}
     Main->>API1688: searchOffers("项链")
     API1688-->>Main: [商品列表]
-    Main->>Generator: generateTitles(input, titles)
-    Generator-->>Main: ["纯银项链女高级感...", "纯银项链女高级感..."]
+    Main->>Filter: filterRelevantProducts(products, ["纯银", "女", "高级感"])
+    Note over Filter: 过滤掉不包含"纯银"的商品
+    Filter-->>Main: [过滤后的商品列表]
+    Main->>Generator: generateTitles(input, coreWord, filteredProducts)
+    Generator-->>Main: ["纯银项链女高级感...", "纯银项链女...", ...]
     Main-->>CLI: 输出结果
     CLI-->>User: 打印标题
+```
+
+### 5.2 产品相关性过滤流程
+
+```mermaid
+flowchart TD
+    A[用户输入: 纯银项链女高级感] --> B[GLM 提取]
+    B --> C[核心词: 项链]
+    B --> D[修饰词: 纯银, 女, 高级感]
+    C --> E[1688 搜索项链]
+    E --> F[获得 20 个商品]
+    F --> G{检查商品是否包含修饰词}
+    G -->|包含"纯银"| H[保留商品]
+    G -->|不包含"纯银"| I[剔除商品]
+    H --> J[汇总过滤后的商品]
+    I --> J
+    J --> K[生成标题]
 ```
 
 ### 5.2 错误处理流程
