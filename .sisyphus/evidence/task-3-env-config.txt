@@ -1,0 +1,22 @@
+Task: 更新 .env.example 添加淘宝相关配置
+Date: 2026-04-18
+Status: COMPLETED
+
+验证结果:
+- grep "TAOBAO_NATIVE" .env.example 返回:
+  Line 13: TAOBAO_NATIVE_PATH=taobao-native # CLI 路径，如已加入 PATH 可直接写 taobao-native
+  Line 14: TAOBAO_NATIVE_TIMEOUT=10000 # 超时时间(毫秒)，默认 10000ms
+
+添加的配置:
+- TAOBAO_NATIVE_PATH: 可选，taobao-native CLI 路径
+- TAOBAO_NATIVE_TIMEOUT: 可选，超时时间，默认 10000ms
+
+保留的配置 (未修改):
+- GLM_API_KEY
+- GLM_API_BASE
+- ALI_1688_AK
+
+文件完整性验证:
+- 原有配置保持不变
+- 新配置添加在文件末尾
+- 格式与现有风格一致

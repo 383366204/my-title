@@ -1,0 +1,18 @@
+# Task 2 Evidence: Regex safety verification
+
+## Verification Command
+```javascript
+const { removeBannedWords } = require('./src/banned-words.js');
+removeBannedWords('测试$100价格');
+removeBannedWords('测试^正则*表达式.等');
+```
+
+## Test Results
+✓ Input with $: 测试$100价格 -> Output: 测试$100价格 (no crash, $ treated as literal)
+✓ Input with ^*. etc: 测试^正则*表达式.等 -> Output: 测试^正则*表达式.等 (no crash)
+
+## Fix Applied
+Before: `new RegExp(word, 'g')` - vulnerable to regex injection
+After: `new RegExp(word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')` - safe escaping
+
+Date: 2026-04-17

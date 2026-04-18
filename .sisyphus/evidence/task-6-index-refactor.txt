@@ -1,0 +1,59 @@
+Task 6: 更新 src/index.js 新流程编排
+=====================================
+
+## 修改内容
+
+### 1. 新增导入
+- 添加: `const { searchTaobaoTitles } = require('./search-taobao');`
+
+### 2. 函数签名更新
+- 旧: `async function run(input, maxLength = 60)`
+- 新: `async function run(input, options = {})`
+- 新增解构: `const { maxLength = 60, peerTitles = [] } = options;`
+
+### 3. 新流程实现
+```
+extract → parallel(1688搜索 + 淘宝搜索) → generateTitles
+```
+
+具体代码:
+```javascript
+// 步骤 2: 并行执行 1688 搜索和淘宝搜索
+console.log('🔎 并行搜索 1688 商品和淘宝同行标题...');
+const [products, taobaoTitles] = await Promise.all([
+  searchAndFilter(coreWord, modifiers),
+  peerTitles.length > 0
+    ? Promise.resolve(peerTitles)  // 如果手动提供了同行标题，直接使用
+    : searchTaobaoTitles(coreWord)   // 否则调用淘宝搜索
+]);
+```
+
+### 4. 生成标题调用更新
+- 旧: `generateTitles(input, coreWord, products, modifiers, maxLength)`
+- 新: `await generateTitles(coreWord, modifiers, taobaoTitles, products, maxLength)`
+
+## 验证结果
+
+### 语法检查
+✅ `node -c src/index.js` - 通过（无错误输出）
+
+### Promise.all 确认
+✅ 代码中包含 `Promise.all` 实现并行搜索（第32行）
+
+### 函数签名确认
+✅ 函数定义为 `run(input, options = {})`
+✅ 支持 `options.maxLength` 和 `options.peerTitles`
+
+### 保留项检查
+✅ 所有 console.log 输出保留（带emoji前缀）
+✅ extractCoreAndModifiers 调用方式未修改
+✅ searchAndFilter 调用方式未修改
+✅ 返回对象结构未改变
+
+## 代码统计
+- 原文件: 53 行
+- 新文件: 66 行
+- 新增行数: 13 行
+
+## 完成时间
+2026-04-18

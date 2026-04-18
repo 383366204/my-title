@@ -1,0 +1,22 @@
+# Verification Evidence for src/search-taobao.js
+# Date: 2026-04-18
+
+## Verification Commands
+
+### 1. Syntax Check
+Command: node -c src/search-taobao.js
+Result: PASS (no output = success)
+
+### 2. Export Type Check
+Command: node -e "const m = require('./src/search-taobao.js'); console.log(typeof m.searchTaobaoTitles, typeof m.isTaobaoNativeInstalled)"
+Result: function function
+
+### 3. isTaobaoNativeInstalled() Test
+Command: node -e "const {isTaobaoNativeInstalled} = require('./src/search-taobao.js'); console.log(isTaobaoNativeInstalled())"
+Result: true
+
+## Summary
+All 3 verification commands passed successfully.
+- File is syntactically valid
+- Both exports are functions
+- isTaobaoNativeInstalled() executes without crashing (returns true, meaning mcporter is installed)

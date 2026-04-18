@@ -1,0 +1,5 @@
+- Decision: Use GLMClient.generateTitles for title generation with 3-5 title output.
+- Fall back to coreWord + rigid modifiers concatenation when GLM fails; do not use spaces for Chinese.
+- Keep banned words filtering via removeBannedWords.
+- Do not introduce new dependencies.
+- Scope fidelity note: Some files outside the planned task scope were modified (e.g., alibaba1688-client.js, data/banned-words.json). These changes should be treated as scope creep and reviewed for reversion or proper task alignment.

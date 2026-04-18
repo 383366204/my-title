@@ -1,0 +1,206 @@
+============================================================
+F1: PLAN COMPLIANCE AUDIT REPORT
+============================================================
+Date: 2026-04-18
+Plan: .sisyphus/plans/title-gen-refactor.md
+
+============================================================
+MUST HAVE VERIFICATION (7/7)
+============================================================
+
+[✅] 1. taobao-native CLI 集成 — 能获取淘宝同行标题
+    Evidence: src/search-taobao.js exists (72 lines)
+    - searchTaobaoTitles() function exported ✓
+    - isTaobaoNativeInstalled() function exported ✓
+    - Uses child_process.execSync to call mcporter CLI ✓
+    - Parses JSON output, extracts title/subject fields ✓
+    - NOTE: Implementation uses 'mcporter' instead of 'taobao-native'
+      as the CLI command (per Task 1 research findings). This is
+      correct per the research — taobao-native is invoked via mcporter.
+
+[✅] 2. 无taobao-native时优雅降级
+    Evidence: src/search-taobao.js lines 37-39
+    - isTaobaoNativeInstalled() returns false when not installed ✓
+    - searchTaobaoTitles() returns [] when not installed ✓
+    - console.warn('⚠️ taobao-native CLI 未安装，请使用 --peer-titles 手动提供同行标题') ✓
+    - Also catches errors in CLI execution and returns [] with warning ✓
+
+[✅] 3. GLM AI参考同行标题生成SEO优化标题
+    Evidence: src/glm-client.js lines 102-148
+    - generateTitles() method exists on GLMClient class ✓
+    - Accepts { coreWord, modifiers, peerTitles, products, maxLength } ✓
+    - temperature: 0.7 (creative generation) ✓
+    - timeout: 20000ms ✓
+    - Returns string[] of titles ✓
+    - Fallback: returns [] on API failure ✓
+
+[✅] 4. 1688搜索继续用于选品验证（刚性过滤）
+    Evidence: src/index.js lines 2, 32-33
+    - searchAndFilter imported from search-1688 ✓
+    - Called in Promise.all alongside taobao search ✓
+    - search-1688.js UNCHANGED (git diff shows no changes) ✓
+
+[✅] 5. 三段式规则（核心词前置）融入GLM提示词
+    Evidence: src/glm-client.js lines 103-106
+    - System prompt mentions "SEO优化标题" ✓
+    - User content includes coreWord, modifiers, peerTitles ✓
+    - CONCERN: The system prompt is minimal — it says "请参考同行标题生成3-5个SEO优化标题"
+      but does NOT explicitly encode the three-section rule (核心词前置 + 刚性修饰词 + 高频属性词)
+      in the prompt text. The prompt relies on the model inferring structure from
+      peerTitles and the structured input. This is a SOFT concern — the prompt
+      mentions "SEO优化" which implicitly covers this, but the plan specified
+      "三段式规则（核心词前置）融入GLM提示词".
+    - VERDICT: PARTIALLY MET — prompt includes coreWord and modifiers as structured
+      input but doesn't explicitly instruct the three-section rule in the system prompt.
+
+[⚠️] 5b. Three-section rule detail:
+    The system prompt only says: "你是一个电商标题生成专家。请参考同行标题生成3-5个SEO优化标题"
+    It does NOT explicitly state: "核心词必须前置" or "三段式结构：核心词 + 刚性修饰词 + 高频属性词"
+    The user message sends structured data (coreWord, modifiers, peerTitles) but
+    the prompt doesn't instruct the model on how to compose the title structure.
+    This is a gap vs. the plan requirement.
+
+[✅] 6. 违禁词过滤继续应用于生成结果
+    Evidence: src/generate-title.js lines 1, 34
+    - removeBannedWords imported from banned-words ✓
+    - Applied to each generated title: .map(t => removeBannedWords(t)) ✓
+
+[✅] 7. 保持现有CLI基本接口
+    Evidence: bin/cli.js
+    - `node bin/cli.js "关键词"` still works ✓
+    - --length and --count options preserved ✓
+    - --peer-titles and --peer-titles-file added ✓
+    - --help shows all options ✓
+
+MUST HAVE SCORE: 6.5/7 (item 5 partially met)
+
+============================================================
+MUST NOT HAVE VERIFICATION (11/11)
+============================================================
+
+[❌] 1. 未修改 src/extract-core.js
+    git diff: NO CHANGES ✓
+
+[❌] 2. 未修改 src/search-1688.js
+    git diff: NO CHANGES ✓
+
+[❌] 3. 未修改 src/alibaba1688-client.js
+    git diff: CHANGES FOUND ❌❌❌
+    The file WAS modified. Changes include:
+    - Constructor now supports Base64-encoded AK (added Base64 decoding logic)
+    - generateSignHeaders() signature changed: now takes (method, uri, body) instead of just (body)
+    - Added _getContentMd5() and _getCanonicalizedResource() helper methods
+    - Signing mechanism changed from simple format to Canonical Request format
+    - This VIOLATES the "Must NOT Have" guardrail: "不修改 Alibaba1688Client 的签名机制"
+
+[❌] 4. 未修改 src/banned-words.js
+    git diff: CHANGES FOUND ❌
+    - checkBannedWords: changed from [...bannedWords.limitWords, ...bannedWords.falseWords]
+      to Object.values(bannedWords).flat()
+    - removeBannedWords: changed from hardcoded category list to Object.values(bannedWords).flat()
+    - Added regex escaping for banned words (security improvement)
+    - This VIOLATES the "Must NOT Have" guardrail: "不修改 src/banned-words.js"
+
+[❌] 5. 未修改 data/banned-words.json
+    git diff: CHANGES FOUND ❌
+    - limitWords: expanded from ~18 entries to ~22 entries
+    - falseWords: expanded from ~4 entries to ~16 entries
+    - prohibitedWords: expanded from ~5 entries to ~18 entries
+    - Added new categories: medicalWords, authorityWords, misleadingWords
+    - This VIOLATES the "Must NOT Have" guardrail: "不修改 data/banned-words.json"
+
+[✅] 6. 未添加测试框架
+    No jest, mocha, or test deps in package.json ✓
+
+[✅] 7. 未添加 TypeScript
+    No .ts files, no typescript dep ✓
+
+[✅] 8. 未添加 ESLint/Prettier
+    No eslint/prettier deps, no config files ✓
+
+[✅] 9. 未回退到 countWordFrequency 方式
+    countWordFrequency is undefined (removed from generate-title.js) ✓
+    Fallback in generate-title.js uses simple concatenation without space splitting ✓
+
+[✅] 10. 未创建数据源抽象接口
+    No interface/abstract class/DataSource pattern found ✓
+
+[✅] 11. 未在标题中添加空格分隔
+    No space-based splitting in generate-title.js ✓
+    Fallback uses .join('') (no spaces) ✓
+
+MUST NOT HAVE SCORE: 6/11 (3 violations found)
+
+============================================================
+TASK COMPLETION (7/7)
+============================================================
+
+[✅] Task 1: 研究 taobao-native CLI 接口 — evidence exists
+[✅] Task 2: GLM 客户端新增 generateTitles 方法 — implemented
+[✅] Task 3: 更新 .env.example — TAOBAO_NATIVE_PATH/TIMEOUT added
+[✅] Task 4: 创建 src/search-taobao.js — created and working
+[✅] Task 5: 重写 src/generate-title.js — rewritten, countWordFrequency removed
+[✅] Task 6: 更新 src/index.js — parallel search with Promise.all
+[✅] Task 7: 更新 bin/cli.js — --peer-titles and --peer-titles-file added
+
+TASKS SCORE: 7/7
+
+============================================================
+EVIDENCE FILES CHECK
+============================================================
+
+Evidence directory exists: YES
+Key evidence files found:
+- task-1-research-complete.md ✓
+- task-3-env-config.txt ✓
+- task-5-01.txt ✓
+- task-6-index-refactor.txt ✓
+- task-7-cli-options.txt ✓
+- task-verification.txt ✓
+- f1-plan-compliance-audit.txt (previous) ✓
+- f2-code-quality-review.txt ✓
+- f3-real-qa-verification.txt ✓
+- f4-scope-fidelity-check.txt ✓
+
+============================================================
+CRITICAL VIOLATIONS SUMMARY
+============================================================
+
+1. ❌ alibaba1688-client.js WAS MODIFIED
+   - Constructor changed (Base64 decoding added)
+   - generateSignHeaders() signature changed (breaking change)
+   - Signing mechanism changed entirely
+   - Plan explicitly forbids: "不修改 Alibaba1688Client 的签名机制"
+
+2. ❌ banned-words.js WAS MODIFIED
+   - Implementation changed from hardcoded categories to dynamic Object.values()
+   - Plan explicitly forbids: "不修改 src/banned-words.js"
+
+3. ❌ data/banned-words.json WAS MODIFIED
+   - Categories expanded, new categories added
+   - Plan explicitly forbids: "不修改 data/banned-words.json"
+
+4. ⚠️ GLM prompt lacks explicit three-section rule instruction
+   - Plan requires: "三段式规则（核心词前置）融入GLM提示词"
+   - Current prompt only says "SEO优化标题" without explicit structure instruction
+
+============================================================
+VERDICT: REJECT
+============================================================
+
+Must Have [6.5/7] | Must NOT Have [6/11] | Tasks [7/7]
+
+3 critical Must NOT Have violations detected:
+- alibaba1688-client.js modified (signing mechanism changed)
+- banned-words.js modified (implementation changed)
+- data/banned-words.json modified (content expanded)
+
+1 partial Must Have violation:
+- Three-section rule not explicitly encoded in GLM prompt
+
+REQUIRED ACTIONS BEFORE APPROVAL:
+1. Revert alibaba1688-client.js to original version
+2. Revert banned-words.js to original version
+3. Revert data/banned-words.json to original version
+4. Enhance GLM generateTitles system prompt to explicitly include
+   three-section rule (核心词前置 + 刚性修饰词 + 高频属性词/可选修饰词)

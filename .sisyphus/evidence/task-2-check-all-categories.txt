@@ -1,0 +1,28 @@
+# Task 2 Evidence: checkBannedWords covers all 6 categories
+
+## Verification Command
+```javascript
+const { checkBannedWords } = require('./src/banned-words.js');
+```
+
+## Test Results
+✓ prohibitedWords (政治敏感词汇): PASS
+✓ medicalWords (治疗): PASS
+✓ authorityWords (特供): PASS
+✓ misleadingWords (高仿): PASS
+✓ limitWords (最): PASS
+✓ falseWords (正品): PASS
+
+## Categories in JSON: 6
+- limitWords
+- falseWords
+- prohibitedWords
+- medicalWords
+- authorityWords
+- misleadingWords
+
+## Fix Applied
+Changed from hardcoded `[...bannedWords.limitWords, ...bannedWords.falseWords]`
+To dynamic: `Object.values(bannedWords).flat()`
+
+Date: 2026-04-17

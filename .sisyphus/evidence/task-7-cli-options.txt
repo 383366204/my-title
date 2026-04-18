@@ -1,0 +1,36 @@
+# Task 7 Evidence: CLI Options Updated
+
+## Modified File
+- `bin/cli.js` - Added --peer-titles and --peer-titles-file options
+
+## Verification Commands
+1. Syntax check: `node -c bin/cli.js` - PASS
+2. Help display: `node bin/cli.js --help` - PASS
+
+## New Options Added
+- `-p, --peer-titles <titles>` - 手动提供淘宝同行标题，逗号分隔
+- `-f, --peer-titles-file <path>` - 从文件读取淘宝同行标题，每行一个
+
+## Implementation Details
+- Added `const fs = require('fs');` for file reading
+- Peer titles are parsed and passed to `run()` as `peerTitles` array
+- File reading has try/catch error handling
+- Existing --length and --count options preserved
+- Description updated to mention peer titles reference
+
+## Verification Output
+```
+Usage: my-title [options] <keywords>
+
+电商选品标题生成工具 - 关键词 → GLM提取 → 1688搜索 → 相关性过滤 → 生成淘宝标题（可参考淘宝同行标题）
+
+Arguments:
+  keywords                       用户输入关键词，如"纯银项链女高级感"
+
+Options:
+  -l, --length <number>          标题最大长度（字符） (default: "60")
+  -c, --count <number>           输出候选标题数量 (default: "3")
+  -p, --peer-titles <titles>     手动提供淘宝同行标题，逗号分隔
+  -f, --peer-titles-file <path>  从文件读取淘宝同行标题，每行一个
+  -h, --help                     display help for command
+```

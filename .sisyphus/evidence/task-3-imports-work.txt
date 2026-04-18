@@ -1,0 +1,19 @@
+# Task 3 - Module Import Evidence
+# Date: 2026-04-17
+
+## Test 1: generateTitles import
+Command: node -e "const {generateTitles} = require('./src/generate-title'); console.log(typeof generateTitles)"
+Output: function
+Status: PASS
+
+## Test 2: removeBannedWords import
+Command: node -e "const {removeBannedWords}=require('./src/banned-words'); console.log(typeof removeBannedWords)"
+Output: function
+Status: PASS
+
+## Test 3: All src modules can be required
+Command: node -e "require('./src/index'); require('./src/extract-core'); require('./src/search-1688'); require('./src/generate-title'); require('./src/glm-client'); require('./src/alibaba1688-client'); require('./src/banned-words'); console.log('All modules OK')"
+Output: All modules OK
+Status: PASS
+
+## Conclusion: All module imports working correctly

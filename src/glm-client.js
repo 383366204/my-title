@@ -87,6 +87,65 @@ class GLMClient {
 
     return result;
   }
+
+  /**
+   * 通过 GLM API 生成 SEO 优化标题
+   * @param {{
+   *   coreWord: string,
+   *   modifiers: Array<{word: string, rigidity: 'rigid'|'optional'}>,
+   *   peerTitles?: string[],
+   *   products?: Array<object>,
+   *   maxLength?: number
+   * }} params
+   * @returns {Promise<Array<string>>} 生成的标题列表 (3-5 条)
+   */
+  async generateTitles({ coreWord, modifiers, peerTitles = [], products = [], maxLength = 60 }) {
+    const systemPrompt = `你是一个电商标题生成专家。请参考同行标题生成3-5个SEO优化标题。输出严格 JSON 格式，不要任何其他文本：
+{
+  "titles": ["标题1", "标题2", "标题3"]
+}`;
+
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: JSON.stringify({ coreWord, modifiers, peerTitles, maxLength, products }) }
+    ];
+
+    try {
+      const response = await axios.post(
+        `${this.apiBase}/chat/completions`,
+        {
+          model: this.model,
+          messages,
+          temperature: 0.7
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${this.apiKey}`,
+            'Content-Type': 'application/json'
+          },
+          timeout: 20000
+        }
+      );
+
+      let content = response.data.choices[0].message.content.trim();
+      // 移除可能的 markdown 代码块
+      content = content.replace(/^```json\n?/, '').replace(/\n?```$/, '');
+      const result = JSON.parse(content);
+
+      if (!Array.isArray(result.titles)) {
+        // 兜底：若返回结构异常，尝试返回空数组以降级处理
+        return [];
+      }
+
+      // 去重并控制数量，确保返回 3-5 条
+      const titles = Array.from(new Set(result.titles.map(t => String(t).trim()).filter(t => t.length > 0)));
+      return titles.slice(0, 5);
+    } catch (err) {
+      // 降级日志，保持流程不中断
+      console.warn('GLM generateTitles 调用失败，执行降级：', err && err.message ? err.message : err);
+      return [];
+    }
+  }
 }
 
 module.exports = GLMClient;

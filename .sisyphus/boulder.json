@@ -1,0 +1,58 @@
+{
+  "active_plan": "/mnt/d/project/my-title/.sisyphus/plans/title-gen-refactor.md",
+  "started_at": "2026-04-18T01:51:55.725Z",
+  "session_ids": [
+    "ses_268c03c46ffeLNfPUQ7CZ87nfn"
+  ],
+  "session_origins": {
+    "ses_268c03c46ffeLNfPUQ7CZ87nfn": "direct"
+  },
+  "plan_name": "title-gen-refactor",
+  "agent": "atlas",
+  "task_sessions": {
+    "todo:1": {
+      "task_key": "todo:1",
+      "task_label": "1",
+      "task_title": "研究 taobao-native CLI 接口",
+      "session_id": "ses_261b57002ffeYgli2r0u4HYiMJ",
+      "agent": "Sisyphus-Junior",
+      "category": "quick",
+      "updated_at": "2026-04-18T01:54:29.134Z"
+    },
+    "todo:4": {
+      "task_key": "todo:4",
+      "task_label": "4",
+      "task_title": "创建 src/search-taobao.js",
+      "session_id": "ses_261b074ddffecanfpLiulxznU6",
+      "agent": "Sisyphus-Junior",
+      "category": "quick",
+      "updated_at": "2026-04-18T01:58:56.400Z"
+    },
+    "todo:6": {
+      "task_key": "todo:6",
+      "task_label": "6",
+      "task_title": "更新 src/index.js 新流程编排",
+      "session_id": "ses_261af6fd8ffeVd7ichixPTcp4i",
+      "agent": "Sisyphus-Junior",
+      "category": "unspecified-high",
+      "updated_at": "2026-04-18T02:03:12.392Z"
+    },
+    "todo:7": {
+      "task_key": "todo:7",
+      "task_label": "7",
+      "task_title": "更新 bin/cli.js 新增选项",
+      "session_id": "ses_261abadf7ffe6cg38F1bBbUjXb",
+      "agent": "Sisyphus-Junior",
+      "category": "quick",
+      "updated_at": "2026-04-18T02:04:19.644Z"
+    },
+    "final-wave:f1": {
+      "task_key": "final-wave:f1",
+      "task_label": "F1",
+      "task_title": "**计划合规审计** — `oracle`",
+      "session_id": "ses_261aaa9c1ffesUaS09vf7uH0mB",
+      "agent": "oracle",
+      "updated_at": "2026-04-18T02:06:29.234Z"
+    }
+  }
+}

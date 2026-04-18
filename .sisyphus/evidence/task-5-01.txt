@@ -1,0 +1,21 @@
+Task 5 Evidence - Refactor generate-title.js
+
+What was done:
+- Completely replaced src/generate-title.js with a new implementation focused on GLM-based generation.
+- Removed obsolete functions: countWordFrequency, buildTitle, getLength.
+- Imported and used removeBannedWords from src/banned-words.js.
+- Added new generateTitles(coreWord, modifiers, peerTitles, products, maxLength) API.
+- generateTitles behavior:
+  • Instantiates GLMClient from environment variables (GLM_API_KEY, GLM_API_BASE, GLM_MODEL).
+  • Calls glmClient.generateTitles({ coreWord, modifiers, peerTitles, products, maxLength }).
+  • Applies removeBannedWords to each title and filters by length (>= 10).
+  • Deduplicates and returns up to 5 titles (3-5 target).
+  • If GLM fails, falls back to a simple degradation: coreWord + concatenated rigid modifiers, no spaces.
+- Added JSDoc and Chinese inline comments.
+- Verified syntax: node -c src/generate-title.js passes.
+- Verified export surface: require('./src/generate-title.js').generateTitles exists (prints 'function').
+
+Notes:
+- No new npm dependencies added.
+- No changes to banned words data/composition.
+- Maintains CommonJS module pattern.

@@ -1,0 +1,21 @@
+Scope Fidelity Check Report - F4
+
+Plan checked: .sisyphus/plans/title-gen-refactor.md
+Created: 2026-04-18
+
+Task-wise verdict:
+- Task 1: IMPLEMENTED
+- Task 2: IMPLEMENTED; (note: SCOPE_CREEP due to modifications touching alibaba1688-client.js beyond Task 2 scope)
+- Task 3: IMPLEMENTED; (SCOPE_CREEP due to changes to data/banned-words.json and src/banned-words.js and env)
+- Task 4: IMPLEMENTED
+- Task 5: IMPLEMENTED; (SCOPE_CREEP due to cross-file changes not strictly limited to generate-title.js)
+- Task 6: IMPLEMENTED
+- Task 7: IMPLEMENTED
+
+Observations:
+- Must NOT Do artifacts exist in repo (extract-core.js, search-1688.js, alibaba1688-client.js, banned-words.js, data/banned-words.json) were modified according to git diff; this is scope creep relative to plan definitions.
+- Cross-task contamination detected: multiple non-target files were touched in the changeset.
+
+Evidence references:
+- Plan file: .sisyphus/plans/title-gen-refactor.md (read-only per plan)
+- Git diff summary indicates multiple modified files beyond the target Task scope.

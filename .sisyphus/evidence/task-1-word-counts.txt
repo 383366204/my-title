@@ -1,0 +1,6 @@
+limitWords: 29
+falseWords: 18
+prohibitedWords: 19
+medicalWords: 20
+authorityWords: 19
+misleadingWords: 19

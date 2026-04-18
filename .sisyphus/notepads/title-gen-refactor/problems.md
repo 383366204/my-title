@@ -1,0 +1,2 @@
+- Potential issues: GLM API reliability, environment variable availability (GLM_API_KEY, etc.).
+- If GLM returns invalid JSON, wrapper will degrade gracefully and log warning.

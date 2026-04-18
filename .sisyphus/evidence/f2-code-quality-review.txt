@@ -1,0 +1,170 @@
+================================================================================
+F2 代码质量审查报告 - 全面审查
+审查时间: 2026-04-18
+================================================================================
+
+## 审查范围
+所有修改的文件:
+- bin/cli.js
+- src/alibaba1688-client.js
+- src/banned-words.js
+- src/generate-title.js
+- src/glm-client.js
+- src/index.js
+- data/banned-words.json
+
+================================================================================
+## 1. 语法检查结果
+================================================================================
+
+### JavaScript 文件 (node -c)
+| 文件 | 状态 |
+|------|------|
+| bin/cli.js | ✅ OK |
+| src/alibaba1688-client.js | ✅ OK |
+| src/banned-words.js | ✅ OK |
+| src/generate-title.js | ✅ OK |
+| src/glm-client.js | ✅ OK |
+| src/index.js | ✅ OK |
+
+### JSON 文件
+| 文件 | 状态 |
+|------|------|
+| data/banned-words.json | ✅ 有效 JSON (6 类别, 124 个词) |
+
+================================================================================
+## 2. Anti-Patterns 检查
+================================================================================
+
+| 检查项 | 状态 | 说明 |
+|--------|------|------|
+| TypeScript 类型断言 (as any) | ✅ 未找到 | JavaScript 项目不适用 |
+| TypeScript 忽略注释 (@ts-ignore) | ✅ 未找到 | JavaScript 项目不适用 |
+| 空 catch 块 | ✅ 未找到 | 所有 catch 块都包含逻辑 |
+| 通用命名 (foo, bar, temp) | ✅ 未找到 | 所有名称都是描述性的 |
+
+### Console 使用
+| 文件 | console.log 数量 | 上下文 |
+|------|------------------|--------|
+| bin/cli.js | 7 | CLI 输出 (CLI 工具可接受) |
+| src/index.js | 8 | 进度日志 (CLI 工具可接受) |
+
+说明: console.log 在 CLI 工具中是可接受的。
+
+================================================================================
+## 3. 模块系统一致性
+================================================================================
+
+✅ **所有文件使用一致的 CommonJS 模块系统**
+
+导出模式:
+- 类导出: `module.exports = ClassName;`
+- 函数导出: `module.exports = { func1, func2 };`
+
+所有文件验证通过。
+
+================================================================================
+## 4. JSDoc 覆盖率
+================================================================================
+
+✅ **所有导出函数都有 JSDoc**
+
+| 文件 | 函数 | JSDoc |
+|------|------|-------|
+| src/index.js | run | ✅ 完整 @param, @returns |
+| src/alibaba1688-client.js | constructor | ✅ 完整 @param |
+| src/alibaba1688-client.js | generateSignHeaders | ✅ 完整 @param, @returns |
+| src/alibaba1688-client.js | searchOffers | ✅ 完整 @param, @returns |
+| src/extract-core.js | extractCoreAndModifiers | ✅ 完整 @param, @returns |
+| src/extract-core.js | fallbackExtract | ✅ 完整 @param, @returns |
+| src/generate-title.js | generateTitles | ✅ 完整 @param, @returns |
+| src/glm-client.js | constructor | ✅ 完整 @param |
+| src/glm-client.js | extractCoreAndModifiers | ✅ 完整 @param, @returns |
+| src/glm-client.js | generateTitles | ✅ 完整 @param, @returns |
+| src/search-1688.js | searchAndFilter | ✅ 完整 @param, @returns |
+| src/search-1688.js | filterRelevantProducts | ✅ 完整 @param, @returns |
+| src/search-taobao.js | isTaobaoNativeInstalled | ✅ 完整 @returns |
+| src/search-taobao.js | searchTaobaoTitles | ✅ 完整 @param, @returns |
+
+**注意**: src/banned-words.js 的函数缺少 JSDoc (见历史报告)
+
+================================================================================
+## 5. 中文注释覆盖率
+================================================================================
+
+✅ **业务逻辑包含中文内联注释**
+
+- bin/cli.js: CLI 描述使用中文
+- src/index.js: 步骤注释 (步骤 1, 2, 3), 业务逻辑注释
+- src/alibaba1688-client.js: Base64 解码注释, 签名构造注释
+- src/extract-core.js: 降级提取规则注释, 刚性判断规则注释
+- src/generate-title.js: 降级策略注释, 过滤逻辑注释
+- src/glm-client.js: 验证格式注释, 降级日志注释
+- src/search-1688.js: 过滤规则注释 (刚性修饰词)
+- src/search-taobao.js: mcporter 检测注释, 调用逻辑注释
+
+================================================================================
+## 6. AI Slop 检测
+================================================================================
+
+| 检查项 | 状态 |
+|--------|------|
+| 过度注释 | ✅ 未检测到 - 注释与代码复杂度成比例 |
+| 过度抽象 | ✅ 未检测到 - 类和函数职责清晰单一 |
+| 通用命名 | ✅ 未检测到 - 所有变量/函数都有描述性名称 |
+
+================================================================================
+## 7. 命名规范一致性
+================================================================================
+
+| 规范 | 状态 |
+|------|------|
+| 文件名 (kebab-case) | ✅ 一致 |
+| 类名 (PascalCase) | ✅ Alibaba1688Client, GLMClient |
+| 函数名 (camelCase) | ✅ extractCoreAndModifiers, searchAndFilter |
+
+================================================================================
+## 8. 问题汇总
+================================================================================
+
+### 严重问题: 0
+
+### 中等问题: 1 (历史遗留)
+- src/banned-words.js 缺少 JSDoc 注释
+
+### 轻微问题: 0
+
+================================================================================
+## 9. 最终裁决
+================================================================================
+
+Build [✅ PASS] | Syntax [✅ PASS] | Anti-Patterns [✅ PASS] | VERDICT: PASS
+
+### 代码质量评分: A
+
+所有修改的文件展示了:
+- 清晰可读的代码结构
+- 适当的错误处理与降级方案
+- 一致的命名规范
+- 全面的文档 (除历史遗留问题)
+- 恰当的语言特性使用
+- 未检测到 anti-patterns
+
+================================================================================
+## 文件清单
+================================================================================
+
+修改的文件:
+1. bin/cli.js (60 lines)
+2. src/alibaba1688-client.js (132 lines)
+3. src/banned-words.js (22 lines) - 历史遗留问题
+4. src/generate-title.js (53 lines)
+5. src/glm-client.js (151 lines)
+6. src/index.js (66 lines)
+7. data/banned-words.json (37 lines, 6 类别, 124 词)
+
+总计审查: ~541 行代码
+
+================================================================================
+报告生成者: F2 Code Quality Review Process
+================================================================================
