@@ -1,10 +1,11 @@
-const { removeBannedWords } = require('./banned-words');
+const { postProcessTitle, constructFallbackTitle } = require('./title-utils');
 const GLMClient = require('./glm-client');
 
 /**
  * 使用 GLM 生成中文标题，包含降级兜底逻辑。
  * 注：当前实现不进行中文分词，直接拼接、过滤和去重。
  *
+ * @param {string} blueOceanWord 蓝海词（用户原始输入，标题必须以此开头）
  * @param {string} coreWord 核心词
  * @param {Array<{word: string, rigidity: 'rigid'|'optional'}>} modifiers 修饰词列表
  * @param {string[]} peerTitles 淘宝同行标题（用于上下文/引导）
@@ -12,7 +13,7 @@ const GLMClient = require('./glm-client');
  * @param {number} [maxLength=60] 最大标题长度（字符数）
  * @returns {Promise<string[]>} 3-5 条候选标题
  */
-async function generateTitles(coreWord, modifiers = [], peerTitles = [], products = [], maxLength = 60) {
+async function generateTitles(blueOceanWord, coreWord, modifiers = [], peerTitles = [], products = [], maxLength = 60) {
   // GLM 客户端实例，API KEY 等由环境变量提供
   const glmClient = new GLMClient({
     apiKey: process.env.GLM_API_KEY,
@@ -23,30 +24,29 @@ async function generateTitles(coreWord, modifiers = [], peerTitles = [], product
   // 尝试通过 GLM 生成标题
   try {
     const glmTitles = await glmClient.generateTitles({
+      blueOceanWord,
       coreWord,
       modifiers,
       peerTitles,
       products,
       maxLength
     });
-    // 过滤违禁词并去重
-    const filtered = glmTitles
-      .map(t => removeBannedWords(t))
-      .filter(t => typeof t === 'string' && t.trim().length > 0 && t.length >= 10);
-    const unique = Array.from(new Set(filtered));
-    // 返回最多 5 条，符合 3-5 的要求
+
+    // 使用统一后处理管线：移除违禁词 → 清理标点 → 蓝海词前置 → 长度归一化 → 去空格
+    const processedTitles = glmTitles
+      .map(title => postProcessTitle(title, blueOceanWord, 40, maxLength))
+      .filter(title => title !== null);
+    const unique = Array.from(new Set(processedTitles));
+    // 返回最多 5 条
     return unique.slice(0, 5);
   } catch (err) {
-    // 降级策略：基于核心词 + 所有 rigid 修饰词简单拼接，去除空格分词
+    // 降级策略：使用标题兜底生成器（如果可用）
     console.warn('GLM generateTitles 调用失败，执行降级方案：', err && err.message ? err.message : err);
-    const rigidWords = (modifiers || [])
-      .filter(m => m && m.rigidity === 'rigid')
-      .map(m => m.word)
-      .filter(Boolean);
-    const suffix = rigidWords.length ? rigidWords.join('') : '';
-    let degraded = coreWord ? coreWord + suffix : suffix;
-    if (degraded.length > maxLength) degraded = degraded.substring(0, maxLength);
-    return degraded.length > 0 ? [degraded] : [];
+    // 优先使用 constructFallbackTitle，基于 1688 第一个商品的标题以及同行标题
+    const originalTitle = Array.isArray(products) && products.length > 0 ? products[0].title : '';
+    const taobaoTitles = Array.isArray(peerTitles) ? peerTitles : [];
+    const fallback = constructFallbackTitle(blueOceanWord, originalTitle || '', taobaoTitles, maxLength);
+    return fallback ? [fallback] : [];
   }
 }
 

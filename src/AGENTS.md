@@ -43,8 +43,8 @@ run(input, options)
   │     └─ searchTaobaoTitles(coreWord)
   │           └─ taobao-native CLI [或手动输入降级]
   │
-  └─ generateTitles(coreWord, modifiers, peerTitles, products, maxLength)
-        └─ GLMClient.generateTitles() [参考同行标题]
+  └─ generateTitles(blueOceanWord, coreWord, modifiers, peerTitles, products, maxLength)
+        └─ GLMClient.generateTitles() [参考同行标题，标题必须以蓝海词开头]
         └─ removeBannedWords() [合规性检查]
 ```
 
