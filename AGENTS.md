@@ -16,7 +16,8 @@
 ```
 my-title/
 ├── bin/
-│   └── cli.js              # CLI 入口（使用 commander）
+│   ├── cli.js              # CLI 入口（使用 commander）
+│   └── mcp-server.mjs      # MCP Server 入口（stdio 传输，供 agent 调用）
 ├── src/
 │   ├── index.js            # 主流程编排器（run 函数）
 │   ├── extract-core.js     # GLM AI 集成 + 降级方案
@@ -42,6 +43,23 @@ my-title/
 └── package.json            # Main: src/index.js, Bin: bin/cli.js
 ```
 
+### MCP 接入配置
+
+任何支持 MCP 的客户端（OpenClaw、Claude Desktop、Cursor 等）添加以下配置即可接入：
+
+```json
+{
+  "mcpServers": {
+    "my-title": {
+      "command": "node",
+      "args": ["/absolute/path/to/my-title/bin/mcp-server.mjs"]
+    }
+  }
+}
+```
+
+暴露工具：`generate_title(keyword, length)` — 返回含铺货标题、选品理由、定价建议的商品列表。
+
 ---
 
 ## 去哪找什么
@@ -49,6 +67,7 @@ my-title/
 | 任务 | 位置 | 备注 |
 |------|------|------|
 | 添加 CLI 命令 | `bin/cli.js` | 使用 commander, dotenv |
+| MCP Server | `bin/mcp-server.mjs` | ESM，注册 generate_title 工具 |
 | 添加 API 客户端 | `src/*-client.js` | 遵循 PascalCase 类命名模式 |
 | 添加工作流步骤 | `src/index.js` | 在 extract/search/generate 之间插入 |
 | 修改标题逻辑 | `src/generate-title.js` | GLM AI 参考同行标题生成 |
@@ -125,7 +144,7 @@ cp .env.example .env
 ## 注意事项
 
 - **依赖项**: commander, axios, dotenv
-- **入口**: CLI 通过 `bin/cli.js`，库通过 `src/index.js`
+- **入口**: CLI 通过 `bin/cli.js`，MCP 通过 `bin/mcp-server.mjs`，库通过 `src/index.js`
 - **环境变量**: 需要 GLM_API_KEY 和 ALI_1688_AK
 - **docs/superpowers/**: 计划/规范文档的非标准目录命名
 - **数据冗余**: `data/banned-words.json` 与 `src/banned-words.js` 逻辑重复
