@@ -19,9 +19,11 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "axios": "^1.6.0",
     "commander": "^12.0.0",
     "dotenv": "^16.4.0",
-    "nodejieba": "^3.5.8"
+    "nodejieba": "^3.5.8",
+    "zod": "^4.3.6"
   }
 }
