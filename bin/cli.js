@@ -18,8 +18,18 @@ program
   .option('-c, --count <number>', '输出候选标题数量', '3')
   .option('-p, --peer-titles <titles>', '手动提供淘宝同行标题，逗号分隔')
   .option('-f, --peer-titles-file <path>', '从文件读取淘宝同行标题，每行一个')
+  .option('--json', '纯 JSON 输出模式，抑制所有进度信息，适合程序调用')
   .option('--format <type>', '输出格式: table / json / both', 'both')
   .action(async (keywords, options) => {
+    const jsonMode = !!options.json;
+    const origLog = console.log;
+    const origWarn = console.warn;
+    const origError = console.error;
+    if (jsonMode) {
+      console.log = () => {};
+      console.warn = () => {};
+      console.error = () => {};
+    }
     try {
       let peerTitles = [];
       if (options.peerTitles) {
@@ -29,15 +39,37 @@ program
           const content = fs.readFileSync(options.peerTitlesFile, 'utf8');
           peerTitles = content.split('\n').map(t => t.trim()).filter(Boolean);
         } catch (err) {
-          console.error(`\n❌ 读取同行标题文件失败: ${err.message}`);
+          if (jsonMode) {
+            process.stdout.write(JSON.stringify({ ok: false, error: `读取同行标题文件失败: ${err.message}` }) + '\n');
+          } else {
+            console.error(`\n❌ 读取同行标题文件失败: ${err.message}`);
+          }
           process.exit(1);
         }
       }
 
       const result = await run(keywords, {
         maxLength: parseInt(options.length),
-        peerTitles
+        peerTitles,
+        silent: jsonMode
       });
+
+      if (jsonMode) {
+        console.log = origLog;
+        console.warn = origWarn;
+        console.error = origError;
+        const output = {
+          ok: true,
+          coreWord: result.coreWord,
+          blueOceanWord: result.blueOceanWord,
+          modifiers: result.modifiers,
+          filteredCount: result.filteredCount,
+          titles: result.titles,
+          products: result.products
+        };
+        process.stdout.write(JSON.stringify(output, null, 2) + '\n');
+        return;
+      }
 
       console.log('\n✅ 处理完成');
       console.log('='.repeat(50));
@@ -68,7 +100,14 @@ program
 
       console.log();
     } catch (error) {
-      console.error('\n❌ 错误:', error.message);
+      if (jsonMode) {
+        console.log = origLog;
+        console.warn = origWarn;
+        console.error = origError;
+        process.stdout.write(JSON.stringify({ ok: false, error: error.message }) + '\n');
+      } else {
+        console.error('\n❌ 错误:', error.message);
+      }
       process.exit(1);
     }
   });
