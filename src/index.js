@@ -23,23 +23,25 @@ const { removeBannedWords } = require('./banned-words');
  * }
  */
 async function run(blueOceanWord, options = {}) {
-  const { maxLength = 60, peerTitles = [] } = options;
-  console.log(`🔍 正在处理: ${blueOceanWord}`);
+  const { maxLength = 60, peerTitles = [], silent = false } = options;
+  const log = silent ? () => {} : console.log.bind(console);
+  const warn = silent ? () => {} : console.warn.bind(console);
+  log(`🔍 正在处理: ${blueOceanWord}`);
 
   // 步骤 1: 提取核心词和修饰词
-  console.log('📝 提取核心词和修饰词...');
+  log('📝 提取核心词和修饰词...');
   const { coreWord, modifiers } = await extractCoreAndModifiers(blueOceanWord);
-  console.log(`  核心词: ${coreWord}`);
-  console.log(`  修饰词: ${modifiers.map(m => `${m.word}(${m.rigidity})`).join(', ')}`);
+  log(`  核心词: ${coreWord}`);
+  log(`  修饰词: ${modifiers.map(m => `${m.word}(${m.rigidity})`).join(', ')}`);
 
   // Step 2: 1688 搜索（优先走 API，失败回退到本地筛选）
-  console.log('🔎 搜索 1688 商品...');
+  log('🔎 搜索 1688 商品...');
   let products = [];
   let mappedTitles = [];
   try {
     products = await require('./search-1688').searchAll(coreWord, blueOceanWord, modifiers);
   } catch (err) {
-    console.warn('⚠️ 1688 搜索失败，尝试本地筛选回退:', err && err.message ? err.message : err);
+    warn('⚠️ 1688 搜索失败，尝试本地筛选回退:', err && err.message ? err.message : err);
     try {
       const { searchAndFilter } = require('./search-1688');
       products = await searchAndFilter(coreWord, modifiers);
@@ -50,7 +52,7 @@ async function run(blueOceanWord, options = {}) {
 
   // 若没有符合条件的商品，直接返回空结果
   if (!Array.isArray(products) || products.length === 0) {
-    console.log('  ⚠️  没有找到匹配的商品');
+    log('  ⚠️  没有找到匹配的商品');
     return {
       coreWord,
       blueOceanWord,
@@ -61,10 +63,10 @@ async function run(blueOceanWord, options = {}) {
     };
   }
 
-  console.log(`  过滤后剩余 ${products.length} 个商品`);
+  log(`  过滤后剩余 ${products.length} 个商品`);
 
   // 步骤 3: 淘宝同行标题（并行获取，若提供了 peerTitles 则优先使用）
-  console.log('🔎 获取淘宝同行标题（并行）...');
+  log('🔎 获取淘宝同行标题（并行）...');
   let taobaoTitles = [];
   if (peerTitles && peerTitles.length > 0) {
     taobaoTitles = peerTitles;
@@ -73,12 +75,12 @@ async function run(blueOceanWord, options = {}) {
       taobaoTitles = await require('./search-taobao').searchTaobaoTitles(blueOceanWord);
     } catch (err) {
       taobaoTitles = [];
-      console.warn('⚠️  淘宝同行标题检索失败，降级为空：', err && err.message ? err.message : err);
+      warn('⚠️  淘宝同行标题检索失败，降级为空：', err && err.message ? err.message : err);
     }
   }
 
   // Step 4: 优先通过 GLM 的 selectAndGenerate 实现多字段输出
-  console.log('✍️  尝试 GLM selectAndGenerate 以输出更多字段...');
+  log('✍️  尝试 GLM selectAndGenerate 以输出更多字段...');
   const glmClient = new GLMClient({
     apiKey: process.env.GLM_API_KEY,
     apiBase: process.env.GLM_API_BASE,
@@ -100,7 +102,7 @@ async function run(blueOceanWord, options = {}) {
         ...p,
         title: cleanTitle(removeBannedWords(p.title || ''))
       }));
-      console.log(`  正在处理第 ${Math.floor(i/BATCH_SIZE) + 1}/${Math.ceil(products.length/BATCH_SIZE)} 批产品 (${batch.length}个)...`);
+      log(`  正在处理第 ${Math.floor(i/BATCH_SIZE) + 1}/${Math.ceil(products.length/BATCH_SIZE)} 批产品 (${batch.length}个)...`);
       
       try {
       const { selectedProducts, titles: titleObjs } = await glmClient.selectAndGenerate({
@@ -119,12 +121,12 @@ async function run(blueOceanWord, options = {}) {
         allTitleObjs = allTitleObjs.concat(titleObjs);
       }
     } catch (batchErr) {
-      console.warn(`  ⚠️ 第 ${Math.floor(i/BATCH_SIZE) + 1} 批处理失败:`, batchErr.message);
+      warn(`  ⚠️ 第 ${Math.floor(i/BATCH_SIZE) + 1} 批处理失败:`, batchErr.message);
       // 继续处理下一批
     }
   }
   
-  console.log(`  ✓ 共处理 ${allSelectedProducts.length} 个产品的选品分析, 生成 ${allTitleObjs.length} 个标题`);
+  log(`  ✓ 共处理 ${allSelectedProducts.length} 个产品的选品分析, 生成 ${allTitleObjs.length} 个标题`);
 
   // Apply postProcessTitle pipeline to all titles after batch processing
   allTitleObjs.forEach(t => {
@@ -159,7 +161,7 @@ async function run(blueOceanWord, options = {}) {
     if (!shopTitle) {
       // 构造回退标题：从原标题和淘宝同行标题中提取关键词
       shopTitle = constructFallbackTitle(blueOceanWord, p.title || '', taobaoTitles || [], maxLength);
-      console.warn(`⚠️ 产品 ${normalizedId} 无GLM标题，使用构造标题: ${shopTitle}`);
+      warn(`⚠️ 产品 ${normalizedId} 无GLM标题，使用构造标题: ${shopTitle}`);
     }
 
     return {
@@ -191,7 +193,7 @@ async function run(blueOceanWord, options = {}) {
   };
   } catch (err) {
     // 备用降级路径：使用本地评分 + 生成标题，或简单标题生成
-    console.warn('⚠️ GLM selectAndGenerate 失败，降级到本地标题生成... ', err && err.message ? err.message : err);
+    warn('⚠️ GLM selectAndGenerate 失败，降级到本地标题生成... ', err && err.message ? err.message : err);
     try {
       // 调用本地生成（需要传入原始参数）
       const titles = await glmClient.generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles, products, maxLength });
@@ -219,7 +221,7 @@ async function run(blueOceanWord, options = {}) {
       };
     } catch (e2) {
       // 最后降级：直接返回简单结构，避免中断流程
-      console.warn('降级失败，返回简化结构：', e2 && e2.message ? e2.message : e2);
+      warn('降级失败，返回简化结构：', e2 && e2.message ? e2.message : e2);
       const simple = products.map(p => ({
         '链接原标题': p.title,
         '产品链接': p.url,
