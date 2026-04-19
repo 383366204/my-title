@@ -264,9 +264,24 @@ class GLMClient {
   标题生成必须遵守以下规则：
   ${COMMON_TITLE_RULES_TEXT}
   7. 标题用词应参考peerTitles（同行标题）和刚性修饰词
-  输出严格 JSON 格式，不要任何其他文字：
+  输出严格 JSON 格式，不要任何其他文字，字段名必须完全一致：
   {
-  ...
+    "selectedProducts": [
+      {
+        "id": "商品id",
+        "score": 1-10的相关性评分,
+        "reason": "选择理由",
+        "priceAdvice": "定价建议",
+        "risk": "风险提示"
+      }
+    ],
+    "titles": [
+      {
+        "productId": "对应商品id",
+        "title": "生成的标题（无标点无空格，连续书写）"
+      }
+    ],
+    "overallAdvice": "整体选品建议"
   }`;
 
     const messages = [
