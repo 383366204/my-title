@@ -1,0 +1,9 @@
+generateTitles: function
+on
+generateTitles: function
+extractCoreAndModifiers: function
+selectAndGenerate: function
+generateTitles: function
+extractCoreAndModifiers: function
+run: function
+generateTitles: function

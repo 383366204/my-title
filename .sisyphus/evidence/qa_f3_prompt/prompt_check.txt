@@ -1,0 +1,2 @@
+selectAndGenerate constraints: { hasBlueOcean: true, hasPunct: true, hasLength: true, hasDiff: true }
+selectAndGenerate constraints: { hasBlueOcean: true, hasPunct: true, hasLength: true, hasDiff: true }

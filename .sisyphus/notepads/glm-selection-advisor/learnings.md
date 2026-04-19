@@ -1,0 +1,11 @@
+# 2026-04-18: learnings from RED/GREEN task: selectAndGenerate
+- Implemented new GLMClient.selectAndGenerate({}) with 30s timeout and JSON-based response.
+- Added unit tests to test/glm-client.test.js covering selectedProducts and titles mappings plus timeout behavior.
+- Preserved judgeRelevance and generateTitles for backward compatibility; marked judgeRelevance as deprecated in code comments.
+- Key patterns:
+  - Red phase: tests drive API response shape; ensure strict JSON structure in GLM responses
+  - Green phase: parse and normalize fields (id, score, reason, priceAdvice, risk) and titles (productId, title)
+- Next steps: integrate selectAndGenerate into main workflow (src/index.js) and ensure end-to-end passes.
+- Added integration of selectAndGenerate path in index.js with three-level fallback and 11-field output.
+- Updated tests (unit and e2e) to mock selectAndGenerate and validate new fields: 选品理由, 定价建议, 风险提示.
+- Expanded output formatter to include 3 new columns in the table and JSON output.

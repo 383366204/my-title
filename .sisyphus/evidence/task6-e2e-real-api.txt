@@ -1,0 +1,74 @@
+# Task 6: 端到端验证（真实API调用）
+
+**执行时间:** 2026-04-18
+**关键词:** 手链ins韩系, 手链女, 纯银项链女高级感
+
+## 测试结果汇总
+
+### 测试1: 手链ins韩系
+```
+real 0m14.142s
+结果: 1688无匹配商品，无法生成标题
+```
+
+### 测试2: 手链女 --peer-titles "韩国气质手链女ins风简约百搭学生 bracelet"
+```
+结果: 找到21个商品，但 GLM API 返回 401 错误
+错误: Request failed with status code 401
+降级: 本地标题生成也失败
+```
+
+### 测试3: 纯银项链女高级感
+```
+结果: 找到5个商品，淘宝同行标题获取成功，但 GLM API 返回 401 错误
+错误: Request failed with status code 401
+```
+
+### 直接 API 测试
+```bash
+curl -X POST "https://open.bigmodel.cn/api/paas/v4/chat/completions" \
+  -H "Authorization: Bearer e101b60c4a68479489cffd17d5482613.F6CAiUAlR9pCFdc1" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"glm-4-flash","messages":[{"role":"user","content":"Say hello in Chinese"}]}'
+  
+结果: 成功返回 "你好！"
+```
+
+## 发现的问题
+
+### Bug: GLMClient 在 index.js 中未传入 API Key
+
+**位置:** `src/index.js` 第80行
+
+**问题代码:**
+```javascript
+const glmClient = new GLMClient({});  // 缺少 apiKey
+```
+
+**影响:**
+- `extract-core.js` 和 `generate-title.js` 正确使用了 `process.env.GLM_API_KEY`
+- 但 `index.js` 第80行创建 GLMClient 时未传入 apiKey
+- 导致所有通过 `glmClient.selectAndGenerate()` 和 `glmClient.generateTitles()` 的调用都返回 401
+
+**正确的代码应该是:**
+```javascript
+const glmClient = new GLMClient({ apiKey: process.env.GLM_API_KEY });
+```
+
+## 验收标准检查
+
+| 标准 | 状态 | 说明 |
+|------|------|------|
+| GLM call succeeds within 30 seconds | ❌ FAIL | 401 错误 - API Key 未传入 |
+| Output includes 3 new fields | ❌ FAIL | GLM 调用失败，新字段为空 |
+| All 11 fields present in output | ❌ FAIL | GLM 调用失败 |
+| Total time < 60 seconds | ✅ PASS | 14秒完成 |
+| Fallback works if GLM fails | ⚠️ PARTIAL | 降级执行但 titles 为空 |
+
+## 结论
+
+**验证失败** - 代码存在 bug 导致 GLM API 无法正常使用。
+
+API Key 本身有效（直接 curl 测试成功），但 index.js 中 GLMClient 未传入 apiKey 参数，导致所有后续 GLM 调用都失败。
+
+需要修复 index.js 第80行才能完成端到端验证。

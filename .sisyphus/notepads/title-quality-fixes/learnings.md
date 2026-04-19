@@ -1,0 +1,21 @@
+# Learnings — title-quality-fixes
+
+-## 2026-04-18 Session Start
+- 计划：修复4个标题质量Bug（标点、原标题fallback、蓝海词未前置、字数不稳定）
+- 核心设计：创建 `src/title-utils.js` 统一后处理管线
+- 双路径问题：主路径用 selectAndGenerate，降级路径用 generateTitles，两条路径都需要修复
+- generate-title.js 目前未被 index.js 调用，但需保持一致性
+- Updated GLM prompts to enforce title quality constraints:
+- 1) selectAndGenerate now uses a template-literal systemPrompt that enforces:
+  - Title must start with the blueOceanWord
+  - Title length target 25-30 Chinese characters, min 20 max ${60} (maxLength injected)
+  - No punctuation in titles
+  - Titles must be different from the original title
+  - No spaces; all words concatenated
+  - Title vocabulary references peerTitles and rigid modifiers
+- 2) generateTitles now includes punctuation-free, min length 20, no spaces constraints in the systemPrompt
+- Both prompts now use template literals to inject blueOceanWord and maxLength
+- Verification performed:
+  - node -c src/glm-client.js passes
+  - Runtime check confirms selectAndGenerate, generateTitles, and extractCoreAndModifiers exist and are functions
+- JSON output structure remains unchanged; only system prompts expanded

@@ -1,0 +1,3 @@
+- End-to-end validation (T6) not yet executed; requires real API key and network access.
+- Minor risk of regression if local score thresholds change; ensure compatibility with existing outputs.
+- Potential need for additional tests for new 3-field output: 选品理由, 定价建议, 风险提示.

@@ -1,0 +1,3 @@
+- 2026-04-19: Refactored src/generate-title.js to use postProcessTitle pipeline instead of manual post-processing.
+- 2026-04-19: Integrated postProcessTitle pipeline into src/index.js; normalized productId keys for titleMap; added robust fallback title construction using blueOceanWord and rigid modifiers; applied post-processing in primary and fallback paths; ensured compatibility with existing fields.
+- 2026-04-19: Syntax check passed: node -c src/index.js.

@@ -1,0 +1,4 @@
+- Status: 5/6 tasks implemented; end-to-end validation (T6) pending.
+- Architecture: Implemented selectAndGenerate path, scoreLocally, and index.js pipeline adjustments as per plan glm-selection-advisor.
+- Tests: Unit tests updated for glm-client and search/1688 flow; end-to-end tests awaiting API readiness.
+- Risks: No major blockers found; timeboxed to 30s GLM timeout with local fallback.
