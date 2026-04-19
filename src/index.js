@@ -34,23 +34,42 @@ async function run(blueOceanWord, options = {}) {
   log(`  核心词: ${coreWord}`);
   log(`  修饰词: ${modifiers.map(m => `${m.word}(${m.rigidity})`).join(', ')}`);
 
-  // Step 2: 1688 搜索（优先走 API，失败回退到本地筛选）
-  log('🔎 搜索 1688 商品...');
+  // Step 2+3: 1688 搜索 + 淘宝同行标题并行获取
+  log('🔎 并行搜索 1688 商品和淘宝同行标题...');
   let products = [];
   let mappedTitles = [];
-  try {
-    products = await require('./search-1688').searchAll(coreWord, blueOceanWord, modifiers);
-  } catch (err) {
-    warn('⚠️ 1688 搜索失败，尝试本地筛选回退:', err && err.message ? err.message : err);
-    try {
-      const { searchAndFilter } = require('./search-1688');
-      products = await searchAndFilter(coreWord, modifiers);
-    } catch (e) {
-      products = [];
-    }
-  }
+  let taobaoTitles = [];
 
-  // 若没有符合条件的商品，直接返回空结果
+  const [searchResult, taobaoResult] = await Promise.all([
+    (async () => {
+      let p = [];
+      try {
+        p = await require('./search-1688').searchAll(coreWord, blueOceanWord, modifiers);
+      } catch (err) {
+        warn('⚠️ 1688 搜索失败，尝试本地筛选回退:', err && err.message ? err.message : err);
+        try {
+          const { searchAndFilter } = require('./search-1688');
+          p = await searchAndFilter(coreWord, modifiers);
+        } catch (e) {
+          p = [];
+        }
+      }
+      return p;
+    })(),
+    (async () => {
+      if (peerTitles && peerTitles.length > 0) return peerTitles;
+      try {
+        return await require('./search-taobao').searchTaobaoTitles(blueOceanWord);
+      } catch (err) {
+        warn('⚠️ 淘宝同行标题检索失败，降级为空：', err && err.message ? err.message : err);
+        return [];
+      }
+    })()
+  ]);
+
+  products = searchResult;
+  taobaoTitles = taobaoResult;
+
   if (!Array.isArray(products) || products.length === 0) {
     log('  ⚠️  没有找到匹配的商品');
     return {
@@ -70,19 +89,7 @@ async function run(blueOceanWord, options = {}) {
     products = products.slice(0, limit);
   }
 
-  // 步骤 3: 淘宝同行标题（并行获取，若提供了 peerTitles 则优先使用）
-  log('🔎 获取淘宝同行标题（并行）...');
-  let taobaoTitles = [];
-  if (peerTitles && peerTitles.length > 0) {
-    taobaoTitles = peerTitles;
-  } else {
-    try {
-      taobaoTitles = await require('./search-taobao').searchTaobaoTitles(blueOceanWord);
-    } catch (err) {
-      taobaoTitles = [];
-      warn('⚠️  淘宝同行标题检索失败，降级为空：', err && err.message ? err.message : err);
-    }
-  }
+  log(`  过滤后剩余 ${products.length} 个商品`);
 
   // Step 4: 优先通过 GLM 的 selectAndGenerate 实现多字段输出
   log('✍️  尝试 GLM selectAndGenerate 以输出更多字段...');
@@ -93,53 +100,40 @@ async function run(blueOceanWord, options = {}) {
   });
   
   try {
-    // 批量处理：每批5个产品，确保所有产品都获得高质量标题
     const BATCH_SIZE = 5;
-    let allSelectedProducts = [];
-    let allTitleObjs = [];
     // 预过滤淘宝同行标题，避免 GLM 学习违禁词
     const cleanedPeerTitles = (peerTitles || []).map(t => cleanTitle(removeBannedWords(t || ''))).filter(Boolean);
     
+    const batches = [];
     for (let i = 0; i < products.length; i += BATCH_SIZE) {
-      const batch = products.slice(i, i + BATCH_SIZE);
-      // 对当前批次的产品标题进行违禁词清洗
-      const cleanedBatch = batch.map(p => ({
-        ...p,
-        title: cleanTitle(removeBannedWords(p.title || ''))
-      }));
-      log(`  正在处理第 ${Math.floor(i/BATCH_SIZE) + 1}/${Math.ceil(products.length/BATCH_SIZE)} 批产品 (${batch.length}个)...`);
-      
-      try {
-      const { selectedProducts, titles: titleObjs } = await glmClient.selectAndGenerate({
-        blueOceanWord,
-        coreWord,
-        modifiers,
-        peerTitles: cleanedPeerTitles,
-        products: cleanedBatch,
-        maxLength
+      batches.push({
+        index: Math.floor(i / BATCH_SIZE),
+        products: products.slice(i, i + BATCH_SIZE).map(p => ({
+          ...p,
+          title: cleanTitle(removeBannedWords(p.title || ''))
+        }))
       });
-      
-      if (Array.isArray(selectedProducts)) {
-        allSelectedProducts = allSelectedProducts.concat(selectedProducts);
-      }
-      if (Array.isArray(titleObjs)) {
-        allTitleObjs = allTitleObjs.concat(titleObjs);
-      }
-      if (onBatch) {
-        await onBatch({
-          batch: Math.floor(i / BATCH_SIZE) + 1,
-          total: Math.ceil(products.length / BATCH_SIZE),
-          productsSoFar: allSelectedProducts.length,
-          titlesSoFar: allTitleObjs.length,
-        });
-      }
-    } catch (batchErr) {
-      warn(`  ⚠️ 第 ${Math.floor(i/BATCH_SIZE) + 1} 批处理失败:`, batchErr.message);
-      // 继续处理下一批
     }
-  }
-  
-  log(`  ✓ 共处理 ${allSelectedProducts.length} 个产品的选品分析, 生成 ${allTitleObjs.length} 个标题`);
+
+    log(`  并行处理 ${batches.length} 批产品...`);
+    const batchResults = await Promise.all(batches.map(({ index, products: batch }) =>
+      glmClient.selectAndGenerate({
+        blueOceanWord, coreWord, modifiers,
+        peerTitles: cleanedPeerTitles,
+        products: batch, maxLength
+      }).then(result => {
+        log(`  第 ${index + 1}/${batches.length} 批完成`);
+        return result;
+      }).catch(err => {
+        warn(`  ⚠️ 第 ${index + 1} 批处理失败:`, err.message);
+        return { selectedProducts: [], titles: [] };
+      })
+    ));
+
+    const allSelectedProducts = batchResults.flatMap(r => Array.isArray(r.selectedProducts) ? r.selectedProducts : []);
+    const allTitleObjs = batchResults.flatMap(r => Array.isArray(r.titles) ? r.titles : []);
+    
+    log(`  ✓ 共处理 ${allSelectedProducts.length} 个产品的选品分析, 生成 ${allTitleObjs.length} 个标题`);
 
   // Apply postProcessTitle pipeline to all titles after batch processing
   allTitleObjs.forEach(t => {
