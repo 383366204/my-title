@@ -89,20 +89,27 @@ node bin/cli.js "戒指男潮牌高级感痞帅" --length 60 --json
     "servers": {
       "my-title": {
         "command": "node",
-        "args": ["/absolute/path/to/my-title/bin/mcp-server.mjs"]
+        "args": ["/absolute/path/to/my-title/bin/mcp-server.mjs"],
+        "timeout": 180000,
+        "trust": "trusted"
       }
     }
   }
 }
 ```
 
-不同客户端的配置文件位置：
+OpenClaw 一行命令添加：
 
-| 客户端 | 配置文件 |
-|--------|----------|
-| OpenClaw | `openclaw mcp set my-title '{"command":"node","args":["/path/to/bin/mcp-server.mjs"]}'` |
-| Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` |
-| Cursor | Settings → MCP |
+```bash
+openclaw mcp set my-title '{"command":"node","args":["/absolute/path/to/my-title/bin/mcp-server.mjs"],"timeout":180000,"trust":"trusted"}'
+```
+
+| 字段 | 说明 |
+|------|------|
+| `command` | Node.js 可执行文件 |
+| `args` | MCP Server 入口文件绝对路径 |
+| `timeout` | 工具调用超时（毫秒），建议 180000（3 分钟） |
+| `trust` | 信任级别，`trusted` 允许工具直接执行 |
 
 ### 工具参数
 
@@ -120,8 +127,8 @@ node bin/cli.js "戒指男潮牌高级感痞帅" --length 60 --json
 ### 注意事项
 
 - 工具执行时间约 60-120 秒（多次 GLM API 调用 + 1688 搜索）
-- 如果客户端有 MCP 工具调用超时限制（如 30 秒），会超时失败
-- 超时场景下建议改用 `exec` 工具直接调用 CLI 的 `--json` 模式
+- 配置 `timeout: 180000`（3 分钟）避免超时
+- 日志输出到 stderr，查看方式：`openclaw logs --follow`，过滤 `[my-title]`
 
 ---
 

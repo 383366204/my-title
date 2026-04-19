@@ -52,7 +52,9 @@ my-title/
   "mcpServers": {
     "my-title": {
       "command": "node",
-      "args": ["/absolute/path/to/my-title/bin/mcp-server.mjs"]
+      "args": ["/absolute/path/to/my-title/bin/mcp-server.mjs"],
+      "timeout": 180000,
+      "trust": "trusted"
     }
   }
 }
