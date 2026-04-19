@@ -25,14 +25,18 @@ server.tool(
   {
     keyword: z.string().describe('商品关键词，如：戒指男潮牌高级感痞帅'),
     length: z.number().default(60).describe('标题最大字符数（1汉字=2字符），默认60'),
+    limit: z.number().default(5).describe('最多处理商品数量，默认5（减少等待时间）'),
   },
-  async ({ keyword, length }) => {
+  async ({ keyword, length, limit }) => {
+    console.error(`[my-title] generate_title called: keyword="${keyword}", length=${length}, limit=${limit}`);
     try {
       const result = await run(keyword, {
         maxLength: length || 60,
         silent: true,
+        limit: limit || 5,
       });
 
+      console.error(`[my-title] success: ${result.products.length} products, ${result.titles.length} titles`);
       return {
         content: [
           {
@@ -50,6 +54,7 @@ server.tool(
         ],
       };
     } catch (err) {
+      console.error(`[my-title] error: ${err.message}`, err.stack);
       return {
         content: [
           {

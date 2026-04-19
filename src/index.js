@@ -23,7 +23,7 @@ const { removeBannedWords } = require('./banned-words');
  * }
  */
 async function run(blueOceanWord, options = {}) {
-  const { maxLength = 60, peerTitles = [], silent = false } = options;
+  const { maxLength = 60, peerTitles = [], silent = false, limit = 0 } = options;
   const log = silent ? () => {} : console.log.bind(console);
   const warn = silent ? () => {} : console.warn.bind(console);
   log(`🔍 正在处理: ${blueOceanWord}`);
@@ -64,6 +64,11 @@ async function run(blueOceanWord, options = {}) {
   }
 
   log(`  过滤后剩余 ${products.length} 个商品`);
+
+  if (limit > 0 && products.length > limit) {
+    log(`  限制处理数量: ${limit} 个`);
+    products = products.slice(0, limit);
+  }
 
   // 步骤 3: 淘宝同行标题（并行获取，若提供了 peerTitles 则优先使用）
   log('🔎 获取淘宝同行标题（并行）...');
