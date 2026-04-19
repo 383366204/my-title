@@ -23,7 +23,7 @@ const { removeBannedWords } = require('./banned-words');
  * }
  */
 async function run(blueOceanWord, options = {}) {
-  const { maxLength = 60, peerTitles = [], silent = false, limit = 0 } = options;
+  const { maxLength = 60, peerTitles = [], silent = false, limit = 0, onBatch = null } = options;
   const log = silent ? () => {} : console.log.bind(console);
   const warn = silent ? () => {} : console.warn.bind(console);
   log(`🔍 正在处理: ${blueOceanWord}`);
@@ -124,6 +124,14 @@ async function run(blueOceanWord, options = {}) {
       }
       if (Array.isArray(titleObjs)) {
         allTitleObjs = allTitleObjs.concat(titleObjs);
+      }
+      if (onBatch) {
+        await onBatch({
+          batch: Math.floor(i / BATCH_SIZE) + 1,
+          total: Math.ceil(products.length / BATCH_SIZE),
+          productsSoFar: allSelectedProducts.length,
+          titlesSoFar: allTitleObjs.length,
+        });
       }
     } catch (batchErr) {
       warn(`  ⚠️ 第 ${Math.floor(i/BATCH_SIZE) + 1} 批处理失败:`, batchErr.message);

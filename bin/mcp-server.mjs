@@ -25,7 +25,7 @@ server.tool(
   {
     keyword: z.string().describe('商品关键词，如：戒指男潮牌高级感痞帅'),
     length: z.number().default(60).describe('标题最大字符数（1汉字=2字符），默认60'),
-    limit: z.number().default(5).describe('最多处理商品数量，默认5（减少等待时间）'),
+    limit: z.number().default(0).describe('最多处理商品数量，0表示全部'),
   },
   async ({ keyword, length, limit }) => {
     console.error(`[my-title] generate_title called: keyword="${keyword}", length=${length}, limit=${limit}`);
@@ -33,7 +33,13 @@ server.tool(
       const result = await run(keyword, {
         maxLength: length || 60,
         silent: true,
-        limit: limit || 5,
+        limit: limit || 0,
+        onBatch: async ({ batch, total, productsSoFar, titlesSoFar }) => {
+          await server.sendLoggingMessage({
+            level: 'info',
+            data: `[my-title] 批次 ${batch}/${total} 完成，已处理 ${productsSoFar} 个商品，生成 ${titlesSoFar} 个标题`,
+          });
+        },
       });
 
       console.error(`[my-title] success: ${result.products.length} products, ${result.titles.length} titles`);
