@@ -19,7 +19,8 @@ const { removeBannedWords } = require('./banned-words');
  *   coreWord, blueOceanWord, modifiers,
  *   products: [ { 原字段按选品表 8 字段 }, ... ],
  *   filteredCount,
- *   titles
+ *   titles,
+ *   stats: { coreWord, modifiers, alibaba1688Total, taobaoTitlesTotal, matchedProducts, batchesProcessed, totalProductsEnriched, totalTitlesGenerated, degraded? }
  * }
  */
 async function run(blueOceanWord, options = {}) {
@@ -70,6 +71,13 @@ async function run(blueOceanWord, options = {}) {
   products = searchResult;
   taobaoTitles = taobaoResult;
 
+  const stats = {
+    coreWord,
+    modifiers: modifiers.map(m => m.word),
+    alibaba1688Total: Array.isArray(searchResult) ? searchResult.length : 0,
+    taobaoTitlesTotal: Array.isArray(taobaoResult) ? taobaoResult.length : 0,
+  };
+
   if (!Array.isArray(products) || products.length === 0) {
     log('  ⚠️  没有找到匹配的商品');
     return {
@@ -78,7 +86,8 @@ async function run(blueOceanWord, options = {}) {
       modifiers,
       products: [],
       filteredCount: 0,
-      titles: []
+      titles: [],
+      stats
     };
   }
 
@@ -88,6 +97,8 @@ async function run(blueOceanWord, options = {}) {
     log(`  限制处理数量: ${limit} 个`);
     products = products.slice(0, limit);
   }
+
+  stats.matchedProducts = products.length;
 
   log(`  过滤后剩余 ${products.length} 个商品`);
 
@@ -132,6 +143,10 @@ async function run(blueOceanWord, options = {}) {
 
     const allSelectedProducts = batchResults.flatMap(r => Array.isArray(r.selectedProducts) ? r.selectedProducts : []);
     const allTitleObjs = batchResults.flatMap(r => Array.isArray(r.titles) ? r.titles : []);
+
+    stats.batchesProcessed = batches.length;
+    stats.totalProductsEnriched = allSelectedProducts.length;
+    stats.totalTitlesGenerated = allTitleObjs.length;
     
     log(`  ✓ 共处理 ${allSelectedProducts.length} 个产品的选品分析, 生成 ${allTitleObjs.length} 个标题`);
 
@@ -196,7 +211,8 @@ async function run(blueOceanWord, options = {}) {
     modifiers,
     products: enriched,
     filteredCount: products.length,
-    titles: mappedTitles
+    titles: mappedTitles,
+    stats
   };
   } catch (err) {
     // 备用降级路径：使用本地评分 + 生成标题，或简单标题生成
@@ -224,7 +240,8 @@ async function run(blueOceanWord, options = {}) {
         modifiers,
         products: enriched,
         filteredCount: products.length,
-        titles: mappedTitles
+        titles: mappedTitles,
+        stats: { ...stats, degraded: 'local_generation' }
       };
     } catch (e2) {
       // 最后降级：直接返回简单结构，避免中断流程
@@ -248,7 +265,8 @@ async function run(blueOceanWord, options = {}) {
         modifiers,
         products: simple,
         filteredCount: products.length,
-        titles: []
+        titles: [],
+        stats: { ...stats, degraded: 'simple_fallback' }
       };
     }
   }

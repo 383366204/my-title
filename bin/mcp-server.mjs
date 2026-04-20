@@ -72,6 +72,7 @@ server.tool(
             filteredCount: result.filteredCount,
             titles: result.titles,
             products: result.products,
+            stats: result.stats,
           },
         });
       })

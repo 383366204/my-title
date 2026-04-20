@@ -65,7 +65,8 @@ program
           modifiers: result.modifiers,
           filteredCount: result.filteredCount,
           titles: result.titles,
-          products: result.products
+          products: result.products,
+          stats: result.stats
         };
         process.stdout.write(JSON.stringify(output, null, 2) + '\n');
         return;
