@@ -1,9 +1,44 @@
+const path = require('path');
 const { extractCoreAndModifiers } = require('./extract-core');
 const { searchAndFilter } = require('./search-1688');
 const { searchTaobaoTitles } = require('./search-taobao');
 const GLMClient = require('./glm-client');
 const { postProcessTitle, constructFallbackTitle, cleanTitle } = require('./title-utils');
 const { removeBannedWords } = require('./banned-words');
+const { ResultCache } = require('./cache');
+
+function fillFallbackAdvice(item) {
+  if (!item['选品理由']) {
+    const price = parseFloat(item['商品原价']) || 0;
+    const sales = item['30天销量'] || 0;
+    const rating = item['好评率'] || 0;
+    const reasons = [];
+    if (sales > 50) reasons.push('销量较高');
+    else if (sales > 10) reasons.push('有一定销量');
+    else reasons.push('新品需测试');
+    if (rating >= 95) reasons.push('好评率优秀');
+    if (price > 0 && price < 5) reasons.push('价格有优势');
+    item['选品理由'] = reasons.join('，') + '，符合核心词描述';
+  }
+  if (!item['定价建议']) {
+    const price = parseFloat(item['商品原价']) || 0;
+    if (price > 0) {
+      const low = Math.ceil(price * 2.5);
+      const high = Math.ceil(price * 4);
+      item['定价建议'] = `1688价${price}元，建议零售${low}-${high}元`;
+    } else {
+      item['定价建议'] = '参考同类商品定价';
+    }
+  }
+  if (!item['风险提示']) {
+    const price = parseFloat(item['商品原价']) || 0;
+    const sales = item['30天销量'] || 0;
+    const risks = [];
+    if (price > 0 && price < 2) risks.push('价格极低，注意材质质量');
+    if (sales === 0) risks.push('无销量参考，需谨慎');
+    item['风险提示'] = risks.length > 0 ? risks.join('；') : '常规商品，注意验货';
+  }
+}
 
 /**
  * 主入口：重构后的流程编排
@@ -27,6 +62,14 @@ async function run(blueOceanWord, options = {}) {
   const { maxLength = 60, peerTitles = [], silent = false, limit = 0, onBatch = null } = options;
   const log = silent ? () => {} : console.log.bind(console);
   const warn = silent ? () => {} : console.warn.bind(console);
+
+  const cache = new ResultCache({ cacheDir: path.join(__dirname, '..', '.cache') });
+  const cached = cache.get(blueOceanWord, maxLength, limit);
+  if (cached) {
+    log('📦 命中缓存，直接返回');
+    return cached;
+  }
+
   log(`🔍 正在处理: ${blueOceanWord}`);
 
   // 步骤 1: 提取核心词和修饰词
@@ -70,6 +113,19 @@ async function run(blueOceanWord, options = {}) {
 
   products = searchResult;
   taobaoTitles = taobaoResult;
+
+  const seen = new Set();
+  products = products.filter(p => {
+    const urlMatch = (p.url || '').match(/\/offer\/(\d+)\.html/);
+    const offerId = urlMatch ? urlMatch[1] : '';
+    const normalizedTitle = (p.title || '').replace(/\s+/g, '').toLowerCase();
+    if (offerId && seen.has('id:' + offerId)) return false;
+    if (offerId) seen.add('id:' + offerId);
+    const titlePrefix = normalizedTitle.substring(0, 15);
+    if (titlePrefix.length >= 10 && seen.has('title:' + titlePrefix)) return false;
+    if (titlePrefix.length >= 10) seen.add('title:' + titlePrefix);
+    return true;
+  });
 
   const stats = {
     coreWord,
@@ -204,8 +260,9 @@ async function run(blueOceanWord, options = {}) {
     };
   });
 
-  // 返回最终结构
-  return {
+  enriched.forEach(fillFallbackAdvice);
+
+  const result = {
     coreWord,
     blueOceanWord,
     modifiers,
@@ -214,6 +271,8 @@ async function run(blueOceanWord, options = {}) {
     titles: mappedTitles,
     stats
   };
+  cache.set(blueOceanWord, maxLength, limit, result);
+  return result;
   } catch (err) {
     // 备用降级路径：使用本地评分 + 生成标题，或简单标题生成
     warn('⚠️ GLM selectAndGenerate 失败，降级到本地标题生成... ', err && err.message ? err.message : err);
@@ -234,7 +293,8 @@ async function run(blueOceanWord, options = {}) {
         '定价建议': '',
         '风险提示': ''
       }));
-      return {
+      enriched.forEach(fillFallbackAdvice);
+      const result = {
         coreWord,
         blueOceanWord,
         modifiers,
@@ -243,6 +303,8 @@ async function run(blueOceanWord, options = {}) {
         titles: mappedTitles,
         stats: { ...stats, degraded: 'local_generation' }
       };
+      cache.set(blueOceanWord, maxLength, limit, result);
+      return result;
     } catch (e2) {
       // 最后降级：直接返回简单结构，避免中断流程
       warn('降级失败，返回简化结构：', e2 && e2.message ? e2.message : e2);
@@ -259,7 +321,8 @@ async function run(blueOceanWord, options = {}) {
         '定价建议': '',
         '风险提示': ''
       }));
-      return {
+      simple.forEach(fillFallbackAdvice);
+      const result = {
         coreWord,
         blueOceanWord,
         modifiers,
@@ -268,6 +331,8 @@ async function run(blueOceanWord, options = {}) {
         titles: [],
         stats: { ...stats, degraded: 'simple_fallback' }
       };
+      cache.set(blueOceanWord, maxLength, limit, result);
+      return result;
     }
   }
 }
