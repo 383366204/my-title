@@ -259,11 +259,12 @@ class GLMClient {
    * @param {number} [params.maxLength=60] - 生成标题的最大长度（字符）
    * @returns {Promise<{selectedProducts:Array<{id:string, score:number, reason:string, priceAdvice:string, risk:string}>, titles:Array<{productId:string, title:string}>, overallAdvice:string}>}
    */
-  async selectAndGenerate({ blueOceanWord, coreWord, modifiers, peerTitles = [], products = [], maxLength = 60 }) {
+  async selectAndGenerate({ blueOceanWord, coreWord, modifiers, peerTitles = [], keywordAnalysis = null, products = [], maxLength = 60 }) {
     const systemPrompt = `你是一个电商标题选择与生成助手。请在给定的候选商品中，基于核心词和刚性修饰词，选择出最符合意图的若干商品，并给出价格建议与风险提示，同时生成对应的标题候选。
   标题生成必须遵守以下规则：
   ${COMMON_TITLE_RULES_TEXT}
-  7. 标题用词应参考peerTitles（同行标题）和刚性修饰词
+  7. 标题用词必须参考keywordAnalysis中的高频词和缺口词。高频词是同行标题中最常出现的词，缺口词是淘宝同行使用但1688原标题没有的零售转化词。标题应尽量包含高频词和缺口词。
+  8. peerTitles仅作为辅助参考，优先使用keywordAnalysis中的分析结果
   输出严格 JSON 格式，不要任何其他文字，字段名必须完全一致：
   {
     "selectedProducts": [
@@ -286,7 +287,7 @@ class GLMClient {
 
     const messages = [
       { role: 'system', content: systemPrompt },
-      { role: 'user', content: JSON.stringify({ blueOceanWord, coreWord, modifiers, peerTitles, maxLength, products }) }
+      { role: 'user', content: JSON.stringify({ blueOceanWord, coreWord, modifiers, peerTitles: peerTitles.slice(0, 50), keywordAnalysis, maxLength, products }) }
     ];
 
     const response = await retry(async () => {

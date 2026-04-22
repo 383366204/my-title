@@ -6,6 +6,7 @@ const GLMClient = require('./glm-client');
 const { postProcessTitle, constructFallbackTitle, cleanTitle } = require('./title-utils');
 const { removeBannedWords } = require('./banned-words');
 const { ResultCache } = require('./cache');
+const { analyzePeerTitles } = require('./keyword-analyzer');
 
 function fillFallbackAdvice(item) {
   if (!item['选品理由']) {
@@ -203,8 +204,20 @@ async function run(blueOceanWord, options = {}) {
   try {
     const BATCH_SIZE = 5;
     // 预过滤淘宝同行标题，避免 GLM 学习违禁词
-    const cleanedPeerTitles = (peerTitles || []).map(t => cleanTitle(removeBannedWords(t || ''))).filter(Boolean);
-    
+    // 优先使用传入的peerTitles，否则使用从图片搜索获取的taobaoTitles
+    const titlesToUse = (peerTitles && peerTitles.length > 0) ? peerTitles : taobaoTitles;
+    const cleanedPeerTitles = (titlesToUse || []).map(t => cleanTitle(removeBannedWords(t || ''))).filter(Boolean);
+
+    // 关键词分析：提取高频词和竞品缺口词
+    let keywordAnalysis = null;
+    if (cleanedPeerTitles.length > 0) {
+      keywordAnalysis = analyzePeerTitles(cleanedPeerTitles, products.map(p => p.title || '').join(' '));
+      log('  📊 关键词分析: 高频词 Top5: ' + (keywordAnalysis.topKeywords.slice(0, 5).map(k => k.word + '(' + k.count + ')').join(', ')));
+      if (keywordAnalysis.gapKeywords.length > 0) {
+        log('  📊 竞品缺口词: ' + keywordAnalysis.gapKeywords.slice(0, 10).map(k => k.word).join(', '));
+      }
+    }
+
     const batches = [];
     for (let i = 0; i < products.length; i += BATCH_SIZE) {
       batches.push({
@@ -221,6 +234,7 @@ async function run(blueOceanWord, options = {}) {
       glmClient.selectAndGenerate({
         blueOceanWord, coreWord, modifiers,
         peerTitles: cleanedPeerTitles,
+        keywordAnalysis,
         products: batch, maxLength
       }).then(result => {
         log(`  第 ${index + 1}/${batches.length} 批完成`);
