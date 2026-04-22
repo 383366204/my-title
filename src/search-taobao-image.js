@@ -1,4 +1,4 @@
-const { execSync } = require('child_process');
+const { execSync, spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -195,25 +195,48 @@ function imageSearchSingle(imageUrl, productId, options = {}) {
     return { productId, hasMatch: false, peerTitles: [], priceRange: { min: null, max: null } };
   }
 
-  // 2) 构建 CLI 命令并执行
+  // 2) 构建 CLI 参数并执行（使用 --request 文件模式完全绕过 shell 转义问题）
   const timeout = options.timeout || 30000;
-  const outFile = path.join(os.tmpdir(), `taobao-image-${productId}-${Date.now()}.json`);
-  // Windows 命令行格式，遵循 search-taobao.js 的风格
-  const winPath = TAOBAO_NATIVE_PATH;
+  // 使用 Windows 可访问的共享目录（C:\Windows\Temp）而非 WSL 的 /tmp
+  const sharedTmpDir = '/mnt/c/Windows/Temp';
+  const outFile = path.join(sharedTmpDir, `taobao-image-${productId}-${Date.now()}.json`);
+  const reqFile = path.join(sharedTmpDir, `taobao-image-req-${productId}-${Date.now()}.json`);
+  const winPath = toWindowsPath(TAOBAO_NATIVE_PATH);
 
-  const cmd = `cmd.exe /c "${winPath} image_search --args '{\\"imagePath\\":\\"${imageUrl}\\",\\"sourceApp\\":\\"my-title\\"}' -o \"${outFile}\""`;
+  // 将参数写入文件，完全避免 shell 转义问题
+  const requestPayload = {
+    tool: 'image_search',
+    arguments: { imagePath: imageUrl, sourceApp: 'my-title' }
+  };
+  fs.writeFileSync(reqFile, JSON.stringify(requestPayload), 'utf8');
+
+  // 将请求文件路径转换为 Windows 格式（供 CLI 读取）
+  const winReqFile = toWindowsPath(reqFile);
+  const winOutFile = toWindowsPath(outFile);
 
   let stdout = '';
   try {
-    stdout = execSync(cmd, {
+    const result = spawnSync('cmd.exe', ['/c', winPath, '--request', winReqFile, '-o', winOutFile], {
       encoding: 'utf8',
       timeout: timeout,
       stdio: ['pipe', 'pipe', 'pipe']
     });
+    stdout = result.stdout || '';
+    if (result.error || result.status !== 0) {
+      throw new Error(result.stderr || result.error?.message || `exit code ${result.status}`);
+    }
   } catch (err) {
-    // 超时或执行错误，返回无匹配
     console.warn('⚠️ image_search 调用失败，API/CLI 异常:', err && err.message ? err.message : err);
     return { productId, hasMatch: false, peerTitles: [], priceRange: { min: null, max: null } };
+  } finally {
+    // 清理请求文件
+    try {
+      if (fs.existsSync(reqFile)) {
+        fs.unlinkSync(reqFile);
+      }
+    } catch (_cleanupErr) {
+      // 忽略清理错误
+    }
   }
 
   // 3) 读取输出文件并解析 JSON，支持 stdout 回退
@@ -247,7 +270,7 @@ function imageSearchSingle(imageUrl, productId, options = {}) {
     return { productId, hasMatch: false, peerTitles: [], priceRange: { min: null, max: null } };
   }
 
-  const categories = Array.isArray(data.categories) ? data.categories : [];
+  const categories = Array.isArray(data.result?.categories) ? data.result.categories : [];
   const allProducts = categories.flatMap(cat => Array.isArray(cat.products) ? cat.products : []);
   const peerTitles = allProducts
     .map(p => (p && p.title) ? p.title : '')
