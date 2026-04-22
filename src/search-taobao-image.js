@@ -216,7 +216,18 @@ function imageSearchSingle(imageUrl, productId, options = {}) {
 
   let stdout = '';
   try {
-    const result = spawnSync('cmd.exe', ['/c', winPath, '--request', winReqFile, '-o', winOutFile], {
+    // 使用 .bat 包装器在 Windows 原生上下文中执行（WSL interop 下直接调用会导致图片上传失败）
+    const batFile = path.join(sharedTmpDir, `taobao-img-${productId}-${Date.now()}.bat`);
+    const winBatFile = toWindowsPath(batFile);
+    const escPath = p => p.replace(/\\/g, '\\\\');
+    const batContent = [
+      '@echo off',
+      `chcp 65001 >nul 2>&1`,
+      `"${escPath(winPath)}" --request "${escPath(winReqFile)}" -o "${escPath(winOutFile)}"`,
+    ].join('\r\n');
+    fs.writeFileSync(batFile, batContent, 'utf8');
+
+    const result = spawnSync('cmd.exe', ['/c', winBatFile], {
       encoding: 'utf8',
       timeout: timeout,
       stdio: ['pipe', 'pipe', 'pipe']
@@ -229,12 +240,19 @@ function imageSearchSingle(imageUrl, productId, options = {}) {
     console.warn('⚠️ image_search 调用失败，API/CLI 异常:', err && err.message ? err.message : err);
     return { productId, hasMatch: false, peerTitles: [], priceRange: { min: null, max: null } };
   } finally {
-    // 清理请求文件
+    // 清理临时文件
     try {
       if (fs.existsSync(reqFile)) {
         fs.unlinkSync(reqFile);
       }
     } catch (_cleanupErr) {
+      // 忽略清理错误
+    }
+    try {
+      if (fs.existsSync(batFile)) {
+        fs.unlinkSync(batFile);
+      }
+    } catch (_cleanupErr2) {
       // 忽略清理错误
     }
   }
