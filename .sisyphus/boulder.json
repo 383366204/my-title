@@ -1,25 +1,39 @@
 {
-  "active_plan": "/mnt/d/project/my-title/.sisyphus/plans/llm-robustness.md",
-  "started_at": "2026-04-19T07:06:07.774Z",
+  "active_plan": "/mnt/d/project/my-title/.sisyphus/plans/image-search-title-flow.md",
+  "started_at": "2026-04-21T23:35:07.600Z",
   "session_ids": [
-    "ses_268c03c46ffeLNfPUQ7CZ87nfn",
-    "ses_25b6616cbffeI4IH9hyTWN7le8"
+    "ses_24eeea21cffeaJqJy0o2z956be",
+    "ses_24d990d91ffeUrNf0Q5QldHWkM",
+    "ses_24d9897e6ffePuseSiFMo5OhN2",
+    "ses_24d8cf9f5ffeK33LyX0jycgAta",
+    "ses_24d8cca4fffegzVDoHhUo8bz7z",
+    "ses_24d83b9bdffeRv1wvDPDH6XTL3",
+    "ses_24d838ba6ffeOBqzfSigJPj3sg",
+    "ses_24d836009ffed8Dp33OgMYtVw6",
+    "ses_24d830616ffe1jNvLwA2d7IZXs"
   ],
   "session_origins": {
-    "ses_268c03c46ffeLNfPUQ7CZ87nfn": "direct",
-    "ses_25b6616cbffeI4IH9hyTWN7le8": "direct"
+    "ses_24eeea21cffeaJqJy0o2z956be": "direct",
+    "ses_24d990d91ffeUrNf0Q5QldHWkM": "appended",
+    "ses_24d9897e6ffePuseSiFMo5OhN2": "appended",
+    "ses_24d8cf9f5ffeK33LyX0jycgAta": "appended",
+    "ses_24d8cca4fffegzVDoHhUo8bz7z": "appended",
+    "ses_24d83b9bdffeRv1wvDPDH6XTL3": "appended",
+    "ses_24d838ba6ffeOBqzfSigJPj3sg": "appended",
+    "ses_24d836009ffed8Dp33OgMYtVw6": "appended",
+    "ses_24d830616ffe1jNvLwA2d7IZXs": "appended"
   },
-  "plan_name": "llm-robustness",
+  "plan_name": "image-search-title-flow",
   "agent": "atlas",
   "task_sessions": {
     "todo:1": {
       "task_key": "todo:1",
       "task_label": "1",
-      "task_title": "新建 `src/llm-utils.js` — parseJsonFromLLM + retry",
-      "session_id": "ses_25b6164c7ffeyqJiZVMoXPDuty",
+      "task_title": "探查 `image_search` 返回格式",
+      "session_id": "ses_24d9897e6ffePuseSiFMo5OhN2",
       "agent": "Sisyphus-Junior",
-      "category": "deep",
-      "updated_at": "2026-04-19T07:24:23.441Z"
+      "category": "quick",
+      "updated_at": "2026-04-21T23:37:32.681Z"
     }
   }
 }

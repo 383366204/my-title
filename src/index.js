@@ -78,41 +78,70 @@ async function run(blueOceanWord, options = {}) {
   log(`  核心词: ${coreWord}`);
   log(`  修饰词: ${modifiers.map(m => `${m.word}(${m.rigidity})`).join(', ')}`);
 
-  // Step 2+3: 1688 搜索 + 淘宝同行标题并行获取
-  log('🔎 并行搜索 1688 商品和淘宝同行标题...');
+  // Step 2: 先独立完成 1688 搜索
+  log('🔎 第一步：1688 搜索独立完成...');
   let products = [];
-  let mappedTitles = [];
   let taobaoTitles = [];
+  let searchResult = [];
+  let imageSearchResults = [];
+  // 保存 imageSearch 的匹配状态用于后续标题回填
+  
+  try {
+    searchResult = await require('./search-1688').searchAll(coreWord, blueOceanWord, modifiers);
+  } catch (err) {
+    warn('⚠️ 1688 搜索失败，尝试本地筛选回退:', err && err.message ? err.message : err);
+    try {
+      const { searchAndFilter } = require('./search-1688');
+      searchResult = await searchAndFilter(coreWord, modifiers);
+    } catch (e) {
+      searchResult = [];
+    }
+  }
 
-  const [searchResult, taobaoResult] = await Promise.all([
-    (async () => {
-      let p = [];
-      try {
-        p = await require('./search-1688').searchAll(coreWord, blueOceanWord, modifiers);
-      } catch (err) {
-        warn('⚠️ 1688 搜索失败，尝试本地筛选回退:', err && err.message ? err.message : err);
+  // Step 3: 根据情况串行执行以图搜图/淘宝同行标题或回退
+  log('🔎 第三步：根据条件进行图像搜索或文字搜索（串行）...');
+  if (peerTitles && peerTitles.length > 0) {
+    taobaoTitles = peerTitles;
+  } else {
+    // 只有在没有传入同行标题且有可用商品时才进行图片-search
+    if (Array.isArray(searchResult) && searchResult.length > 0) {
+      const isImageSearchAvailable = () => {
         try {
-          const { searchAndFilter } = require('./search-1688');
-          p = await searchAndFilter(coreWord, modifiers);
+          const m = require('./search-taobao-image');
+          return typeof m.isImageSearchAvailable === 'function' ? m.isImageSearchAvailable() : false;
         } catch (e) {
-          p = [];
+          return false;
+        }
+      };
+      if (isImageSearchAvailable()) {
+        const { searchPeerTitlesByImage } = require('./search-taobao-image');
+        try {
+          imageSearchResults = await searchPeerTitlesByImage(searchResult);
+          taobaoTitles = imageSearchResults
+            .filter(r => r.hasMatch && Array.isArray(r.peerTitles))
+            .flatMap(r => r.peerTitles);
+          log('🔎 以图搜图完成，提取同行标题数量: ' + taobaoTitles.length);
+        } catch (err) {
+          warn('⚠️ 以图搜图失败，降级到文字搜索:', err && err.message ? err.message : err);
+          taobaoTitles = [];
+          try {
+            taobaoTitles = await require('./search-taobao').searchTaobaoTitles(blueOceanWord);
+          } catch (e) {
+            taobaoTitles = [];
+          }
+        }
+      } else {
+        try {
+          taobaoTitles = await require('./search-taobao').searchTaobaoTitles(blueOceanWord);
+        } catch (err) {
+          warn('⚠️ 淘宝同行标题检索失败，降级为空：', err && err.message ? err.message : err);
+          taobaoTitles = [];
         }
       }
-      return p;
-    })(),
-    (async () => {
-      if (peerTitles && peerTitles.length > 0) return peerTitles;
-      try {
-        return await require('./search-taobao').searchTaobaoTitles(blueOceanWord);
-      } catch (err) {
-        warn('⚠️ 淘宝同行标题检索失败，降级为空：', err && err.message ? err.message : err);
-        return [];
-      }
-    })()
-  ]);
-
-  products = searchResult;
-  taobaoTitles = taobaoResult;
+    }
+  }
+  // Step 2+3 的最终产物：将结果赋给统一的 products/taobaoTitles 变量
+  products = Array.isArray(searchResult) ? searchResult : [];
 
   const seen = new Set();
   products = products.filter(p => {
@@ -131,7 +160,12 @@ async function run(blueOceanWord, options = {}) {
     coreWord,
     modifiers: modifiers.map(m => m.word),
     alibaba1688Total: Array.isArray(searchResult) ? searchResult.length : 0,
-    taobaoTitlesTotal: Array.isArray(taobaoResult) ? taobaoResult.length : 0,
+    taobaoTitlesTotal: Array.isArray(taobaoTitles) ? taobaoTitles.length : 0,
+    imageSearchTotal: Array.isArray(imageSearchResults) ? imageSearchResults.length : 0,
+    imageSearchMatched: Array.isArray(imageSearchResults) ? imageSearchResults.filter(r => r.hasMatch).length : 0,
+    taobaoSource: (Array.isArray(imageSearchResults) && imageSearchResults.length > 0)
+      ? 'image_search'
+      : (Array.isArray(taobaoTitles) && taobaoTitles.length > 0 ? 'text_search' : 'none'),
   };
 
   if (!Array.isArray(products) || products.length === 0) {
@@ -232,13 +266,16 @@ async function run(blueOceanWord, options = {}) {
     // 构建1688产品详情页链接
     const productId = p.id || p.offerId || p.productId;
     const detailUrl = productId ? `https://detail.1688.com/offer/${productId}.html` : p.url;
-    
     // 归一化用于 titleMap 的键
     const normalizedId = String(productId || '').trim();
     let shopTitle = titleMap[normalizedId];
     if (!shopTitle) {
-      // 构造回退标题：从原标题和淘宝同行标题中提取关键词
-      shopTitle = constructFallbackTitle(blueOceanWord, p.title || '', taobaoTitles || [], maxLength);
+      // 选用来自图片搜索的同行标题（如存在），否则回落到 taobaoTitles
+      const imageResult = (imageSearchResults || []).find(r => r && (r.productId === normalizedId || r.productId === String(productId)));
+      const fallbackPeerTitles = (imageResult && imageResult.hasMatch && imageResult.peerTitles)
+        ? imageResult.peerTitles
+        : (taobaoTitles || []);
+      shopTitle = constructFallbackTitle(blueOceanWord, p.title || '', fallbackPeerTitles, maxLength);
       warn(`⚠️ 产品 ${normalizedId} 无GLM标题，使用构造标题: ${shopTitle}`);
     }
 

@@ -51,7 +51,8 @@ program
       const result = await run(keywords, {
         maxLength: parseInt(options.length),
         peerTitles,
-        silent: jsonMode
+        silent: jsonMode,
+        limit: parseInt(options.count)
       });
 
       if (jsonMode) {
