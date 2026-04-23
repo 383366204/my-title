@@ -42,6 +42,82 @@ function fillFallbackAdvice(item) {
 }
 
 /**
+ * 统一构建输出结果（消除 3 处降级路径的重复代码）
+ * @param {Object} params
+ * @param {string} params.coreWord - 核心词
+ * @param {string} params.blueOceanWord - 蓝海词
+ * @param {Array} params.modifiers - 修饰词列表
+ * @param {Array} params.products - 商品列表（原始 1688 数据）
+ * @param {Array} [params.selectedProducts] - GLM 选品结果（可为空）
+ * @param {Array} [params.titleObjs] - GLM 标题对象列表 [{productId, title}]
+ * @param {Object} params.stats - 统计信息
+ * @param {Array} [params.imageSearchResults] - 以图搜图结果
+ * @param {Array} [params.taobaoTitles] - 淘宝同行标题
+ * @param {number} params.maxLength - 最大标题长度
+ * @returns {{ coreWord, blueOceanWord, modifiers, products, filteredCount, titles, stats }}
+ */
+function buildOutput({ coreWord, blueOceanWord, modifiers, products, selectedProducts = [], titleObjs = [], stats, imageSearchResults = [], taobaoTitles = [], maxLength = 60 }) {
+  // 构建标题映射（归一化 productId）
+  const titleMap = {};
+  if (Array.isArray(titleObjs)) {
+    titleObjs.forEach(t => {
+      if (t && t.productId) {
+        titleMap[String(t.productId).trim()] = t.title;
+      }
+    });
+  }
+
+  const mappedTitles = titleObjs.map(t => t && t.title);
+
+  const enriched = products.map((p, idx) => {
+    const selected = Array.isArray(selectedProducts) ? selectedProducts[idx] || {} : {};
+    // 构建1688产品详情页链接
+    const productId = p.id || p.offerId || p.productId;
+    const detailUrl = productId ? `https://detail.1688.com/offer/${productId}.html` : p.url;
+    // 归一化用于 titleMap 的键
+    const normalizedId = String(productId || '').trim();
+    let shopTitle = titleMap[normalizedId];
+    if (!shopTitle) {
+      // 选用来自图片搜索的同行标题（如存在），否则回落到 taobaoTitles
+      const imageResult = (imageSearchResults || []).find(r => r && (r.productId === normalizedId || r.productId === String(productId)));
+      const fallbackPeerTitles = (imageResult && imageResult.hasMatch && imageResult.peerTitles)
+        ? imageResult.peerTitles
+        : (taobaoTitles || []);
+      shopTitle = constructFallbackTitle(blueOceanWord, p.title || '', fallbackPeerTitles, maxLength);
+    }
+
+    return {
+      // 原输出字段
+      '链接原标题': p.title,
+      '产品链接': detailUrl,
+      '主图链接': p.url || p.image,
+      '铺货标题': shopTitle,
+      '商品原价': p.price,
+      '30天销量': p.stats && typeof p.stats.last30DaysSales === 'number' ? p.stats.last30DaysSales : 0,
+      '好评率': p.stats && typeof p.stats.goodRates === 'number' ? p.stats.goodRates : 0,
+      '复购率': p.stats && typeof p.stats.repurchaseRate === 'number' ? p.stats.repurchaseRate : 0,
+      '蓝海词': blueOceanWord,
+      // 新增字段
+      '选品理由': selected.reason || '',
+      '定价建议': selected.priceAdvice || '',
+      '风险提示': selected.risk || ''
+    };
+  });
+
+  enriched.forEach(fillFallbackAdvice);
+
+  return {
+    coreWord,
+    blueOceanWord,
+    modifiers,
+    products: enriched,
+    filteredCount: products.length,
+    titles: mappedTitles,
+    stats
+  };
+}
+
+/**
  * 主入口：重构后的流程编排
  * 单一任务：将用户输入重构为核心词/修饰词后，完成双重搜索、同行标题并产出标题
  *
@@ -65,10 +141,30 @@ async function run(blueOceanWord, options = {}) {
   const warn = silent ? () => {} : console.warn.bind(console);
 
   const cache = new ResultCache({ cacheDir: path.join(__dirname, '..', '.cache') });
-  const cached = cache.get(blueOceanWord, maxLength, limit);
+  // 计算 peerTitles hash 用于缓存键区分
+  const _peerTitlesHash = (peerTitles && peerTitles.length > 0)
+    ? require('crypto').createHash('md5').update(peerTitles.join('|')).digest('hex').slice(0, 8)
+    : '';
+
+  const cached = cache.get(blueOceanWord, maxLength, limit, _peerTitlesHash);
   if (cached) {
     log('📦 命中缓存，直接返回');
     return cached;
+  }
+
+  // 输入校验
+  if (!blueOceanWord || typeof blueOceanWord !== 'string') {
+    throw new Error('蓝海词不能为空，请提供有效的搜索关键词');
+  }
+  const trimmed = blueOceanWord.trim();
+  if (trimmed.length === 0) {
+    throw new Error('蓝海词不能为纯空格，请提供有效的搜索关键词');
+  }
+  if (trimmed.length > 100) {
+    warn(`⚠️ 关键词过长(${trimmed.length}字符)，截断至100字符`);
+    blueOceanWord = trimmed.slice(0, 100);
+  } else {
+    blueOceanWord = trimmed;
   }
 
   log(`🔍 正在处理: ${blueOceanWord}`);
@@ -116,6 +212,9 @@ async function run(blueOceanWord, options = {}) {
       };
       if (isImageSearchAvailable()) {
         const { searchPeerTitlesByImage } = require('./search-taobao-image');
+        // 预先并行启动 text_search 作为后备（#9 并行搜索优化）
+        const textSearchPromise = require('./search-taobao').searchTaobaoTitles(blueOceanWord)
+          .catch(() => []);
         try {
           imageSearchResults = await searchPeerTitlesByImage(searchResult);
           taobaoTitles = imageSearchResults
@@ -123,13 +222,8 @@ async function run(blueOceanWord, options = {}) {
             .flatMap(r => r.peerTitles);
           log('🔎 以图搜图完成，提取同行标题数量: ' + taobaoTitles.length);
         } catch (err) {
-          warn('⚠️ 以图搜图失败，降级到文字搜索:', err && err.message ? err.message : err);
-          taobaoTitles = [];
-          try {
-            taobaoTitles = await require('./search-taobao').searchTaobaoTitles(blueOceanWord);
-          } catch (e) {
-            taobaoTitles = [];
-          }
+          warn('⚠️ 以图搜图失败，使用预取的文本搜索结果:', err && err.message ? err.message : err);
+          taobaoTitles = await textSearchPromise;
         }
       } else {
         try {
@@ -211,7 +305,7 @@ async function run(blueOceanWord, options = {}) {
     // 关键词分析：提取高频词和竞品缺口词
     let keywordAnalysis = null;
     if (cleanedPeerTitles.length > 0) {
-      keywordAnalysis = analyzePeerTitles(cleanedPeerTitles, products.map(p => p.title || '').join(' '));
+      keywordAnalysis = analyzePeerTitles(cleanedPeerTitles, products.map(p => p.title || ''));
       log('  📊 关键词分析: 高频词 Top5: ' + (keywordAnalysis.topKeywords.slice(0, 5).map(k => k.word + '(' + k.count + ')').join(', ')));
       if (keywordAnalysis.gapKeywords.length > 0) {
         log('  📊 竞品缺口词: ' + keywordAnalysis.gapKeywords.slice(0, 10).map(k => k.word).join(', '));
@@ -262,127 +356,64 @@ async function run(blueOceanWord, options = {}) {
     }
   });
 
-  // 构造标题映射（归一化 productId，在 postProcessTitle 之后构建）
-  const titleMap = {};
-  if (Array.isArray(allTitleObjs)) {
-    allTitleObjs.forEach(t => {
-      if (t && t.productId) {
-        const normalizedId = String(t.productId).trim();
-        titleMap[normalizedId] = t.title;
-      }
+    // 使用统一的 buildOutput 构建输出
+    const result = buildOutput({
+      coreWord, blueOceanWord, modifiers, products,
+      selectedProducts: allSelectedProducts,
+      titleObjs: allTitleObjs,
+      stats,
+      imageSearchResults,
+      taobaoTitles,
+      maxLength
     });
-  }
-
-  mappedTitles = allTitleObjs.map(t => t && t.title);
-
-  const enriched = products.map((p, idx) => {
-    const selected = Array.isArray(allSelectedProducts) ? allSelectedProducts[idx] || {} : {};
-    // 构建1688产品详情页链接
-    const productId = p.id || p.offerId || p.productId;
-    const detailUrl = productId ? `https://detail.1688.com/offer/${productId}.html` : p.url;
-    // 归一化用于 titleMap 的键
-    const normalizedId = String(productId || '').trim();
-    let shopTitle = titleMap[normalizedId];
-    if (!shopTitle) {
-      // 选用来自图片搜索的同行标题（如存在），否则回落到 taobaoTitles
-      const imageResult = (imageSearchResults || []).find(r => r && (r.productId === normalizedId || r.productId === String(productId)));
-      const fallbackPeerTitles = (imageResult && imageResult.hasMatch && imageResult.peerTitles)
-        ? imageResult.peerTitles
-        : (taobaoTitles || []);
-      shopTitle = constructFallbackTitle(blueOceanWord, p.title || '', fallbackPeerTitles, maxLength);
-      warn(`⚠️ 产品 ${normalizedId} 无GLM标题，使用构造标题: ${shopTitle}`);
-    }
-
-    return {
-      // 原输出字段
-      '链接原标题': p.title,
-      '产品链接': detailUrl,
-      '主图链接': p.url || p.image,
-      '铺货标题': shopTitle,
-      '商品原价': p.price,
-      '30天销量': p.stats && typeof p.stats.last30DaysSales === 'number' ? p.stats.last30DaysSales : 0,
-      '好评率': p.stats && typeof p.stats.goodRates === 'number' ? p.stats.goodRates : 0,
-      '复购率': p.stats && typeof p.stats.repurchaseRate === 'number' ? p.stats.repurchaseRate : 0,
-      '蓝海词': blueOceanWord,
-      // 新增字段
-      '选品理由': selected.reason || '',
-      '定价建议': selected.priceAdvice || '',
-      '风险提示': selected.risk || ''
-    };
-  });
-
-  enriched.forEach(fillFallbackAdvice);
-
-  const result = {
-    coreWord,
-    blueOceanWord,
-    modifiers,
-    products: enriched,
-    filteredCount: products.length,
-    titles: mappedTitles,
-    stats
-  };
-  cache.set(blueOceanWord, maxLength, limit, result);
-  return result;
+    cache.set(blueOceanWord, maxLength, limit, result, _peerTitlesHash);
+    return result;
   } catch (err) {
     // 备用降级路径：使用本地评分 + 生成标题，或简单标题生成
     warn('⚠️ GLM selectAndGenerate 失败，降级到本地标题生成... ', err && err.message ? err.message : err);
     try {
+      // 降级路径也需要清洗同行标题
+      const fallbackPeerTitles = (peerTitles || []).map(t => cleanTitle(removeBannedWords(t || ''))).filter(Boolean);
       // 调用本地生成（需要传入原始参数）
-      const titles = await glmClient.generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles, products, maxLength });
-      mappedTitles = titles.map(t => postProcessTitle(t, blueOceanWord, 40, maxLength) || t.replace(/\s+/g, ''));
-      const enriched = products.map((p, index) => ({
-        '链接原标题': p.title,
-        '产品链接': p.url,
-        '铺货标题': (Array.isArray(mappedTitles) && mappedTitles.length > index) ? mappedTitles[index] : (Array.isArray(mappedTitles) && mappedTitles.length > 0 ? mappedTitles[0] : p.title),
-        '商品原价': p.price,
-        '30天销量': p.stats && typeof p.stats.last30DaysSales === 'number' ? p.stats.last30DaysSales : 0,
-        '好评率': p.stats && typeof p.stats.goodRates === 'number' ? p.stats.goodRates : 0,
-        '复购率': p.stats && typeof p.stats.repurchaseRate === 'number' ? p.stats.repurchaseRate : 0,
-        '蓝海词': blueOceanWord,
-        '选品理由': '',
-        '定价建议': '',
-        '风险提示': ''
-      }));
-      enriched.forEach(fillFallbackAdvice);
-      const result = {
-        coreWord,
-        blueOceanWord,
-        modifiers,
-        products: enriched,
-        filteredCount: products.length,
-        titles: mappedTitles,
-        stats: { ...stats, degraded: 'local_generation' }
-      };
-      cache.set(blueOceanWord, maxLength, limit, result);
+      const titles = await glmClient.generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles: fallbackPeerTitles, products, maxLength });
+      const mappedTitles = titles.map(t => postProcessTitle(t, blueOceanWord, 40, maxLength) || t.replace(/\s+/g, ''));
+      // 使用 buildOutput 统一构建（降级路径无 selectedProducts/titleObjs）
+      const result = buildOutput({
+        coreWord, blueOceanWord, modifiers, products,
+        stats: { ...stats, degraded: 'local_generation' },
+        imageSearchResults,
+        taobaoTitles,
+        maxLength
+      });
+      // 覆盖 titles（降级路径的标题来自 generateTitles，不是 selectAndGenerate）
+      result.titles = mappedTitles;
+      // 覆盖铺货标题（降级路径按索引分配）
+      result.products.forEach((p, idx) => {
+        p['铺货标题'] = (Array.isArray(mappedTitles) && mappedTitles.length > idx)
+          ? mappedTitles[idx]
+          : (Array.isArray(mappedTitles) && mappedTitles.length > 0 ? mappedTitles[0] : p['链接原标题']);
+      });
+      cache.set(blueOceanWord, maxLength, limit, result, _peerTitlesHash);
       return result;
     } catch (e2) {
       // 最后降级：直接返回简单结构，避免中断流程
       warn('降级失败，返回简化结构：', e2 && e2.message ? e2.message : e2);
-      const simple = products.map(p => ({
-        '链接原标题': p.title,
-        '产品链接': p.url,
-        '铺货标题': postProcessTitle(p.title, blueOceanWord, 40, maxLength) || p.title.replace(/\s+/g, ''),
-        '商品原价': p.price,
-        '30天销量': p.stats && typeof p.stats.last30DaysSales === 'number' ? p.stats.last30DaysSales : 0,
-        '好评率': p.stats && typeof p.stats.goodRates === 'number' ? p.stats.goodRates : 0,
-        '复购率': p.stats && typeof p.stats.repurchaseRate === 'number' ? p.stats.repurchaseRate : 0,
-        '蓝海词': blueOceanWord,
-        '选品理由': '',
-        '定价建议': '',
-        '风险提示': ''
-      }));
-      simple.forEach(fillFallbackAdvice);
-      const result = {
-        coreWord,
-        blueOceanWord,
-        modifiers,
-        products: simple,
-        filteredCount: products.length,
-        titles: [],
-        stats: { ...stats, degraded: 'simple_fallback' }
-      };
-      cache.set(blueOceanWord, maxLength, limit, result);
+      const simpleTitles = products.map(p =>
+        postProcessTitle(p.title, blueOceanWord, 40, maxLength) || p.title.replace(/\s+/g, '')
+      );
+      const result = buildOutput({
+        coreWord, blueOceanWord, modifiers, products,
+        stats: { ...stats, degraded: 'simple_fallback' },
+        imageSearchResults,
+        taobaoTitles,
+        maxLength
+      });
+      // 覆盖 titles 和铺货标题（最简降级路径）
+      result.titles = simpleTitles;
+      result.products.forEach((p, idx) => {
+        p['铺货标题'] = simpleTitles[idx] || p['链接原标题'];
+      });
+      cache.set(blueOceanWord, maxLength, limit, result, _peerTitlesHash);
       return result;
     }
   }

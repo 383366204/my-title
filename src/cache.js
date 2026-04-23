@@ -13,8 +13,8 @@ class ResultCache {
     this.ttlMs = ttlMs;
   }
 
-  _key(keyword, maxLength, limit) {
-    const raw = `${keyword}::${maxLength}::${limit || 0}`;
+  _key(keyword, maxLength, limit, peerTitlesHash = '') {
+    const raw = `${keyword}::${maxLength}::${limit || 0}::${peerTitlesHash}`;
     return crypto.createHash('md5').update(raw).digest('hex');
   }
 
@@ -22,9 +22,9 @@ class ResultCache {
     return path.join(this.cacheDir, `${key}.json`);
   }
 
-  get(keyword, maxLength, limit) {
+  get(keyword, maxLength, limit, peerTitlesHash = '') {
     try {
-      const filePath = this._path(this._key(keyword, maxLength, limit));
+      const filePath = this._path(this._key(keyword, maxLength, limit, peerTitlesHash));
       if (!fs.existsSync(filePath)) return null;
       const stat = fs.statSync(filePath);
       if (Date.now() - stat.mtimeMs > this.ttlMs) {
@@ -37,12 +37,12 @@ class ResultCache {
     }
   }
 
-  set(keyword, maxLength, limit, result) {
+  set(keyword, maxLength, limit, result, peerTitlesHash = '') {
     try {
       if (!fs.existsSync(this.cacheDir)) {
         fs.mkdirSync(this.cacheDir, { recursive: true });
       }
-      const filePath = this._path(this._key(keyword, maxLength, limit));
+      const filePath = this._path(this._key(keyword, maxLength, limit, peerTitlesHash));
       fs.writeFileSync(filePath, JSON.stringify(result), 'utf8');
     } catch {
       // cache write failure is non-critical

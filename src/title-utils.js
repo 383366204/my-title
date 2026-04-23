@@ -92,7 +92,7 @@ function constructFallbackTitle(blueOceanWord, originalTitle, taobaoTitles = [],
   let cleaned = removeBannedWords(originalTitle || '');
   cleaned = cleanTitle(cleaned);
   // 5. 移除蓝海词整词在 cleaned 中的出现，防止重复前缀
-  cleaned = cleaned.replace(blueOceanWord, '');
+    cleaned = cleaned.replaceAll(blueOceanWord, '');
 
   // 6. 使用 jieba.cut() 将 cleaned 拆分为词组，按词级过滤
   const titleWords = jieba.cut(cleaned);
@@ -107,7 +107,7 @@ function constructFallbackTitle(blueOceanWord, originalTitle, taobaoTitles = [],
 
   // 8. 淘宝同行标题辅助：按词级追加，不重复且不过长
   if (Array.isArray(taobaoTitles) && taobaoTitles.length > 0) {
-    const resultWords = new Set(result.match(/[^]+/g) ? [] : []); // 占位，保持逻辑清晰
+    const resultWords = new Set(getNodejieba().cut(result)); // 占位，保持逻辑清晰
     for (const t of taobaoTitles) {
       if (typeof t !== 'string') continue;
       let tClean = removeBannedWords(t);

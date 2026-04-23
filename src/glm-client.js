@@ -100,6 +100,9 @@ class GLMClient {
   }
 
   /**
+   * @deprecated 此方法已被 selectAndGenerate() 内部替代，保留仅用于测试兼容性。
+   *             新代码请使用 selectAndGenerate() 进行产品选择和标题生成。
+   *
    * 评估产品与搜索意图的相关性
     * @param {{
    *   blueOceanWord: string,
