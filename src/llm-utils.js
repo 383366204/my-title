@@ -36,15 +36,21 @@ function parseJsonFromLLM(content) {
  * @param {Function} fn 需要执行的异步函数，返回一个 Promise
  * @param {number} [maxRetries=2] 最大重试次数（不包含初次尝试）
  * @param {number} [delayMs=1000] 每次重试的延迟（毫秒）
+ * @param {Function} [shouldRetry] 可选函数，接收错误对象，返回是否应重试
  * @returns {Promise<any>} 第一次成功返回的值
  */
-async function retry(fn, maxRetries = 2, delayMs = 1000) {
+async function retry(fn, maxRetries = 2, delayMs = 1000, shouldRetry = null) {
   let lastError;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       return await fn();
     } catch (err) {
       lastError = err;
+      // 如果提供了 shouldRetry 且返回 false，直接抛出不重试
+      if (shouldRetry && !shouldRetry(err)) throw err;
+      // 默认行为：只重试有 code（网络错误）或 response（HTTP错误）的错误，跳过解析错误
+      const retryable = shouldRetry ? shouldRetry(err) : (err.code || err.response);
+      if (!retryable) throw err;
       if (attempt < maxRetries) {
         await new Promise(resolve => setTimeout(resolve, delayMs));
       }

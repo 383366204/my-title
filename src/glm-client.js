@@ -208,8 +208,8 @@ class GLMClient {
       { role: 'user', content: JSON.stringify({ coreWord, modifiers, peerTitles, maxLength, products }) }
     ];
 
-    try {
-      const response = await axios.post(
+    const response = await retry(async () => {
+      const res = await axios.post(
         `${this.apiBase}/chat/completions`,
         {
           model: this.model,
@@ -224,24 +224,21 @@ class GLMClient {
           timeout: 20000
         }
       );
+      return res;
+    }, 1, 2000);
 
-      let content = response.data.choices[0].message.content.trim();
-      // 使用通用解析器解析 LLM JSON 输出
-      const result = parseJsonFromLLM(content);
+    let content = response.data.choices[0].message.content.trim();
+    // 使用通用解析器解析 LLM JSON 输出
+    const result = parseJsonFromLLM(content);
 
-      if (!Array.isArray(result.titles)) {
-        // 兜底：若返回结构异常，尝试返回空数组以降级处理
-        return [];
-      }
-
-      // 去重并控制数量，确保返回 3-5 条
-      const titles = Array.from(new Set(result.titles.map(t => String(t).trim()).filter(t => t.length > 0)));
-      return titles.slice(0, 5);
-    } catch (err) {
-      // 降级日志，保持流程不中断
-      console.warn('GLM generateTitles 调用失败，执行降级：', err && err.message ? err.message : err);
+    if (!Array.isArray(result.titles)) {
+      // 兜底：若返回结构异常，尝试返回空数组以降级处理
       return [];
     }
+
+    // 去重并控制数量，确保返回 3-5 条
+    const titles = Array.from(new Set(result.titles.map(t => String(t).trim()).filter(t => t.length > 0)));
+    return titles.slice(0, 5);
   }
 
   /**
@@ -263,11 +260,27 @@ class GLMClient {
    * @returns {Promise<{selectedProducts:Array<{id:string, score:number, reason:string, priceAdvice:string, risk:string}>, titles:Array<{productId:string, title:string}>, overallAdvice:string}>}
    */
   async selectAndGenerate({ blueOceanWord, coreWord, modifiers, peerTitles = [], keywordAnalysis = null, products = [], maxLength = 60 }) {
+    // 构造关键词分析区块，处理 keywordAnalysis 为 null 的情况
+    let keywordSection = '';
+    if (keywordAnalysis && keywordAnalysis.topKeywords) {
+      keywordSection = `
+【关键词分析】
+高频词（出现频次最高，应优先使用）: ${keywordAnalysis.topKeywords.slice(0, 15).map(k => k.word + '(' + k.count + ')').join(', ')}
+缺口词（竞品有但我们没有的高价值词，标题应尽量包含）: ${keywordAnalysis.gapKeywords.slice(0, 10).map(k => k.word + '(' + k.count + ')').join(', ')}
+
+用词策略：
+- 标题前段：蓝海词 + 核心词（已保证）
+- 标题中段：优先使用高频词（确保搜索曝光）
+- 标题后段：补充2-3个缺口词（填补竞品优势）
+- 避免堆砌：同类词选1个（如"锁骨链"和"颈链"只取搜索量更高的）`;
+    } else {
+      keywordSection = '\n【关键词分析】无同行数据，请根据商品标题和常识生成标题。\n';
+    }
+
     const systemPrompt = `你是一个电商标题选择与生成助手。请在给定的候选商品中，基于核心词和刚性修饰词，选择出最符合意图的若干商品，并给出价格建议与风险提示，同时生成对应的标题候选。
   标题生成必须遵守以下规则：
   ${COMMON_TITLE_RULES_TEXT}
-  7. 标题用词必须参考keywordAnalysis中的高频词和缺口词。高频词是同行标题中最常出现的词，缺口词是淘宝同行使用但1688原标题没有的零售转化词。标题应尽量包含高频词和缺口词。
-  8. peerTitles仅作为辅助参考，优先使用keywordAnalysis中的分析结果
+  ${keywordSection}
   输出严格 JSON 格式，不要任何其他文字，字段名必须完全一致：
   {
     "selectedProducts": [
@@ -290,7 +303,7 @@ class GLMClient {
 
     const messages = [
       { role: 'system', content: systemPrompt },
-      { role: 'user', content: JSON.stringify({ blueOceanWord, coreWord, modifiers, peerTitles: peerTitles.slice(0, 50), keywordAnalysis, maxLength, products }) }
+      { role: 'user', content: JSON.stringify({ blueOceanWord, coreWord, modifiers, peerTitles: peerTitles.slice(0, 50), maxLength, products }) }
     ];
 
     const response = await retry(async () => {
@@ -330,7 +343,7 @@ class GLMClient {
     }));
 
     const titles = result.titles.map(t => ({
-      productId: t.productId || t.product_id,
+      productId: String(t.productId || t.product_id || '').trim(),
       title: removeBannedWords(t.title)
     }));
 
