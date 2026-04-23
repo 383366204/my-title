@@ -44,7 +44,7 @@ function scoreLocally(products, coreWord, blueOceanWord, modifiers) {
     }
 
     // 阈值>=40通过
-    const passed = score >= 40;
+    const passed = score >= 30;
 
     return { product, score, passed };
   });

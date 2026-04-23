@@ -45,8 +45,8 @@ function filterRelevantProducts(products, modifiers) {
     const description = (product.description || '').toLowerCase();
     const combinedText = `${title} ${description}`;
 
-    // 至少匹配一个刚性修饰词
-    return rigidModifiers.some(word => combinedText.includes(word));
+    // 必须匹配所有刚性修饰词
+    return rigidModifiers.every(word => combinedText.includes(word));
   });
 }
 

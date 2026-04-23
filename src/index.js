@@ -19,7 +19,7 @@ function fillFallbackAdvice(item) {
     else reasons.push('新品需测试');
     if (rating >= 95) reasons.push('好评率优秀');
     if (price > 0 && price < 5) reasons.push('价格有优势');
-    item['选品理由'] = reasons.join('，') + '，符合核心词描述';
+    item['选品理由'] = reasons.join('，');
   }
   if (!item['定价建议']) {
     const price = parseFloat(item['商品原价']) || 0;
@@ -69,17 +69,34 @@ function buildOutput({ coreWord, blueOceanWord, modifiers, products, selectedPro
 
   const mappedTitles = titleObjs.map(t => t && t.title);
 
+  // Build a Map for ID-based lookup of selected products
+  const selectedMap = new Map();
+  if (Array.isArray(selectedProducts)) {
+    for (const s of selectedProducts) {
+      if (s && (s.productId || s.product_id)) {
+        const key = String(s.productId || s.product_id || '').trim();
+        selectedMap.set(key, s);
+      }
+    }
+  }
+
   const enriched = products.map((p, idx) => {
-    const selected = Array.isArray(selectedProducts) ? selectedProducts[idx] || {} : {};
-    // 构建1688产品详情页链接
+    // Use ID-based lookup for selected products
     const productId = p.id || p.offerId || p.productId;
+    const selected = selectedMap.get(String(productId || '').trim()) || {};
+    // 构建1688产品详情页链接
     const detailUrl = productId ? `https://detail.1688.com/offer/${productId}.html` : p.url;
     // 归一化用于 titleMap 的键
     const normalizedId = String(productId || '').trim();
     let shopTitle = titleMap[normalizedId];
     if (!shopTitle) {
       // 选用来自图片搜索的同行标题（如存在），否则回落到 taobaoTitles
-      const imageResult = (imageSearchResults || []).find(r => r && (r.productId === normalizedId || r.productId === String(productId)));
+      const imageResult = (imageSearchResults || []).find(r => {
+        if (!r) return false;
+        const rId = String(r.productId || '').trim();
+        const pId = String(productId || '').trim();
+        return rId === pId;
+      });
       const fallbackPeerTitles = (imageResult && imageResult.hasMatch && imageResult.peerTitles)
         ? imageResult.peerTitles
         : (taobaoTitles || []);
@@ -195,6 +212,25 @@ async function run(blueOceanWord, options = {}) {
     }
   }
 
+  // 提前赋值并对结果进行去重和限制，便于以图搜图在限定范围内执行
+  products = Array.isArray(searchResult) ? searchResult : [];
+  const _dedupSeen = new Set();
+  products = products.filter(p => {
+    const urlMatch = (p.url || '').match(/\/offer\/(\d+)\.html/);
+    const offerId = urlMatch ? urlMatch[1] : '';
+    const normalizedTitle = (p.title || '').replace(/\s+/g, '').toLowerCase();
+    if (offerId && _dedupSeen.has('id:' + offerId)) return false;
+    if (offerId) _dedupSeen.add('id:' + offerId);
+    const titlePrefix = normalizedTitle.substring(0, 15);
+    if (titlePrefix.length >= 10 && _dedupSeen.has('title:' + titlePrefix)) return false;
+    if (titlePrefix.length >= 10) _dedupSeen.add('title:' + titlePrefix);
+    return true;
+  });
+  if (limit > 0 && products.length > limit) {
+    log(`  限制处理数量: ${limit} 个`);
+    products = products.slice(0, limit);
+  }
+
   // Step 3: 根据情况串行执行以图搜图/淘宝同行标题或回退
   log('🔎 第三步：根据条件进行图像搜索或文字搜索（串行）...');
   if (peerTitles && peerTitles.length > 0) {
@@ -212,18 +248,21 @@ async function run(blueOceanWord, options = {}) {
       };
       if (isImageSearchAvailable()) {
         const { searchPeerTitlesByImage } = require('./search-taobao-image');
-        // 预先并行启动 text_search 作为后备（#9 并行搜索优化）
-        const textSearchPromise = require('./search-taobao').searchTaobaoTitles(blueOceanWord)
-          .catch(() => []);
+        // text_search 将在需要时按需执行（仅在图片搜索失败后或无结果时才调用）
         try {
-          imageSearchResults = await searchPeerTitlesByImage(searchResult);
+          imageSearchResults = await searchPeerTitlesByImage(products);
           taobaoTitles = imageSearchResults
             .filter(r => r.hasMatch && Array.isArray(r.peerTitles))
             .flatMap(r => r.peerTitles);
-          log('🔎 以图搜图完成，提取同行标题数量: ' + taobaoTitles.length);
+        log('🔎 以图搜图完成，提取同行标题数量: ' + taobaoTitles.length);
+        // 如果图搜图没有返回结果，尝试文本搜索作为回退
+        if ((taobaoTitles || []).length === 0) {
+          log('🔎 以图搜图无结果，尝试文字搜索...');
+          taobaoTitles = await require('./search-taobao').searchTaobaoTitles(blueOceanWord).catch(() => []);
+        }
         } catch (err) {
           warn('⚠️ 以图搜图失败，使用预取的文本搜索结果:', err && err.message ? err.message : err);
-          taobaoTitles = await textSearchPromise;
+          taobaoTitles = await require('./search-taobao').searchTaobaoTitles(blueOceanWord).catch(() => []);
         }
       } else {
         try {
@@ -235,33 +274,7 @@ async function run(blueOceanWord, options = {}) {
       }
     }
   }
-  // Step 2+3 的最终产物：将结果赋给统一的 products/taobaoTitles 变量
-  products = Array.isArray(searchResult) ? searchResult : [];
 
-  const seen = new Set();
-  products = products.filter(p => {
-    const urlMatch = (p.url || '').match(/\/offer\/(\d+)\.html/);
-    const offerId = urlMatch ? urlMatch[1] : '';
-    const normalizedTitle = (p.title || '').replace(/\s+/g, '').toLowerCase();
-    if (offerId && seen.has('id:' + offerId)) return false;
-    if (offerId) seen.add('id:' + offerId);
-    const titlePrefix = normalizedTitle.substring(0, 15);
-    if (titlePrefix.length >= 10 && seen.has('title:' + titlePrefix)) return false;
-    if (titlePrefix.length >= 10) seen.add('title:' + titlePrefix);
-    return true;
-  });
-
-  const stats = {
-    coreWord,
-    modifiers: modifiers.map(m => m.word),
-    alibaba1688Total: Array.isArray(searchResult) ? searchResult.length : 0,
-    taobaoTitlesTotal: Array.isArray(taobaoTitles) ? taobaoTitles.length : 0,
-    imageSearchTotal: Array.isArray(imageSearchResults) ? imageSearchResults.length : 0,
-    imageSearchMatched: Array.isArray(imageSearchResults) ? imageSearchResults.filter(r => r.hasMatch).length : 0,
-    taobaoSource: (Array.isArray(imageSearchResults) && imageSearchResults.length > 0)
-      ? 'image_search'
-      : (Array.isArray(taobaoTitles) && taobaoTitles.length > 0 ? 'text_search' : 'none'),
-  };
 
   if (!Array.isArray(products) || products.length === 0) {
     log('  ⚠️  没有找到匹配的商品');
@@ -272,20 +285,18 @@ async function run(blueOceanWord, options = {}) {
       products: [],
       filteredCount: 0,
       titles: [],
-      stats
+      stats: { coreWord, modifiers: modifiers.map(m => m.word) }
     };
   }
 
   log(`  过滤后剩余 ${products.length} 个商品`);
 
-  if (limit > 0 && products.length > limit) {
-    log(`  限制处理数量: ${limit} 个`);
-    products = products.slice(0, limit);
-  }
+  let stats = {
+    coreWord,
+    modifiers: modifiers.map(m => m.word)
+  };
 
   stats.matchedProducts = products.length;
-
-  log(`  过滤后剩余 ${products.length} 个商品`);
 
   // Step 4: 优先通过 GLM 的 selectAndGenerate 实现多字段输出
   log('✍️  尝试 GLM selectAndGenerate 以输出更多字段...');

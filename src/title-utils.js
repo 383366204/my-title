@@ -46,19 +46,19 @@ function ensureBlueOceanPrefix(title, blueOceanWord) {
   if (!blueOceanWord) return title;
   if (title.startsWith(blueOceanWord)) return title;
   if (title.includes(blueOceanWord)) {
-    return blueOceanWord + title.replace(blueOceanWord, '');
+    return blueOceanWord + title.replaceAll(blueOceanWord, '');
   }
   return blueOceanWord + title;
 }
 
-function normalizeLength(title, minLength = 40, maxLength = 60) {
+function normalizeLength(title, minLength = 30, maxLength = 60) {
   if (typeof title !== 'string') return null;
   if (byteLen(title) < minLength) return null;
   if (byteLen(title) > maxLength) return truncateByBytes(title, maxLength);
   return title;
 }
 
-function postProcessTitle(title, blueOceanWord, minLength = 40, maxLength = 60) {
+function postProcessTitle(title, blueOceanWord, minLength = 30, maxLength = 60) {
   if (typeof title !== 'string' || !title.trim()) return null;
   let result = removeBannedWords(title);
   result = cleanTitle(result);
@@ -107,15 +107,16 @@ function constructFallbackTitle(blueOceanWord, originalTitle, taobaoTitles = [],
 
   // 8. 淘宝同行标题辅助：按词级追加，不重复且不过长
   if (Array.isArray(taobaoTitles) && taobaoTitles.length > 0) {
-    const resultWords = new Set(getNodejieba().cut(result)); // 占位，保持逻辑清晰
+    const resultWords = new Set(jieba.cut(result)); // 词级去重集合
     for (const t of taobaoTitles) {
       if (typeof t !== 'string') continue;
       let tClean = removeBannedWords(t);
       tClean = cleanTitle(tClean);
       const tWords = jieba.cut(tClean);
       for (const w of tWords) {
-        if (!blueWords.has(w) && !result.includes(w)) {
+        if (!blueWords.has(w) && !resultWords.has(w) && w.trim()) {
           result += w;
+          resultWords.add(w); // 保持Set与result同步
           if (typeof maxLength === 'number' && byteLen(result) >= maxLength) break;
         }
       }
