@@ -1,7 +1,12 @@
-const { execSync, spawnSync } = require('child_process');
+const { execSync, exec, spawnSync, spawn } = require('child_process');
+const util = require('util');
+const execAsync = util.promisify(exec);
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+
+// 单例锁：防止 taobao-native 同时处理多个图片搜索
+let isSearching = false;
 
 // Windows 路径（WSL2 环境）— 与 search-taobao.js 保持完全一致
 const TAOBAO_NATIVE_PATH = '/mnt/c/Users/38336/AppData/Local/Programs/taobao/bin/taobao-native.cmd';
@@ -31,16 +36,13 @@ function toWindowsPath(wslPath) {
 
 /**
  * 启动淘宝桌面版
- * @returns {boolean} 是否成功启动
+ * @returns {Promise<boolean>} 是否成功启动
  */
-function launchTaobaoDesktop() {
+async function launchTaobaoDesktop() {
   try {
     console.log('🚀 正在启动淘宝桌面版...');
     const winPath = toWindowsPath(TAOBAO_NATIVE_PATH);
-    execSync(
-      `cmd.exe /c "${winPath}" launch`,
-      { stdio: 'ignore', timeout: 10000 }
-    );
+    await execAsync(`cmd.exe /c "${winPath}" launch`, { timeout: 10000 });
     console.log('✅ 淘宝桌面版已启动');
     return true;
   } catch (error) {
@@ -56,7 +58,7 @@ function launchTaobaoDesktop() {
  * @returns {Promise<Array<{productId:string, peerTitles:string[], priceRange:{min:number,max:number}, hasMatch:boolean}>>}
  */
 async function searchPeerTitlesByImage(products, options = {}) {
-  const { concurrency = 2, intervalMs = 4000, timeout = 30000 } = options;
+  const { coreWord, concurrency = 2, intervalMs = 4000, timeout = 30000 } = options;
 
   // 记录开始时间
   const startTime = Date.now();
@@ -102,7 +104,7 @@ async function searchPeerTitlesByImage(products, options = {}) {
 
   // 只启动一次淘宝桌面版
   console.log('\n🚀 启动淘宝桌面版...');
-  const launched = launchTaobaoDesktop();
+  const launched = await launchTaobaoDesktop();
 
   if (!launched) {
     console.warn('⚠️  淘宝桌面版启动失败，返回空结果');
@@ -141,7 +143,16 @@ async function searchPeerTitlesByImage(products, options = {}) {
 
   // 定义 handler：对单个商品执行图片搜索
   async function handleItem(item, handlerIndex) {
-    const result = imageSearchSingle(item.url, item.id, { timeout });
+    // imageSearchSingle 已改为异步，确保返回 Promise 并在这里等待结果
+    let result = await imageSearchSingle(item.url, item.id, { timeout });
+
+    // 失败重试：无匹配结果时等 2s 重试 1 次
+    if (!result.hasMatch && (!result.peerTitles || result.peerTitles.length === 0)) {
+      console.log(`🔄 [Worker-${handlerIndex}] 首次失败，2s 后重试...`);
+      await new Promise(r => setTimeout(r, 2000));
+      result = await imageSearchSingle(item.url, item.id, { timeout: 45000 }); // 更长超时
+    }
+
     // 保存原始索引以便回填结果
     result.originalIndex = item.originalIndex;
     return result;
@@ -155,6 +166,36 @@ async function searchPeerTitlesByImage(products, options = {}) {
     const originalIndex = itemsToProcess[idx].originalIndex;
     finalResults[originalIndex] = result;
   });
+
+  // 收集所有同行标题进行清洗
+  let taobaoTitles = finalResults
+    .filter(r => r && r.hasMatch && Array.isArray(r.peerTitles))
+    .flatMap(r => r.peerTitles);
+
+  let cleanedTitles = null;
+  let originalCount = taobaoTitles.length;
+  let filteredCount = originalCount;
+
+  if (coreWord && taobaoTitles.length > 0) {
+    try {
+      cleanedTitles = await cleanPeerTitles(
+        taobaoTitles,
+        coreWord,
+        options.blueOceanWord || '',
+        null
+      );
+      filteredCount = cleanedTitles.length;
+      console.log(`🧹 标题清洗: ${originalCount} 条 → 过滤后 ${filteredCount} 条 → 精选 ${Math.min(filteredCount, 50)} 条`);
+
+      finalResults.forEach(r => {
+        if (r && r.hasMatch) {
+          r.peerTitles = cleanedTitles;
+        }
+      });
+    } catch (e) {
+      console.warn('⚠️ 标题清洗失败，使用原始标题:', e.message);
+    }
+  }
 
   // 计算统计数据
   const endTime = Date.now();
@@ -182,136 +223,161 @@ async function searchPeerTitlesByImage(products, options = {}) {
  * @param {object} options - 配置
  * @returns {{productId:string, peerTitles:string[], priceRange:{min:number|null,max:number|null}, hasMatch:boolean}}
  */
-function imageSearchSingle(imageUrl, productId, options = {}) {
-  // 1) 验证 imageUrl 非空且是有效 URL
-  if (!imageUrl || typeof imageUrl !== 'string') {
-    console.warn('⚠️ image_search: imageUrl 为空或非字符串');
-    return { productId, hasMatch: false, peerTitles: [], priceRange: { min: null, max: null } };
+async function imageSearchSingle(imageUrl, productId, options = {}) {
+  // 单例锁：等待前一个搜索完成
+  while (isSearching) {
+    await new Promise(resolve => setTimeout(resolve, 1000));
   }
+  isSearching = true;
   try {
-    new URL(imageUrl);
-  } catch (e) {
-    console.warn('⚠️ image_search: imageUrl 非有效 URL');
-    return { productId, hasMatch: false, peerTitles: [], priceRange: { min: null, max: null } };
-  }
+    // 1) 验证 imageUrl 非空且是有效 URL
+    if (!imageUrl || typeof imageUrl !== 'string') {
+      console.warn('⚠️ image_search: imageUrl 为空或非字符串');
+      return { productId, hasMatch: false, peerTitles: [], priceRange: { min: null, max: null } };
+    }
+    try {
+      new URL(imageUrl);
+    } catch (e) {
+      console.warn('⚠️ image_search: imageUrl 非有效 URL');
+      return { productId, hasMatch: false, peerTitles: [], priceRange: { min: null, max: null } };
+    }
 
-  // 2) 构建 CLI 参数并执行（使用 --request 文件模式完全绕过 shell 转义问题）
-  const timeout = options.timeout || 30000;
-  // 使用 Windows 可访问的共享目录（C:\Windows\Temp）而非 WSL 的 /tmp
-  const sharedTmpDir = '/mnt/c/Windows/Temp';
-  const outFile = path.join(sharedTmpDir, `taobao-image-${productId}-${Date.now()}.json`);
-  const reqFile = path.join(sharedTmpDir, `taobao-image-req-${productId}-${Date.now()}.json`);
-  const winPath = toWindowsPath(TAOBAO_NATIVE_PATH);
+    // 2) 构建 CLI 参数并执行（使用 --request 文件模式完全绕过 shell 转义问题）
+    const timeout = options.timeout || 30000;
+    // 使用 Windows 可访问的共享目录（C:\Windows\Temp）而非 WSL 的 /tmp
+    const sharedTmpDir = '/mnt/c/Windows/Temp';
+    const outFile = path.join(sharedTmpDir, `taobao-image-${productId}-${Date.now()}.json`);
+    const reqFile = path.join(sharedTmpDir, `taobao-image-req-${productId}-${Date.now()}.json`);
+    const winPath = toWindowsPath(TAOBAO_NATIVE_PATH);
 
-  // 将参数写入文件，完全避免 shell 转义问题
-  const requestPayload = {
-    tool: 'image_search',
-    arguments: { imagePath: imageUrl, sourceApp: 'my-title' }
-  };
-  fs.writeFileSync(reqFile, JSON.stringify(requestPayload), 'utf8');
+    // 将参数写入文件，完全避免 shell 转义问题
+    const requestPayload = {
+      tool: 'image_search',
+      arguments: { imagePath: imageUrl, sourceApp: 'my-title' }
+    };
+    fs.writeFileSync(reqFile, JSON.stringify(requestPayload), 'utf8');
 
-  // 将请求文件路径转换为 Windows 格式（供 CLI 读取）
-  const winReqFile = toWindowsPath(reqFile);
-  const winOutFile = toWindowsPath(outFile);
+    // 将请求文件路径转换为 Windows 格式（供 CLI 读取）
+    const winReqFile = toWindowsPath(reqFile);
+    const winOutFile = toWindowsPath(outFile);
+    // 3) 使用异步方式执行 baton 脚本，避免阻塞
+    let stdout = '';
+    let batFile = null;
+    return new Promise((resolve) => {
+      // 使用 .bat 包装器在 Windows 原生上下文中执行
+      batFile = path.join(sharedTmpDir, `taobao-img-${productId}-${Date.now()}.bat`);
+      const winBatFile = toWindowsPath(batFile);
+      const escPath = p => p.replace(/\\/g, '\\\\');
+      const batContent = [
+        '@echo off',
+        `chcp 65001 >nul 2>&1`,
+        `"${escPath(winPath)}" --request "${escPath(winReqFile)}" -o "${escPath(winOutFile)}"`,
+      ].join('\r\n');
+      fs.writeFileSync(batFile, batContent, 'utf8');
 
-  let stdout = '';
-  try {
-    // 使用 .bat 包装器在 Windows 原生上下文中执行（WSL interop 下直接调用会导致图片上传失败）
-    const batFile = path.join(sharedTmpDir, `taobao-img-${productId}-${Date.now()}.bat`);
-    const winBatFile = toWindowsPath(batFile);
-    const escPath = p => p.replace(/\\/g, '\\\\');
-    const batContent = [
-      '@echo off',
-      `chcp 65001 >nul 2>&1`,
-      `"${escPath(winPath)}" --request "${escPath(winReqFile)}" -o "${escPath(winOutFile)}"`,
-    ].join('\r\n');
-    fs.writeFileSync(batFile, batContent, 'utf8');
+      const child = spawn('cmd.exe', ['/c', winBatFile], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe']
+      });
 
-    const result = spawnSync('cmd.exe', ['/c', winBatFile], {
-      encoding: 'utf8',
-      timeout: timeout,
-      stdio: ['pipe', 'pipe', 'pipe']
+      let timer;
+      let killed = false;
+
+      child.stdout.on('data', data => { stdout += data; });
+      child.stderr.on('data', data => { /* 可忽略或 log */ });
+
+      timer = setTimeout(() => {
+        killed = true;
+        try {
+          // 尝试强制结束进程
+          child.kill();
+        } catch (_) {}
+        try {
+          execSync(`taskkill /F /T /PID ${child.pid}`, { stdio: 'ignore' });
+        } catch (_) {}
+        // 直接返回无匹配的结果
+        resolve({ productId, hasMatch: false, peerTitles: [], priceRange: { min: null, max: null } });
+      }, timeout);
+
+      child.on('close', (code) => {
+        clearTimeout(timer);
+        if (killed) return;
+
+        // 3) 读取输出文件并解析 JSON，支持 stdout 回退
+        let data = null;
+        try {
+          const text = fs.readFileSync(outFile, 'utf8');
+          data = JSON.parse(text);
+        } catch (e) {
+          // 尝试从 stdout 回退提取 JSON 行
+          try {
+            const line = (stdout || '').split('\n').find(l => l && l.trim().startsWith('{'));
+            if (line) data = JSON.parse(line);
+          } catch (e2) {
+            data = null;
+          }
+        } finally {
+          // 4) 清理临时文件
+          try {
+            if (fs.existsSync(outFile)) {
+              fs.unlinkSync(outFile);
+            }
+          } catch (_) {
+            // 忽略清理错误
+          }
+        }
+
+        // 5) 解析嵌套结构并扁平化
+        if (!data || typeof data !== 'object') {
+          // 清理 reqFile 与 batFile
+          try { if (fs.existsSync(reqFile)) fs.unlinkSync(reqFile); } catch (_) {}
+          try { if (batFile && fs.existsSync(batFile)) fs.unlinkSync(batFile); } catch (_) {}
+          resolve({ productId, hasMatch: false, peerTitles: [], priceRange: { min: null, max: null } });
+          return;
+        }
+
+        const categories = Array.isArray(data.result?.categories) ? data.result.categories : [];
+        const allProducts = categories.flatMap(cat => Array.isArray(cat.products) ? cat.products : []);
+        const peerTitles = allProducts
+          .map(p => (p && p.title) ? p.title : '')
+          .filter(t => typeof t === 'string' && t.length > 0);
+
+        // 6) 价格区间提取
+        let min = null;
+        let max = null;
+        allProducts.forEach(p => {
+          const priceVal = parseFloat(p && p.price ? p.price : '');
+          if (!isNaN(priceVal)) {
+            if (min === null || priceVal < min) min = priceVal;
+            if (max === null || priceVal > max) max = priceVal;
+          }
+        });
+
+        const priceRange = {
+          min: isNaN(min) ? null : min,
+          max: isNaN(max) ? null : max
+        };
+        const hasMatch = peerTitles.length > 0;
+
+        // 清理 reqFile 与 batFile
+        try { if (fs.existsSync(reqFile)) fs.unlinkSync(reqFile); } catch (_) {}
+        try { if (batFile && fs.existsSync(batFile)) fs.unlinkSync(batFile); } catch (_) {}
+
+        resolve({ productId, peerTitles, priceRange, hasMatch });
+      });
+
+      child.on('error', (err) => {
+        clearTimeout(timer);
+        // 清理临时文件
+        try { if (fs.existsSync(reqFile)) fs.unlinkSync(reqFile); } catch (_) {}
+        try { if (batFile && fs.existsSync(batFile)) fs.unlinkSync(batFile); } catch (_) {}
+        try { if (fs.existsSync(outFile)) fs.unlinkSync(outFile); } catch (_) {}
+        resolve({ productId, hasMatch: false, peerTitles: [], priceRange: { min: null, max: null } });
+      });
     });
-    stdout = result.stdout || '';
-    if (result.error || result.status !== 0) {
-      throw new Error(result.stderr || result.error?.message || `exit code ${result.status}`);
-    }
-  } catch (err) {
-    console.warn('⚠️ image_search 调用失败，API/CLI 异常:', err && err.message ? err.message : err);
-    return { productId, hasMatch: false, peerTitles: [], priceRange: { min: null, max: null } };
   } finally {
-    // 清理临时文件
-    try {
-      if (fs.existsSync(reqFile)) {
-        fs.unlinkSync(reqFile);
-      }
-    } catch (_cleanupErr) {
-      // 忽略清理错误
-    }
-    try {
-      if (fs.existsSync(batFile)) {
-        fs.unlinkSync(batFile);
-      }
-    } catch (_cleanupErr2) {
-      // 忽略清理错误
-    }
+    isSearching = false;
   }
-
-  // 3) 读取输出文件并解析 JSON，支持 stdout 回退
-  let data = null;
-  try {
-    const text = fs.readFileSync(outFile, 'utf8');
-    data = JSON.parse(text);
-  } catch (e) {
-    // 尝试从 stdout 回退提取 JSON 行
-    try {
-      const line = (stdout || '').split('\n').find(l => l && l.trim().startsWith('{'));
-      if (line) {
-        data = JSON.parse(line);
-      }
-    } catch (e2) {
-      data = null;
-    }
-  } finally {
-    // 4) 清理临时文件
-    try {
-      if (fs.existsSync(outFile)) {
-        fs.unlinkSync(outFile);
-      }
-    } catch (_cleanupErr) {
-      // 忽略清理错误
-    }
-  }
-
-  // 5) 解析嵌套结构并扁平化
-  if (!data || typeof data !== 'object') {
-    return { productId, hasMatch: false, peerTitles: [], priceRange: { min: null, max: null } };
-  }
-
-  const categories = Array.isArray(data.result?.categories) ? data.result.categories : [];
-  const allProducts = categories.flatMap(cat => Array.isArray(cat.products) ? cat.products : []);
-  const peerTitles = allProducts
-    .map(p => (p && p.title) ? p.title : '')
-    .filter(t => typeof t === 'string' && t.length > 0);
-
-  // 6) 价格区间提取
-  let min = null;
-  let max = null;
-  allProducts.forEach(p => {
-    const priceVal = parseFloat(p && p.price ? p.price : '');
-    if (!isNaN(priceVal)) {
-      if (min === null || priceVal < min) min = priceVal;
-      if (max === null || priceVal > max) max = priceVal;
-    }
-  });
-
-  const priceRange = {
-    min: isNaN(min) ? null : min,
-    max: isNaN(max) ? null : max
-  };
-  const hasMatch = peerTitles.length > 0;
-
-  return { productId, peerTitles, priceRange, hasMatch };
 }
 
 /**
@@ -400,7 +466,127 @@ function isImageSearchAvailable() {
   return isTaobaoNativeInstalled();
 }
 
+// ============================================================
+// 清洗管道函数
+// ============================================================
+
+/**
+ * 品类过滤：从标题列表中排除指定品类词
+ * @param {string[]} titles - 原始标题列表
+ * @param {string[]} excludeCategories - 要排除的品类词列表
+ * @returns {string[]} 过滤后的标题列表
+ */
+function filterByCategory(titles, excludeCategories) {
+  if (!excludeCategories || excludeCategories.length === 0) return titles;
+  return titles.filter(title =>
+    !excludeCategories.some(word => title.includes(word))
+  );
+}
+
+/**
+ * 指纹去重：标准化后取前 20 字符作为指纹去重
+ * @param {string[]} titles - 原始标题列表
+ * @returns {string[]} 去重后的标题列表
+ */
+function dedupeTitles(titles) {
+  const seen = new Set();
+  return titles.filter(title => {
+    // 标准化：去空格、统一标点、小写
+    const normalized = title
+      .replace(/\s+/g, '')
+      .replace(/[，。！？]/g, '')
+      .toLowerCase();
+    // 取前 20 字符作为指纹
+    const fingerprint = normalized.slice(0, 20);
+    if (seen.has(fingerprint)) return false;
+    seen.add(fingerprint);
+    return true;
+  });
+}
+
+/**
+ * 计算标题与蓝海词/核心词的相关性得分
+ * @param {string} title - 标题
+ * @param {string} blueOceanWord - 蓝海词
+ * @param {string} coreWord - 核心词
+ * @returns {number} 相关性得分
+ */
+function calculateRelevanceScore(title, blueOceanWord, coreWord) {
+  let score = 0;
+  // 包含核心词 +10
+  if (title.includes(coreWord)) score += 10;
+  // 标题长度适中 (15-40 字符) +5
+  if (title.length >= 15 && title.length <= 40) score += 5;
+  // 不含降级词 +3
+  const downgradeWords = ['仿', '假', '沙金', '越南'];
+  if (!downgradeWords.some(w => title.includes(w))) score += 3;
+  // 包含蓝海词中的词 +2 每个（简单实现：检查蓝海词的分词）
+  const blueWords = blueOceanWord.split(/\s+/);
+  blueWords.forEach(word => {
+    if (word.length > 1 && title.includes(word)) score += 2;
+  });
+  return score;
+}
+
+/**
+ * 精选 Top-N 标题（按相关性得分降序）
+ * @param {string[]} titles - 标题列表
+ * @param {string} blueOceanWord - 蓝海词
+ * @param {string} coreWord - 核心词
+ * @param {number} maxCount - 最大返回数量，默认 50
+ * @returns {string[]} 精选后的标题列表
+ */
+function selectTopTitles(titles, blueOceanWord, coreWord, maxCount = 50) {
+  const scored = titles.map(title => ({
+    title,
+    score: calculateRelevanceScore(title, blueOceanWord, coreWord)
+  }));
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, maxCount).map(item => item.title);
+}
+
+/**
+ * 清洗管道编排：过滤 → 去重 → 精选
+ * @param {string[]} rawTitles - 原始标题列表
+ * @param {string} coreWord - 核心词
+ * @param {string} blueOceanWord - 蓝海词
+ * @param {object} glmClient - GLM 客户端（可选，用于 AI 品类过滤）
+ * @returns {Promise<string[]>} 清洗后的标题列表
+ */
+async function cleanPeerTitles(rawTitles, coreWord, blueOceanWord, glmClient) {
+  // 硬编码兜底排除词（当 GLM 不可用时使用）
+  const fallbackExcludes = ['耳环', '耳钉', '耳饰', '手链', '手镯', '戒指', '脚链', '发饰', '胸针'];
+
+  let excludeCategories = fallbackExcludes;
+
+  // 如果提供了 glmClient，尝试获取 AI 生成的品类词
+  if (glmClient && typeof glmClient.generateCategoryFilters === 'function') {
+    try {
+      const filters = await glmClient.generateCategoryFilters(coreWord, blueOceanWord);
+      if (filters && filters.excludeCategories) {
+        excludeCategories = filters.excludeCategories;
+      }
+    } catch (e) {
+      console.warn('⚠️ GLM 品类过滤失败，使用兜底词表:', e.message);
+    }
+  }
+
+  // 管道：过滤 → 去重 → 精选
+  const filtered = filterByCategory(rawTitles, excludeCategories);
+  const deduped = dedupeTitles(filtered);
+  const selected = selectTopTitles(deduped, blueOceanWord, coreWord, 50);
+
+  console.log(`🧹 清洗完成: ${rawTitles.length} → ${filtered.length} → ${deduped.length} → ${selected.length}`);
+
+  return selected;
+}
+
 module.exports = {
   searchPeerTitlesByImage,
-  isImageSearchAvailable
+  isImageSearchAvailable,
+  filterByCategory,
+  dedupeTitles,
+  calculateRelevanceScore,
+  selectTopTitles,
+  cleanPeerTitles
 };
