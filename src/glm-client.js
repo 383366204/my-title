@@ -11,6 +11,24 @@ const COMMON_TITLE_RULES_TEXT = `标题中不允许出现任何标点符号（�
 标题中不要有空格，所有词语连续书写
 标题中严禁使用以下违禁词：${BANNED_WORDS_LIST}`;
 
+// 品类过滤词表生成 Prompt
+const CATEGORY_FILTER_PROMPT = `你是一个电商品类分析专家。
+根据用户输入的核心词和蓝海词，分析该类商品在淘宝上的常见分类和相关词汇。
+
+核心词: {{coreWord}}
+蓝海词: {{blueOceanWord}}
+
+请返回 JSON 格式:
+{
+  "targetCategories": ["该核心词下的细分品类列表"],
+  "excludeCategories": ["不属于该类别的品类词，用于过滤噪音"],
+  "relatedMaterials": ["常见材质/材料词"]
+}
+
+注意:
+- excludeCategories 应该包含明显不属于该类别的词（如搜索"项链"时，应排除"耳环"、"手链"等）
+- 返回必须是合法 JSON，不要有任何其他文字`;
+
 class GLMClient {
   // Deprecated: use selectAndGenerate() instead. This method remains for compatibility.
   /**
@@ -351,6 +369,54 @@ class GLMClient {
       selectedProducts,
       titles,
       overallAdvice: result.overallAdvice || ''
+    };
+  }
+
+  /**
+   * AI 动态生成品类过滤词表
+   * @param {string} coreWord - 核心词
+   * @param {string} blueOceanWord - 蓝海词
+   * @returns {Promise<{targetCategories: string[], excludeCategories: string[], relatedMaterials: string[]}>}
+   */
+  async generateCategoryFilters(coreWord, blueOceanWord) {
+    const prompt = CATEGORY_FILTER_PROMPT
+      .replace('{{coreWord}}', coreWord)
+      .replace('{{blueOceanWord}}', blueOceanWord);
+
+    const messages = [
+      { role: 'system', content: '你是一个电商品类分析专家。' },
+      { role: 'user', content: prompt }
+    ];
+
+    const response = await retry(async () => {
+      return await axios.post(
+        `${this.apiBase}/chat/completions`,
+        {
+          model: this.model,
+          messages,
+          temperature: 0.3
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${this.apiKey}`,
+            'Content-Type': 'application/json'
+          },
+          timeout: 15000
+        }
+      );
+    }, 1, 2000);
+
+    let content = response.data.choices[0].message.content.trim();
+    const result = parseJsonFromLLM(content);
+
+    if (!result || !Array.isArray(result.targetCategories) || !Array.isArray(result.excludeCategories) || !Array.isArray(result.relatedMaterials)) {
+      throw new Error('Invalid JSON response from generateCategoryFilters');
+    }
+
+    return {
+      targetCategories: result.targetCategories,
+      excludeCategories: result.excludeCategories,
+      relatedMaterials: result.relatedMaterials
     };
   }
 }

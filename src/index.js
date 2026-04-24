@@ -250,7 +250,7 @@ async function run(blueOceanWord, options = {}) {
         const { searchPeerTitlesByImage } = require('./search-taobao-image');
         // text_search 将在需要时按需执行（仅在图片搜索失败后或无结果时才调用）
         try {
-          imageSearchResults = await searchPeerTitlesByImage(products);
+          imageSearchResults = await searchPeerTitlesByImage(products, { coreWord });
           taobaoTitles = imageSearchResults
             .filter(r => r.hasMatch && Array.isArray(r.peerTitles))
             .flatMap(r => r.peerTitles);
