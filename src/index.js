@@ -6,7 +6,8 @@ const GLMClient = require('./glm-client');
 const { postProcessTitle, constructFallbackTitle, cleanTitle } = require('./title-utils');
 const { removeBannedWords } = require('./banned-words');
 const { ResultCache } = require('./cache');
-const { analyzePeerTitles } = require('./keyword-analyzer');
+const { analyzePeerTitles, recommendResearchKeywords, enrichWithSycmData } = require('./keyword-analyzer');
+const { parseSycmData } = require('./sycm-parser');
 
 const RUN_TIMEOUT = parseInt(process.env.RUN_TIMEOUT) || 120000;
 
@@ -286,7 +287,7 @@ async function _searchPeerTitles({ products, blueOceanWord, peerTitles, glmClien
  * @param {Function} params.warn
  * @returns {Promise<any>}
  */
-async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles, products, taobaoTitles, maxLength, imageSearchResults, stats, cache, _peerTitlesHash, glmClient, log, warn, limit }) {
+async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles, products, taobaoTitles, maxLength, imageSearchResults, stats, cache, _peerTitlesHash, glmClient, log, warn, limit, sycmKeywords = [], sycmDataHash = '' }) {
   // Step 4: 尝试 GLM selectAndGenerate 以输出更多字段...
   // 使用与原实现相同的流程与降级策略
   const glmInvoke = async () => {
@@ -319,6 +320,7 @@ async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles,
       glmClient.selectAndGenerate({
         blueOceanWord, coreWord, modifiers,
         peerTitles: cleanedPeerTitles,
+        sycmKeywords: sycmKeywords,
         keywordAnalysis,
         products: batch, maxLength
       }).then(result => {
@@ -353,7 +355,7 @@ async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles,
       taobaoTitles,
       maxLength
     });
-    cache.set(blueOceanWord, maxLength, limit, result, _peerTitlesHash);
+    cache.set(blueOceanWord, maxLength, limit, result, _peerTitlesHash, sycmDataHash);
     return result;
   };
   // 调用 GLM 与降级逻辑
@@ -405,7 +407,8 @@ async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles,
 }
 
 async function run(blueOceanWord, options = {}) {
-  const { maxLength = 60, peerTitles = [], silent = false, limit = 0, onBatch = null } = options;
+  const { maxLength = 60, peerTitles = [], silent = false, limit = 0, onBatch = null, research = false, sycmData } = options;
+  
   const log = silent ? () => {} : console.log.bind(console);
   const warn = silent ? () => {} : console.warn.bind(console);
 
@@ -418,8 +421,10 @@ async function run(blueOceanWord, options = {}) {
   const _peerTitlesHash = (peerTitles && peerTitles.length > 0)
     ? require('crypto').createHash('md5').update(peerTitles.join('|')).digest('hex').slice(0, 8)
     : '';
+  // 计算 SYCM 数据哈希，用于缓存键区分（如果存在）
+  const _sycmDataHash = sycmData ? require('crypto').createHash('md5').update(sycmData).digest('hex').slice(0, 8) : '';
 
-  const cached = cache.get(blueOceanWord, maxLength, limit, _peerTitlesHash);
+  const cached = cache.get(blueOceanWord, maxLength, limit, _peerTitlesHash, _sycmDataHash);
   if (cached) {
     log('📦 命中缓存，直接返回');
     return cached;
@@ -448,6 +453,23 @@ async function run(blueOceanWord, options = {}) {
   log(`  核心词: ${coreWord}`);
   log(`  修饰词: ${modifiers.map(m => `${m.word}(${m.rigidity})`).join(', ')}`);
 
+  // 如果开启 research 模式，先进行研究数据收集，不生成标题
+  if (research === true) {
+    log('🔬 research 模式：开始提取研究关键词...');
+    // 读取 1688 商品与同行标题以形成研究输入
+    const { products } = await _search1688(coreWord, blueOceanWord, modifiers, limit, log, warn);
+    const glmClientForResearch = new GLMClient({
+      apiKey: process.env.GLM_API_KEY,
+      apiBase: process.env.GLM_API_BASE,
+      model: process.env.GLM_API_MODEL
+    });
+    const { taobaoTitles } = await _searchPeerTitles({ products, blueOceanWord, peerTitles, glmClient: glmClientForResearch, log, warn });
+    const peerTitlesForResearch = (peerTitles && peerTitles.length > 0) ? peerTitles : taobaoTitles;
+    const researchKeywordsObj = recommendResearchKeywords({ coreWord, blueOceanWord, modifiers, peerTitles: peerTitlesForResearch || [] });
+    const researchKeywords = researchKeywordsObj && Array.isArray(researchKeywordsObj.keywords) ? researchKeywordsObj.keywords : [];
+    return { ok: true, researchKeywords, coreWord, modifiers };
+  }
+
   // 步骤 2: 1688 搜索 + 去重
   log('🔎 第一步：1688 搜索独立完成...');
   const { products } = await _search1688(coreWord, blueOceanWord, modifiers, limit, log, warn);
@@ -460,6 +482,18 @@ async function run(blueOceanWord, options = {}) {
     model: process.env.GLM_API_MODEL
   });
   const { taobaoTitles, imageSearchResults } = await _searchPeerTitles({ products, blueOceanWord, peerTitles, glmClient, log, warn });
+
+  // 若提供了 SYCM 数据，解析并增强关键词，随后在 _generateTitles 调用中注入 sycmKeywords
+  let sycmKeywords = [];
+  if (sycmData) {
+    try {
+      const topKeys = analyzePeerTitles(peerTitles, []);
+      const { sycmKeywords: _sycmKeywords } = enrichWithSycmData(topKeys, parseSycmData(sycmData));
+      sycmKeywords = _sycmKeywords || [];
+    } catch (_) {
+      sycmKeywords = [];
+    }
+  }
 
   // 空结果早期返回
   if (!Array.isArray(products) || products.length === 0) {
@@ -486,7 +520,7 @@ async function run(blueOceanWord, options = {}) {
   };
 
   return Promise.race([
-    _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles, products, taobaoTitles, maxLength, imageSearchResults, stats, cache, _peerTitlesHash, glmClient, log, warn, limit }),
+    _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles, products, taobaoTitles, maxLength, imageSearchResults, stats, cache, _peerTitlesHash, glmClient, log, warn, limit, sycmKeywords, sycmDataHash: _sycmDataHash }),
     timeoutPromise
   ]);
 }

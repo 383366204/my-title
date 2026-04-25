@@ -20,6 +20,8 @@ program
   .option('-f, --peer-titles-file <path>', '从文件读取淘宝同行标题，每行一个')
   .option('--json', '纯 JSON 输出模式，抑制所有进度信息，适合程序调用')
   .option('--format <type>', '输出格式: table / json / both', 'both')
+  .option('--research', '分析并推荐去生意参谋查哪些关键词')
+  .option('--keyword-file <path>', '加载生意参谋搜索分析数据文件')
   .action(async (keywords, options) => {
     const jsonMode = !!options.json;
     const origLog = console.log;
@@ -31,6 +33,54 @@ program
       console.error = () => {};
     }
     try {
+      // --research 模式：只分析并推荐关键词
+      if (options.research) {
+        const result = await run(keywords, {
+          maxLength: parseInt(options.length),
+          peerTitles: [],
+          silent: jsonMode,
+          limit: 0,
+          research: true
+        });
+
+        if (jsonMode) {
+          console.log = origLog;
+          console.warn = origWarn;
+          console.error = origError;
+          process.stdout.write(JSON.stringify({
+            researchKeywords: result.researchKeywords || [],
+            coreWord: result.coreWord,
+            modifiers: result.modifiers
+          }, null, 2) + '\n');
+          return;
+        }
+
+        console.log('\n📊 推荐去生意参谋查询以下关键词的搜索分析数据：');
+        if (result.researchKeywords && result.researchKeywords.length > 0) {
+          result.researchKeywords.forEach((kw, i) => {
+            const tag = kw.isCore ? '(核心词)' : kw.isRigid ? '(刚性修饰词组合)' : '(高频关联词)';
+            console.log(`  ${i + 1}. ${kw.word} ${tag}`);
+          });
+        }
+        console.log('\n💡 将数据复制保存到文件后，使用 --keyword-file <文件路径> 重新运行');
+        return;
+      }
+
+      // --keyword-file 模式：加载生意参谋数据
+      let sycmData = null;
+      if (options.keywordFile) {
+        try {
+          sycmData = fs.readFileSync(options.keywordFile, 'utf-8');
+        } catch (err) {
+          if (jsonMode) {
+            process.stdout.write(JSON.stringify({ ok: false, error: `读取生意参谋数据文件失败: ${err.message}` }) + '\n');
+          } else {
+            console.error(`\n❌ 读取生意参谋数据文件失败: ${err.message}`);
+          }
+          process.exit(1);
+        }
+      }
+
       let peerTitles = [];
       if (options.peerTitles) {
         peerTitles = options.peerTitles.split(',').map(t => t.trim()).filter(Boolean);
@@ -52,7 +102,8 @@ program
         maxLength: parseInt(options.length),
         peerTitles,
         silent: jsonMode,
-        limit: parseInt(options.count)
+        limit: parseInt(options.count),
+        sycmData
       });
 
       if (jsonMode) {

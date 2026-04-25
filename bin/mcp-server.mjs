@@ -39,9 +39,10 @@ server.tool(
   {
     keyword: z.string().optional().describe('商品关键词（首次调用必传），如：戒指男潮牌高级感痞帅'),
     length: z.number().default(60).describe('标题最大字符数（1汉字=2字符），默认60'),
+    keyword_data: z.string().optional().describe('生意参谋搜索分析数据（可选，Tab分隔格式）'),
     task_id: z.string().optional().describe('查询任务结果时传入（不需要传 keyword）'),
   },
-  async ({ keyword, length, task_id }) => {
+  async ({ keyword, length, keyword_data, task_id }) => {
     if (task_id) {
       const task = tasks.get(task_id);
       if (!task) {
@@ -76,7 +77,7 @@ server.tool(
 
     console.error(`[my-title] task ${id} started: keyword="${keyword}", length=${length}`);
 
-    run(keyword, { maxLength: length || 60, silent: true })
+    run(keyword, { maxLength: length || 60, silent: true, sycmData: keyword_data })
       .then(result => {
         console.error(`[my-title] task ${id} done: ${result.products.length} products, ${result.titles.length} titles`);
         tasks.set(id, {

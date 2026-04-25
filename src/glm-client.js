@@ -277,10 +277,31 @@ class GLMClient {
    * @param {number} [params.maxLength=60] - 生成标题的最大长度（字符）
    * @returns {Promise<{selectedProducts:Array<{id:string, score:number, reason:string, priceAdvice:string, risk:string}>, titles:Array<{productId:string, title:string}>, overallAdvice:string}>}
    */
-  async selectAndGenerate({ blueOceanWord, coreWord, modifiers, peerTitles = [], keywordAnalysis = null, products = [], maxLength = 60 }) {
-    // 构造关键词分析区块，处理 keywordAnalysis 为 null 的情况
+  async selectAndGenerate({ blueOceanWord, coreWord, modifiers, peerTitles = [], keywordAnalysis = null, sycmKeywords = null, products = [], maxLength = 60 }) {
+    // 构造关键词分析区块，优先级：sycmKeywords > keywordAnalysis > 默认文本
     let keywordSection = '';
-    if (keywordAnalysis && keywordAnalysis.topKeywords) {
+    if (sycmKeywords && Array.isArray(sycmKeywords) && sycmKeywords.length > 0) {
+      // 按需求供给比降序排列
+      const sortedSycm = [...sycmKeywords].sort((a, b) => (b.demandSupplyRatio || 0) - (a.demandSupplyRatio || 0));
+      const sycmLines = sortedSycm.map(k => {
+        const ratio = k.demandSupplyRatio || 0;
+        let stars = '';
+        if (ratio >= 5.0) stars = ' ★★★';
+        else if (ratio >= 2.0) stars = ' ★★';
+        else if (ratio >= 1.0) stars = ' ★';
+        return `${k.keyword} | 搜索人气:${k.searchPopularity || 0} | 倍数:${ratio.toFixed(2)} | 转化率:${k.conversionRate || 0}%${stars}`;
+      }).join('\n');
+      keywordSection = `
+【生意参谋搜索数据（按关键词倍数排序，★越多越优先使用）】
+${sycmLines}
+
+用词策略（基于真实搜索数据）：
+- 优先使用需求供给比高的关键词（★★★ > ★★ > ★）
+- 标题前段：蓝海词 + 核心词 + 需求供给比最高的修饰词
+- 标题中段：需求供给比次高的词
+- 标题后段：补充高搜索人气但竞争适中的词
+- 避免使用需求供给比 < 1.0 的词（竞争大于需求）`;
+    } else if (keywordAnalysis && keywordAnalysis.topKeywords) {
       keywordSection = `
 【关键词分析】
 高频词（出现频次最高，应优先使用）: ${keywordAnalysis.topKeywords.slice(0, 15).map(k => k.word + '(' + k.count + ')').join(', ')}
