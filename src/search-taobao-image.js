@@ -7,6 +7,21 @@ const os = require('os');
 
 const { TAOBAO_NATIVE_PATH, isTaobaoNativeInstalled, toWindowsPath, launchTaobaoDesktop } = require('./taobao-utils');
 
+let _searchLock = Promise.resolve();
+
+async function _acquireLock(timeoutMs = 120000) {
+  let release;
+  const nextLock = new Promise(resolve => { release = resolve; });
+  const prevLock = _searchLock;
+  _searchLock = nextLock;
+  const timer = setTimeout(() => {
+    console.warn('⚠️ 搜索锁超时自动释放');
+    release();
+  }, timeoutMs);
+  await prevLock;
+  return () => { clearTimeout(timer); release(); };
+}
+
 /**
  * 主入口：对一批1688商品逐一执行以图搜图
  * @param {Array<{id:string, url:string, title:string}>} products - 1688商品列表
@@ -14,7 +29,7 @@ const { TAOBAO_NATIVE_PATH, isTaobaoNativeInstalled, toWindowsPath, launchTaobao
  * @returns {Promise<Array<{productId:string, peerTitles:string[], priceRange:{min:number,max:number}, hasMatch:boolean}>>}
  */
 async function searchPeerTitlesByImage(products, options = {}) {
-  const { coreWord, concurrency = 2, intervalMs = 4000, timeout = 30000 } = options;
+  const { coreWord, glmClient, concurrency = 2, intervalMs = 4000, timeout = 30000 } = options;
 
   // 记录开始时间
   const startTime = Date.now();
@@ -138,14 +153,14 @@ async function searchPeerTitlesByImage(products, options = {}) {
         taobaoTitles,
         coreWord,
         options.blueOceanWord || '',
-        null
+        glmClient || null
       );
       filteredCount = cleanedTitles.length;
       console.log(`🧹 标题清洗: ${originalCount} 条 → 过滤后 ${filteredCount} 条 → 精选 ${Math.min(filteredCount, 50)} 条`);
 
       finalResults.forEach(r => {
         if (r && r.hasMatch) {
-          r.peerTitles = cleanedTitles;
+          r.peerTitles = [...cleanedTitles];
         }
       });
     } catch (e) {
@@ -185,10 +200,7 @@ async function imageSearchSingle(imageUrl, productId, options = {}) {
   console.log(`   图片URL: ${imageUrl.substring(0, 60)}...`);
   
   // 单例锁：等待前一个搜索完成
-  while (isSearching) {
-    await new Promise(resolve => setTimeout(resolve, 1000));
-  }
-  isSearching = true;
+  const releaseLock = await _acquireLock();
   
   try {
     // 1) 验证 imageUrl 非空且是有效 URL
@@ -225,6 +237,8 @@ async function imageSearchSingle(imageUrl, productId, options = {}) {
     let stdout = '';
     let batFile = null;
     return new Promise((resolve) => {
+      let resolved = false;
+      const resolveOnce = (val) => { if (!resolved) { resolved = true; resolve(val); } };
       // 使用 .bat 包装器在 Windows 原生上下文中执行
       batFile = path.join(sharedTmpDir, `taobao-img-${productId}-${Date.now()}.bat`);
       const winBatFile = toWindowsPath(batFile);
@@ -242,13 +256,11 @@ async function imageSearchSingle(imageUrl, productId, options = {}) {
       });
 
       let timer;
-      let killed = false;
 
       child.stdout.on('data', data => { stdout += data; });
       child.stderr.on('data', data => { /* 可忽略或 log */ });
 
       timer = setTimeout(() => {
-        killed = true;
         const elapsed = Date.now() - startTime;
         console.warn(`⏱️  [${productId}] 超时! (${elapsed}ms > ${timeout}ms)，强制终止进程 PID=${child.pid}`);
         try {
@@ -262,12 +274,11 @@ async function imageSearchSingle(imageUrl, productId, options = {}) {
           console.warn(`⚠️ [${productId}] taskkill 失败:`, e.message);
         }
         // 直接返回无匹配的结果
-        resolve({ productId, hasMatch: false, peerTitles: [], priceRange: { min: null, max: null }, timeout: true });
+        resolveOnce({ productId, hasMatch: false, peerTitles: [], priceRange: { min: null, max: null }, timeout: true });
       }, timeout);
 
       child.on('close', (code) => {
         clearTimeout(timer);
-        if (killed) return;
         
         const elapsed = Date.now() - startTime;
 
@@ -296,7 +307,7 @@ async function imageSearchSingle(imageUrl, productId, options = {}) {
           // 清理 reqFile 与 batFile
           try { if (fs.existsSync(reqFile)) fs.unlinkSync(reqFile); } catch (_) {}
           try { if (batFile && fs.existsSync(batFile)) fs.unlinkSync(batFile); } catch (_) {}
-          resolve({ productId, hasMatch: false, peerTitles: [], priceRange: { min: null, max: null } });
+          resolveOnce({ productId, hasMatch: false, peerTitles: [], priceRange: { min: null, max: null } });
           return;
         }
 
@@ -327,7 +338,7 @@ async function imageSearchSingle(imageUrl, productId, options = {}) {
         try { if (fs.existsSync(reqFile)) fs.unlinkSync(reqFile); } catch (_) {}
         try { if (batFile && fs.existsSync(batFile)) fs.unlinkSync(batFile); } catch (_) {}
 
-        resolve({ productId, peerTitles, priceRange, hasMatch });
+        resolveOnce({ productId, peerTitles, priceRange, hasMatch });
       });
 
       child.on('error', (err) => {
@@ -336,11 +347,11 @@ async function imageSearchSingle(imageUrl, productId, options = {}) {
         try { if (fs.existsSync(reqFile)) fs.unlinkSync(reqFile); } catch (_) {}
         try { if (batFile && fs.existsSync(batFile)) fs.unlinkSync(batFile); } catch (_) {}
         try { if (fs.existsSync(outFile)) fs.unlinkSync(outFile); } catch (_) {}
-        resolve({ productId, hasMatch: false, peerTitles: [], priceRange: { min: null, max: null } });
+        resolveOnce({ productId, hasMatch: false, peerTitles: [], priceRange: { min: null, max: null } });
       });
     });
   } finally {
-    isSearching = false;
+    releaseLock();
   }
 }
 

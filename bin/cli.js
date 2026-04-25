@@ -67,7 +67,8 @@ program
           filteredCount: result.filteredCount,
           titles: result.titles,
           products: result.products,
-          stats: result.stats
+          stats: result.stats,
+          peerTitles: result.peerTitles || []
         };
         process.stdout.write(JSON.stringify(output, null, 2) + '\n');
         return;

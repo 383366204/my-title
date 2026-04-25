@@ -130,7 +130,8 @@ function buildOutput({ coreWord, blueOceanWord, modifiers, products, selectedPro
     products: enriched,
     filteredCount: products.length,
     titles: mappedTitles,
-    stats
+    stats,
+    peerTitles: taobaoTitles || []
   };
 }
 
@@ -250,7 +251,7 @@ async function run(blueOceanWord, options = {}) {
         const { searchPeerTitlesByImage } = require('./search-taobao-image');
         // text_search 将在需要时按需执行（仅在图片搜索失败后或无结果时才调用）
         try {
-          imageSearchResults = await searchPeerTitlesByImage(products, { coreWord });
+          imageSearchResults = await searchPeerTitlesByImage(products, { coreWord, glmClient });
           taobaoTitles = imageSearchResults
             .filter(r => r.hasMatch && Array.isArray(r.peerTitles))
             .flatMap(r => r.peerTitles);

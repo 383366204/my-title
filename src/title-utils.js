@@ -2,9 +2,16 @@ const { removeBannedWords } = require('./banned-words');
 
 // 惰性加载 nodejieba（仅 constructFallbackTitle 使用，避免影响其他函数的加载速度）
 let _nodejieba = null;
+let _nodejiebaTried = false;
+
 function getNodejieba() {
-  if (!_nodejieba) {
-    _nodejieba = require('nodejieba');
+  if (!_nodejiebaTried) {
+    _nodejiebaTried = true;
+    try {
+      _nodejieba = require('nodejieba');
+    } catch (_) {
+      _nodejieba = null;
+    }
   }
   return _nodejieba;
 }
@@ -85,7 +92,11 @@ function constructFallbackTitle(blueOceanWord, originalTitle, taobaoTitles = [],
   if (typeof blueOceanWord !== 'string' || !blueOceanWord) return '';
   // 2. 获取 jieba 实例，进行分词
   const jieba = getNodejieba();
-  // 3. blueOceanWord 作为词集合（word-level 去重）
+  // jieba 不可用时降级为简单的空格分词
+  if (!jieba) {
+    const fallback = blueOceanWord + (originalTitle || '').replace(/\s+/g, '').substring(0, maxLength - byteLen(blueOceanWord));
+    return fallback.replace(/\s+/g, '');
+  }
   const blueWords = new Set(jieba.cut(blueOceanWord));
 
   // 4. 清理原标题

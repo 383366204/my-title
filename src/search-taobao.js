@@ -1,4 +1,4 @@
-const { execSync } = require('child_process');
+const { execSync, execFileSync } = require('child_process');
 
 const { TAOBAO_NATIVE_PATH, isTaobaoNativeInstalled, toWindowsPath, launchTaobaoDesktop } = require('./taobao-utils');
 
@@ -35,14 +35,12 @@ async function searchTaobaoTitles(keyword, options = {}) {
     console.log(`🔍 搜索关键词: ${keyword}`);
     
     // 调用 taobao-native 搜索商品
-    const result = execSync(
-      `cmd.exe /c "${winPath} search_products --args '{\\"keyword\\":\\"${keyword}\\",\\"sourceApp\\":\\"my-title\\"}'"`,
-      {
-        encoding: 'utf8',
-        timeout: timeout,
-        stdio: ['pipe', 'pipe', 'pipe']
-      }
-    );
+    const args = JSON.stringify({ keyword, sourceApp: 'my-title' });
+    const result = execFileSync('cmd.exe', ['/c', winPath, 'search_products', '--args', args], {
+      encoding: 'utf8',
+      timeout: timeout,
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
 
     // 解析输出（第一行应该是 JSON）
     const lines = result.trim().split('\n');
