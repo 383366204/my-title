@@ -1,52 +1,6 @@
 const { execSync } = require('child_process');
-const fs = require('fs');
-const path = require('path');
 
-// Windows 路径（WSL2 环境）
-const TAOBAO_NATIVE_PATH = '/mnt/c/Users/38336/AppData/Local/Programs/taobao/bin/taobao-native.cmd';
-
-/**
- * 检测 taobao-native CLI 是否已安装
- * @returns {boolean} 是否已安装
- */
-function isTaobaoNativeInstalled() {
-  try {
-    // 检查 CLI 文件是否存在
-    fs.accessSync(TAOBAO_NATIVE_PATH, fs.constants.F_OK);
-    return true;
-  } catch (error) {
-    return false;
-  }
-}
-
-/**
- * 将 WSL2 路径转换为 Windows 路径
- * @param {string} wslPath - WSL2 路径
- * @returns {string} Windows 路径
- */
-function toWindowsPath(wslPath) {
-  return wslPath.replace('/mnt/c/', 'C:\\').replace(/\//g, '\\');
-}
-
-/**
- * 启动淘宝桌面版
- * @returns {boolean} 是否成功启动
- */
-function launchTaobaoDesktop() {
-  try {
-    console.log('🚀 正在启动淘宝桌面版...');
-    const winPath = toWindowsPath(TAOBAO_NATIVE_PATH);
-    execSync(
-      `cmd.exe /c "${winPath}" launch`,
-      { stdio: 'ignore', timeout: 10000 }
-    );
-    console.log('✅ 淘宝桌面版已启动');
-    return true;
-  } catch (error) {
-    console.warn('⚠️  启动淘宝桌面版失败:', error.message);
-    return false;
-  }
-}
+const { TAOBAO_NATIVE_PATH, isTaobaoNativeInstalled, toWindowsPath, launchTaobaoDesktop } = require('./taobao-utils');
 
 /**
  * 搜索淘宝同行标题
@@ -69,7 +23,7 @@ async function searchTaobaoTitles(keyword, options = {}) {
 
   try {
     // 尝试启动淘宝桌面版（如果未运行）
-    launchTaobaoDesktop();
+    await launchTaobaoDesktop();
     
     // 等待淘宝桌面版准备就绪
     console.log('⏳ 等待淘宝桌面版准备就绪...');

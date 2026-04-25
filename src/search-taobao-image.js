@@ -5,51 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-// 单例锁：防止 taobao-native 同时处理多个图片搜索
-let isSearching = false;
-
-// Windows 路径（WSL2 环境）— 与 search-taobao.js 保持完全一致
-const TAOBAO_NATIVE_PATH = '/mnt/c/Users/38336/AppData/Local/Programs/taobao/bin/taobao-native.cmd';
-
-/**
- * 检测 taobao-native CLI 是否已安装
- * @returns {boolean} 是否已安装
- */
-function isTaobaoNativeInstalled() {
-  try {
-    // 检查 CLI 文件是否存在
-    fs.accessSync(TAOBAO_NATIVE_PATH, fs.constants.F_OK);
-    return true;
-  } catch (error) {
-    return false;
-  }
-}
-
-/**
- * 将 WSL2 路径转换为 Windows 路径
- * @param {string} wslPath - WSL2 路径
- * @returns {string} Windows 路径
- */
-function toWindowsPath(wslPath) {
-  return wslPath.replace('/mnt/c/', 'C:\\').replace(/\//g, '\\');
-}
-
-/**
- * 启动淘宝桌面版
- * @returns {Promise<boolean>} 是否成功启动
- */
-async function launchTaobaoDesktop() {
-  try {
-    console.log('🚀 正在启动淘宝桌面版...');
-    const winPath = toWindowsPath(TAOBAO_NATIVE_PATH);
-    await execAsync(`cmd.exe /c "${winPath}" launch`, { timeout: 10000 });
-    console.log('✅ 淘宝桌面版已启动');
-    return true;
-  } catch (error) {
-    console.warn('⚠️  启动淘宝桌面版失败:', error.message);
-    return false;
-  }
-}
+const { TAOBAO_NATIVE_PATH, isTaobaoNativeInstalled, toWindowsPath, launchTaobaoDesktop } = require('./taobao-utils');
 
 /**
  * 主入口：对一批1688商品逐一执行以图搜图
@@ -224,21 +180,26 @@ async function searchPeerTitlesByImage(products, options = {}) {
  * @returns {{productId:string, peerTitles:string[], priceRange:{min:number|null,max:number|null}, hasMatch:boolean}}
  */
 async function imageSearchSingle(imageUrl, productId, options = {}) {
+  const startTime = Date.now();
+  console.log(`\n🖼️ [${productId}] 开始以图搜图`);
+  console.log(`   图片URL: ${imageUrl.substring(0, 60)}...`);
+  
   // 单例锁：等待前一个搜索完成
   while (isSearching) {
     await new Promise(resolve => setTimeout(resolve, 1000));
   }
   isSearching = true;
+  
   try {
     // 1) 验证 imageUrl 非空且是有效 URL
     if (!imageUrl || typeof imageUrl !== 'string') {
-      console.warn('⚠️ image_search: imageUrl 为空或非字符串');
+      console.warn(`⚠️ [${productId}] image_search: imageUrl 为空或非字符串`);
       return { productId, hasMatch: false, peerTitles: [], priceRange: { min: null, max: null } };
     }
     try {
       new URL(imageUrl);
     } catch (e) {
-      console.warn('⚠️ image_search: imageUrl 非有效 URL');
+      console.warn(`⚠️ [${productId}] image_search: imageUrl 非有效 URL`);
       return { productId, hasMatch: false, peerTitles: [], priceRange: { min: null, max: null } };
     }
 
@@ -288,20 +249,27 @@ async function imageSearchSingle(imageUrl, productId, options = {}) {
 
       timer = setTimeout(() => {
         killed = true;
+        const elapsed = Date.now() - startTime;
+        console.warn(`⏱️  [${productId}] 超时! (${elapsed}ms > ${timeout}ms)，强制终止进程 PID=${child.pid}`);
         try {
           // 尝试强制结束进程
           child.kill();
         } catch (_) {}
         try {
           execSync(`taskkill /F /T /PID ${child.pid}`, { stdio: 'ignore' });
-        } catch (_) {}
+          console.log(`🔪 [${productId}] taskkill 执行成功`);
+        } catch (e) {
+          console.warn(`⚠️ [${productId}] taskkill 失败:`, e.message);
+        }
         // 直接返回无匹配的结果
-        resolve({ productId, hasMatch: false, peerTitles: [], priceRange: { min: null, max: null } });
+        resolve({ productId, hasMatch: false, peerTitles: [], priceRange: { min: null, max: null }, timeout: true });
       }, timeout);
 
       child.on('close', (code) => {
         clearTimeout(timer);
         if (killed) return;
+        
+        const elapsed = Date.now() - startTime;
 
         // 3) 读取输出文件并解析 JSON，支持 stdout 回退
         let data = null;
@@ -319,12 +287,8 @@ async function imageSearchSingle(imageUrl, productId, options = {}) {
         } finally {
           // 4) 清理临时文件
           try {
-            if (fs.existsSync(outFile)) {
-              fs.unlinkSync(outFile);
-            }
-          } catch (_) {
-            // 忽略清理错误
-          }
+            if (fs.existsSync(outFile)) fs.unlinkSync(outFile);
+          } catch (_) {}
         }
 
         // 5) 解析嵌套结构并扁平化
