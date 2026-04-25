@@ -6,6 +6,7 @@ const path = require('path');
 const os = require('os');
 
 const { TAOBAO_NATIVE_PATH, isTaobaoNativeInstalled, toWindowsPath, launchTaobaoDesktop } = require('./taobao-utils');
+const logger = require('./log');
 
 let _searchLock = Promise.resolve();
 
@@ -175,14 +176,15 @@ async function searchPeerTitlesByImage(products, options = {}) {
   const peerTitlesTotal = finalResults.reduce((sum, r) => sum + (r && r.peerTitles ? r.peerTitles.length : 0), 0);
 
   // 打印统计日志
-  console.log('\n📊 以图搜图任务统计：');
-  console.log(`   总商品数: ${products.length}`);
-  console.log(`   有效商品: ${validProducts.length}`);
-  console.log(`   跳过商品: ${skippedProducts.length}`);
-  console.log(`   匹配成功: ${matchedCount}`);
-  console.log(`   获取同行标题: ${peerTitlesTotal} 条`);
-  console.log(`   总耗时: ${(totalTime / 1000).toFixed(1)}s`);
-  console.log(`   平均耗时/商品: ${(totalTime / validProducts.length / 1000).toFixed(1)}s\n`);
+  logger.info('以图搜图任务统计：', {
+    total: products.length,
+    valid: validProducts.length,
+    skipped: skippedProducts.length,
+    matched: matchedCount,
+    peerTitles: peerTitlesTotal,
+    totalTime: totalTime,
+    avgTime: (totalTime / validProducts.length / 1000).toFixed(1)
+  });
 
   return finalResults;
 }
@@ -390,16 +392,16 @@ async function withRateLimit(items, handler, concurrency = 2, intervalMs = 4000)
       // 记录批次开始（只在批次第一个任务时记录）
       if (index % concurrency === 0) {
         batchCount++;
-        console.log(`📦 [Worker-${workerId}] 开始第 ${batchNumber} 批（索引 ${index}-${Math.min(index + concurrency - 1, items.length - 1)}）`);
+        logger.debug(`[Worker-${workerId}] 开始第 ${batchNumber} 批（索引 ${index}-${Math.min(index + concurrency - 1, items.length - 1)}）`);
       }
 
       // 执行任务并捕获错误
       try {
-        console.log(`🔍 [Worker-${workerId}] 处理第 ${index + 1}/${items.length} 项: ${item.id || 'unknown'}`);
+        logger.debug(`[Worker-${workerId}] 处理第 ${index + 1}/${items.length} 项: ${item.id || 'unknown'}`);
         const startTime = Date.now();
         results[index] = await handler(item, index);
         const elapsed = Date.now() - startTime;
-        console.log(`✅ [Worker-${workerId}] 第 ${index + 1} 项完成，耗时 ${elapsed}ms`);
+        logger.debug(`[Worker-${workerId}] 第 ${index + 1} 项完成，耗时 ${elapsed}ms`);
       } catch (err) {
         console.warn(`⚠️ 图片搜索第 ${index + 1} 项失败:`, err.message);
         // 返回默认值，不影响其他 worker
@@ -415,7 +417,7 @@ async function withRateLimit(items, handler, concurrency = 2, intervalMs = 4000)
 
       // 每完成 concurrency 个任务后等待 intervalMs
       if (completedCount % concurrency === 0 && completedCount < items.length) {
-        console.log(`⏳ 批次完成，等待 ${intervalMs}ms... (${completedCount}/${items.length})`);
+        logger.debug(`批次完成，等待 ${intervalMs}ms... (${completedCount}/${items.length})`);
         await delay(intervalMs);
       }
     }
