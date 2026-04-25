@@ -34,6 +34,9 @@ async function extractCoreAndModifiers(input) {
  * }}
  */
 function fallbackExtract(input) {
+  if (input == null || typeof input !== 'string') {
+    return { coreWord: String(input), modifiers: [] };
+  }
   const words = input.split(/\s+/).filter(Boolean);
   if (words.length === 0) {
     return {

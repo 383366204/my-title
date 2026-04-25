@@ -14,12 +14,24 @@ require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
 
 const { run } = require('../src/index.js');
 
+const TASK_TTL = 30 * 60 * 1000; // 30 minutes
+
 const server = new McpServer({
   name: 'my-title',
   version: '1.0.0',
 });
 
 const tasks = new Map();
+
+// Cleanup expired tasks every 5 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, task] of tasks) {
+    if (task.createdAt && now - task.createdAt > TASK_TTL) {
+      tasks.delete(id);
+    }
+  }
+}, 5 * 60 * 1000);
 
 server.tool(
   'generate_title',
@@ -33,6 +45,11 @@ server.tool(
     if (task_id) {
       const task = tasks.get(task_id);
       if (!task) {
+        return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: 'task_id 不存在' }) }], isError: true };
+      }
+      // Check if task has expired
+      if (task.createdAt && Date.now() - task.createdAt > TASK_TTL) {
+        tasks.delete(task_id);
         return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: 'task_id 不存在' }) }], isError: true };
       }
       if (task.status === 'processing') {
@@ -55,7 +72,7 @@ server.tool(
     }
 
     const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-    tasks.set(id, { status: 'processing' });
+    tasks.set(id, { status: 'processing', createdAt: Date.now() });
 
     console.error(`[my-title] task ${id} started: keyword="${keyword}", length=${length}`);
 
@@ -64,6 +81,7 @@ server.tool(
         console.error(`[my-title] task ${id} done: ${result.products.length} products, ${result.titles.length} titles`);
         tasks.set(id, {
           status: 'done',
+          createdAt: Date.now(),
           result: {
             ok: true,
             coreWord: result.coreWord,
@@ -78,7 +96,7 @@ server.tool(
       })
       .catch(err => {
         console.error(`[my-title] task ${id} failed: ${err.message}`);
-        tasks.set(id, { status: 'error', error: err.message });
+        tasks.set(id, { status: 'error', createdAt: Date.now(), error: err.message });
       });
 
     return {

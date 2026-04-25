@@ -194,7 +194,8 @@ class Alibaba1688Client {
         // 429 或网络错误时重试
         const isRetryable =
           (err.response && (err.response.status === 429 || err.response.status === 503)) ||
-          (!err.response && (err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT'));
+          (!err.response && (err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT')) ||
+          (err.message && err.message.includes('1688 API error'));
         if (isRetryable && attempt < MAX_RETRIES) {
           attempt += 1;
           const backoff = Math.min(1000 * Math.pow(2, attempt - 1), 4000);
