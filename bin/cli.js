@@ -152,6 +152,13 @@ program
         console.log(`\n📄 JSON 已写入: ${jsonPath}`);
       }
 
+      // 提示用户可以使用生意参谋数据增强
+      if (!options.keywordFile && !options.research) {
+        console.log('\n💡 提示: 使用生意参谋数据可获得更精准的选词和排序');
+        console.log('   1. 先运行: node bin/cli.js "' + keywords + '" --research');
+        console.log('   2. 复制生意参谋数据到文件后: node bin/cli.js "' + keywords + '" --keyword-file <文件路径>');
+      }
+
       console.log();
     } catch (error) {
       if (jsonMode) {
