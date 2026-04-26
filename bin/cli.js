@@ -174,4 +174,102 @@ program
     }
   });
 
+program
+  .command('image <url>')
+  .description('从 1688 商品链接自动获取主图，以图搜图生成铺货标题')
+  .option('-l, --length <number>', '标题最大长度', '60')
+  .option('-c, --count <number>', '输出候选标题数量', '3')
+  .option('--json', '纯 JSON 输出模式')
+  .option('--format <type>', '输出格式: table / json / both', 'both')
+  .action(async (url, options) => {
+    const jsonMode = !!options.json;
+    const origLog = console.log;
+    const origWarn = console.warn;
+    const origError = console.error;
+    if (jsonMode) {
+      console.log = () => {};
+      console.warn = () => {};
+      console.error = () => {};
+    }
+    try {
+      const result = await require('../src').runFromImage(url, {
+        maxLength: parseInt(options.length),
+        silent: jsonMode
+      });
+
+      if (result.ok === false) {
+        if (jsonMode) {
+          console.log = origLog;
+          console.warn = origWarn;
+          console.error = origError;
+          process.stdout.write(JSON.stringify({ ok: false, error: result.error, step: result.step }) + '\n');
+        } else {
+          console.error(`\n❌ 错误[${result.step}]: ${result.error}`);
+        }
+        process.exit(1);
+      }
+
+      if (jsonMode) {
+        console.log = origLog;
+        console.warn = origWarn;
+        console.error = origError;
+        const output = {
+          ok: true,
+          sourceUrl: result.sourceUrl,
+          imageUrl: result.imageUrl,
+          originalTitle: result.originalTitle,
+          coreWord: result.coreWord,
+          blueOceanWord: result.blueOceanWord,
+          titles: result.titles,
+          peerTitles: result.peerTitles,
+          peerSource: result.peerSource,
+          stats: result.stats
+        };
+        process.stdout.write(JSON.stringify(output, null, 2) + '\n');
+        return;
+      }
+
+      console.log('\n✅ 处理完成');
+      console.log('='.repeat(50));
+      console.log(`来源链接: ${result.sourceUrl}`);
+      console.log(`核心词: ${result.coreWord}`);
+      console.log(`蓝海词: ${result.blueOceanWord}`);
+      console.log(`原标题: ${result.originalTitle}`);
+
+      if (result.titles.length === 0) {
+        console.log('\n❌ 没有生成标题，请尝试其他链接');
+        process.exit(1);
+      }
+
+      const outputFormat = options.format || 'both';
+      
+      if (outputFormat === 'table' || outputFormat === 'both') {
+        console.log('\n📝 生成的标题:');
+        const count = Math.min(parseInt(options.count), result.titles.length);
+        result.titles.slice(0, count).forEach((title, index) => {
+          console.log(`${index + 1}. ${title} (${byteLen(title)} 字符)`);
+        });
+      }
+
+      if (outputFormat === 'json') {
+        console.log(JSON.stringify(result, null, 2));
+      } else if (outputFormat === 'both') {
+        console.log();
+        console.log(JSON.stringify(result, null, 2));
+      }
+
+      console.log();
+    } catch (error) {
+      if (jsonMode) {
+        console.log = origLog;
+        console.warn = origWarn;
+        console.error = origError;
+        process.stdout.write(JSON.stringify({ ok: false, error: error.message }) + '\n');
+      } else {
+        console.error('\n❌ 错误:', error.message);
+      }
+      process.exit(1);
+    }
+  });
+
 program.parse();
