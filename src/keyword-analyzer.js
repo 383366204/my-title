@@ -213,9 +213,11 @@ function enrichWithSycmData({ topKeywords = [], gapKeywords = [] }, sycmDataArra
 
     if (!inTop && !inGap) {
       sycmKeywords.push({
-        word: keyword,
+        keyword: keyword,
         demandSupplyRatio: item.demandSupplyRatio,
         searchPopularity: item.searchPopularity,
+        clickRate: item.clickRate,
+        conversionRate: item.conversionRate,
         hasSycmData: true
       });
     }

@@ -301,9 +301,10 @@ ${sycmLines}
 - 标题中段：需求供给比次高的词
 - 标题后段：补充高搜索人气但竞争适中的词
 - 避免使用需求供给比 < 1.0 的词（竞争大于需求）`;
-    } else if (keywordAnalysis && keywordAnalysis.topKeywords) {
-      keywordSection = `
-【关键词分析】
+    }
+    if (keywordAnalysis && keywordAnalysis.topKeywords) {
+      keywordSection += (keywordSection ? '\n\n' : '') + `
+【同行标题分析（补充）】
 高频词（出现频次最高，应优先使用）: ${keywordAnalysis.topKeywords.slice(0, 15).map(k => k.word + '(' + k.count + ')').join(', ')}
 缺口词（竞品有但我们没有的高价值词，标题应尽量包含）: ${keywordAnalysis.gapKeywords.slice(0, 10).map(k => k.word + '(' + k.count + ')').join(', ')}
 
@@ -312,7 +313,8 @@ ${sycmLines}
 - 标题中段：优先使用高频词（确保搜索曝光）
 - 标题后段：补充2-3个缺口词（填补竞品优势）
 - 避免堆砌：同类词选1个（如"锁骨链"和"颈链"只取搜索量更高的）`;
-    } else {
+    }
+    if (!keywordSection) {
       keywordSection = '\n【关键词分析】无同行数据，请根据商品标题和常识生成标题。\n';
     }
 

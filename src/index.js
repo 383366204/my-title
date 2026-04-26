@@ -505,7 +505,9 @@ async function run(blueOceanWord, options = {}) {
   let sycmKeywords = [];
   if (sycmData) {
     try {
-      const topKeys = analyzePeerTitles(peerTitles, []);
+      const titlesForAnalysis = (taobaoTitles && taobaoTitles.length > 0) ? taobaoTitles : peerTitles;
+      const productTitles = products.map(p => p.title || '');
+      const topKeys = analyzePeerTitles(titlesForAnalysis, productTitles);
       const { sycmKeywords: _sycmKeywords } = enrichWithSycmData(topKeys, parseSycmData(sycmData));
       sycmKeywords = _sycmKeywords || [];
     } catch (_) {
