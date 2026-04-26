@@ -1,4 +1,5 @@
 const GLMClient = require('./glm-client');
+const axios = require('axios');
 
 /**
  * 从用户输入提取核心词和带刚性分类的修饰词
@@ -61,4 +62,224 @@ function fallbackExtract(input) {
   };
 }
 
-module.exports = { extractCoreAndModifiers, fallbackExtract };
+/**
+ * 从同行标题数组中提取核心词、蓝海词和修饰词
+ * @param {string[]} peerTitles - 同行标题数组
+ * @returns {Promise<{
+ *   coreWord: string,
+ *   blueOceanWord: string,
+ *   modifiers: Array<{word: string, rigidity: 'rigid'|'optional'}>
+ * }>}
+ */
+async function extractCoreFromPeerTitles(peerTitles) {
+  const apiKey = process.env.GLM_API_KEY;
+  if (!apiKey) {
+    throw new Error('环境变量 GLM_API_KEY 未设置');
+  }
+
+  const apiBase = process.env.GLM_API_BASE;
+  const client = new GLMClient({ apiKey, apiBase });
+
+  try {
+    const systemPrompt = `你是一个电商标题分析专家。请分析以下同行标题数组，提取：
+
+1. 核心词 (coreWord) - 1-2个词，代表商品的核心类别（如"项链女"、"连衣裙"）
+2. 蓝海词 (blueOceanWord) - 从同行标题中提取出现频率最高的核心词组合，作为最佳标题前缀（如"银项链女"、"纯棉T恤男"）
+3. 修饰词列表 (modifiers) - 分析同行标题中的高频修饰词，并标注刚性程度：
+   - "rigid" = 刚性修饰词（材质、颜色、规格、人群）
+   - "optional" = 可选修饰词（风格、流行词、季节词）
+
+判断规则：
+- 材质相关词（如"纯银"、"纯棉"、"真皮"）→ rigid
+- 颜色相关词（如"黑色"、"白色"、"金色"）→ rigid  
+- 规格尺寸（如"XL"、"加大"、"长款"）→ rigid
+- 目标人群（如"女"、"男"、"学生"）→ rigid
+- 风格（如"韩版"、"ins风"、"简约"）→ optional
+- 流行词（如"高级感"、"气质"、"百搭"）→ optional
+- 时间/季节（如"新款"、"夏季"、"2026"）→ optional
+
+输出严格 JSON 格式，不要任何其他文字：
+{
+  "coreWord": "核心词",
+  "blueOceanWord": "蓝海词",
+  "modifiers": [
+    {"word": "修饰词1", "rigidity": "rigid"},
+    {"word": "修饰词2", "rigidity": "optional"}
+  ]
+}`;
+
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: JSON.stringify(peerTitles) }
+    ];
+
+    const response = await axios.post(
+      `${client.apiBase}/chat/completions`,
+      {
+        model: client.model,
+        messages,
+        temperature: 0.1
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 15000
+      }
+    );
+
+    let content = response.data.choices[0].message.content.trim();
+    // 移除可能的 markdown 代码块并解析 JSON
+    const { parseJsonFromLLM } = require('./llm-utils');
+    const result = parseJsonFromLLM(content);
+
+    // 验证格式
+    if (!result.coreWord || !result.blueOceanWord || !Array.isArray(result.modifiers)) {
+      throw new Error('Invalid response format from GLM');
+    }
+
+    result.modifiers.forEach(mod => {
+      if (!['rigid', 'optional'].includes(mod.rigidity)) {
+        mod.rigidity = 'optional';
+      }
+    });
+
+    return result;
+  } catch (error) {
+    console.warn(`⚠️  GLM API 调用失败，使用降级提取: ${error.message}`);
+    return fallbackExtractFromPeers(peerTitles);
+  }
+}
+
+/**
+ * 降级提取（当 GLM API 失败时使用简单规则分析同行标题）
+ * @param {string[]} peerTitles - 同行标题数组
+ * @returns {{
+ *   coreWord: string,
+ *   blueOceanWord: string,
+ *   modifiers: Array<{word: string, rigidity: 'rigid'|'optional'}>
+ * }}
+ */
+function fallbackExtractFromPeers(peerTitles) {
+  if (!Array.isArray(peerTitles) || peerTitles.length === 0) {
+    return {
+      coreWord: '',
+      blueOceanWord: '',
+      modifiers: []
+    };
+  }
+
+  // 简单中文分词：提取常见电商关键词模式
+  const wordFrequency = {};
+  const rigidPattern = /纯银|合金|纯棉|羊毛|真丝|真皮|不锈钢|黄铜|金色|银色|黑色|白色|红色|蓝色|女|男|女款|男款|XL|L|M|S|加大|长款|短款|中长款|学生|儿童|成人|人群|材质|颜色|规格|尺寸|925|足银|纯金|镀金/;
+
+  // 常见电商词模式（2-4字符）
+  const commonPatterns = [
+    /(项链|手链|耳环|戒指|手镯|连衣裙|T恤|衬衫|外套|裤子|鞋子|包包)/,
+    /(纯银|纯棉|纯金|真皮|真丝|羊毛|牛仔|雪纺)/,
+    /(黑色|白色|红色|蓝色|金色|银色|灰色|粉色)/,
+    /(女款|男款|儿童|学生|成人|中老年)/,
+    /(新款|时尚|流行|经典|简约|复古|韩版|ins风)/,
+    /(加厚|薄款|长袖|短袖|宽松|修身|加大)/,
+    /([0-9]+克|[0-9]+cm|[0-9]+mm)/,
+  ];
+
+  peerTitles.forEach(title => {
+    if (typeof title === 'string') {
+      const words = new Set();
+      
+      // 1. 提取匹配常见模式的词
+      commonPatterns.forEach(pattern => {
+        const matches = title.match(new RegExp(pattern.source, 'g'));
+        if (matches) {
+          matches.forEach(match => words.add(match));
+        }
+      });
+      
+      // 2. 提取2-4字符的连续中文词（避免单个字符）
+      for (let i = 0; i < title.length - 1; i++) {
+        for (let len = 2; len <= 4 && i + len <= title.length; len++) {
+          const word = title.substring(i, i + len);
+          // 只添加看起来像有意义的词（包含常见品类词或修饰词）
+          if (rigidPattern.test(word) || word.match(/[项链手链耳环衣裤鞋包]/)) {
+            words.add(word);
+          }
+        }
+      }
+      
+      // 统计词频
+      words.forEach(word => {
+        wordFrequency[word] = (wordFrequency[word] || 0) + 1;
+      });
+    }
+  });
+
+  // 按频率排序，只保留出现2次以上的词
+  const sortedWords = Object.entries(wordFrequency)
+    .filter(([word, freq]) => freq >= 2 && word.length >= 2)
+    .sort((a, b) => {
+      // 先按频率，再按长度（优先长词）
+      if (b[1] !== a[1]) return b[1] - a[1];
+      return b[0].length - a[0].length;
+    })
+    .map(entry => entry[0]);
+
+  if (sortedWords.length === 0) {
+    // 如果没有高频词，找最长公共子串作为核心词
+    const lcs = findLongestCommonSubstring(peerTitles.filter(t => typeof t === 'string'));
+    const coreWord = lcs || (peerTitles[0] || '').substring(0, 4);
+    return {
+      coreWord,
+      blueOceanWord: coreWord,
+      modifiers: []
+    };
+  }
+
+  // 选取核心词：最高频且最长的词
+  const coreWord = sortedWords[0] || '';
+
+  // 选取蓝海词：核心词 + 下一个高频修饰词（如果有）
+  let blueOceanWord = coreWord;
+  if (sortedWords.length >= 2) {
+    // 找第一个不是核心词子串的词
+    const nextWord = sortedWords.find(word => !coreWord.includes(word) && word !== coreWord);
+    if (nextWord) {
+      blueOceanWord = coreWord + nextWord;
+    }
+  }
+
+  // 其他高频词作为修饰词，判断刚性
+  const modifiers = sortedWords.slice(1).map(word => ({
+    word,
+    rigidity: rigidPattern.test(word) ? 'rigid' : 'optional'
+  }));
+
+  return {
+    coreWord,
+    blueOceanWord,
+    modifiers
+  };
+}
+
+// 辅助函数：查找字符串数组的最长公共子串
+function findLongestCommonSubstring(strings) {
+  if (strings.length === 0) return '';
+  if (strings.length === 1) return strings[0];
+  
+  const first = strings[0];
+  let longest = '';
+  
+  for (let i = 0; i < first.length; i++) {
+    for (let j = i + 1; j <= first.length; j++) {
+      const substr = first.substring(i, j);
+      if (substr.length > longest.length && strings.every(s => s.includes(substr))) {
+        longest = substr;
+      }
+    }
+  }
+  
+  return longest;
+}
+
+module.exports = { extractCoreAndModifiers, fallbackExtract, extractCoreFromPeerTitles, fallbackExtractFromPeers };
