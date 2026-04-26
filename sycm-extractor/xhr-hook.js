@@ -6,32 +6,15 @@
   
   console.log('[SYCM-XHR] 生意参谋数据提取脚本已加载 (MAIN world)');
   
-  // 匹配生意参谋搜索分析的 API URL
+  // 匹配淘宝生意参谋搜索分析的 API URL
   const SYCM_API_PATTERNS = [
-    // 1688 生意参谋 API 模式
-    /sycm\.1688\.com\/.*search/i,
-    /sycm\.1688\.com\/.*keyword/i,
-    /sycm\.1688\.com\/.*word/i,
-    /sycm\.1688\.com\/.*data/i,
-    /sycm\.1688\.com\/.*list/i,
-    /sycm\.1688\.com\/.*result/i,
-    /ainext\.1688\.com\/.*sycm/i,
-    
     // 淘宝生意参谋 API 模式  
     /sycm\.taobao\.com\/.*search/i,
     /sycm\.taobao\.com\/.*keyword/i,
     /sycm\.taobao\.com\/.*word/i,
     /sycm\.taobao\.com\/.*data/i,
     /sycm\.taobao\.com\/.*list/i,
-    /sycm\.taobao\.com\/.*result/i,
-    
-    // 通用搜索分析 API 特征
-    /search\/keyword/i,
-    /search\/analysis/i,
-    /search\/word/i,
-    /keyword\/data/i,
-    /keyword\/list/i,
-    /keyword\/search/i
+    /sycm\.taobao\.com\/.*result/i
   ];
   
   // 排除不相关的 API
@@ -53,11 +36,8 @@
       return false;
     }
     
-    // 检查是否为生意参谋相关 API
-    const isSycmDomain = url.includes('sycm.1688.com') || url.includes('sycm.taobao.com');
-    const isAinextDomain = url.includes('ainext.1688.com') && url.includes('sycm');
-    
-    if (!isSycmDomain && !isAinextDomain) {
+    // 只检查淘宝生意参谋域名
+    if (!url.includes('sycm.taobao.com')) {
       return false;
     }
     

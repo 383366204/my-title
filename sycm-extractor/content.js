@@ -25,7 +25,7 @@
   // 页面检测
   function isSycmPage() {
     const host = window.location.hostname;
-    return host.includes('sycm.1688.com') || host.includes('sycm.taobao.com');
+    return host.includes('sycm.taobao.com');
   }
   
   // 监听 XHR 数据
@@ -385,7 +385,7 @@
       console.log('[SYCM-CONTENT] 当前页面不是生意参谋');
       return { 
         error: 'not_sycm_page',
-        message: '请在生意参谋页面 (sycm.1688.com 或 sycm.taobao.com) 使用此功能'
+        message: '请在生意参谋页面 (sycm.taobao.com) 使用此功能'
       };
     }
     

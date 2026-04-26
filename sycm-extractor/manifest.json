@@ -4,16 +4,16 @@
   "version": "1.0.0",
   "description": "一键提取生意参谋搜索分析数据到剪贴板",
   "permissions": ["activeTab"],
-  "host_permissions": ["*://sycm.1688.com/*", "*://sycm.taobao.com/*"],
+  "host_permissions": ["*://sycm.taobao.com/*"],
   "content_scripts": [
     {
-      "matches": ["*://sycm.1688.com/*", "*://sycm.taobao.com/*"],
+      "matches": ["*://sycm.taobao.com/*"],
       "js": ["xhr-hook.js"],
       "run_at": "document_start",
       "world": "MAIN"
     },
     {
-      "matches": ["*://sycm.1688.com/*", "*://sycm.taobao.com/*"],
+      "matches": ["*://sycm.taobao.com/*"],
       "js": ["content.js"],
       "run_at": "document_idle"
     }

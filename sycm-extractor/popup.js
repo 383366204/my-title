@@ -46,13 +46,13 @@
       currentTabId = tab.id;
       const url = tab.url || '';
 
-      isSycmPage = /sycm\.1688\.com|sycm\.taobao\.com/.test(url);
+       isSycmPage = /sycm\.taobao\.com/.test(url);
 
       if (!isSycmPage) {
         setStatus('warning', '⚠', '请在生意参谋页面使用此插件');
         showWarning(
           '当前页面不是生意参谋',
-          '请切换到 sycm.1688.com 或 sycm.taobao.com 后再试'
+          '请切换到 sycm.taobao.com 后再试'
         );
         return;
       }
@@ -134,11 +134,11 @@
   }
 
   function handleExtractError(result) {
-    const errorMap = {
-      not_sycm_page: {
-        text: '当前页面不是生意参谋',
-        hint: '请切换到 sycm.1688.com 或 sycm.taobao.com 后再试',
-      },
+     const errorMap = {
+       not_sycm_page: {
+         text: '当前页面不是生意参谋',
+         hint: '请切换到 sycm.taobao.com 后再试',
+       },
       no_data_available: {
         text: result.message || '暂无可用数据',
         hint: result.hint || '请在生意参谋中执行搜索操作，等待数据加载完成后再提取',
