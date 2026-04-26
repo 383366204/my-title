@@ -162,17 +162,14 @@ function recommendResearchKeywords({ coreWord, blueOceanWord, modifiers = [], pe
     }
   }
 
-  // 4. 从 peerTitles 提取高频词（取 top 5，priority: 4-8, source: '高频词'）
   if (peerTitles && peerTitles.length > 0) {
-    const { topKeywords } = analyzePeerTitles(peerTitles, []);
+    const { topKeywords, gapKeywords } = analyzePeerTitles(peerTitles, []);
+
     const top5 = topKeywords.slice(0, 5);
     for (let i = 0; i < top5.length; i++) {
       addKeyword(top5[i].word, '高频词', 4 + i);
     }
 
-    // 5. 从 peerTitles 提取缺口词（取 top 3-5，priority: 9-13, source: '缺口词'）
-    // 复用 analyzePeerTitles 的缺口词检测逻辑
-    const { gapKeywords } = analyzePeerTitles(peerTitles, []);
     const topGap = gapKeywords.slice(0, 5);
     for (let i = 0; i < topGap.length; i++) {
       addKeyword(topGap[i].word, '缺口词', 9 + i);
@@ -210,8 +207,9 @@ function enrichWithSycmData({ topKeywords = [], gapKeywords = [] }, sycmDataArra
     });
 
     // 检查是否已在 topKeywords 或 gapKeywords 中（子串包含方向：k.word包含keyword）
-    const inTop = topKeywords.some(k => k.word === keyword || k.word.includes(keyword));
-    const inGap = gapKeywords.some(k => k.word === keyword || k.word.includes(keyword));
+    // 子串匹配需要 >= 2 字符，避免单字词（如"银"、"金"）错误触发匹配
+    const inTop = topKeywords.some(k => k.word === keyword || (keyword.length >= 2 && k.word.includes(keyword)));
+    const inGap = gapKeywords.some(k => k.word === keyword || (keyword.length >= 2 && k.word.includes(keyword)));
 
     if (!inTop && !inGap) {
       sycmKeywords.push({
@@ -229,10 +227,9 @@ function enrichWithSycmData({ topKeywords = [], gapKeywords = [] }, sycmDataArra
     const enriched = keywords.map(k => {
       let match = sycmMap.get(k.word);
 
-      // 如果没有精确匹配，尝试子串包含
       if (!match) {
         for (const [sycmWord, data] of sycmMap.entries()) {
-          if (sycmWord.includes(k.word) || k.word.includes(sycmWord)) {
+          if ((k.word.length >= 2 && sycmWord.length >= 2) && (sycmWord.includes(k.word) || k.word.includes(sycmWord))) {
             match = data;
             break;
           }

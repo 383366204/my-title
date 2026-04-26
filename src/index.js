@@ -381,7 +381,7 @@ async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles,
           ? mappedTitles[idx]
           : (Array.isArray(mappedTitles) && mappedTitles.length > 0 ? mappedTitles[0] : p['链接原标题']);
       });
-    cache.set(blueOceanWord, maxLength, limit, result, _peerTitlesHash);
+      cache.set(blueOceanWord, maxLength, limit, result, _peerTitlesHash, sycmDataHash);
       return result;
     } catch (e2) {
       // 最后降级：直接返回简单结构，避免中断流程
@@ -400,7 +400,7 @@ async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles,
       result.products.forEach((p, idx) => {
         p['铺货标题'] = simpleTitles[idx] || p['链接原标题'];
       });
-    cache.set(blueOceanWord, maxLength, limit, result, _peerTitlesHash);
+      cache.set(blueOceanWord, maxLength, limit, result, _peerTitlesHash, sycmDataHash);
       return result;
     }
   }

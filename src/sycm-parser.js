@@ -131,7 +131,10 @@ function parseSycmData(rawText) {
   // 按 demandSupplyRatio 降序排序
   result.sort((a, b) => b.demandSupplyRatio - a.demandSupplyRatio);
 
-  return result;
+  // 数据量上限
+  const limited = result.slice(0, 200);
+
+  return limited;
 }
 
 module.exports = { parseSycmData, parseRangeValue };
