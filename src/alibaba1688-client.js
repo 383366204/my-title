@@ -210,6 +210,103 @@ class Alibaba1688Client {
     // 如果循环结束仍未返回，抛出最后的错误
     throw lastError;
   }
+
+  /**
+   * 获取商品详情
+   * @param {string} offerId - 1688 商品 ID
+   * @returns {Promise<object>} 商品详情（含完整响应结构）
+   */
+  async getOfferDetail(offerId) {
+    const endpoint = '/1688claw/skill/workflow';
+    const body = JSON.stringify({ 
+      code: "offer_detail", 
+      bizParams: { item_id: [offerId] } 
+    });
+    const signHeaders = this.generateSignHeaders('POST', endpoint, body);
+
+    const url = `${this.baseUrl}${endpoint}`;
+
+    // 复用 searchOffers 中的重试逻辑
+    const MAX_RETRIES = 3;
+    let attempt = 0;
+    let lastError = null;
+
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    while (attempt <= MAX_RETRIES) {
+      try {
+        if (process.env.ENABLE_DELAY === 'true') {
+          const delayMs = 3000 + Math.floor(Math.random() * 2000);
+          await sleep(delayMs);
+        }
+
+        const response = await axios.post(url, body, {
+          headers: signHeaders,
+          timeout: 10000
+        });
+
+        if (!response.data || response.data.success !== true) {
+          throw new Error(`1688 API error: ${JSON.stringify(response.data)}`);
+        }
+
+        // 返回完整响应，供调用方提取需要的字段（如主图）
+        return response.data;
+      } catch (err) {
+        lastError = err;
+        const isRetryable =
+          (err.response && (err.response.status === 429 || err.response.status === 503)) ||
+          (!err.response && (err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT')) ||
+          (err.message && err.message.includes('1688 API error'));
+        if (isRetryable && attempt < MAX_RETRIES) {
+          attempt += 1;
+          const backoff = Math.min(1000 * Math.pow(2, attempt - 1), 4000);
+          const jitter = Math.floor(Math.random() * 1000);
+          await sleep(backoff + jitter);
+          continue;
+        }
+        throw err;
+      }
+    }
+
+    throw lastError;
+  }
 }
 
+/**
+ * 从 1688 链接提取 offerId
+ * @param {string} url - 1688 商品详情页 URL
+ * @returns {object|null} { offerId: string } 或 null（无效 URL）
+ * 
+ * 支持格式：
+ * - https://detail.1688.com/offer/123456.html
+ * - https://detail.1688.com/offer/123456.html?spm=...
+ * - https://m.1688.com/offer/123456.html
+ */
+function parse1688Url(url) {
+  if (typeof url !== 'string') return null;
+  
+  try {
+    const parsedUrl = new URL(url);
+    const hostname = parsedUrl.hostname;
+    
+    // 验证域名是否为 1688
+    if (!hostname.endsWith('1688.com')) return null;
+    
+    // 匹配路径模式 /offer/数字.html
+    const pathMatch = parsedUrl.pathname.match(/\/offer\/(\d+)(?:\.html)?/);
+    if (pathMatch && pathMatch[1]) {
+      return { offerId: pathMatch[1] };
+    }
+    
+    return null;
+  } catch (e) {
+    // URL 解析失败
+    return null;
+  }
+}
+
+/**
+ * 1688 API 客户端
+ */
 module.exports = Alibaba1688Client;
+module.exports.parse1688Url = parse1688Url;
