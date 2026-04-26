@@ -456,15 +456,12 @@ async function run(blueOceanWord, options = {}) {
   // 如果开启 research 模式，先进行研究数据收集，不生成标题
   if (research === true) {
     log('🔬 research 模式：开始提取研究关键词...');
-    // 读取 1688 商品与同行标题以形成研究输入
+    // 读取 1688 商品，直接使用商品标题（不做以图搜图，避免超时）
     const { products } = await _search1688(coreWord, blueOceanWord, modifiers, limit, log, warn);
-    const glmClientForResearch = new GLMClient({
-      apiKey: process.env.GLM_API_KEY,
-      apiBase: process.env.GLM_API_BASE,
-      model: process.env.GLM_API_MODEL
-    });
-    const { taobaoTitles } = await _searchPeerTitles({ products, blueOceanWord, peerTitles, glmClient: glmClientForResearch, log, warn });
-    const peerTitlesForResearch = (peerTitles && peerTitles.length > 0) ? peerTitles : taobaoTitles;
+    // research 模式直接使用 1688 商品标题，不做以图搜图
+    const peerTitlesForResearch = (peerTitles && peerTitles.length > 0)
+      ? peerTitles
+      : products.slice(0, 20).map(p => p.title).filter(Boolean);
     const researchKeywordsObj = recommendResearchKeywords({ coreWord, blueOceanWord, modifiers, peerTitles: peerTitlesForResearch || [] });
     const researchKeywords = researchKeywordsObj && Array.isArray(researchKeywordsObj.keywords) ? researchKeywordsObj.keywords : [];
     return { ok: true, researchKeywords, coreWord, modifiers };
