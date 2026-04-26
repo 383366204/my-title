@@ -473,6 +473,8 @@ async function run(blueOceanWord, options = {}) {
         } catch (e) {
           warn('  淘宝搜索失败，降级使用1688商品标题');
         }
+      } else {
+        warn('  taobao-native 未安装，使用1688商品标题作为同行数据（C端数据更准确）');
       }
 
       // 降级：使用 1688 商品标题

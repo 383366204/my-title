@@ -35,14 +35,24 @@ setInterval(() => {
 
 server.tool(
   'generate_title',
-  '电商选品标题生成工具（异步）。首次调用传入 keyword 启动生成，返回 task_id。再次调用传入 task_id 查询结果。结果包含铺货标题、选品理由、定价建议、风险提示的商品列表。',
+  '电商选品标题生成工具（异步）。首次调用传入 keyword 启动生成，返回 task_id。再次调用传入 task_id 查询结果。结果包含铺货标题、选品理由、定价建议、风险提示的商品列表。设置 research=true 可获取推荐研究关键词列表（不生成标题）。',
   {
     keyword: z.string().optional().describe('商品关键词（首次调用必传），如：戒指男潮牌高级感痞帅'),
     length: z.number().default(60).describe('标题最大字符数（1汉字=2字符），默认60'),
     keyword_data: z.string().optional().describe('生意参谋搜索分析数据（可选，Tab分隔格式）'),
     task_id: z.string().optional().describe('查询任务结果时传入（不需要传 keyword）'),
+    research: z.boolean().default(false).describe('推荐研究关键词模式（返回推荐词列表，不生成标题）'),
   },
-  async ({ keyword, length, keyword_data, task_id }) => {
+  async ({ keyword, length, keyword_data, task_id, research }) => {
+    // Research mode: sync call, returns keyword recommendations
+    if (research) {
+      const result = await run(keyword, { research: true });
+      if (result.ok && result.researchKeywords) {
+        return { content: [{ type: 'text', text: JSON.stringify({ ok: true, researchKeywords: result.researchKeywords, coreWord: result.coreWord, modifiers: result.modifiers }, null, 2) }] };
+      }
+      return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: '推荐关键词失败' }) }] };
+    }
+
     if (task_id) {
       const task = tasks.get(task_id);
       if (!task) {

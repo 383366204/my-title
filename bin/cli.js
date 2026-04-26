@@ -58,7 +58,8 @@ program
         console.log('\n📊 推荐去生意参谋查询以下关键词的搜索分析数据：');
         if (result.researchKeywords && result.researchKeywords.length > 0) {
           result.researchKeywords.forEach((kw, i) => {
-            const tag = kw.isCore ? '(核心词)' : kw.isRigid ? '(刚性修饰词组合)' : '(高频关联词)';
+            const tagMap = { '核心词': '(核心词)', '蓝海词': '(蓝海词)', '核心词+刚性修饰词': '(刚性修饰词组合)', '高频词': '(高频关联词)', '缺口词': '(缺口词)' };
+            const tag = tagMap[kw.source] || '(关联词)';
             console.log(`  ${i + 1}. ${kw.word} ${tag}`);
           });
         }
