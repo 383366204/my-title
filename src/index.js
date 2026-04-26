@@ -456,13 +456,34 @@ async function run(blueOceanWord, options = {}) {
   // 如果开启 research 模式，先进行研究数据收集，不生成标题
   if (research === true) {
     log('🔬 research 模式：开始提取研究关键词...');
-    // 读取 1688 商品，直接使用商品标题（不做以图搜图，避免超时）
-    const { products } = await _search1688(coreWord, blueOceanWord, modifiers, limit, log, warn);
-    // research 模式直接使用 1688 商品标题，不做以图搜图
-    const peerTitlesForResearch = (peerTitles && peerTitles.length > 0)
-      ? peerTitles
-      : products.slice(0, 20).map(p => p.title).filter(Boolean);
-    const researchKeywordsObj = recommendResearchKeywords({ coreWord, blueOceanWord, modifiers, peerTitles: peerTitlesForResearch || [] });
+
+    // 优先从淘宝文字搜索获取同行标题（C端数据更接近生意参谋搜索生态）
+    let peerTitlesForResearch = peerTitles || [];
+    if (peerTitlesForResearch.length === 0) {
+      const { isTaobaoNativeInstalled } = require('./search-taobao');
+      if (isTaobaoNativeInstalled()) {
+        try {
+          const { searchTaobaoTitles } = require('./search-taobao');
+          log('📱 淘宝文字搜索获取同行标题...');
+          const taobaoResult = await searchTaobaoTitles(coreWord);
+          if (taobaoResult && taobaoResult.length > 0) {
+            peerTitlesForResearch = taobaoResult;
+            log(`  获取到 ${taobaoResult.length} 条淘宝同行标题`);
+          }
+        } catch (e) {
+          warn('  淘宝搜索失败，降级使用1688商品标题');
+        }
+      }
+
+      // 降级：使用 1688 商品标题
+      if (peerTitlesForResearch.length === 0) {
+        const { products } = await _search1688(coreWord, blueOceanWord, modifiers, limit, log, warn);
+        peerTitlesForResearch = products.slice(0, 20).map(p => p.title).filter(Boolean);
+        log(`  使用 ${peerTitlesForResearch.length} 条1688商品标题（降级）`);
+      }
+    }
+
+    const researchKeywordsObj = recommendResearchKeywords({ coreWord, blueOceanWord, modifiers, peerTitles: peerTitlesForResearch });
     const researchKeywords = researchKeywordsObj && Array.isArray(researchKeywordsObj.keywords) ? researchKeywordsObj.keywords : [];
     return { ok: true, researchKeywords, coreWord, modifiers };
   }
