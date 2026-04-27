@@ -65,6 +65,7 @@ class GLMClient {
 - 颜色 → rigid（如"黑色"必须是黑色）
 - 规格尺寸 → rigid（如"XL"必须是XL）
 - 目标人群 → rigid（如"女款"必须是女款）
+- 品类限定词 → rigid（如"猫咪"限定宠物用品、"婴儿"限定婴儿用品、"汽车"限定汽车用品。这些词虽然不是材质/颜色/规格，但不匹配则商品完全错误）
 - 风格 → optional（如"ins风"是风格描述，不强制）
 - 流行词 → optional（如"高级感"、"网红"是描述性词，不强制）
 - 时间/季节 → optional（如"2026新款"、"夏季"不强制）
@@ -76,7 +77,13 @@ class GLMClient {
     {"word": "修饰词1", "rigidity": "rigid"},
     {"word": "修饰词2", "rigidity": "optional"}
   ]
-}`;
+}
+
+示例：
+输入"猫咪衣服春装" → {"coreWord": "衣服", "modifiers": [{"word": "猫咪", "rigidity": "rigid"}, {"word": "春装", "rigidity": "rigid"}]}
+输入"宠物狗衣服冬装" → {"coreWord": "衣服", "modifiers": [{"word": "宠物狗", "rigidity": "rigid"}, {"word": "冬装", "rigidity": "rigid"}]}
+输入"婴儿连体衣纯棉" → {"coreWord": "连体衣", "modifiers": [{"word": "婴儿", "rigidity": "rigid"}, {"word": "纯棉", "rigidity": "rigid"}]}
+输入"儿童书包小学生" → {"coreWord": "书包", "modifiers": [{"word": "儿童", "rigidity": "rigid"}, {"word": "小学生", "rigidity": "rigid"}]}`;
 
     const messages = [
       { role: 'system', content: systemPrompt },

@@ -66,31 +66,40 @@ async function searchAll(coreWord, blueOceanWord, modifiers = []) {
   // 创建 1688 客户端
   const client = new Alibaba1688Client(ak);
 
-  // 第一次搜索：使用核心词
-  const coreProducts = await client.searchOffers(coreWord);
-
-  // 第二次搜索：使用蓝海词（间隔3-5秒由客户端内部控制 ENABLE_DELAY）
-  const blueOceanProducts = await client.searchOffers(blueOceanWord);
+  // 生成搜索查询列表（多查询组合）
+  const rigidWords = modifiers.filter(m => m.rigidity === 'rigid').map(m => m.word);
+  // 去重子串：避免核心词已包含的修饰词
+  const dedupedRigids = rigidWords.filter(word => !coreWord.includes(word) && word !== coreWord);
+  
+  const queries = [coreWord]; // 第1个：核心词本身
+  
+  // 渐进组合：coreWord + rigid[0], coreWord + rigid[0] + rigid[1], ...（最多4个）
+  let currentQuery = coreWord;
+  for (let i = 0; i < dedupedRigids.length && queries.length < 4; i++) {
+    currentQuery = dedupedRigids[i] + currentQuery; // rigid 前置！如 "猫咪" + "衣服" = "猫咪衣服"
+    queries.push(currentQuery);
+  }
+  
+  // 如果 blueOceanWord 不在 queries 中且还有位置，追加
+  if (!queries.includes(blueOceanWord) && queries.length < 4) {
+    queries.push(blueOceanWord);
+  }
+  
+  // 对 queries 去重
+  const uniqueQueries = [...new Set(queries)];
 
   // 合并并去重（根据 product.id 或 id 字段）
   const productMap = new Map();
 
-  // 添加核心词搜索结果
-  if (Array.isArray(coreProducts)) {
-    for (const product of coreProducts) {
-      const id = product.id || product.offerId || product.productId;
-      if (id && !productMap.has(id)) {
-        productMap.set(id, product);
-      }
-    }
-  }
-
-  // 添加蓝海词搜索结果
-  if (Array.isArray(blueOceanProducts)) {
-    for (const product of blueOceanProducts) {
-      const id = product.id || product.offerId || product.productId;
-      if (id && !productMap.has(id)) {
-        productMap.set(id, product);
+  // 依次搜索每个查询并合并结果
+  for (const query of uniqueQueries) {
+    const products = await client.searchOffers(query);
+    if (Array.isArray(products)) {
+      for (const product of products) {
+        const id = product.id || product.offerId || product.productId;
+        if (id && !productMap.has(id)) {
+          productMap.set(id, product);
+        }
       }
     }
   }

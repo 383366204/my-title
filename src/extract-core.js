@@ -83,10 +83,10 @@ async function extractCoreFromPeerTitles(peerTitles) {
   try {
     const systemPrompt = `你是一个电商标题分析专家。请分析以下同行标题数组，提取：
 
-1. 核心词 (coreWord) - 1-2个词，代表商品的核心类别（如"项链女"、"连衣裙"）
+1. 核心词 (coreWord) - 1-2个词，代表商品的核心类别（如"项链"、"连衣裙"）
 2. 蓝海词 (blueOceanWord) - 从同行标题中提取出现频率最高的核心词组合，作为最佳标题前缀（如"银项链女"、"纯棉T恤男"）
 3. 修饰词列表 (modifiers) - 分析同行标题中的高频修饰词，并标注刚性程度：
-   - "rigid" = 刚性修饰词（材质、颜色、规格、人群）
+   - "rigid" = 刚性修饰词（材质、颜色、规格、人群、品类限定词）
    - "optional" = 可选修饰词（风格、流行词、季节词）
 
 判断规则：
@@ -94,6 +94,7 @@ async function extractCoreFromPeerTitles(peerTitles) {
 - 颜色相关词（如"黑色"、"白色"、"金色"）→ rigid  
 - 规格尺寸（如"XL"、"加大"、"长款"）→ rigid
 - 目标人群（如"女"、"男"、"学生"）→ rigid
+- 品类限定词 → rigid（如"猫咪"限定宠物用品、"婴儿"限定婴儿用品、"汽车"限定汽车用品。这些词虽然不是材质/颜色/规格，但不匹配则商品完全错误）
 - 风格（如"韩版"、"ins风"、"简约"）→ optional
 - 流行词（如"高级感"、"气质"、"百搭"）→ optional
 - 时间/季节（如"新款"、"夏季"、"2026"）→ optional
@@ -106,7 +107,11 @@ async function extractCoreFromPeerTitles(peerTitles) {
     {"word": "修饰词1", "rigidity": "rigid"},
     {"word": "修饰词2", "rigidity": "optional"}
   ]
-}`;
+}
+
+示例：
+同行标题["猫咪衣服宠物猫春装可爱小猫服装","猫咪衣服薄款夏季布偶猫宠物衣服"] → {"coreWord": "衣服", "blueOceanWord": "猫咪衣服", "modifiers": [{"word": "猫咪", "rigidity": "rigid"}, {"word": "宠物", "rigidity": "rigid"}, {"word": "春装", "rigidity": "optional"}]}
+同行标题["婴儿连体衣纯棉春秋款","婴儿衣服纯棉连体衣夏季"] → {"coreWord": "连体衣", "blueOceanWord": "婴儿连体衣", "modifiers": [{"word": "婴儿", "rigidity": "rigid"}, {"word": "纯棉", "rigidity": "rigid"}, {"word": "春秋款", "rigidity": "optional"}]}`;
 
     const messages = [
       { role: 'system', content: systemPrompt },
