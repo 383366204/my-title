@@ -2,6 +2,36 @@ const { postProcessTitle, constructFallbackTitle } = require('./title-utils');
 const GLMClient = require('./glm-client');
 
 /**
+ * 判断两个标题是否高度相似
+ * 当字符差异数 < 标题最大长度的30% 时视为重复
+ */
+function isSimilar(a, b) {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  const maxLen = Math.max(a.length, b.length);
+  if (maxLen === 0) return true;
+  const threshold = Math.max(2, Math.ceil(maxLen * 0.3));
+  let diff = 0;
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    if (a[i] !== b[i]) diff++;
+  }
+  return diff < threshold;
+}
+
+/**
+ * 基于相似度去重，保留第一个不重复的标题
+ */
+function dedupeTitles(titles) {
+  const result = [];
+  for (const title of titles) {
+    if (title && !result.some(existing => isSimilar(title, existing))) {
+      result.push(title);
+    }
+  }
+  return result;
+}
+
+/**
  * 使用 GLM 生成中文标题，包含降级兜底逻辑。
  * 注：当前实现不进行中文分词，直接拼接、过滤和去重。
  *
@@ -13,7 +43,7 @@ const GLMClient = require('./glm-client');
  * @param {number} [maxLength=60] 最大标题长度（字符数）
  * @returns {Promise<string[]>} 3-5 条候选标题
  */
-async function generateTitles(blueOceanWord, coreWord, modifiers = [], peerTitles = [], products = [], maxLength = 60) {
+async function generateTitles(blueOceanWord, coreWord, modifiers = [], peerTitles = [], products = [], maxLength = 60, minLength = 40) {
   // GLM 客户端实例，API KEY 等由环境变量提供
   const glmClient = new GLMClient({
     apiKey: process.env.GLM_API_KEY,
@@ -34,9 +64,9 @@ async function generateTitles(blueOceanWord, coreWord, modifiers = [], peerTitle
 
     // 使用统一后处理管线：移除违禁词 → 清理标点 → 蓝海词前置 → 长度归一化 → 去空格
     const processedTitles = glmTitles
-      .map(title => postProcessTitle(title, blueOceanWord, 40, maxLength))
+      .map(title => postProcessTitle(title, blueOceanWord, minLength, maxLength))
       .filter(title => title !== null);
-    const unique = Array.from(new Set(processedTitles));
+    const unique = dedupeTitles(processedTitles);
     // 返回最多 5 条
     return unique.slice(0, 5);
   } catch (err) {
@@ -50,4 +80,4 @@ async function generateTitles(blueOceanWord, coreWord, modifiers = [], peerTitle
   }
 }
 
-module.exports = { generateTitles };
+module.exports = { generateTitles, isSimilar, dedupeTitles };

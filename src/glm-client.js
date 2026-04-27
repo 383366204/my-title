@@ -209,12 +209,13 @@ class GLMClient {
   async generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles = [], products = [], maxLength = 60 }) {
   const systemPrompt = `你是一个电商标题生成专家。请生成3-5个SEO优化标题。
  
- 重要规则：
- 1. 每个标题必须以蓝海词"${blueOceanWord}"开头
- 2. 标题应参考1688商品标题和淘宝同行标题中的高频词汇
- 3. 标题长度控制在${Math.floor(maxLength / 2)}个汉字以内（${maxLength}个字符，1汉字=2字符）
- 4. 优先使用刚性修饰词（材质、颜色、规格、人群）
-  ${COMMON_TITLE_RULES_TEXT}
+  重要规则：
+  1. 每个标题必须以蓝海词"${blueOceanWord}"开头
+  2. 标题应参考1688商品标题和淘宝同行标题中的高频词汇
+  3. 标题长度控制在${Math.floor(maxLength / 2)}个汉字以内（${maxLength}个字符，1汉字=2字符）
+  4. 优先使用刚性修饰词（材质、颜色、规格、人群）
+  5. 每个标题必须差异化：从不同角度（风格、场景、人群、卖点）切入，禁止生成相同或高度相似的标题
+   ${COMMON_TITLE_RULES_TEXT}
  
  输出严格 JSON 格式，不要任何其他文本：
  {
