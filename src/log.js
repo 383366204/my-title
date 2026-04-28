@@ -8,7 +8,7 @@ function log(level, message, meta) {
   const ts = new Date().toISOString();
   const prefix = PREFIXES[level] || '';
   const extra = meta ? ' ' + JSON.stringify(meta) : '';
-  console.log(`${prefix} [${ts}] ${message}${extra}`);
+  console.error(`${prefix} [${ts}] ${message}${extra}`);
 }
 
 module.exports = {

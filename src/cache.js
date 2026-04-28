@@ -79,7 +79,7 @@ class ResultCache {
           }
         } catch (_) {}
       }
-      if (cleaned > 0) console.log(`🧹 清理 ${cleaned} 个过期缓存文件`);
+      if (cleaned > 0) console.error(`🧹 清理 ${cleaned} 个过期缓存文件`);
     } catch (_) {}
   }
 }

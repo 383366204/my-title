@@ -26,13 +26,13 @@ async function searchTaobaoTitles(keyword, options = {}) {
     await launchTaobaoDesktop();
     
     // 等待淘宝桌面版准备就绪
-    console.log('⏳ 等待淘宝桌面版准备就绪...');
+    console.error('⏳ 等待淘宝桌面版准备就绪...');
     await new Promise(resolve => setTimeout(resolve, 5000));
 
     // 转换路径为 Windows 格式
     const winPath = toWindowsPath(cliPath);
     
-    console.log(`🔍 搜索关键词: ${keyword}`);
+    console.error(`🔍 搜索关键词: ${keyword}`);
     
     // 调用 taobao-native 搜索商品
     const args = JSON.stringify({ keyword, sourceApp: 'my-title' });
@@ -60,7 +60,7 @@ async function searchTaobaoTitles(keyword, options = {}) {
         .map(p => p.title || '')
         .filter(t => t.length > 0);
       
-      console.log(`✅ 找到 ${titles.length} 个商品标题`);
+      console.error(`✅ 找到 ${titles.length} 个商品标题`);
       return titles;
     }
 

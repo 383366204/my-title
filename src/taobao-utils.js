@@ -34,10 +34,10 @@ function toWindowsPath(wslPath) {
  */
 async function launchTaobaoDesktop() {
   try {
-    console.log('🚀 正在启动淘宝桌面版...');
+    console.error('🚀 正在启动淘宝桌面版...');
     const winPath = toWindowsPath(TAOBAO_NATIVE_PATH);
     await execAsync(`cmd.exe /c "${winPath}" launch`, { timeout: 10000 });
-    console.log('✅ 淘宝桌面版已启动');
+    console.error('✅ 淘宝桌面版已启动');
     return true;
   } catch (error) {
     console.warn('⚠️  启动淘宝桌面版失败:', error.message);

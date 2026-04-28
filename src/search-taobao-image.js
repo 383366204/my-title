@@ -34,9 +34,9 @@ async function searchPeerTitlesByImage(products, options = {}) {
 
   // 记录开始时间
   const startTime = Date.now();
-  console.log(`\n🖼️  开始以图搜图任务`);
-  console.log(`   总商品数: ${products.length}`);
-  console.log(`   并发数: ${concurrency}, 批次间隔: ${intervalMs}ms, 超时: ${timeout}ms`);
+  console.error(`\n🖼️  开始以图搜图任务`);
+  console.error(`   总商品数: ${products.length}`);
+  console.error(`   并发数: ${concurrency}, 批次间隔: ${intervalMs}ms, 超时: ${timeout}ms`);
 
   // 过滤无图片URL的商品
   const validProducts = [];
@@ -54,13 +54,13 @@ async function searchPeerTitlesByImage(products, options = {}) {
 
   // 记录跳过数量日志
   if (skippedProducts.length > 0) {
-    console.log(`\n⚠️  跳过 ${skippedProducts.length} 个无效商品（无有效图片URL）：`);
+    console.error(`\n⚠️  跳过 ${skippedProducts.length} 个无效商品（无有效图片URL）：`);
     skippedProducts.forEach(({ index, product, reason }) => {
-      console.log(`   [${index + 1}] ID:${product.id || 'unknown'} - ${reason}`);
+      console.error(`   [${index + 1}] ID:${product.id || 'unknown'} - ${reason}`);
     });
   }
 
-  console.log(`\n✅ 有效商品: ${validProducts.length}/${products.length}`);
+  console.error(`\n✅ 有效商品: ${validProducts.length}/${products.length}`);
 
   // 如果没有有效商品，直接返回空结果
   if (validProducts.length === 0) {
@@ -70,12 +70,12 @@ async function searchPeerTitlesByImage(products, options = {}) {
       priceRange: { min: null, max: null },
       hasMatch: false
     }));
-    console.log('⚠️  无有效商品可处理，返回空结果');
+    console.error('⚠️  无有效商品可处理，返回空结果');
     return emptyResults;
   }
 
   // 只启动一次淘宝桌面版
-  console.log('\n🚀 启动淘宝桌面版...');
+  console.error('\n🚀 启动淘宝桌面版...');
   const launched = await launchTaobaoDesktop();
 
   if (!launched) {
@@ -90,9 +90,9 @@ async function searchPeerTitlesByImage(products, options = {}) {
   }
 
   // 等待桌面版就绪（5000ms）
-  console.log('⏳ 等待淘宝桌面版准备就绪...');
+  console.error('⏳ 等待淘宝桌面版准备就绪...');
   await new Promise(resolve => setTimeout(resolve, 5000));
-  console.log('✅ 淘宝桌面版准备就绪，开始处理图片搜索\n');
+  console.error('✅ 淘宝桌面版准备就绪，开始处理图片搜索\n');
 
   // 创建结果数组（最终返回，与输入 products 长度一致）
   const finalResults = new Array(products.length);
@@ -120,7 +120,7 @@ async function searchPeerTitlesByImage(products, options = {}) {
 
     // 失败重试：无匹配结果时等 2s 重试 1 次
     if (!result.hasMatch && (!result.peerTitles || result.peerTitles.length === 0)) {
-      console.log(`🔄 [Worker-${handlerIndex}] 首次失败，2s 后重试...`);
+      console.error(`🔄 [Worker-${handlerIndex}] 首次失败，2s 后重试...`);
       await new Promise(r => setTimeout(r, 2000));
       result = await imageSearchSingle(item.url, item.id, { timeout: 45000 }); // 更长超时
     }
@@ -157,7 +157,7 @@ async function searchPeerTitlesByImage(products, options = {}) {
         glmClient || null
       );
       filteredCount = cleanedTitles.length;
-      console.log(`🧹 标题清洗: ${originalCount} 条 → 过滤后 ${filteredCount} 条 → 精选 ${Math.min(filteredCount, 50)} 条`);
+      console.error(`🧹 标题清洗: ${originalCount} 条 → 过滤后 ${filteredCount} 条 → 精选 ${Math.min(filteredCount, 50)} 条`);
 
       finalResults.forEach(r => {
         if (r && r.hasMatch) {
@@ -198,8 +198,8 @@ async function searchPeerTitlesByImage(products, options = {}) {
  */
 async function imageSearchSingle(imageUrl, productId, options = {}) {
   const startTime = Date.now();
-  console.log(`\n🖼️ [${productId}] 开始以图搜图`);
-  console.log(`   图片URL: ${imageUrl.substring(0, 60)}...`);
+  console.error(`\n🖼️ [${productId}] 开始以图搜图`);
+  console.error(`   图片URL: ${imageUrl.substring(0, 60)}...`);
   
   // 单例锁：等待前一个搜索完成
   const releaseLock = await _acquireLock();
@@ -271,7 +271,7 @@ async function imageSearchSingle(imageUrl, productId, options = {}) {
         } catch (_) {}
         try {
           execSync(`taskkill /F /T /PID ${child.pid}`, { stdio: 'ignore' });
-          console.log(`🔪 [${productId}] taskkill 执行成功`);
+          console.error(`🔪 [${productId}] taskkill 执行成功`);
         } catch (e) {
           console.warn(`⚠️ [${productId}] taskkill 失败:`, e.message);
         }
@@ -553,7 +553,7 @@ async function cleanPeerTitles(rawTitles, coreWord, blueOceanWord, glmClient) {
   const deduped = dedupeTitles(filtered);
   const selected = selectTopTitles(deduped, blueOceanWord, coreWord, 50);
 
-  console.log(`🧹 清洗完成: ${rawTitles.length} → ${filtered.length} → ${deduped.length} → ${selected.length}`);
+  console.error(`🧹 清洗完成: ${rawTitles.length} → ${filtered.length} → ${deduped.length} → ${selected.length}`);
 
   return selected;
 }
