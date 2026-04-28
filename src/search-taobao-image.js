@@ -30,7 +30,7 @@ async function _acquireLock(timeoutMs = 120000) {
  * @returns {Promise<Array<{productId:string, peerTitles:string[], priceRange:{min:number,max:number}, hasMatch:boolean}>>}
  */
 async function searchPeerTitlesByImage(products, options = {}) {
-  const { coreWord, glmClient, concurrency = 2, intervalMs = 4000, timeout = 30000 } = options;
+  const { coreWord, glmClient, concurrency = 2, intervalMs = 4000, jitterMs = 0, timeout = 30000 } = options;
 
   // 记录开始时间
   const startTime = Date.now();
@@ -131,7 +131,7 @@ async function searchPeerTitlesByImage(products, options = {}) {
   }
 
   // 调用 withRateLimit 处理所有有效商品
-  const processedResults = await withRateLimit(itemsToProcess, handleItem, concurrency, intervalMs);
+  const processedResults = await withRateLimit(itemsToProcess, handleItem, concurrency, intervalMs, jitterMs);
 
   // 将处理结果回填到最终数组的正确位置
   processedResults.forEach((result, idx) => {
@@ -365,7 +365,7 @@ async function imageSearchSingle(imageUrl, productId, options = {}) {
  * @param {number} intervalMs - 批次间隔毫秒数
  * @returns {Promise<Array>}
  */
-async function withRateLimit(items, handler, concurrency = 2, intervalMs = 4000) {
+async function withRateLimit(items, handler, concurrency = 2, intervalMs = 4000, jitterMs = 0) {
   // 初始化结果数组（保持与输入顺序一致）
   const results = new Array(items.length);
   // 共享索引，用于 worker 协作消费队列
@@ -418,7 +418,7 @@ async function withRateLimit(items, handler, concurrency = 2, intervalMs = 4000)
       // 每完成 concurrency 个任务后等待 intervalMs
       if (completedCount % concurrency === 0 && completedCount < items.length) {
         logger.debug(`批次完成，等待 ${intervalMs}ms... (${completedCount}/${items.length})`);
-        await delay(intervalMs);
+        await delay(intervalMs + Math.floor(Math.random() * jitterMs));
       }
     }
   }
