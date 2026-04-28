@@ -250,7 +250,7 @@ async function _searchPeerTitles({ products, blueOceanWord, peerTitles, glmClien
             console.error('[peerTitles] 开始以图搜图, 商品数:', products.length);
             // 每个商品都需要自己的同行标题来生成专属标题，全部搜图
             // 串行 + 40秒基础间隔 + 随机0-20秒抖动，避免触发淘宝限流
-            imageSearchResults = await searchPeerTitlesByImage(products, { coreWord: blueOceanWord, glmClient, concurrency: 1, intervalMs: 40000, jitterMs: 20000 });
+            imageSearchResults = await searchPeerTitlesByImage(products, { coreWord: blueOceanWord, glmClient, concurrency: 1, intervalMs: 40000, jitterMs: 20000, timeout: 60000 });
            taobaoTitles = imageSearchResults
             .filter(r => r.hasMatch && Array.isArray(r.peerTitles))
             .flatMap(r => r.peerTitles);
