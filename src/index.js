@@ -246,11 +246,11 @@ async function _searchPeerTitles({ products, blueOceanWord, peerTitles, glmClien
        };
        if (isImageSearchAvailable()) {
          const { searchPeerTitlesByImage } = require('./search-taobao-image');
-         try {
-           console.error('[peerTitles] 开始以图搜图, 商品数:', products.length);
-           // 只取前3个商品搜图，避免请求过多触发限流
-           const topProducts = products.slice(0, 3);
-           imageSearchResults = await searchPeerTitlesByImage(topProducts, { coreWord: blueOceanWord, glmClient, concurrency: 1 });
+          try {
+            console.error('[peerTitles] 开始以图搜图, 商品数:', products.length);
+            // 每个商品都需要自己的同行标题来生成专属标题，全部搜图
+            // 串行 + 6秒间隔，避免触发淘宝限流
+            imageSearchResults = await searchPeerTitlesByImage(products, { coreWord: blueOceanWord, glmClient, concurrency: 1, intervalMs: 6000 });
            taobaoTitles = imageSearchResults
             .filter(r => r.hasMatch && Array.isArray(r.peerTitles))
             .flatMap(r => r.peerTitles);
