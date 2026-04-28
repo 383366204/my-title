@@ -244,12 +244,14 @@ async function _searchPeerTitles({ products, blueOceanWord, peerTitles, glmClien
            return false;
          }
        };
-      if (isImageSearchAvailable()) {
-        const { searchPeerTitlesByImage } = require('./search-taobao-image');
-        try {
-          console.error('[peerTitles] 开始以图搜图, 商品数:', products.length);
-          imageSearchResults = await searchPeerTitlesByImage(products, { coreWord: blueOceanWord, glmClient });
-          taobaoTitles = imageSearchResults
+       if (isImageSearchAvailable()) {
+         const { searchPeerTitlesByImage } = require('./search-taobao-image');
+         try {
+           console.error('[peerTitles] 开始以图搜图, 商品数:', products.length);
+           // 只取前3个商品搜图，避免请求过多触发限流
+           const topProducts = products.slice(0, 3);
+           imageSearchResults = await searchPeerTitlesByImage(topProducts, { coreWord: blueOceanWord, glmClient, concurrency: 1 });
+           taobaoTitles = imageSearchResults
             .filter(r => r.hasMatch && Array.isArray(r.peerTitles))
             .flatMap(r => r.peerTitles);
           log('🔎 以图搜图完成，提取同行标题数量: ' + taobaoTitles.length);
