@@ -430,10 +430,6 @@ async function run(blueOceanWord, options = {}) {
   const log = silent ? () => {} : console.log.bind(console);
   const warn = silent ? () => {} : console.warn.bind(console);
 
-  const timeoutPromise = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error(`流程超时(${RUN_TIMEOUT/1000}s)，请简化关键词或减少数量`)), RUN_TIMEOUT)
-  );
-
   const cache = new ResultCache({ cacheDir: path.join(__dirname, '..', '.cache') });
   // 计算 peerTitles hash 用于缓存键区分
   const _peerTitlesHash = (peerTitles && peerTitles.length > 0)
@@ -569,12 +565,16 @@ async function run(blueOceanWord, options = {}) {
 
   // 步骤 4: GLM 标题生成（含降级路径 + 超时保护）
   log('✍️  尝试 GLM selectAndGenerate 以输出更多字段...');
-  const stats = {
-    coreWord,
-    modifiers: modifiers.map(m => m.word),
-    matchedProducts: products.length,
-    trace
-  };
+   const stats = {
+     coreWord,
+     modifiers: modifiers.map(m => m.word),
+     matchedProducts: products.length,
+     trace
+   };
+
+  const timeoutPromise = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error(`标题生成超时(${RUN_TIMEOUT/1000}s)，请简化关键词或减少数量`)), RUN_TIMEOUT)
+  );
 
   return Promise.race([
     _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles, products, taobaoTitles, maxLength, imageSearchResults, stats, cache, _peerTitlesHash, glmClient, log, warn, limit, sycmKeywords, sycmDataHash: _sycmDataHash }),
