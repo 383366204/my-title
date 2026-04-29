@@ -30,7 +30,7 @@ async function _acquireLock(timeoutMs = 120000) {
  * @returns {Promise<{results: Array<{productId:string, peerTitles:string[], priceRange:{min:number,max:number}, hasMatch:boolean}>, captchaDetected: boolean}>}
  */
 async function searchPeerTitlesByImage(products, options = {}) {
-  const { coreWord, glmClient, concurrency = 2, intervalMs = 4000, jitterMs = 0, timeout = 30000, signal = null, onProgress = null, skipFlag = null } = options;
+  const { coreWord, glmClient, concurrency = 2, intervalMs = 4000, jitterMs = 0, timeout = 30000, signal = null, onProgress = null, skipFlag = null, maxImageSearch = 0 } = options;
 
   // 记录开始时间
   const startTime = Date.now();
@@ -38,17 +38,20 @@ async function searchPeerTitlesByImage(products, options = {}) {
   console.error(`   总商品数: ${products.length}`);
   console.error(`   并发数: ${concurrency}, 批次间隔: ${intervalMs}ms, 超时: ${timeout}ms`);
 
-  // 过滤无图片URL的商品
-  const validProducts = [];
+  // 去重：按主图URL分组，相同URL只搜一次
+  const urlToProducts = new Map(); // url -> [{ index, product }]
   const skippedProducts = [];
 
   for (let i = 0; i < products.length; i++) {
     const p = products[i];
-    // 验证商品是否有有效的图片URL
     if (!p.url || !p.url.startsWith('http')) {
       skippedProducts.push({ index: i, product: p, reason: !p.url ? '无图片URL' : 'URL不以http开头' });
     } else {
-      validProducts.push({ index: i, product: p });
+      const urlKey = p.url.split('?')[0]; // 去掉查询参数避免同一图片不同CDN参数
+      if (!urlToProducts.has(urlKey)) {
+        urlToProducts.set(urlKey, []);
+      }
+      urlToProducts.get(urlKey).push({ index: i, product: p });
     }
   }
 
@@ -60,7 +63,23 @@ async function searchPeerTitlesByImage(products, options = {}) {
     });
   }
 
-  console.error(`\n✅ 有效商品: ${validProducts.length}/${products.length}`);
+  // 每个唯一URL只搜一次
+  const validProducts = [];
+  for (const [url, items] of urlToProducts) {
+    validProducts.push(items[0]); // 取第一个商品作为代表
+  }
+
+  const totalValidProducts = products.length - skippedProducts.length;
+  console.error(`\n✅ 有效商品: ${validProducts.length} 张唯一图片 / ${totalValidProducts} 个商品 (去重前)`);
+  if (validProducts.length < totalValidProducts) {
+    console.error(`   📋 去重: ${totalValidProducts - validProducts.length} 个重复图片跳过`);
+  }
+
+  // maxImageSearch 限制：只搜前 N 个
+  if (maxImageSearch > 0 && validProducts.length > maxImageSearch) {
+    console.error(`   ✂️  max_image_search=${maxImageSearch}，只搜前 ${maxImageSearch} 张（共 ${validProducts.length} 张唯一图片）`);
+    validProducts.splice(maxImageSearch);
+  }
 
   // 如果没有有效商品，直接返回空结果
   if (validProducts.length === 0) {
@@ -107,10 +126,11 @@ async function searchPeerTitlesByImage(products, options = {}) {
     };
   });
 
-  // 准备要处理的有效商品列表
+  // 准备要处理的有效商品列表（每个唯一图片的代表商品）
   const itemsToProcess = validProducts.map(({ index, product }) => ({
     ...product,
-    originalIndex: index
+    originalIndex: index,
+    urlKey: product.url.split('?')[0] // 保存URL key用于结果共享
   }));
 
   // 定义 handler：对单个商品执行图片搜索
@@ -141,7 +161,7 @@ async function searchPeerTitlesByImage(products, options = {}) {
     itemsToProcess, 
     handleItem, 
     concurrency, 
-    intervalMs, 
+    intervalMs, // 传递给 withRateLimit 作为 initialIntervalMs
     jitterMs,
     signal,
     onProgress ? (progress) => {
@@ -150,11 +170,22 @@ async function searchPeerTitlesByImage(products, options = {}) {
     } : null,
      skipFlag
    );
-   // 将处理结果回填到最终数组的正确位置
+   // 将搜图结果共享给所有同图商品
+  const urlToResult = new Map();
   processedResults.forEach((result, idx) => {
-    const originalIndex = itemsToProcess[idx].originalIndex;
-    finalResults[originalIndex] = result;
+    const product = itemsToProcess[idx];
+    urlToResult.set(product.urlKey, result);
   });
+
+  // 填充 finalResults：代表商品直接取结果，同图商品复制结果
+  for (const [url, items] of urlToProducts) {
+    const result = urlToResult.get(url);
+    if (result) {
+      for (const { index } of items) {
+        finalResults[index] = { ...result, productId: products[index].id };
+      }
+    }
+  }
 
   // 收集所有同行标题进行清洗
   let taobaoTitles = finalResults
@@ -414,14 +445,14 @@ async function imageSearchSingle(imageUrl, productId, options = {}) {
  * @param {Array} items - 待处理项
  * @param {Function} handler - 每项的处理函数
  * @param {number} concurrency - 最大并发数
- * @param {number} intervalMs - 批次间隔毫秒数
+ * @param {number} initialIntervalMs - 初始批次间隔毫秒数（动态自适应）
  * @param {number} jitterMs - 随机抖动毫秒数
  * @param {AbortSignal|null} signal - 取消信号
  * @param {Function|null} onProgress - 进度回调函数
  * @param {Object|null} skipFlag - 外部跳过标志对象 { skipImageSearch: boolean }
  * @returns {Promise<{results: Array, captchaDetected: boolean}>}
  */
-async function withRateLimit(items, handler, concurrency = 2, intervalMs = 4000, jitterMs = 0, signal = null, onProgress = null, skipFlag = null) {
+async function withRateLimit(items, handler, concurrency = 2, initialIntervalMs = 4000, jitterMs = 0, signal = null, onProgress = null, skipFlag = null) {
   // 初始化结果数组（保持与输入顺序一致）
   const results = new Array(items.length);
   // 共享索引，用于 worker 协作消费队列
@@ -430,6 +461,13 @@ async function withRateLimit(items, handler, concurrency = 2, intervalMs = 4000,
   let batchCount = 0;
   let consecutiveTimeouts = 0;
   let captchaDetected = false;
+
+  // 动态间隔状态
+  let currentInterval = initialIntervalMs;
+  const MIN_INTERVAL = 10000;  // 最低 10 秒
+  const MAX_INTERVAL = 60000;  // 最高 60 秒
+  let consecutiveSuccess = 0;   // 连续成功计数
+  let consecutiveFail = 0;     // 连续失败计数
 
   // 延迟函数：等待指定毫秒数
   const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -473,6 +511,32 @@ async function withRateLimit(items, handler, concurrency = 2, intervalMs = 4000,
         const elapsed = Date.now() - startTime;
         logger.debug(`[Worker-${workerId}] 第 ${index + 1} 项完成，耗时 ${elapsed}ms`);
         
+        // 动态间隔调整
+        if (results[index]?.hasMatch) {
+          // 成功：逐步缩短间隔
+          consecutiveSuccess++;
+          consecutiveFail = 0;
+          if (consecutiveSuccess >= 2 && currentInterval > MIN_INTERVAL) {
+            currentInterval = Math.max(MIN_INTERVAL, currentInterval - 5000);
+            console.error(`[Worker-${workerId}] 连续成功 ${consecutiveSuccess} 次，间隔缩短至 ${currentInterval/1000}s`);
+            consecutiveSuccess = 0;
+          }
+        } else if (results[index]?.timeout || results[index]?.aborted) {
+          // 超时/取消：加长间隔
+          consecutiveFail++;
+          consecutiveSuccess = 0;
+          currentInterval = Math.min(MAX_INTERVAL, currentInterval + 15000);
+          console.error(`[Worker-${workerId}] 搜索超时/失败，间隔延长至 ${currentInterval/1000}s`);
+        } else {
+          // 无匹配但非超时：适度加长
+          consecutiveFail++;
+          consecutiveSuccess = 0;
+          if (consecutiveFail >= 2) {
+            currentInterval = Math.min(MAX_INTERVAL, currentInterval + 10000);
+            console.error(`[Worker-${workerId}] 连续无匹配 ${consecutiveFail} 次，间隔延长至 ${currentInterval/1000}s`);
+          }
+        }
+        
         // 检查超时并更新连续超时计数器
         if (results[index]?.timeout === true) {
           consecutiveTimeouts++;
@@ -502,10 +566,11 @@ async function withRateLimit(items, handler, concurrency = 2, intervalMs = 4000,
       
       if (onProgress) onProgress({ completed: completedCount, total: items.length });
 
-      // 每完成 concurrency 个任务后等待 intervalMs
+      // 每完成 concurrency 个任务后等待 currentInterval
       if (completedCount % concurrency === 0 && completedCount < items.length) {
-        logger.debug(`批次完成，等待 ${intervalMs}ms... (${completedCount}/${items.length})`);
-        await delay(intervalMs + Math.floor(Math.random() * jitterMs));
+        const jitter = Math.floor(Math.random() * (jitterMs || 5000)); // 默认 0-5s 抖动
+        logger.debug(`批次完成，等待 ${currentInterval/1000}s + ${jitter/1000}s 抖动... (${completedCount}/${items.length})`);
+        await delay(currentInterval + jitter);
       }
     }
   }

@@ -419,8 +419,11 @@ server.tool(
     use_image_search: z.boolean().default(false).describe('启用淘宝以图搜词获取同行热门标题（默认false）'),
     cancel: z.boolean().default(false).describe('取消正在处理的任务（需要传入task_id）'),
     skip_image_search: z.boolean().default(false).describe('跳过已触发的图片搜索（需要传入task_id）'),
+    max_image_search: z.number().default(0).describe('图搜最大商品数（0=不限制，建议10-15）'),
+    min_price: z.number().default(0).describe('最低价格过滤（元，0=不过滤）'),
+    max_price: z.number().default(0).describe('最高价格过滤（元，0=不过滤）'),
   },
-  async ({ keyword, length, keyword_data, task_id, research, use_image_search, cancel, skip_image_search }) => {
+  async ({ keyword, length, keyword_data, task_id, research, use_image_search, cancel, skip_image_search, max_image_search, min_price, max_price }) => {
     // Research mode: sync call, returns keyword recommendations
     if (research) {
       const result = await run(keyword, { research: true });
@@ -501,26 +504,32 @@ server.tool(
 
     const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     const abortController = new AbortController();
-    const estimatedSeconds = use_image_search ? (40 * 50 + 5) : 60; // 默认预估 40 商品
+    const estimatedSeconds = use_image_search ? ((max_image_search || 40) * 50 + 5) : 60; // 默认预估 40 商品
     const skipFlag = { skipImageSearch: false };
     tasks.set(id, { 
       status: 'processing', 
       createdAt: Date.now(), 
       keyword_data: !!keyword_data,
       useImageSearch: use_image_search,
+      maxImageSearch: max_image_search,
+      minPrice: min_price,
+      maxPrice: max_price,
       abortController: abortController,
       progress: { completed: 0, total: 0, estimated_seconds_remaining: estimatedSeconds },
       estimatedSeconds,
       skipFlag
     });
 
-    console.error(`[my-title] task ${id} started: keyword="${keyword}", length=${length}, use_image_search=${use_image_search}`);
+    console.error(`[my-title] task ${id} started: keyword="${keyword}", length=${length}, use_image_search=${use_image_search}, max_image_search=${max_image_search}, min_price=${min_price}, max_price=${max_price}`);
 
     run(keyword, { 
       maxLength: length || 60, 
       silent: true, 
       sycmData: keyword_data,
       useImageSearch: use_image_search,
+      maxImageSearch: max_image_search,
+      minPrice: min_price,
+      maxPrice: max_price,
       signal: abortController.signal,
       skipFlag: tasks.get(id).skipFlag,
       onProductsFound: (count) => {

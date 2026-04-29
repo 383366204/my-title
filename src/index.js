@@ -227,11 +227,12 @@ async function _search1688(coreWord, blueOceanWord, modifiers, limit, log, warn)
  * @param {Function} params.log
  * @param {Function} params.warn
  * @param {boolean} [params.useImageSearch=false] - 是否启用以图搜图
+ * @param {number} [params.maxImageSearch=0] - 图搜最大商品数（0=不限制）
  * @param {AbortSignal|null} [params.signal=null] - 取消信号
  * @param {Object} [params.trace=null] - 追踪信息对象
  * @returns {Promise<{taobaoTitles: Array, imageSearchResults: Array}>}
  */
-async function _searchPeerTitles({ products, blueOceanWord, peerTitles, glmClient, log, warn, useImageSearch = false, signal = null, trace = null, skipFlag = null }) {
+async function _searchPeerTitles({ products, blueOceanWord, peerTitles, glmClient, log, warn, useImageSearch = false, maxImageSearch = 0, signal = null, trace = null, skipFlag = null }) {
   let taobaoTitles = [];
   let imageSearchResults = [];
   let peerSource = 'none';
@@ -255,9 +256,9 @@ async function _searchPeerTitles({ products, blueOceanWord, peerTitles, glmClien
               console.error('[peerTitles] 开始以图搜图, 商品数:', products.length);
                // 每个商品都需要自己的同行标题来生成专属标题，全部搜图
                // 串行 + 40秒基础间隔 + 随机0-20秒抖动，避免触发淘宝限流
-                const imageSearchResponse = await searchPeerTitlesByImage(products, { coreWord: blueOceanWord, glmClient, concurrency: 1, intervalMs: 40000, jitterMs: 20000, timeout: 60000, signal, skipFlag, onProgress: (progress) => {
-                  if (onProgress) onProgress(progress);
-                }});
+                 const imageSearchResponse = await searchPeerTitlesByImage(products, { coreWord: blueOceanWord, glmClient, concurrency: 1, intervalMs: 40000, jitterMs: 20000, timeout: 60000, maxImageSearch, signal, skipFlag, onProgress: (progress) => {
+                   if (onProgress) onProgress(progress);
+                 }});
                 imageSearchResults = imageSearchResponse.results;
                 // 检查是否检测到验证码
                 if (imageSearchResponse.captchaDetected) {
@@ -465,7 +466,7 @@ async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles,
 }
 
 async function run(blueOceanWord, options = {}) {
-  const { maxLength = 60, peerTitles = [], silent = false, limit = 0, onBatch = null, research = false, sycmData, useImageSearch = false, signal = null, onProductsFound = null, onProgress = null, skipFlag = null } = options;
+  const { maxLength = 60, peerTitles = [], silent = false, limit = 0, onBatch = null, research = false, sycmData, useImageSearch = false, maxImageSearch = 0, minPrice = 0, maxPrice = 0, signal = null, onProductsFound = null, onProgress = null, skipFlag = null } = options;
   
   const log = silent ? () => {} : console.log.bind(console);
   const warn = silent ? () => {} : console.warn.bind(console);
@@ -565,6 +566,19 @@ async function run(blueOceanWord, options = {}) {
   // 1688 搜索完成后触发回调
   if (onProductsFound) onProductsFound(products.length);
 
+  // 价格过滤（在图搜前减少商品数量）
+  if (minPrice > 0 || maxPrice > 0) {
+    const beforeCount = products.length;
+    products = products.filter(p => {
+      const price = parseFloat(p.price || p.salePrice || '0');
+      if (minPrice > 0 && price < minPrice) return false;
+      if (maxPrice > 0 && price > maxPrice) return false;
+      return true;
+    });
+    console.error(`[价格过滤] ${beforeCount} → ${products.length} 个商品 (min=${minPrice}, max=${maxPrice})`);
+    if (onProductsFound) onProductsFound(products.length); // 更新预估
+  }
+
   // 步骤 3: 同行标题搜索
   log('🔎 第三步：根据条件进行图像搜索或文字搜索（串行）...');
   const glmClient = new GLMClient({
@@ -572,7 +586,7 @@ async function run(blueOceanWord, options = {}) {
     apiBase: process.env.GLM_API_BASE,
     model: process.env.GLM_API_MODEL
   });
-  const { taobaoTitles, imageSearchResults, peerSource } = await _searchPeerTitles({ products, blueOceanWord, peerTitles, glmClient, log, warn, useImageSearch, signal, trace, skipFlag });
+  const { taobaoTitles, imageSearchResults, peerSource } = await _searchPeerTitles({ products, blueOceanWord, peerTitles, glmClient, log, warn, useImageSearch, maxImageSearch, signal, trace, skipFlag });
   trace.peerTitlesSource = peerSource;
 
   // 若提供了 SYCM 数据，解析并增强关键词，随后在 _generateTitles 调用中注入 sycmKeywords
