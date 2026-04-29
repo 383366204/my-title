@@ -27,10 +27,10 @@ async function _acquireLock(timeoutMs = 120000) {
  * 主入口：对一批1688商品逐一执行以图搜图
  * @param {Array<{id:string, url:string, title:string}>} products - 1688商品列表
  * @param {object} options - 配置选项
- * @returns {Promise<Array<{productId:string, peerTitles:string[], priceRange:{min:number,max:number}, hasMatch:boolean}>>}
+ * @returns {Promise<{results: Array<{productId:string, peerTitles:string[], priceRange:{min:number,max:number}, hasMatch:boolean}>, captchaDetected: boolean}>}
  */
 async function searchPeerTitlesByImage(products, options = {}) {
-  const { coreWord, glmClient, concurrency = 2, intervalMs = 4000, jitterMs = 0, timeout = 30000 } = options;
+  const { coreWord, glmClient, concurrency = 2, intervalMs = 4000, jitterMs = 0, timeout = 30000, signal = null, onProgress = null, skipFlag = null } = options;
 
   // 记录开始时间
   const startTime = Date.now();
@@ -116,13 +116,13 @@ async function searchPeerTitlesByImage(products, options = {}) {
   // 定义 handler：对单个商品执行图片搜索
   async function handleItem(item, handlerIndex) {
     // imageSearchSingle 已改为异步，确保返回 Promise 并在这里等待结果
-    let result = await imageSearchSingle(item.url, item.id, { timeout });
+    let result = await imageSearchSingle(item.url, item.id, { timeout, signal });
 
     // 失败重试：无匹配结果时等 2s 重试 1 次
     if (!result.hasMatch && (!result.peerTitles || result.peerTitles.length === 0)) {
       console.error(`🔄 [Worker-${handlerIndex}] 首次失败，2s 后重试...`);
       await new Promise(r => setTimeout(r, 2000));
-      result = await imageSearchSingle(item.url, item.id, { timeout: 45000 }); // 更长超时
+      result = await imageSearchSingle(item.url, item.id, { timeout: 45000, signal }); // 更长超时
     }
 
     // 保存原始索引以便回填结果
@@ -130,10 +130,27 @@ async function searchPeerTitlesByImage(products, options = {}) {
     return result;
   }
 
-  // 调用 withRateLimit 处理所有有效商品
-  const processedResults = await withRateLimit(itemsToProcess, handleItem, concurrency, intervalMs, jitterMs);
-
-  // 将处理结果回填到最终数组的正确位置
+  const progressRef = { completed: 0, total: validProducts.length, startedAt: Date.now() };
+   
+  if (signal?.aborted) {
+    console.error('🛑 搜索任务已取消，直接返回空结果');
+    return finalResults;
+  }
+  
+  const { results: processedResults, captchaDetected } = await withRateLimit(
+    itemsToProcess, 
+    handleItem, 
+    concurrency, 
+    intervalMs, 
+    jitterMs,
+    signal,
+    onProgress ? (progress) => {
+      progressRef.completed = progress.completed;
+      onProgress(progress);
+    } : null,
+     skipFlag
+   );
+   // 将处理结果回填到最终数组的正确位置
   processedResults.forEach((result, idx) => {
     const originalIndex = itemsToProcess[idx].originalIndex;
     finalResults[originalIndex] = result;
@@ -184,9 +201,10 @@ async function searchPeerTitlesByImage(products, options = {}) {
     peerTitles: peerTitlesTotal,
     totalTime: totalTime,
     avgTime: (totalTime / validProducts.length / 1000).toFixed(1)
-  });
+   });
 
-  return finalResults;
+   // 返回包含结果数组和验证码检测标志的对象
+   return { results: finalResults, captchaDetected };
 }
 
 /**
@@ -194,12 +212,21 @@ async function searchPeerTitlesByImage(products, options = {}) {
  * @param {string} imageUrl - 1688商品主图CDN URL
  * @param {string} productId - 商品ID（用于关联结果）
  * @param {object} options - 配置
- * @returns {{productId:string, peerTitles:string[], priceRange:{min:number|null,max:number|null}, hasMatch:boolean}}
+ * @param {number} [options.timeout=30000] - 超时时间（毫秒）
+ * @param {AbortSignal|null} [options.signal=null] - 取消信号
+ * @returns {{productId:string, peerTitles:string[], priceRange:{min:number|null,max:number|null}, hasMatch:boolean, timeout?:boolean, aborted?:boolean}}
  */
 async function imageSearchSingle(imageUrl, productId, options = {}) {
+  const { timeout = 30000, signal = null } = options;
   const startTime = Date.now();
   console.error(`\n🖼️ [${productId}] 开始以图搜图`);
   console.error(`   图片URL: ${imageUrl.substring(0, 60)}...`);
+  
+  // 检查是否已取消
+  if (signal?.aborted) {
+    console.error(`🛑 [${productId}] 搜索已取消，直接返回空结果`);
+    return { productId, hasMatch: false, peerTitles: [], priceRange: { min: null, max: null }, aborted: true };
+  }
   
   // 单例锁：等待前一个搜索完成
   const releaseLock = await _acquireLock();
@@ -218,7 +245,6 @@ async function imageSearchSingle(imageUrl, productId, options = {}) {
     }
 
     // 2) 构建 CLI 参数并执行（使用 --request 文件模式完全绕过 shell 转义问题）
-    const timeout = options.timeout || 30000;
     // 使用 Windows 可访问的共享目录（C:\Windows\Temp）而非 WSL 的 /tmp
     const sharedTmpDir = '/mnt/c/Windows/Temp';
     const outFile = path.join(sharedTmpDir, `taobao-image-${productId}-${Date.now()}.json`);
@@ -252,19 +278,37 @@ async function imageSearchSingle(imageUrl, productId, options = {}) {
       ].join('\r\n');
       fs.writeFileSync(batFile, batContent, 'utf8');
 
-      const child = spawn('cmd.exe', ['/c', winBatFile], {
+      const child = spawn('/mnt/c/Windows/System32/cmd.exe', ['/c', winBatFile], {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe']
       });
 
       let timer;
+      let abortHandler = null;
+
+      // 监听 abort 信号
+      if (signal) {
+        abortHandler = () => {
+          console.error(`🛑 [${productId}] 收到取消信号，终止子进程`);
+          try { child.kill(); } catch (_) {}
+          try { if (batFile && fs.existsSync(batFile)) fs.unlinkSync(batFile); } catch (_) {}
+          try { if (reqFile && fs.existsSync(reqFile)) fs.unlinkSync(reqFile); } catch (_) {}
+          try { if (outFile && fs.existsSync(outFile)) fs.unlinkSync(outFile); } catch (_) {}
+          resolveOnce({ productId, hasMatch: false, peerTitles: [], priceRange: { min: null, max: null }, aborted: true });
+        };
+        signal.addEventListener('abort', abortHandler, { once: true });
+      }
 
       child.stdout.on('data', data => { stdout += data; });
       child.stderr.on('data', data => { /* 可忽略或 log */ });
 
-      timer = setTimeout(() => {
+       timer = setTimeout(() => {
         const elapsed = Date.now() - startTime;
         console.warn(`⏱️  [${productId}] 超时! (${elapsed}ms > ${timeout}ms)，强制终止进程 PID=${child.pid}`);
+        // 移除 abort 事件监听器
+        if (signal && abortHandler) {
+          signal.removeEventListener('abort', abortHandler);
+        }
         try {
           // 尝试强制结束进程
           child.kill();
@@ -281,6 +325,10 @@ async function imageSearchSingle(imageUrl, productId, options = {}) {
 
       child.on('close', (code) => {
         clearTimeout(timer);
+        // 移除 abort 事件监听器
+        if (signal && abortHandler) {
+          signal.removeEventListener('abort', abortHandler);
+        }
         
         const elapsed = Date.now() - startTime;
 
@@ -345,6 +393,10 @@ async function imageSearchSingle(imageUrl, productId, options = {}) {
 
       child.on('error', (err) => {
         clearTimeout(timer);
+        // 移除 abort 事件监听器
+        if (signal && abortHandler) {
+          signal.removeEventListener('abort', abortHandler);
+        }
         // 清理临时文件
         try { if (fs.existsSync(reqFile)) fs.unlinkSync(reqFile); } catch (_) {}
         try { if (batFile && fs.existsSync(batFile)) fs.unlinkSync(batFile); } catch (_) {}
@@ -363,15 +415,21 @@ async function imageSearchSingle(imageUrl, productId, options = {}) {
  * @param {Function} handler - 每项的处理函数
  * @param {number} concurrency - 最大并发数
  * @param {number} intervalMs - 批次间隔毫秒数
- * @returns {Promise<Array>}
+ * @param {number} jitterMs - 随机抖动毫秒数
+ * @param {AbortSignal|null} signal - 取消信号
+ * @param {Function|null} onProgress - 进度回调函数
+ * @param {Object|null} skipFlag - 外部跳过标志对象 { skipImageSearch: boolean }
+ * @returns {Promise<{results: Array, captchaDetected: boolean}>}
  */
-async function withRateLimit(items, handler, concurrency = 2, intervalMs = 4000, jitterMs = 0) {
+async function withRateLimit(items, handler, concurrency = 2, intervalMs = 4000, jitterMs = 0, signal = null, onProgress = null, skipFlag = null) {
   // 初始化结果数组（保持与输入顺序一致）
   const results = new Array(items.length);
   // 共享索引，用于 worker 协作消费队列
   let currentIndex = 0;
   let completedCount = 0;
   let batchCount = 0;
+  let consecutiveTimeouts = 0;
+  let captchaDetected = false;
 
   // 延迟函数：等待指定毫秒数
   const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -379,6 +437,18 @@ async function withRateLimit(items, handler, concurrency = 2, intervalMs = 4000,
   // 单个 worker：循环从队列取任务并执行
   async function worker(workerId) {
     while (true) {
+      if (signal?.aborted) {
+        console.error(`[Worker-${workerId}] 收到取消信号，停止工作`);
+        break;
+      }
+      if (skipFlag?.skipImageSearch) {
+        console.error(`[Worker-${workerId}] 收到跳过搜图信号，停止工作`);
+        break;
+      }
+      if (captchaDetected) {
+        console.error(`[Worker-${workerId}] 检测到验证码，停止工作`);
+        break;
+      }
       // 获取当前要处理的索引（原子操作）
       const index = currentIndex;
       if (index >= items.length) {
@@ -402,6 +472,21 @@ async function withRateLimit(items, handler, concurrency = 2, intervalMs = 4000,
         results[index] = await handler(item, index);
         const elapsed = Date.now() - startTime;
         logger.debug(`[Worker-${workerId}] 第 ${index + 1} 项完成，耗时 ${elapsed}ms`);
+        
+        // 检查超时并更新连续超时计数器
+        if (results[index]?.timeout === true) {
+          consecutiveTimeouts++;
+          console.error(`⚠️ 第 ${index + 1} 项搜索超时，连续超时计数: ${consecutiveTimeouts}`);
+        } else if (results[index]?.hasMatch === true) {
+          consecutiveTimeouts = 0; // 有匹配结果时重置计数器
+        }
+        
+        // 检查是否触发验证码检测
+        if (consecutiveTimeouts >= 3) {
+          console.error(`⚠️ 连续 ${consecutiveTimeouts} 个商品搜索超时，疑似遇到验证码`);
+          captchaDetected = true;
+          break;
+        }
       } catch (err) {
         console.warn(`⚠️ 图片搜索第 ${index + 1} 项失败:`, err.message);
         // 返回默认值，不影响其他 worker
@@ -414,6 +499,8 @@ async function withRateLimit(items, handler, concurrency = 2, intervalMs = 4000,
       }
 
       completedCount++;
+      
+      if (onProgress) onProgress({ completed: completedCount, total: items.length });
 
       // 每完成 concurrency 个任务后等待 intervalMs
       if (completedCount % concurrency === 0 && completedCount < items.length) {
@@ -432,7 +519,7 @@ async function withRateLimit(items, handler, concurrency = 2, intervalMs = 4000,
   // 等待所有 worker 完成
   await Promise.all(workers);
 
-  return results;
+  return { results, captchaDetected };
 }
 
 /**

@@ -33,14 +33,16 @@ function toWindowsPath(wslPath) {
  * @returns {Promise<boolean>} 是否成功启动
  */
 async function launchTaobaoDesktop() {
+  try { require('fs').appendFileSync('/tmp/imgsearch-debug.log', `[${new Date().toISOString()}] launchTaobaoDesktop called: TAOBAO_NATIVE_PATH=${TAOBAO_NATIVE_PATH}\n`); } catch(e) {}
   try {
     console.error('🚀 正在启动淘宝桌面版...');
     const winPath = toWindowsPath(TAOBAO_NATIVE_PATH);
-    await execAsync(`cmd.exe /c "${winPath}" launch`, { timeout: 10000 });
+    await execAsync(`/mnt/c/Windows/System32/cmd.exe /c "${winPath}" launch`, { timeout: 10000 });
     console.error('✅ 淘宝桌面版已启动');
     return true;
   } catch (error) {
     console.warn('⚠️  启动淘宝桌面版失败:', error.message);
+    try { require('fs').appendFileSync('/tmp/imgsearch-debug.log', `[${new Date().toISOString()}] launchTaobaoDesktop FAILED: ${error.message}\n`); } catch(e) {}
     return false;
   }
 }

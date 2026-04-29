@@ -1,49 +1,50 @@
 {
-  "active_plan": "/mnt/d/project/my-title/.sisyphus/plans/sycm-keyword-optimization.md",
-  "started_at": "2026-04-25T16:29:06.876Z",
+  "active_plan": "/mnt/d/project/my-title/.sisyphus/plans/taobao-image-control.md",
+  "started_at": "2026-04-29T12:49:17.900Z",
   "session_ids": [
-    "ses_24eeea21cffeaJqJy0o2z956be"
+    "ses_235bb9fdeffeYfO0iuEHOnGlU8"
   ],
-  "plan_name": "sycm-keyword-optimization",
-  "worktree_path": null,
   "session_origins": {
-    "ses_24eeea21cffeaJqJy0o2z956be": "direct"
+    "ses_235bb9fdeffeYfO0iuEHOnGlU8": "direct"
   },
+  "plan_name": "taobao-image-control",
+  "agent": "atlas",
   "task_sessions": {
     "todo:1": {
       "task_key": "todo:1",
       "task_label": "1",
-      "task_title": "SYCM数据解析器 `src/sycm-parser.js`",
-      "session_id": "ses_23a85378fffePo908Ai9hkVNpo",
+      "task_title": "MCP generate_title 参数扩展",
+      "session_id": "ses_226b47897ffexkwCnzovudjTpB",
       "agent": "Sisyphus-Junior",
       "category": "quick",
-      "updated_at": "2026-04-25T16:33:48.320Z"
+      "updated_at": "2026-04-29T12:52:56.595Z"
     },
     "todo:4": {
       "task_key": "todo:4",
       "task_label": "4",
-      "task_title": "关键词推荐器",
-      "session_id": "ses_23a80d45bffeb0ZFRXu81TBbD5",
+      "task_title": "滑块检测逻辑（连续3超时 → captcha_required）",
+      "session_id": "ses_2269fb364fferAxPmxMYBdAoeq",
       "agent": "Sisyphus-Junior",
-      "category": "quick",
-      "updated_at": "2026-04-25T16:40:27.574Z"
+      "category": "deep",
+      "updated_at": "2026-04-29T13:33:55.586Z"
     },
     "todo:7": {
       "task_key": "todo:7",
       "task_label": "7",
-      "task_title": "index.js集成 — research模式 + keyword-file加载 + 传递",
-      "session_id": "ses_23a7ad03bffe66NqqHTqUha4kG",
+      "task_title": "端到端集成测试 + 清理",
+      "session_id": "ses_2268aebdfffeP3MrLz4bcRJFij",
       "agent": "Sisyphus-Junior",
       "category": "quick",
-      "updated_at": "2026-04-25T16:48:37.520Z"
+      "updated_at": "2026-04-29T13:39:46.017Z"
     },
     "final-wave:f1": {
       "task_key": "final-wave:f1",
       "task_label": "F1",
       "task_title": "**Plan Compliance Audit** — `oracle`",
-      "session_id": "ses_23a7414abffeLj1Gh2MJka6yGJ",
-      "agent": "oracle",
-      "updated_at": "2026-04-25T16:51:09.594Z"
+      "session_id": "ses_2267de5b4ffeFucmi1bGngDmNM",
+      "agent": "Sisyphus-Junior",
+      "category": "quick",
+      "updated_at": "2026-04-29T13:52:36.394Z"
     }
   }
 }

@@ -146,6 +146,8 @@ function buildOutput({ coreWord, blueOceanWord, modifiers, products, selectedPro
  * - blueOceanWord: 用户原始输入，称为蓝海词
  * - options.maxLength: 生成标题的最大长度
  * - options.peerTitles: 可选的同行标题，若提供将跳过淘宝搜索
+ * - options.useImageSearch: 是否启用以图搜图功能（默认 false）
+ * - options.signal: AbortSignal 用于取消操作（默认 null）
  *
  * 返回对象结构：
  * {
@@ -224,9 +226,12 @@ async function _search1688(coreWord, blueOceanWord, modifiers, limit, log, warn)
  * @param {Object} params glmClient
  * @param {Function} params.log
  * @param {Function} params.warn
+ * @param {boolean} [params.useImageSearch=false] - 是否启用以图搜图
+ * @param {AbortSignal|null} [params.signal=null] - 取消信号
+ * @param {Object} [params.trace=null] - 追踪信息对象
  * @returns {Promise<{taobaoTitles: Array, imageSearchResults: Array}>}
  */
-async function _searchPeerTitles({ products, blueOceanWord, peerTitles, glmClient, log, warn }) {
+async function _searchPeerTitles({ products, blueOceanWord, peerTitles, glmClient, log, warn, useImageSearch = false, signal = null, trace = null, skipFlag = null }) {
   let taobaoTitles = [];
   let imageSearchResults = [];
   let peerSource = 'none';
@@ -234,56 +239,70 @@ async function _searchPeerTitles({ products, blueOceanWord, peerTitles, glmClien
     taobaoTitles = peerTitles;
     peerSource = 'manual_input';
    } else {
-     if (Array.isArray(products) && products.length > 0) {
-       const isImageSearchAvailable = () => {
-         try {
-           const m = require('./search-taobao-image');
-           return typeof m.isImageSearchAvailable === 'function' ? m.isImageSearchAvailable() : false;
-         } catch (e) {
-           console.error('[peerTitles] search-taobao-image 模块加载失败:', e.message);
-           return false;
-         }
-       };
-       if (isImageSearchAvailable()) {
-         const { searchPeerTitlesByImage } = require('./search-taobao-image');
+      if (Array.isArray(products) && products.length > 0) {
+        const isImageSearchAvailable = () => {
           try {
-            console.error('[peerTitles] 开始以图搜图, 商品数:', products.length);
-            // 每个商品都需要自己的同行标题来生成专属标题，全部搜图
-            // 串行 + 40秒基础间隔 + 随机0-20秒抖动，避免触发淘宝限流
-            imageSearchResults = await searchPeerTitlesByImage(products, { coreWord: blueOceanWord, glmClient, concurrency: 1, intervalMs: 40000, jitterMs: 20000, timeout: 60000 });
-           taobaoTitles = imageSearchResults
-            .filter(r => r.hasMatch && Array.isArray(r.peerTitles))
-            .flatMap(r => r.peerTitles);
-          log('🔎 以图搜图完成，提取同行标题数量: ' + taobaoTitles.length);
-           if ((taobaoTitles || []).length === 0) {
-             log('🔎 以图搜图无结果，尝试文字搜索...');
-             taobaoTitles = await require('./search-taobao').searchTaobaoTitles(blueOceanWord).catch((e) => { console.error('[peerTitles] 以图搜图无结果后文字搜索失败:', e.message); return []; });
+            const m = require('./search-taobao-image');
+            return typeof m.isImageSearchAvailable === 'function' ? m.isImageSearchAvailable() : false;
+          } catch (e) {
+            console.error('[peerTitles] search-taobao-image 模块加载失败:', e.message);
+            return false;
+          }
+        };
+         if (useImageSearch && isImageSearchAvailable()) {
+           const { searchPeerTitlesByImage } = require('./search-taobao-image');
+            try {
+              console.error('[peerTitles] 开始以图搜图, 商品数:', products.length);
+               // 每个商品都需要自己的同行标题来生成专属标题，全部搜图
+               // 串行 + 40秒基础间隔 + 随机0-20秒抖动，避免触发淘宝限流
+                const imageSearchResponse = await searchPeerTitlesByImage(products, { coreWord: blueOceanWord, glmClient, concurrency: 1, intervalMs: 40000, jitterMs: 20000, timeout: 60000, signal, skipFlag, onProgress: (progress) => {
+                  if (onProgress) onProgress(progress);
+                }});
+                imageSearchResults = imageSearchResponse.results;
+                // 检查是否检测到验证码
+                if (imageSearchResponse.captchaDetected) {
+                  if (trace) {
+                    trace.captchaDetected = true;
+                  }
+                  console.error('[peerTitles] 检测到验证码，使用部分搜图结果继续生成');
+                }
+              taobaoTitles = imageSearchResults
+               .filter(r => r.hasMatch && Array.isArray(r.peerTitles))
+               .flatMap(r => r.peerTitles);
+            log('🔎 以图搜图完成，提取同行标题数量: ' + taobaoTitles.length);
+            if ((taobaoTitles || []).length === 0) {
+              log('🔎 以图搜图无结果，尝试文字搜索...');
+              taobaoTitles = await require('./search-taobao').searchTaobaoTitles(blueOceanWord).catch((e) => { console.error('[peerTitles] 以图搜图无结果后文字搜索失败:', e.message); return []; });
+              peerSource = taobaoTitles.length > 0 ? 'taobao_text' : 'none';
+            } else {
+              peerSource = 'image_search';
+            }
+            console.error('[peerTitles] 以图搜图结果: peerTitles=' + taobaoTitles.length + ', source=' + peerSource);
+           } catch (err) {
+             console.error('[peerTitles] 以图搜图失败:', err && err.message ? err.message : err);
+             taobaoTitles = await require('./search-taobao').searchTaobaoTitles(blueOceanWord).catch((e) => { console.error('[peerTitles] 以图搜图失败后文字搜索也失败:', e.message); return []; });
              peerSource = taobaoTitles.length > 0 ? 'taobao_text' : 'none';
-           } else {
-             peerSource = 'image_search';
            }
-           console.error('[peerTitles] 以图搜图结果: peerTitles=' + taobaoTitles.length + ', source=' + peerSource);
-         } catch (err) {
-           console.error('[peerTitles] 以图搜图失败:', err && err.message ? err.message : err);
-           taobaoTitles = await require('./search-taobao').searchTaobaoTitles(blueOceanWord).catch((e) => { console.error('[peerTitles] 以图搜图失败后文字搜索也失败:', e.message); return []; });
-           peerSource = taobaoTitles.length > 0 ? 'taobao_text' : 'none';
-         }
-       } else {
-         console.error('[peerTitles] 以图搜图不可用，尝试文字搜索');
-         try {
+         } else if (useImageSearch && !isImageSearchAvailable()) {
+           console.error('[peerTitles] 用户要求图搜但不可用，降级到文字搜索');
            taobaoTitles = await require('./search-taobao').searchTaobaoTitles(blueOceanWord);
-          peerSource = taobaoTitles.length > 0 ? 'taobao_text' : 'none';
-         } catch (err) {
-           console.error('[peerTitles] 淘宝文字搜索失败:', err && err.message ? err.message : err);
-           taobaoTitles = [];
-           peerSource = 'none';
-         }
-       }
-     } else {
-       console.error('[peerTitles] 无商品数据，跳过同行标题搜索 (products=' + (products ? products.length : 'null') + ')');
-     }
-   }
-   return { taobaoTitles, imageSearchResults, peerSource };
+           peerSource = taobaoTitles.length > 0 ? 'taobao_text' : 'none';
+         } else {
+           console.error('[peerTitles] 以图搜图不可用，尝试文字搜索');
+           try {
+            taobaoTitles = await require('./search-taobao').searchTaobaoTitles(blueOceanWord);
+           peerSource = taobaoTitles.length > 0 ? 'taobao_text' : 'none';
+          } catch (err) {
+            console.error('[peerTitles] 淘宝文字搜索失败:', err && err.message ? err.message : err);
+            taobaoTitles = [];
+            peerSource = 'none';
+          }
+        }
+      } else {
+        console.error('[peerTitles] 无商品数据，跳过同行标题搜索 (products=' + (products ? products.length : 'null') + ')');
+      }
+    }
+    return { taobaoTitles, imageSearchResults, peerSource };
 }
 
 /**
@@ -303,12 +322,19 @@ async function _searchPeerTitles({ products, blueOceanWord, peerTitles, glmClien
  * @param {Object} params glmClient
  * @param {Function} params.log
  * @param {Function} params.warn
+ * @param {AbortSignal|null} [params.signal=null] - 取消信号
  * @returns {Promise<any>}
  */
-async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles, products, taobaoTitles, maxLength, imageSearchResults, stats, cache, _peerTitlesHash, glmClient, log, warn, limit, sycmKeywords = [], sycmDataHash = '' }) {
+async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles, products, taobaoTitles, maxLength, imageSearchResults, stats, cache, _peerTitlesHash, glmClient, log, warn, limit, sycmKeywords = [], sycmDataHash = '', signal = null }) {
   // Step 4: 尝试 GLM selectAndGenerate 以输出更多字段...
   // 使用与原实现相同的流程与降级策略
   const glmInvoke = async () => {
+    // 检查信号是否已取消
+    if (signal?.aborted) {
+      const err = new Error('标题生成已取消');
+      err.name = 'AbortError';
+      throw err;
+    }
     // 拟定 peer titles 的来源
     const titlesToUse = (peerTitles && peerTitles.length > 0) ? peerTitles : taobaoTitles;
     const cleanedPeerTitles = (titlesToUse || []).map(t => cleanTitle(removeBannedWords(t || ''))).filter(Boolean);
@@ -334,6 +360,12 @@ async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles,
       });
     }
     log(`  并行处理 ${batches.length} 批产品...`);
+    // 在开始并行处理前再次检查信号
+    if (signal?.aborted) {
+      const err = new Error('标题生成已取消');
+      err.name = 'AbortError';
+      throw err;
+    }
     const batchResults = await Promise.all(batches.map(({ index, products: batch }) =>
       glmClient.selectAndGenerate({
         blueOceanWord, coreWord, modifiers,
@@ -380,6 +412,12 @@ async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles,
   try {
     return await glmInvoke();
   } catch (e) {
+    // 检查信号是否已取消
+    if (signal?.aborted) {
+      const err = new Error('标题生成已取消');
+      err.name = 'AbortError';
+      throw err;
+    }
     // 降级：本地化标题生成
     warn('⚠️ GLM selectAndGenerate 失败，降级到本地标题生成... ', e && e.message ? e.message : e);
     try {
@@ -427,7 +465,7 @@ async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles,
 }
 
 async function run(blueOceanWord, options = {}) {
-  const { maxLength = 60, peerTitles = [], silent = false, limit = 0, onBatch = null, research = false, sycmData } = options;
+  const { maxLength = 60, peerTitles = [], silent = false, limit = 0, onBatch = null, research = false, sycmData, useImageSearch = false, signal = null, onProductsFound = null, onProgress = null, skipFlag = null } = options;
   
   const log = silent ? () => {} : console.log.bind(console);
   const warn = silent ? () => {} : console.warn.bind(console);
@@ -523,6 +561,9 @@ async function run(blueOceanWord, options = {}) {
   log('🔎 第一步：1688 搜索独立完成...');
   const { products, searchOk } = await _search1688(coreWord, blueOceanWord, modifiers, limit, log, warn);
   trace.search1688 = searchOk ? 'ok' : 'failed';
+  
+  // 1688 搜索完成后触发回调
+  if (onProductsFound) onProductsFound(products.length);
 
   // 步骤 3: 同行标题搜索
   log('🔎 第三步：根据条件进行图像搜索或文字搜索（串行）...');
@@ -531,7 +572,7 @@ async function run(blueOceanWord, options = {}) {
     apiBase: process.env.GLM_API_BASE,
     model: process.env.GLM_API_MODEL
   });
-  const { taobaoTitles, imageSearchResults, peerSource } = await _searchPeerTitles({ products, blueOceanWord, peerTitles, glmClient, log, warn });
+  const { taobaoTitles, imageSearchResults, peerSource } = await _searchPeerTitles({ products, blueOceanWord, peerTitles, glmClient, log, warn, useImageSearch, signal, trace, skipFlag });
   trace.peerTitlesSource = peerSource;
 
   // 若提供了 SYCM 数据，解析并增强关键词，随后在 _generateTitles 调用中注入 sycmKeywords
@@ -574,12 +615,24 @@ async function run(blueOceanWord, options = {}) {
      trace
    };
 
-  const timeoutPromise = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error(`标题生成超时(${RUN_TIMEOUT/1000}s)，请简化关键词或减少数量`)), RUN_TIMEOUT)
-  );
+  const timeoutPromise = new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(() => 
+      reject(new Error(`标题生成超时(${RUN_TIMEOUT/1000}s)，请简化关键词或减少数量`)), RUN_TIMEOUT
+    );
+    
+    // 如果提供了 signal，监听取消事件
+    if (signal) {
+      signal.addEventListener('abort', () => {
+        clearTimeout(timeoutId);
+        const err = new Error('标题生成已取消');
+        err.name = 'AbortError';
+        reject(err);
+      }, { once: true });
+    }
+  });
 
   return Promise.race([
-    _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles, products, taobaoTitles, maxLength, imageSearchResults, stats, cache, _peerTitlesHash, glmClient, log, warn, limit, sycmKeywords, sycmDataHash: _sycmDataHash }),
+    _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles, products, taobaoTitles, maxLength, imageSearchResults, stats, cache, _peerTitlesHash, glmClient, log, warn, limit, sycmKeywords, sycmDataHash: _sycmDataHash, signal }),
     timeoutPromise
   ]);
 }
@@ -723,11 +776,12 @@ async function runFromImage(url, options = {}) {
         model: process.env.GLM_API_MODEL
       });
       
-      const imageSearchResults = await searchPeerTitlesByImage(products, {
+      const imageSearchResponse = await searchPeerTitlesByImage(products, {
         coreWord: '', // 先留空，后续从同行标题提取
         glmClient
       });
       
+      const imageSearchResults = imageSearchResponse.results;
       const firstResult = imageSearchResults[0] || {};
       const peerTitles = firstResult.peerTitles || [];
       const hasMatch = firstResult.hasMatch || false;

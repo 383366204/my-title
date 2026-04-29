@@ -36,7 +36,7 @@ async function searchTaobaoTitles(keyword, options = {}) {
     
     // 调用 taobao-native 搜索商品
     const args = JSON.stringify({ keyword, sourceApp: 'my-title' });
-    const result = execFileSync('cmd.exe', ['/c', winPath, 'search_products', '--args', args], {
+    const result = execFileSync('/mnt/c/Windows/System32/cmd.exe', ['/c', winPath, 'search_products', '--args', args], {
       encoding: 'utf8',
       timeout: timeout,
       stdio: ['pipe', 'pipe', 'pipe']
