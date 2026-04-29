@@ -326,7 +326,7 @@ async function _searchPeerTitles({ products, blueOceanWord, peerTitles, glmClien
  * @param {AbortSignal|null} [params.signal=null] - 取消信号
  * @returns {Promise<any>}
  */
-async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles, products, taobaoTitles, maxLength, imageSearchResults, stats, cache, _peerTitlesHash, glmClient, log, warn, limit, sycmKeywords = [], sycmDataHash = '', signal = null }) {
+async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles, products, taobaoTitles, maxLength, imageSearchResults, stats, cache, _peerTitlesHash, glmClient, log, warn, limit, sycmKeywords = [], sycmDataHash = '', signal = null, useImageSearch = false, maxImageSearch = 0, minPrice = 0, maxPrice = 0 }) {
   // Step 4: 尝试 GLM selectAndGenerate 以输出更多字段...
   // 使用与原实现相同的流程与降级策略
   const glmInvoke = async () => {
@@ -405,9 +405,9 @@ async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles,
       imageSearchResults,
       taobaoTitles,
       maxLength
-    });
-    cache.set(blueOceanWord, maxLength, limit, result, _peerTitlesHash, sycmDataHash);
-    return result;
+     });
+     cache.set(blueOceanWord, maxLength, limit, result, _peerTitlesHash, sycmDataHash, useImageSearch, maxImageSearch, minPrice, maxPrice);
+     return result;
   };
   // 调用 GLM 与降级逻辑
   try {
@@ -434,13 +434,13 @@ async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles,
         maxLength
       });
       result.titles = mappedTitles;
-      result.products.forEach((p, idx) => {
-        p['铺货标题'] = (Array.isArray(mappedTitles) && mappedTitles.length > idx)
-          ? mappedTitles[idx]
-          : (Array.isArray(mappedTitles) && mappedTitles.length > 0 ? mappedTitles[0] : p['链接原标题']);
-      });
-      cache.set(blueOceanWord, maxLength, limit, result, _peerTitlesHash, sycmDataHash);
-      return result;
+       result.products.forEach((p, idx) => {
+         p['铺货标题'] = (Array.isArray(mappedTitles) && mappedTitles.length > idx)
+           ? mappedTitles[idx]
+           : (Array.isArray(mappedTitles) && mappedTitles.length > 0 ? mappedTitles[0] : p['链接原标题']);
+       });
+       cache.set(blueOceanWord, maxLength, limit, result, _peerTitlesHash, sycmDataHash, useImageSearch, maxImageSearch, minPrice, maxPrice);
+       return result;
     } catch (e2) {
       // 最后降级：直接返回简单结构，避免中断流程
       warn('降级失败，返回简化结构：', e2 && e2.message ? e2.message : e2);
@@ -456,11 +456,11 @@ async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles,
         maxLength
       });
       result.titles = simpleTitles;
-      result.products.forEach((p, idx) => {
-        p['铺货标题'] = simpleTitles[idx] || p['链接原标题'];
-      });
-      cache.set(blueOceanWord, maxLength, limit, result, _peerTitlesHash, sycmDataHash);
-      return result;
+       result.products.forEach((p, idx) => {
+         p['铺货标题'] = simpleTitles[idx] || p['链接原标题'];
+       });
+       cache.set(blueOceanWord, maxLength, limit, result, _peerTitlesHash, sycmDataHash, useImageSearch, maxImageSearch, minPrice, maxPrice);
+       return result;
     }
   }
 }
@@ -488,7 +488,7 @@ async function run(blueOceanWord, options = {}) {
     taobaoInstalled: false
   };
 
-  const cached = cache.get(blueOceanWord, maxLength, limit, _peerTitlesHash, _sycmDataHash);
+  const cached = cache.get(blueOceanWord, maxLength, limit, _peerTitlesHash, _sycmDataHash, useImageSearch, maxImageSearch, minPrice, maxPrice);
   if (cached) {
     log('📦 命中缓存，直接返回');
     if (cached.stats && cached.stats.trace) {
@@ -646,7 +646,7 @@ async function run(blueOceanWord, options = {}) {
   });
 
   return Promise.race([
-    _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles, products, taobaoTitles, maxLength, imageSearchResults, stats, cache, _peerTitlesHash, glmClient, log, warn, limit, sycmKeywords, sycmDataHash: _sycmDataHash, signal }),
+     _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles, products, taobaoTitles, maxLength, imageSearchResults, stats, cache, _peerTitlesHash, glmClient, log, warn, limit, sycmKeywords, sycmDataHash: _sycmDataHash, signal, useImageSearch, maxImageSearch, minPrice, maxPrice }),
     timeoutPromise
   ]);
 }
