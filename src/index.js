@@ -256,7 +256,7 @@ async function _searchPeerTitles({ products, blueOceanWord, peerTitles, glmClien
               console.error('[peerTitles] 开始以图搜图, 商品数:', products.length);
                // 每个商品都需要自己的同行标题来生成专属标题，全部搜图
                // 串行 + 40秒基础间隔 + 随机0-20秒抖动，避免触发淘宝限流
-                 const imageSearchResponse = await searchPeerTitlesByImage(products, { coreWord: blueOceanWord, glmClient, concurrency: 1, intervalMs: 40000, jitterMs: 20000, timeout: 60000, maxImageSearch, signal, skipFlag, onProgress: (progress) => {
+                  const imageSearchResponse = await searchPeerTitlesByImage(products, { coreWord: blueOceanWord, glmClient, concurrency: 1, intervalMs: 15000, jitterMs: 20000, timeout: 60000, maxImageSearch, signal, skipFlag, onProgress: (progress) => {
                    if (onProgress) onProgress(progress);
                  }});
                 imageSearchResults = imageSearchResponse.results;
@@ -560,7 +560,7 @@ async function run(blueOceanWord, options = {}) {
 
   // 步骤 2: 1688 搜索 + 去重
   log('🔎 第一步：1688 搜索独立完成...');
-  const { products, searchOk } = await _search1688(coreWord, blueOceanWord, modifiers, limit, log, warn);
+  let { products, searchOk } = await _search1688(coreWord, blueOceanWord, modifiers, limit, log, warn);
   trace.search1688 = searchOk ? 'ok' : 'failed';
   
   // 1688 搜索完成后触发回调
