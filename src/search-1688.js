@@ -1,28 +1,7 @@
 const Alibaba1688Client = require('./alibaba1688-client');
 const { scoreLocally } = require('./score-local');
 
-/**
- * 搜索 1688 商品并根据刚性修饰词过滤
- * @param {string} coreWord - 核心词
- * @param {Array<{word: string, rigidity: 'rigid'|'optional'}>} modifiers - 修饰词列表
- * @returns {Promise<Array<object>>} 过滤后的商品列表
- */
-async function searchAndFilter(coreWord, modifiers) {
-  const ak = process.env.ALI_1688_AK;
-  if (!ak) {
-    throw new Error('环境变量 ALI_1688_AK 未设置');
-  }
 
-  const client = new Alibaba1688Client(ak);
-  const products = await client.searchOffers(coreWord);
-
-  if (!Array.isArray(products) || products.length === 0) {
-    return [];
-  }
-
-  // 只过滤刚性修饰词，可选修饰词不参与过滤
-  return filterRelevantProducts(products, modifiers);
-}
 
 /**
  * 根据刚性修饰词过滤产品
@@ -134,4 +113,4 @@ async function searchAll(coreWord, blueOceanWord, modifiers = []) {
   }
 }
 
-module.exports = { searchAndFilter, filterRelevantProducts, searchAll };
+module.exports = { searchAll };

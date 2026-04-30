@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-const { TAOBAO_NATIVE_PATH, isTaobaoNativeInstalled, toWindowsPath, launchTaobaoDesktop } = require('./taobao-utils');
+const { TAOBAO_NATIVE_PATH, isTaobaoNativeInstalled, toWindowsPath, ensureTaobaoDesktopReady } = require('./taobao-utils');
 const logger = require('./log');
 
 let _searchLock = Promise.resolve();
@@ -93,11 +93,11 @@ async function searchPeerTitlesByImage(products, options = {}) {
     return emptyResults;
   }
 
-  // 只启动一次淘宝桌面版
+  // 确保淘宝桌面版已启动并就绪（同进程只启动一次）
   console.error('\n🚀 启动淘宝桌面版...');
-  const launched = await launchTaobaoDesktop();
+  const ready = await ensureTaobaoDesktopReady();
 
-  if (!launched) {
+  if (!ready) {
     console.warn('⚠️  淘宝桌面版启动失败，返回空结果');
     const emptyResults = products.map(p => ({
       productId: p.id,
@@ -105,12 +105,8 @@ async function searchPeerTitlesByImage(products, options = {}) {
       priceRange: { min: null, max: null },
       hasMatch: false
     }));
-    return emptyResults;
+    return { results: emptyResults, captchaDetected: false };
   }
-
-  // 等待桌面版就绪（5000ms）
-  console.error('⏳ 等待淘宝桌面版准备就绪...');
-  await new Promise(resolve => setTimeout(resolve, 5000));
   console.error('✅ 淘宝桌面版准备就绪，开始处理图片搜索\n');
 
   // 创建结果数组（最终返回，与输入 products 长度一致）

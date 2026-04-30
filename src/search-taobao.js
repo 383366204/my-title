@@ -1,6 +1,6 @@
 const { execSync, execFileSync } = require('child_process');
 
-const { TAOBAO_NATIVE_PATH, isTaobaoNativeInstalled, toWindowsPath, launchTaobaoDesktop } = require('./taobao-utils');
+const { TAOBAO_NATIVE_PATH, isTaobaoNativeInstalled, toWindowsPath, ensureTaobaoDesktopReady } = require('./taobao-utils');
 
 /**
  * 搜索淘宝同行标题
@@ -22,12 +22,12 @@ async function searchTaobaoTitles(keyword, options = {}) {
   }
 
   try {
-    // 尝试启动淘宝桌面版（如果未运行）
-    await launchTaobaoDesktop();
-    
-    // 等待淘宝桌面版准备就绪
-    console.error('⏳ 等待淘宝桌面版准备就绪...');
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    // 确保淘宝桌面版已启动并就绪（同进程只启动一次）
+    const ready = await ensureTaobaoDesktopReady();
+    if (!ready) {
+      console.warn('⚠️  淘宝桌面版启动失败');
+      return [];
+    }
 
     // 转换路径为 Windows 格式
     const winPath = toWindowsPath(cliPath);

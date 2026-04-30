@@ -125,6 +125,79 @@ class GLMClient {
   }
 
   /**
+   * 从同行标题数组中提取核心词、蓝海词和修饰词
+   * @param {string[]} peerTitles - 同行标题数组
+   * @returns {Promise<{coreWord: string, blueOceanWord: string, modifiers: Array<{word: string, rigidity: 'rigid'|'optional'}>}>}
+   */
+  async extractKeywordsFromPeers(peerTitles) {
+    const { RIGIDITY_RULES_TEXT } = require('./extract-core');
+
+    const systemPrompt = `你是一个电商标题分析专家。请分析以下同行标题数组，提取：
+
+1. 核心词 (coreWord) - 1-2个词，代表商品的核心类别（如"项链"、"连衣裙"）
+2. 蓝海词 (blueOceanWord) - 从同行标题中提取出现频率最高的核心词组合，作为最佳标题前缀（如"银项链女"、"纯棉T恤男"）
+3. 修饰词列表 (modifiers) - 分析同行标题中的高频修饰词，并标注刚性程度：
+   - "rigid" = 刚性修饰词（材质、颜色、规格、人群、品类限定词）
+   - "optional" = 可选修饰词（风格、流行词、季节词）
+
+判断规则：
+${RIGIDITY_RULES_TEXT}
+
+输出严格 JSON 格式，不要任何其他文字：
+{
+  "coreWord": "核心词",
+  "blueOceanWord": "蓝海词",
+  "modifiers": [
+    {"word": "修饰词1", "rigidity": "rigid"},
+    {"word": "修饰词2", "rigidity": "optional"}
+  ]
+}
+
+示例：
+同行标题["猫咪衣服宠物猫春装可爱小猫服装","猫咪衣服薄款夏季布偶猫宠物衣服"] → {"coreWord": "衣服", "blueOceanWord": "猫咪衣服", "modifiers": [{"word": "猫咪", "rigidity": "rigid"}, {"word": "宠物", "rigidity": "rigid"}, {"word": "春装", "rigidity": "optional"}]}
+同行标题["婴儿连体衣纯棉春秋款","婴儿衣服纯棉连体衣夏季"] → {"coreWord": "连体衣", "blueOceanWord": "婴儿连体衣", "modifiers": [{"word": "婴儿", "rigidity": "rigid"}, {"word": "纯棉", "rigidity": "rigid"}, {"word": "春秋款", "rigidity": "optional"}]}`;
+
+    const userContent = `同行标题数组：\n${peerTitles.map((t, i) => `${i + 1}. ${t}`).join('\n')}`;
+
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userContent }
+    ];
+
+    const response = await axios.post(
+      `${this.apiBase}/chat/completions`,
+      {
+        model: this.model,
+        messages,
+        temperature: 0.1
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 15000
+      }
+    );
+
+    let content = response.data.choices[0].message.content.trim();
+    const result = parseJsonFromLLM(content);
+
+    // 验证格式
+    if (!result.coreWord || !result.blueOceanWord || !Array.isArray(result.modifiers)) {
+      throw new Error('Invalid response format from GLM');
+    }
+
+    result.modifiers.forEach(mod => {
+      if (!['rigid', 'optional'].includes(mod.rigidity)) {
+        mod.rigidity = 'optional';
+      }
+    });
+
+    return result;
+  }
+
+  /**
    * @deprecated 此方法已被 selectAndGenerate() 内部替代，保留仅用于测试兼容性。
    *             新代码请使用 selectAndGenerate() 进行产品选择和标题生成。
    *

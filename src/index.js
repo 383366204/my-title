@@ -1,6 +1,5 @@
 const path = require('path');
-const { extractCoreAndModifiers } = require('./extract-core');
-const { searchAndFilter } = require('./search-1688');
+const { extractKeywords } = require('./extract-core');
 const { searchTaobaoTitles } = require('./search-taobao');
 const GLMClient = require('./glm-client');
 const { postProcessTitle, constructFallbackTitle, cleanTitle } = require('./title-utils');
@@ -165,7 +164,7 @@ function buildOutput({ coreWord, blueOceanWord, modifiers, products, selectedPro
  * @returns {Promise<{coreWord: string, modifiers: Array}>}
  */
 async function _extractCore(blueOceanWord, log) {
-  const { coreWord, modifiers } = await require('./extract-core').extractCoreAndModifiers(blueOceanWord);
+  const { coreWord, modifiers } = await extractKeywords('keyword', { data: blueOceanWord });
   return { coreWord, modifiers };
 }
 
@@ -189,9 +188,23 @@ async function _search1688(coreWord, blueOceanWord, modifiers, limit, log, warn)
     warn('⚠️ 1688 搜索失败，尝试本地筛选回退:', err && err.message ? err.message : err);
     searchOk = false;
     try {
-      const { searchAndFilter } = require('./search-1688');
-      searchResult = await searchAndFilter(coreWord, modifiers);
-    } catch (e) {
+      // 内联简化搜索：仅搜核心词 + 刚性过滤（不同于 searchAll 的路径，避免循环）
+      const Alibaba1688Client = require('./alibaba1688-client');
+      const ak = process.env.ALI_1688_AK;
+      if (!ak) throw new Error('环境变量 ALI_1688_AK 未设置');
+      const fallbackClient = new Alibaba1688Client(ak);
+      const fallbackProducts = await fallbackClient.searchOffers(coreWord);
+      // 内联刚性过滤逻辑
+      const rigidModifiers = modifiers
+        .filter(m => m.rigidity === 'rigid')
+        .map(m => m.word.toLowerCase());
+      searchResult = rigidModifiers.length === 0 ? fallbackProducts : fallbackProducts.filter(product => {
+        const title = (product.subject || product.title || '').toLowerCase();
+        const description = (product.description || '').toLowerCase();
+        const combinedText = `${title} ${description}`;
+        return rigidModifiers.every(word => combinedText.includes(word));
+      });
+    } catch (e2) {
       searchResult = [];
     }
   }
@@ -815,7 +828,6 @@ async function runFromImage(url, options = {}) {
       
       // 步骤 5: 提取核心词
       log('📝 第五步：从同行标题提取核心词、蓝海词和修饰词...');
-      const { extractCoreFromPeerTitles } = require('./extract-core');
       
       let coreWord, blueOceanWord, modifiers;
       
@@ -824,9 +836,8 @@ async function runFromImage(url, options = {}) {
         log(`  使用用户提供的蓝海词: ${keyword}`);
         blueOceanWord = keyword;
         // 从关键词中提取核心词（取最后 1-2 个有意义的词）
-        const { extractCoreAndModifiers } = require('./extract-core');
         try {
-          const extracted = await extractCoreAndModifiers(keyword);
+          const extracted = await extractKeywords('keyword', { data: keyword });
           coreWord = extracted.coreWord;
           modifiers = extracted.modifiers;
         } catch (_) {
@@ -834,7 +845,7 @@ async function runFromImage(url, options = {}) {
           modifiers = [];
         }
       } else {
-        const extracted = await extractCoreFromPeerTitles(peerTitles);
+        const extracted = await extractKeywords('peerTitles', { data: peerTitles });
         coreWord = extracted.coreWord;
         blueOceanWord = extracted.blueOceanWord;
         modifiers = extracted.modifiers;
