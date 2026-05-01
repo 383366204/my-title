@@ -1,11 +1,27 @@
-const bannedWords = require('../data/banned-words.json');
+let bannedWords = {};
+let allBanned = [];
+let bannedRegexes = [];
 
-const allBanned = [...new Set(Object.values(bannedWords).flat())];
-const bannedRegexes = allBanned.map(w =>
-  new RegExp(w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')
-);
+try {
+  bannedWords = require('../data/banned-words.json');
+  allBanned = [...new Set(Object.values(bannedWords).flat())];
+  bannedRegexes = allBanned.map(w =>
+    new RegExp(w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')
+  );
+  if (allBanned.length === 0) {
+    console.warn('[banned-words] 警告: 违禁词列表为空，请检查 data/banned-words.json');
+  }
+} catch (err) {
+  console.error('[banned-words] 加载违禁词文件失败:', err && err.message ? err.message : err);
+  bannedWords = {};
+  allBanned = [];
+  bannedRegexes = [];
+}
 
 function checkBannedWords(title) {
+  if (typeof title !== 'string' || !title) {
+    return { valid: true, words: [] };
+  }
   const found = [];
   Object.values(bannedWords).flat().forEach(word => {
     if (title.includes(word)) found.push(word);
