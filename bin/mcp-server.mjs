@@ -73,6 +73,41 @@ function broadcastEvent(event, data) {
 }
 
 // HTTP Request Handlers
+
+async function handleApiOpportunities(req, res) {
+  if (!process.env.ALI_1688_AK) {
+    return sendErrorResponse(res, 500, 'ALI_1688_AK 未配置');
+  }
+  try {
+    const Alibaba1688Client = require('../src/alibaba1688-client.js');
+    const client = new Alibaba1688Client(process.env.ALI_1688_AK);
+    const result = await client.fetchOpportunities();
+    sendJsonResponse(res, 200, { ok: true, data: result });
+  } catch (err) {
+    console.error(`[HTTP] opportunities error: ${err.message}`);
+    sendErrorResponse(res, 502, `1688 API 错误: ${err.message}`);
+  }
+}
+
+async function handleApiTrend(req, res, body) {
+  if (!process.env.ALI_1688_AK) {
+    return sendErrorResponse(res, 500, 'ALI_1688_AK 未配置');
+  }
+  try {
+    const { query } = body;
+    if (!query || typeof query !== 'string') {
+      return sendErrorResponse(res, 400, 'Missing or invalid query parameter');
+    }
+    const Alibaba1688Client = require('../src/alibaba1688-client.js');
+    const client = new Alibaba1688Client(process.env.ALI_1688_AK);
+    const result = await client.fetchTrend(query);
+    sendJsonResponse(res, 200, { ok: true, data: result });
+  } catch (err) {
+    console.error(`[HTTP] trend error: ${err.message}`);
+    sendErrorResponse(res, 502, `1688 API 错误: ${err.message}`);
+  }
+}
+
 async function handleApiResearch(req, res, body) {
   try {
     const { keyword } = body;
@@ -346,14 +381,28 @@ function handleHttpRequest(req, res) {
     return;
   }
   
-  // Handle task query: /api/task/:task_id
+// Handle task query: /api/task/:task_id
   const taskMatch = pathname.match(/^\/api\/task\/([^\/]+)$/);
   if (taskMatch && req.method === 'GET') {
     const taskId = taskMatch[1];
     handleTaskQuery(req, res, taskId);
     return;
   }
-  
+
+  // GET /api/opportunities - 1688 商机热榜
+  if (pathname === '/api/opportunities' && req.method === 'GET') {
+    handleApiOpportunities(req, res);
+    return;
+  }
+
+  // POST /api/trend - 1688 趋势洞察
+  if (pathname === '/api/trend' && req.method === 'POST') {
+    parseJsonBody(req).then(body => handleApiTrend(req, res, body)).catch(err => {
+      sendErrorResponse(res, 400, `Invalid JSON body: ${err.message}`);
+    });
+    return;
+  }
+
   // 404 for unknown routes
   sendErrorResponse(res, 404, 'Not Found');
 }
@@ -682,6 +731,50 @@ server.tool(
   }
 );
 
+server.tool(
+  'opportunities',
+  '1688 商机热榜工具。返回各平台（1688/淘宝/小红书）的热门商机排行榜数据，帮助发现当前市场热销品类和趋势。适合选品参考。',
+  {
+    // 空参数
+  },
+  async () => {
+    if (!process.env.ALI_1688_AK) {
+      return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: 'ALI_1688_AK 未配置' }) }], isError: true };
+    }
+    try {
+      const Alibaba1688Client = require('../src/alibaba1688-client.js');
+      const client = new Alibaba1688Client(process.env.ALI_1688_AK);
+      const result = await client.fetchOpportunities();
+      return { content: [{ type: 'text', text: JSON.stringify({ ok: true, data: result }) }] };
+    } catch (err) {
+      console.error(`[my-title] opportunities error: ${err.message}`);
+      return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: err.message }) }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  'trend',
+  '1688 趋势洞察工具。输入品类/类目关键词，返回该品类的市场趋势洞察、热门属性和竞争热度分析。适合了解市场规模和增长趋势。',
+  {
+    query: z.string().describe('趋势洞察关键词（类目/品类，尽量宽泛）'),
+  },
+  async ({ query }) => {
+    if (!process.env.ALI_1688_AK) {
+      return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: 'ALI_1688_AK 未配置' }) }], isError: true };
+    }
+    try {
+      const Alibaba1688Client = require('../src/alibaba1688-client.js');
+      const client = new Alibaba1688Client(process.env.ALI_1688_AK);
+      const result = await client.fetchTrend(query);
+      return { content: [{ type: 'text', text: JSON.stringify({ ok: true, data: result }) }] };
+    } catch (err) {
+      console.error(`[my-title] trend error: ${err.message}`);
+      return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: err.message }) }], isError: true };
+    }
+  }
+);
+
 async function main() {
   // Parse command line arguments for HTTP mode
   const args = process.argv.slice(2);
@@ -719,6 +812,8 @@ async function main() {
       console.error(`[HTTP]   GET  /api/status      - 服务器状态`);
       console.error(`[HTTP]   GET  /api/events      - SSE 事件流`);
       console.error(`[HTTP]   GET  /api/task/:id    - 查询任务结果`);
+      console.error(`[HTTP]   GET  /api/opportunities - 1688 商机热榜`);
+      console.error(`[HTTP]   POST /api/trend        - 1688 趋势洞察`);
     });
     
     // Keep process alive (HTTP server handles its own event loop)

@@ -272,4 +272,103 @@ program
     }
   });
 
+program
+  .command('opportunities')
+  .description('获取 1688 商机热榜数据（1688/淘宝/小红书热门商品）')
+  .option('--json', '纯 JSON 输出模式')
+  .action(function(options, command) {
+    const mainOpts = command.parent ? command.parent.opts() : {};
+    const jsonMode = !!options.json || !!mainOpts.json;
+    const origLog = console.log;
+    const origWarn = console.warn;
+    const origError = console.error;
+    if (jsonMode) {
+      console.log = function(){};
+      console.warn = function(){};
+      console.error = function(){};
+    }
+    try {
+      const Alibaba1688Client = require('../src/alibaba1688-client');
+      const client = new Alibaba1688Client(process.env.ALI_1688_AK);
+      return client.fetchOpportunities().then(function(result) {
+        if (jsonMode) {
+          console.log = origLog;
+          console.warn = origWarn;
+          console.error = origError;
+          process.stdout.write(JSON.stringify({ ok: true, data: result }, null, 2) + '\n');
+          return;
+        }
+        console.log('\n📊 1688 商机热榜');
+        console.log('='.repeat(50));
+        console.log(JSON.stringify(result, null, 2));
+        console.log();
+      }).catch(function(error) {
+        if (jsonMode) {
+          console.log = origLog;
+          console.warn = origWarn;
+          console.error = origError;
+          process.stdout.write(JSON.stringify({ ok: false, error: error.message }) + '\n');
+        } else {
+          console.error('\n❌ 错误:', error.message);
+        }
+        process.exit(1);
+      });
+    } catch (error) {
+      if (jsonMode) {
+        console.log = origLog;
+        console.warn = origWarn;
+        console.error = origError;
+        process.stdout.write(JSON.stringify({ ok: false, error: error.message }) + '\n');
+      } else {
+        console.error('\n❌ 错误:', error.message);
+      }
+      process.exit(1);
+    }
+  });
+
+program
+  .command('trend <query>')
+  .description('获取指定品类的趋势洞察数据')
+  .option('--json', '纯 JSON 输出模式')
+  .action(async function(query, options, command) {
+    const mainOpts = command && command.parent ? command.parent.opts() : {};
+    const jsonMode = !!options.json || !!mainOpts.json;
+    const origLog = console.log;
+    const origWarn = console.warn;
+    const origError = console.error;
+    if (jsonMode) {
+      console.log = () => {};
+      console.warn = () => {};
+      console.error = () => {};
+    }
+    try {
+      const Alibaba1688Client = require('../src/alibaba1688-client');
+      const client = new Alibaba1688Client(process.env.ALI_1688_AK);
+      const result = await client.fetchTrend(query);
+
+      if (jsonMode) {
+        console.log = origLog;
+        console.warn = origWarn;
+        console.error = origError;
+        process.stdout.write(JSON.stringify({ ok: true, data: result }, null, 2) + '\n');
+        return;
+      }
+
+      console.log('\n📈 趋势洞察: ' + query);
+      console.log('='.repeat(50));
+      console.log(JSON.stringify(result, null, 2));
+      console.log();
+    } catch (error) {
+      if (jsonMode) {
+        console.log = origLog;
+        console.warn = origWarn;
+        console.error = origError;
+        process.stdout.write(JSON.stringify({ ok: false, error: error.message }) + '\n');
+      } else {
+        console.error('\n❌ 错误:', error.message);
+      }
+      process.exit(1);
+    }
+  });
+
 program.parse();

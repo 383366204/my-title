@@ -1,50 +1,59 @@
 {
-  "active_plan": "/mnt/d/project/my-title/.sisyphus/plans/taobao-image-control.md",
-  "started_at": "2026-04-29T12:49:17.900Z",
+  "active_plan": "/mnt/d/project/my-title/.sisyphus/plans/opportunities-trend.md",
+  "started_at": "2026-05-01T04:02:43.706Z",
   "session_ids": [
-    "ses_235bb9fdeffeYfO0iuEHOnGlU8"
+    "ses_24eeea21cffeaJqJy0o2z956be"
   ],
+  "plan_name": "opportunities-trend",
   "session_origins": {
-    "ses_235bb9fdeffeYfO0iuEHOnGlU8": "direct"
+    "ses_24eeea21cffeaJqJy0o2z956be": "direct"
   },
-  "plan_name": "taobao-image-control",
-  "agent": "atlas",
   "task_sessions": {
     "todo:1": {
       "task_key": "todo:1",
       "task_label": "1",
-      "task_title": "MCP generate_title 参数扩展",
-      "session_id": "ses_226b47897ffexkwCnzovudjTpB",
+      "task_title": "Alibaba1688Client 新增 fetchOpportunities + fetchTrend 方法",
+      "session_id": "ses_21e4a0844ffeeVW7GyFZkxXKFa",
       "agent": "Sisyphus-Junior",
       "category": "quick",
-      "updated_at": "2026-04-29T12:52:56.595Z"
+      "updated_at": "2026-05-01T04:08:33.293Z"
     },
-    "todo:4": {
-      "task_key": "todo:4",
-      "task_label": "4",
-      "task_title": "滑块检测逻辑（连续3超时 → captcha_required）",
-      "session_id": "ses_2269fb364fferAxPmxMYBdAoeq",
-      "agent": "Sisyphus-Junior",
-      "category": "deep",
-      "updated_at": "2026-04-29T13:33:55.586Z"
-    },
-    "todo:7": {
-      "task_key": "todo:7",
-      "task_label": "7",
-      "task_title": "端到端集成测试 + 清理",
-      "session_id": "ses_2268aebdfffeP3MrLz4bcRJFij",
+    "todo:3": {
+      "task_key": "todo:3",
+      "task_label": "3",
+      "task_title": "CLI 新增 opportunities + trend 子命令",
+      "session_id": "ses_21e44b5dcffe0TOkKH7mCOLbPx",
       "agent": "Sisyphus-Junior",
       "category": "quick",
-      "updated_at": "2026-04-29T13:39:46.017Z"
+      "updated_at": "2026-05-01T04:37:16.666Z"
+    },
+    "todo:6": {
+      "task_key": "todo:6",
+      "task_label": "6",
+      "task_title": "E2E 验证 — CLI 入口",
+      "session_id": "ses_21e2b5640ffeLpEU8O0qdBLm6m",
+      "agent": "Sisyphus-Junior",
+      "category": "unspecified-high",
+      "updated_at": "2026-05-01T04:40:20.606Z"
+    },
+    "todo:8": {
+      "task_key": "todo:8",
+      "task_label": "8",
+      "task_title": "E2E 验证 — stats 补全 + 数据格式",
+      "session_id": "ses_21e22c3eaffeM3tuvHOJR60v3i",
+      "agent": "Sisyphus-Junior",
+      "category": "unspecified-high",
+      "updated_at": "2026-05-01T04:50:06.784Z"
     },
     "final-wave:f1": {
       "task_key": "final-wave:f1",
       "task_label": "F1",
       "task_title": "**Plan Compliance Audit** — `oracle`",
-      "session_id": "ses_2267de5b4ffeFucmi1bGngDmNM",
+      "session_id": "ses_21e200315ffe61dcRAaU82Co5q",
       "agent": "Sisyphus-Junior",
-      "category": "quick",
-      "updated_at": "2026-04-29T13:52:36.394Z"
+      "category": "unspecified-high",
+      "updated_at": "2026-05-01T04:52:18.978Z"
     }
-  }
+  },
+  "agent": "atlas"
 }

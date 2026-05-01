@@ -176,7 +176,10 @@ class Alibaba1688Client {
             totalSales: rawStats.totalSales ?? 0,
             remarkCnt: rawStats.remarkCnt ?? 0,
             categoryListName: rawStats.categoryListName ?? '',
-            earliestListingTime: rawStats.earliestListingTime ?? 0
+            earliestListingTime: rawStats.earliestListingTime ?? 0,
+            collectionRate24h: rawStats.collectionRate24h ?? 0,
+            last30DaysDropShippingSales: parseNumber(rawStats.last30DaysDropShippingSales),
+            totalOrder: parseNumber(rawStats.totalOrder)
           };
 
           return {
@@ -251,6 +254,126 @@ class Alibaba1688Client {
 
         // 返回完整响应，供调用方提取需要的字段（如主图）
         return response.data;
+      } catch (err) {
+        lastError = err;
+        const isRetryable =
+          (err.response && (err.response.status === 429 || err.response.status === 503)) ||
+          (!err.response && (err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT')) ||
+          (err.message && err.message.includes('1688 API error'));
+        if (isRetryable && attempt < MAX_RETRIES) {
+          attempt += 1;
+          const backoff = Math.min(1000 * Math.pow(2, attempt - 1), 4000);
+          const jitter = Math.floor(Math.random() * 1000);
+          await sleep(backoff + jitter);
+          continue;
+        }
+        throw err;
+      }
+    }
+
+    throw lastError;
+  }
+
+  /**
+   * 获取商机数据（多平台爆款商品）
+   * @param {number} timeout - 请求超时时间（毫秒），默认 15000
+   * @returns {Promise<object>} 商机数据（含 1688、淘宝、小红书等平台爆款）
+   */
+  async fetchOpportunities(timeout = 15000) {
+    const endpoint = '/1688claw/skill/workflow';
+    const body = JSON.stringify({
+      code: "offer_opportunity"
+    });
+    const signHeaders = this.generateSignHeaders('POST', endpoint, body);
+
+    const url = `${this.baseUrl}${endpoint}`;
+
+    const MAX_RETRIES = 3;
+    let attempt = 0;
+    let lastError = null;
+
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    while (attempt <= MAX_RETRIES) {
+      try {
+        if (process.env.ENABLE_DELAY === 'true') {
+          const delayMs = 3000 + Math.floor(Math.random() * 2000);
+          await sleep(delayMs);
+        }
+
+        const response = await axios.post(url, body, {
+          headers: signHeaders,
+          timeout
+        });
+
+        if (!response.data || response.data.success !== true) {
+          throw new Error(`1688 API error: ${JSON.stringify(response.data)}`);
+        }
+
+        return response.data.model.bizData;
+      } catch (err) {
+        lastError = err;
+        const isRetryable =
+          (err.response && (err.response.status === 429 || err.response.status === 503)) ||
+          (!err.response && (err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT')) ||
+          (err.message && err.message.includes('1688 API error'));
+        if (isRetryable && attempt < MAX_RETRIES) {
+          attempt += 1;
+          const backoff = Math.min(1000 * Math.pow(2, attempt - 1), 4000);
+          const jitter = Math.floor(Math.random() * 1000);
+          await sleep(backoff + jitter);
+          continue;
+        }
+        throw err;
+      }
+    }
+
+    throw lastError;
+  }
+
+  /**
+   * 获取热门趋势（搜索词趋势分析）
+   * @param {string} query - 搜索关键词
+   * @param {number} timeout - 请求超时时间（毫秒），默认 15000
+   * @returns {Promise<string|object>} 趋势分析结果（Markdown 格式或对象）
+   */
+  async fetchTrend(query, timeout = 15000) {
+    if (!query || typeof query !== 'string' || query.trim() === '') {
+      throw new Error('fetchTrend: query 参数不能为空');
+    }
+
+    const endpoint = '/1688claw/skill/workflow';
+    const body = JSON.stringify({
+      code: "offer_hot",
+      bizParams: { query: query.trim() }
+    });
+    const signHeaders = this.generateSignHeaders('POST', endpoint, body);
+
+    const url = `${this.baseUrl}${endpoint}`;
+
+    const MAX_RETRIES = 3;
+    let attempt = 0;
+    let lastError = null;
+
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    while (attempt <= MAX_RETRIES) {
+      try {
+        if (process.env.ENABLE_DELAY === 'true') {
+          const delayMs = 3000 + Math.floor(Math.random() * 2000);
+          await sleep(delayMs);
+        }
+
+        const response = await axios.post(url, body, {
+          headers: signHeaders,
+          timeout
+        });
+
+        if (!response.data || response.data.success !== true) {
+          throw new Error(`1688 API error: ${JSON.stringify(response.data)}`);
+        }
+
+        return response.data.model.bizData;
       } catch (err) {
         lastError = err;
         const isRetryable =
