@@ -49,9 +49,10 @@ async function retry(fn, maxRetries = 2, delayMs = 1000, shouldRetry = null) {
       // 如果提供了 shouldRetry 且返回 false，直接抛出不重试
       if (shouldRetry && !shouldRetry(err)) throw err;
       // 默认行为：只重试有 code（网络错误）或 response（HTTP错误）的错误，跳过解析错误
+      // SyntaxError means LLM returned malformed JSON — retrying won't fix it
       const retryable = shouldRetry
         ? shouldRetry(err)
-        : (err.code || err.response || err instanceof SyntaxError);
+        : (err.code || err.response);
       if (!retryable) throw err;
       if (attempt < maxRetries) {
         await new Promise(resolve => setTimeout(resolve, delayMs));
