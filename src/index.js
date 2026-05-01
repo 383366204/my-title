@@ -245,7 +245,7 @@ async function _search1688(coreWord, blueOceanWord, modifiers, limit, log, warn)
  * @param {Object} [params.trace=null] - 追踪信息对象
  * @returns {Promise<{taobaoTitles: Array, imageSearchResults: Array}>}
  */
-async function _searchPeerTitles({ products, blueOceanWord, peerTitles, glmClient, log, warn, useImageSearch = false, maxImageSearch = 0, signal = null, trace = null, skipFlag = null }) {
+async function _searchPeerTitles({ products, blueOceanWord, peerTitles, glmClient, log, warn, useImageSearch = false, maxImageSearch = 0, signal = null, trace = null, skipFlag = null, onProgress = null }) {
   let taobaoTitles = [];
   let imageSearchResults = [];
   let peerSource = 'none';
@@ -582,7 +582,7 @@ async function run(blueOceanWord, options = {}) {
   // 价格过滤（在图搜前减少商品数量）
   if (minPrice > 0 || maxPrice > 0) {
     const beforeCount = products.length;
-    products = products.filter(p => {
+    products = (products || []).filter(p => {
       const price = parseFloat(p.price || p.salePrice || '0');
       if (minPrice > 0 && price < minPrice) return false;
       if (maxPrice > 0 && price > maxPrice) return false;
@@ -599,7 +599,7 @@ async function run(blueOceanWord, options = {}) {
     apiBase: process.env.GLM_API_BASE,
     model: process.env.GLM_API_MODEL
   });
-  const { taobaoTitles, imageSearchResults, peerSource } = await _searchPeerTitles({ products, blueOceanWord, peerTitles, glmClient, log, warn, useImageSearch, maxImageSearch, signal, trace, skipFlag });
+  const { taobaoTitles, imageSearchResults, peerSource } = await _searchPeerTitles({ products, blueOceanWord, peerTitles, glmClient, log, warn, useImageSearch, maxImageSearch, signal, trace, skipFlag, onProgress });
   trace.peerTitlesSource = peerSource;
 
   // 若提供了 SYCM 数据，解析并增强关键词，随后在 _generateTitles 调用中注入 sycmKeywords
@@ -627,7 +627,7 @@ async function run(blueOceanWord, options = {}) {
       products: [],
       filteredCount: 0,
       titles: [],
-      stats: { coreWord, modifiers: modifiers.map(m => m.word) }
+      stats: { coreWord, modifiers: modifiers.map(m => m.word), trace }
     };
   }
 
