@@ -161,11 +161,11 @@ function buildOutput({ coreWord, blueOceanWord, modifiers, products, selectedPro
  * 提取核心词与修饰词（对外不可见实现）
  * @param {string} blueOceanWord
  * @param {Function} log
- * @returns {Promise<{coreWord: string, modifiers: Array}>}
+ * @returns {Promise<{coreWord: string, modifiers: Array, semanticGroups: Object}>}
  */
 async function _extractCore(blueOceanWord, log) {
-  const { coreWord, modifiers } = await extractKeywords('keyword', { data: blueOceanWord });
-  return { coreWord, modifiers };
+  const { coreWord, modifiers, semanticGroups } = await extractKeywords('keyword', { data: blueOceanWord });
+  return { coreWord, modifiers, semanticGroups };
 }
 
 /**
@@ -178,12 +178,12 @@ async function _extractCore(blueOceanWord, log) {
  * @param {Function} warn
  * @returns {Promise<{products: Array}>}
  */
-async function _search1688(coreWord, blueOceanWord, modifiers, limit, log, warn) {
+async function _search1688(coreWord, blueOceanWord, modifiers, limit, log, warn, semanticGroups = {}) {
   let products = [];
   let searchResult = [];
   let searchOk = true;
   try {
-    searchResult = await require('./search-1688').searchAll(coreWord, blueOceanWord, modifiers);
+    searchResult = await require('./search-1688').searchAll(coreWord, blueOceanWord, modifiers, semanticGroups);
   } catch (err) {
     warn('⚠️ 1688 搜索失败，尝试本地筛选回退:', err && err.message ? err.message : err);
     searchOk = false;
@@ -529,9 +529,12 @@ async function run(blueOceanWord, options = {}) {
 
   // 步骤 1: 提取核心词和修饰词
   log('📝 提取核心词和修饰词...');
-  const { coreWord, modifiers } = await _extractCore(blueOceanWord, log);
+  const { coreWord, modifiers, semanticGroups = {} } = await _extractCore(blueOceanWord, log);
   log(`  核心词: ${coreWord}`);
   log(`  修饰词: ${modifiers.map(m => `${m.word}(${m.rigidity})`).join(', ')}`);
+  if (Object.keys(semanticGroups).length > 0) {
+    log('  📊 语义族: ' + Object.entries(semanticGroups).map(([k,v]) => `${k}(${v.length}词)`).join(', '));
+  }
 
   // 如果开启 research 模式，先进行研究数据收集，不生成标题
   if (research === true) {
@@ -558,9 +561,9 @@ async function run(blueOceanWord, options = {}) {
         warn('  taobao-native 未安装，使用1688商品标题作为同行数据（C端数据更准确）');
       }
 
-      // 降级：使用 1688 商品标题
+       // 降级：使用 1688 商品标题
       if (peerTitlesForResearch.length === 0) {
-        const { products } = await _search1688(coreWord, blueOceanWord, modifiers, limit, log, warn);
+        const { products } = await _search1688(coreWord, blueOceanWord, modifiers, limit, log, warn, semanticGroups);
         peerTitlesForResearch = products.slice(0, 20).map(p => p.title).filter(Boolean);
         log(`  使用 ${peerTitlesForResearch.length} 条1688商品标题（降级）`);
       }
@@ -573,7 +576,7 @@ async function run(blueOceanWord, options = {}) {
 
   // 步骤 2: 1688 搜索 + 去重
   log('🔎 第一步：1688 搜索独立完成...');
-  let { products, searchOk } = await _search1688(coreWord, blueOceanWord, modifiers, limit, log, warn);
+  let { products, searchOk } = await _search1688(coreWord, blueOceanWord, modifiers, limit, log, warn, semanticGroups);
   trace.search1688 = searchOk ? 'ok' : 'failed';
   
   // 1688 搜索完成后触发回调

@@ -9,9 +9,10 @@
  * @param {string} coreWord - 核心词
  * @param {string} blueOceanWord - 蓝海词
  * @param {string[]} modifiers - 刚性修饰词数组
- * @returns {Array<{product: object, score: number, passed: boolean}>}
+ * @param {Object} [semanticGroups={}] - 语义族映射 {修饰词: [同义词数组]}
+ * @returns {Array<{product: object, score: number, passed: boolean}>} 评分结果，支持精确匹配和语义族匹配
  */
-function scoreLocally(products, coreWord, blueOceanWord, modifiers) {
+function scoreLocally(products, coreWord, blueOceanWord, modifiers, semanticGroups = {}) {
   return products.map(product => {
     let score = 0;
     const title = product.title || '';
@@ -23,7 +24,14 @@ function scoreLocally(products, coreWord, blueOceanWord, modifiers) {
 
     // 刚性修饰词匹配: 每个+10分
     modifiers.forEach(modifier => {
+      // 1. 精确命中（快速路径）
       if (title.includes(modifier)) {
+        score += 10;
+        return;
+      }
+      // 2. 语义族命中（AI 驱动的新路径）
+      const group = semanticGroups[modifier] || semanticGroups[modifier.toLowerCase()];
+      if (group && group.some(synonym => title.includes(synonym) || title.includes(synonym.toLowerCase()))) {
         score += 10;
       }
     });

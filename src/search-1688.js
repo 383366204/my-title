@@ -7,9 +7,10 @@ const { scoreLocally } = require('./score-local');
  * 根据刚性修饰词过滤产品
  * @param {Array<object>} products - 商品列表
  * @param {Array<{word: string, rigidity: 'rigid'|'optional'}>} modifiers - 修饰词列表
+ * @param {Object} [semanticGroups={}] - 语义族映射 {修饰词: [同义词数组]}
  * @returns {Array<object>} 过滤后的商品列表
  */
-function filterRelevantProducts(products, modifiers) {
+function filterRelevantProducts(products, modifiers, semanticGroups = {}) {
   const rigidModifiers = modifiers
     .filter(m => m.rigidity === 'rigid')
     .map(m => m.word.toLowerCase());
@@ -24,8 +25,15 @@ function filterRelevantProducts(products, modifiers) {
     const description = (product.description || '').toLowerCase();
     const combinedText = `${title} ${description}`;
 
-    // 必须匹配所有刚性修饰词
-    return rigidModifiers.every(word => combinedText.includes(word));
+    // 必须匹配所有刚性修饰词（精确匹配优先，语义族匹配兜底）
+    return rigidModifiers.every(word => {
+      // 1. 精确命中
+      if (combinedText.includes(word)) return true;
+      // 2. 语义族命中
+      const group = semanticGroups[word] || semanticGroups[word.toLowerCase()];
+      if (group && group.some(synonym => combinedText.includes(synonym.toLowerCase()))) return true;
+      return false;
+    });
   });
 }
 
@@ -34,9 +42,10 @@ function filterRelevantProducts(products, modifiers) {
  * @param {string} coreWord - 核心词（第一次搜索）
  * @param {string} blueOceanWord - 蓝海词（第二次搜索）
  * @param {Array<{word: string, rigidity: 'rigid'|'optional'}>} modifiers - 修饰词列表（用于降级过滤）
+ * @param {Object} [semanticGroups={}] - 语义族映射 {修饰词: [同义词数组]}
  * @returns {Promise<Array<object>>} 过滤后的商品列表
  */
-async function searchAll(coreWord, blueOceanWord, modifiers = []) {
+async function searchAll(coreWord, blueOceanWord, modifiers = [], semanticGroups = {}) {
   const ak = process.env.ALI_1688_AK;
   if (!ak) {
     throw new Error('环境变量 ALI_1688_AK 未设置');
@@ -99,7 +108,8 @@ async function searchAll(coreWord, blueOceanWord, modifiers = []) {
       mergedProducts,
       coreWord,
       blueOceanWord,
-      rigidModifiers
+      rigidModifiers,
+      semanticGroups
     );
 
     const passedProducts = scoredResults
@@ -109,7 +119,7 @@ async function searchAll(coreWord, blueOceanWord, modifiers = []) {
     return passedProducts;
   } catch (error) {
     console.warn('本地评分失败，降级到刚性修饰词过滤:', error.message);
-    return filterRelevantProducts(mergedProducts, modifiers);
+    return filterRelevantProducts(mergedProducts, modifiers, semanticGroups);
   }
 }
 

@@ -49,7 +49,8 @@ class GLMClient {
    * @param {string} input - 用户输入关键词
    * @returns {Promise<{
    *   coreWord: string,
-   *   modifiers: Array<{word: string, rigidity: 'rigid'|'optional'}>
+   *   modifiers: Array<{word: string, rigidity: 'rigid'|'optional', group: string, synonyms: string[]}>,
+   *   semanticGroups: {[group: string]: string[]}
    * }>} 
    */
   async extractCoreAndModifiers(input) {
@@ -70,20 +71,28 @@ class GLMClient {
 - 流行词 → optional（如"高级感"、"网红"是描述性词，不强制）
 - 时间/季节 → optional（如"2026新款"、"夏季"不强制）
 
+如果该修饰词有常见的语义等价变体（如颜色的不同叫法、材质的不同标号、人群的不同称呼），请在 synonyms 中列出
+group 用简短的语义族命名如'蓝色系'、'纯银系'、'女系'
+synonyms 每组最多10个，只列最常见的变体
+
 输出严格 JSON 格式，不要任何其他文字：
 {
   "coreWord": "核心词",
   "modifiers": [
-    {"word": "修饰词1", "rigidity": "rigid"},
-    {"word": "修饰词2", "rigidity": "optional"}
-  ]
+    {"word": "修饰词1", "rigidity": "rigid", "group": "语义族", "synonyms": ["同义词1", "同义词2"]},
+    {"word": "修饰词2", "rigidity": "optional", "group": "语义族", "synonyms": ["同义词1", "同义词2"]}
+  ],
+  "semanticGroups": {
+    "蓝色系": ["蓝色", "天蓝", "浅蓝", "宝蓝", "藏青", "湖蓝"],
+    "纯银系": ["纯银", "S925", "925银", "足银", "镀银"]
+  }
 }
 
 示例：
-输入"猫咪衣服春装" → {"coreWord": "衣服", "modifiers": [{"word": "猫咪", "rigidity": "rigid"}, {"word": "春装", "rigidity": "rigid"}]}
-输入"宠物狗衣服冬装" → {"coreWord": "衣服", "modifiers": [{"word": "宠物狗", "rigidity": "rigid"}, {"word": "冬装", "rigidity": "rigid"}]}
-输入"婴儿连体衣纯棉" → {"coreWord": "连体衣", "modifiers": [{"word": "婴儿", "rigidity": "rigid"}, {"word": "纯棉", "rigidity": "rigid"}]}
-输入"儿童书包小学生" → {"coreWord": "书包", "modifiers": [{"word": "儿童", "rigidity": "rigid"}, {"word": "小学生", "rigidity": "rigid"}]}`;
+输入"猫咪衣服春装" → {"coreWord": "衣服", "modifiers": [{"word": "猫咪", "rigidity": "rigid", "group": "宠物系", "synonyms": ["宠物"]}, {"word": "春装", "rigidity": "rigid", "group": "春季系", "synonyms": ["春季", "春天"]}], "semanticGroups": {"宠物系": ["猫咪", "宠物", "宠物猫"], "春季系": ["春装", "春季", "春天"]}}
+输入"宠物狗衣服冬装" → {"coreWord": "衣服", "modifiers": [{"word": "宠物狗", "rigidity": "rigid", "group": "宠物系", "synonyms": ["宠物", "狗"]}, {"word": "冬装", "rigidity": "rigid", "group": "冬季系", "synonyms": ["冬季", "冬天"]}], "semanticGroups": {"宠物系": ["宠物狗", "宠物", "狗"], "冬季系": ["冬装", "冬季", "冬天"]}}
+输入"婴儿连体衣纯棉" → {"coreWord": "连体衣", "modifiers": [{"word": "婴儿", "rigidity": "rigid", "group": "婴儿系", "synonyms": ["婴幼儿", "宝宝"]}, {"word": "纯棉", "rigidity": "rigid", "group": "纯棉系", "synonyms": ["全棉", "100%棉"]}], "semanticGroups": {"婴儿系": ["婴儿", "婴幼儿", "宝宝"], "纯棉系": ["纯棉", "全棉", "100%棉"]}}
+输入"儿童书包小学生" → {"coreWord": "书包", "modifiers": [{"word": "儿童", "rigidity": "rigid", "group": "学生系", "synonyms": ["学生", "学龄"]}, {"word": "小学生", "rigidity": "rigid", "group": "学生系", "synonyms": ["学生", "学龄"]}], "semanticGroups": {"学生系": ["儿童", "小学生", "学生", "学龄"]}}`;
 
     const messages = [
       { role: 'system', content: systemPrompt },
@@ -121,13 +130,34 @@ class GLMClient {
       }
     });
 
+    // Ensure group and synonyms defaults for each modifier
+    result.modifiers.forEach(mod => {
+      mod.group = mod.group || mod.word;
+      mod.synonyms = mod.synonyms || [mod.word];
+      if (mod.synonyms.length > 10) mod.synonyms = mod.synonyms.slice(0, 10);
+    });
+
+    // Handle semanticGroups: if not present, build from modifiers
+    if (!result.semanticGroups) {
+      result.semanticGroups = {};
+      result.modifiers.forEach(mod => {
+        const group = mod.group || mod.word;
+        const synonyms = mod.synonyms || [mod.word];
+        if (!result.semanticGroups[group]) {
+          result.semanticGroups[group] = [];
+        }
+        // Merge, dedupe, truncate to 10
+        result.semanticGroups[group] = [...new Set([...result.semanticGroups[group], ...synonyms])].slice(0, 10);
+      });
+    }
+
     return result;
   }
 
   /**
    * 从同行标题数组中提取核心词、蓝海词和修饰词
    * @param {string[]} peerTitles - 同行标题数组
-   * @returns {Promise<{coreWord: string, blueOceanWord: string, modifiers: Array<{word: string, rigidity: 'rigid'|'optional'}>}>}
+   * @returns {Promise<{coreWord: string, blueOceanWord: string, modifiers: Array<{word: string, rigidity: 'rigid'|'optional', group: string, synonyms: string[]}>, semanticGroups: {[group: string]: string[]}}>}
    */
   async extractKeywordsFromPeers(peerTitles) {
     const { RIGIDITY_RULES_TEXT } = require('./extract-core');
@@ -143,19 +173,27 @@ class GLMClient {
 判断规则：
 ${RIGIDITY_RULES_TEXT}
 
+如果该修饰词有常见的语义等价变体（如颜色的不同叫法、材质的不同标号、人群的不同称呼），请在 synonyms 中列出
+group 用简短的语义族命名如'蓝色系'、'纯银系'、'女系'
+synonyms 每组最多10个，只列最常见的变体
+
 输出严格 JSON 格式，不要任何其他文字：
 {
   "coreWord": "核心词",
   "blueOceanWord": "蓝海词",
   "modifiers": [
-    {"word": "修饰词1", "rigidity": "rigid"},
-    {"word": "修饰词2", "rigidity": "optional"}
-  ]
+    {"word": "修饰词1", "rigidity": "rigid", "group": "语义族", "synonyms": ["同义词1", "同义词2"]},
+    {"word": "修饰词2", "rigidity": "optional", "group": "语义族", "synonyms": ["同义词1", "同义词2"]}
+  ],
+  "semanticGroups": {
+    "蓝色系": ["蓝色", "天蓝", "浅蓝", "宝蓝", "藏青", "湖蓝"],
+    "纯银系": ["纯银", "S925", "925银", "足银", "镀银"]
+  }
 }
 
 示例：
-同行标题["猫咪衣服宠物猫春装可爱小猫服装","猫咪衣服薄款夏季布偶猫宠物衣服"] → {"coreWord": "衣服", "blueOceanWord": "猫咪衣服", "modifiers": [{"word": "猫咪", "rigidity": "rigid"}, {"word": "宠物", "rigidity": "rigid"}, {"word": "春装", "rigidity": "optional"}]}
-同行标题["婴儿连体衣纯棉春秋款","婴儿衣服纯棉连体衣夏季"] → {"coreWord": "连体衣", "blueOceanWord": "婴儿连体衣", "modifiers": [{"word": "婴儿", "rigidity": "rigid"}, {"word": "纯棉", "rigidity": "rigid"}, {"word": "春秋款", "rigidity": "optional"}]}`;
+同行标题["猫咪衣服宠物猫春装可爱小猫服装","猫咪衣服薄款夏季布偶猫宠物衣服"] → {"coreWord": "衣服", "blueOceanWord": "猫咪衣服", "modifiers": [{"word": "猫咪", "rigidity": "rigid", "group": "宠物系", "synonyms": ["宠物"]}, {"word": "宠物", "rigidity": "rigid", "group": "宠物系", "synonyms": ["宠物猫", "猫咪"]}, {"word": "春装", "rigidity": "optional", "group": "春季系", "synonyms": ["春季", "春天"]}], "semanticGroups": {"宠物系": ["猫咪", "宠物", "宠物猫"], "春季系": ["春装", "春季", "春天"]}}
+同行标题["婴儿连体衣纯棉春秋款","婴儿衣服纯棉连体衣夏季"] → {"coreWord": "连体衣", "blueOceanWord": "婴儿连体衣", "modifiers": [{"word": "婴儿", "rigidity": "rigid", "group": "婴儿系", "synonyms": ["婴幼儿", "宝宝"]}, {"word": "纯棉", "rigidity": "rigid", "group": "纯棉系", "synonyms": ["全棉", "100%棉"]}, {"word": "春秋款", "rigidity": "optional", "group": "季节系", "synonyms": ["春秋季", "春秋"]}], "semanticGroups": {"婴儿系": ["婴儿", "婴幼儿", "宝宝"], "纯棉系": ["纯棉", "全棉", "100%棉"], "季节系": ["春秋款", "春秋季", "春秋"]}}`;
 
     const userContent = `同行标题数组：\n${peerTitles.map((t, i) => `${i + 1}. ${t}`).join('\n')}`;
 
@@ -193,6 +231,27 @@ ${RIGIDITY_RULES_TEXT}
         mod.rigidity = 'optional';
       }
     });
+
+    // Ensure group and synonyms defaults for each modifier
+    result.modifiers.forEach(mod => {
+      mod.group = mod.group || mod.word;
+      mod.synonyms = mod.synonyms || [mod.word];
+      if (mod.synonyms.length > 10) mod.synonyms = mod.synonyms.slice(0, 10);
+    });
+
+    // Handle semanticGroups: if not present, build from modifiers
+    if (!result.semanticGroups) {
+      result.semanticGroups = {};
+      result.modifiers.forEach(mod => {
+        const group = mod.group || mod.word;
+        const synonyms = mod.synonyms || [mod.word];
+        if (!result.semanticGroups[group]) {
+          result.semanticGroups[group] = [];
+        }
+        // Merge, dedupe, truncate to 10
+        result.semanticGroups[group] = [...new Set([...result.semanticGroups[group], ...synonyms])].slice(0, 10);
+      });
+    }
 
     return result;
   }
