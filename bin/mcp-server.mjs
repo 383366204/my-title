@@ -15,6 +15,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
 
 const { run, runFromImage } = require('../src/index.js');
+const { getRateLimiter, RateLimitError } = require('../src/rate-limiter.js');
 
 const TASK_TTL = 30 * 60 * 1000; // 30 minutes
 
@@ -84,7 +85,15 @@ async function handleApiOpportunities(req, res) {
     const result = await client.fetchOpportunities();
     sendJsonResponse(res, 200, { ok: true, data: result });
   } catch (err) {
-    console.error(`[HTTP] opportunities error: ${err.message}`);
+    if (err.name === 'RateLimitError') {
+      sendJsonResponse(res, 429, {
+        ok: false,
+        error: '1688 API 冷却中',
+        retry_after_seconds: Math.ceil(err.cooldownRemainingMs / 1000),
+      });
+      return;
+    }
+    console.error(`[HTTP] opportunities error:`, err.message);
     sendErrorResponse(res, 502, `1688 API 错误: ${err.message}`);
   }
 }
@@ -103,8 +112,54 @@ async function handleApiTrend(req, res, body) {
     const result = await client.fetchTrend(query);
     sendJsonResponse(res, 200, { ok: true, data: result });
   } catch (err) {
-    console.error(`[HTTP] trend error: ${err.message}`);
+    if (err.name === 'RateLimitError') {
+      sendJsonResponse(res, 429, {
+        ok: false,
+        error: '1688 API 冷却中',
+        retry_after_seconds: Math.ceil(err.cooldownRemainingMs / 1000),
+      });
+      return;
+    }
+    console.error(`[HTTP] trend error:`, err.message);
     sendErrorResponse(res, 502, `1688 API 错误: ${err.message}`);
+  }
+}
+
+async function handleApiBatchGenerate(req, res, keywords, length) {
+  try {
+    const { batchRun } = require('../src/batch.js');
+    const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    tasks.set(id, { status: 'processing', createdAt: Date.now(), progress: { completed: 0, total: keywords.length } });
+
+    console.error(`[HTTP] batch task ${id} started: ${keywords.length} keywords`);
+
+    batchRun(keywords, { maxLength: length || 60, silent: true })
+      .then(result => {
+        console.error(`[HTTP] batch task ${id} done: ${result.summary.success}/${result.summary.total}`);
+        tasks.set(id, { status: 'done', createdAt: Date.now(), result });
+      })
+      .catch(err => {
+        console.error(`[HTTP] batch task ${id} failed: ${err.message}`);
+        tasks.set(id, { status: 'error', createdAt: Date.now(), error: err.message });
+      });
+
+    sendJsonResponse(res, 202, {
+      ok: true,
+      status: 'processing',
+      task_id: id,
+      message: `已开始批量生成，请用 task_id="${id}" 查询结果`,
+    });
+  } catch (err) {
+    if (err.name === 'RateLimitError') {
+      sendJsonResponse(res, 429, {
+        ok: false,
+        error: '1688 API 冷却中',
+        retry_after_seconds: Math.ceil(err.cooldownRemainingMs / 1000),
+      });
+      return;
+    }
+    console.error(`[HTTP] batch-generate error: ${err.message}`);
+    sendErrorResponse(res, 500, `Internal server error: ${err.message}`);
   }
 }
 
@@ -227,9 +282,35 @@ async function handleApiGenerate(req, res, body) {
         });
       })
       .catch(err => {
-        console.error(`[HTTP] task ${id} failed: ${err.message}`);
+        // 限流错误：返回排队状态而非服务器错误
+        if (err.name === 'RateLimitError') {
+          const status = getRateLimiter().getStatus();
+          tasks.set(id, {
+            status: 'done',
+            createdAt: Date.now(),
+            result: {
+              ok: true,
+              status: 'rate_limited',
+              retry_after_seconds: Math.ceil(err.cooldownRemainingMs / 1000),
+              cooldown: status.cooldown,
+              message: status.cooldown
+                ? `1688 API 冷却中，预计 ${Math.ceil(err.cooldownRemainingMs / 1000)} 秒后恢复`
+                : `1688 API 请求限流，请稍后重试`,
+            },
+          });
+          
+          // Emit task completed event with rate limit status
+          broadcastEvent('task_completed', { 
+            task_id: id, 
+            keyword,
+            status: 'rate_limited',
+            timestamp: new Date().toISOString(),
+          });
+          return;
+        }
+        console.error(`[HTTP] task ${id} failed:`, err.message);
         tasks.set(id, { status: 'error', createdAt: Date.now(), error: err.message });
-        
+
         // Emit task error event
         broadcastEvent('task_error', { 
           task_id: id, 
@@ -257,7 +338,8 @@ function handleApiStatus(req, res) {
   const activeTasks = Array.from(tasks.entries())
     .filter(([_, task]) => task.status === 'processing')
     .map(([id, task]) => ({ id, createdAt: task.createdAt }));
-  
+  const rateLimiterStatus = getRateLimiter().getStatus();
+
   sendJsonResponse(res, 200, {
     ok: true,
     serverStatus: 'running',
@@ -268,7 +350,8 @@ function handleApiStatus(req, res) {
     activeTasksCount: activeTasks.length,
     activeTasks,
     historyCount: history.length,
-    sseClientsCount: sseClients.size
+    sseClientsCount: sseClients.size,
+    rateLimiter: rateLimiterStatus
   });
 }
 
@@ -400,6 +483,26 @@ function handleHttpRequest(req, res) {
     parseJsonBody(req).then(body => handleApiTrend(req, res, body)).catch(err => {
       sendErrorResponse(res, 400, `Invalid JSON body: ${err.message}`);
     });
+    return;
+  }
+
+  if (pathname === '/api/batch-generate' && req.method === 'POST') {
+    parseJsonBody(req).then(body => {
+      const { keywords, length = 60 } = body;
+      if (!Array.isArray(keywords) || keywords.length === 0) {
+        return sendErrorResponse(res, 400, 'keywords must be a non-empty array');
+      }
+      handleApiBatchGenerate(req, res, keywords, length);
+    }).catch(err => {
+      sendErrorResponse(res, 400, `Invalid JSON body: ${err.message}`);
+    });
+    return;
+  }
+
+  // POST /api/rate-limit/reset - 重置 1688 API 冷却
+  if (pathname === '/api/rate-limit/reset' && req.method === 'POST') {
+    getRateLimiter().resetCooldown();
+    sendJsonResponse(res, 200, { ok: true, message: '冷却已重置' });
     return;
   }
 
@@ -628,7 +731,25 @@ server.tool(
         }
       })
       .catch(err => {
-        console.error(`[my-title] task ${id} failed: ${err.message}`);
+        // 限流错误：返回排队状态而非服务器错误
+        if (err.name === 'RateLimitError') {
+          const status = getRateLimiter().getStatus();
+          tasks.set(id, {
+            status: 'done',
+            createdAt: Date.now(),
+            result: {
+              ok: true,
+              status: 'rate_limited',
+              retry_after_seconds: Math.ceil(err.cooldownRemainingMs / 1000),
+              cooldown: status.cooldown,
+              message: status.cooldown
+                ? `1688 API 冷却中，预计 ${Math.ceil(err.cooldownRemainingMs / 1000)} 秒后恢复`
+                : `1688 API 请求限流，请稍后重试`,
+            },
+          });
+          return;
+        }
+        console.error(`[my-title] task ${id} failed:`, err.message);
         // Handle abort error
         if (err.name === 'AbortError' && tasks.get(id).status === 'processing') {
           tasks.set(id, { status: 'cancelled', createdAt: Date.now() });
@@ -718,7 +839,21 @@ server.tool(
         });
       })
       .catch(err => {
-        console.error(`[my-title] image task ${id} failed: ${err.message}`);
+        if (err.name === 'RateLimitError') {
+          tasks.set(id, {
+            status: 'done',
+            createdAt: Date.now(),
+            result: {
+              ok: true,
+              status: 'rate_limited',
+              retry_after_seconds: Math.ceil(err.cooldownRemainingMs / 1000),
+              cooldown: true,
+              message: `1688 API 冷却中，预计 ${Math.ceil(err.cooldownRemainingMs / 1000)} 秒后恢复`,
+            },
+          });
+          return;
+        }
+        console.error(`[my-title] image task ${id} failed:`, err.message);
         tasks.set(id, { status: 'error', createdAt: Date.now(), error: err.message });
       });
 
@@ -747,7 +882,16 @@ server.tool(
       const result = await client.fetchOpportunities();
       return { content: [{ type: 'text', text: JSON.stringify({ ok: true, data: result }) }] };
     } catch (err) {
-      console.error(`[my-title] opportunities error: ${err.message}`);
+      if (err.name === 'RateLimitError') {
+        return { content: [{ type: 'text', text: JSON.stringify({
+          ok: true,
+          status: 'rate_limited',
+          retry_after_seconds: Math.ceil(err.cooldownRemainingMs / 1000),
+          cooldown: true,
+          message: `1688 API 冷却中，预计 ${Math.ceil(err.cooldownRemainingMs / 1000)} 秒后恢复`,
+        }) }] };
+      }
+      console.error(`[my-title] opportunities error:`, err.message);
       return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: err.message }) }], isError: true };
     }
   }
@@ -769,9 +913,126 @@ server.tool(
       const result = await client.fetchTrend(query);
       return { content: [{ type: 'text', text: JSON.stringify({ ok: true, data: result }) }] };
     } catch (err) {
-      console.error(`[my-title] trend error: ${err.message}`);
+      if (err.name === 'RateLimitError') {
+        return { content: [{ type: 'text', text: JSON.stringify({
+          ok: true,
+          status: 'rate_limited',
+          retry_after_seconds: Math.ceil(err.cooldownRemainingMs / 1000),
+          cooldown: true,
+          message: `1688 API 冷却中，预计 ${Math.ceil(err.cooldownRemainingMs / 1000)} 秒后恢复`,
+        }) }] };
+      }
+      console.error(`[my-title] trend error:`, err.message);
       return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: err.message }) }], isError: true };
     }
+  }
+);
+
+server.tool(
+  'batch_generate_titles',
+  '批量蓝海词选品工具。一次调用处理多个关键词，自动去重核心词共享 1688 搜索结果，比多次调用 generate_title 更省 API 配额。',
+  {
+    keywords: z.array(z.string()).min(1).max(20).describe('蓝海词数组（1-20个）'),
+    length: z.number().default(60).describe('标题最大字符数'),
+    task_id: z.string().optional().describe('查询任务结果时传入'),
+  },
+  async ({ keywords, length, task_id }) => {
+    // 轮询模式
+    if (task_id) {
+      const task = tasks.get(task_id);
+      if (!task) {
+        return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: 'task_id 不存在' }) }], isError: true };
+      }
+      if (task.createdAt && Date.now() - task.createdAt > TASK_TTL) {
+        tasks.delete(task_id);
+        return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: 'task_id 不存在' }) }], isError: true };
+      }
+      if (task.status === 'processing') {
+        return { content: [{ type: 'text', text: JSON.stringify({
+          ok: true, status: 'processing', task_id,
+          progress: task.progress || { completed: 0, total: keywords ? keywords.length : 0 },
+          message: '仍在处理中，请几秒后再次查询',
+        }) }] };
+      }
+      if (task.status === 'done') {
+        const result = task.result;
+        tasks.delete(task_id);
+        return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+      }
+      if (task.status === 'error') {
+        const err = task.error;
+        tasks.delete(task_id);
+        return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: err }) }], isError: true };
+      }
+    }
+
+    if (!keywords || !Array.isArray(keywords) || keywords.length === 0) {
+      return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: '必须传 keywords 数组' }) }], isError: true };
+    }
+
+    const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const abortController = new AbortController();
+    const estimatedSeconds = keywords.length * 60;
+    tasks.set(id, {
+      status: 'processing',
+      createdAt: Date.now(),
+      progress: { completed: 0, total: keywords.length, currentKeyword: '' },
+      abortController,
+    });
+
+    console.error(`[my-title] batch task ${id} started: ${keywords.length} keywords`);
+
+    const { batchRun } = require('../src/batch.js');
+    batchRun(keywords, {
+      maxLength: length || 60,
+      silent: true,
+      signal: abortController.signal,
+      onProgress: ({ completed, total, currentKeyword }) => {
+        const task = tasks.get(id);
+        if (task) {
+          task.progress = { completed, total, currentKeyword };
+        }
+      },
+    })
+      .then(result => {
+        console.error(`[my-title] batch task ${id} done: ${result.summary.success}/${result.summary.total}`);
+        tasks.set(id, {
+          status: 'done',
+          createdAt: Date.now(),
+          result,
+        });
+      })
+      .catch(err => {
+        if (err.name === 'RateLimitError') {
+          tasks.set(id, {
+            status: 'done',
+            createdAt: Date.now(),
+            result: {
+              ok: true,
+              status: 'rate_limited',
+              retry_after_seconds: Math.ceil(err.cooldownRemainingMs / 1000),
+              cooldown: true,
+              message: `1688 API 冷却中，预计 ${Math.ceil(err.cooldownRemainingMs / 1000)} 秒后恢复`,
+            },
+          });
+          return;
+        }
+        console.error(`[my-title] batch task ${id} failed: ${err.message}`);
+        tasks.set(id, { status: 'error', createdAt: Date.now(), error: err.message });
+      });
+
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          ok: true,
+          status: 'processing',
+          task_id: id,
+          estimated_seconds: estimatedSeconds,
+          message: `已开始批量生成 ${keywords.length} 个关键词的标题，预计约 ${Math.ceil(estimatedSeconds / 60)} 分钟。请用 task_id="${id}" 查询结果。`,
+        }),
+      }],
+    };
   }
 );
 
@@ -806,14 +1067,15 @@ async function main() {
     httpServer.listen(httpPort, () => {
       console.error(`[HTTP] Server started on port ${httpPort}`);
       console.error(`[HTTP] Available endpoints:`);
-      console.error(`[HTTP]   POST /api/research    - 同步返回推荐词`);
-      console.error(`[HTTP]   POST /api/extract     - 暂存 SYCM 数据`);
-      console.error(`[HTTP]   POST /api/generate    - 异步生成标题`);
-      console.error(`[HTTP]   GET  /api/status      - 服务器状态`);
-      console.error(`[HTTP]   GET  /api/events      - SSE 事件流`);
-      console.error(`[HTTP]   GET  /api/task/:id    - 查询任务结果`);
+      console.error(`[HTTP]   POST /api/research      - 同步返回推荐词`);
+      console.error(`[HTTP]   POST /api/extract       - 暂存 SYCM 数据`);
+      console.error(`[HTTP]   POST /api/generate      - 异步生成标题`);
+      console.error(`[HTTP]   POST /api/batch-generate - 批量生成标题`);
+      console.error(`[HTTP]   GET  /api/status        - 服务器状态`);
+      console.error(`[HTTP]   GET  /api/events        - SSE 事件流`);
+      console.error(`[HTTP]   GET  /api/task/:id      - 查询任务结果`);
       console.error(`[HTTP]   GET  /api/opportunities - 1688 商机热榜`);
-      console.error(`[HTTP]   POST /api/trend        - 1688 趋势洞察`);
+      console.error(`[HTTP]   POST /api/trend          - 1688 趋势洞察`);
     });
     
     // Keep process alive (HTTP server handles its own event loop)

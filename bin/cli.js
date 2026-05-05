@@ -3,6 +3,7 @@
 require('dotenv').config();
 const { Command } = require('commander');
 const { run } = require('../src');
+const { batchRun } = require('../src/batch');
 const { formatResult } = require('../src/output-formatter');
 const { byteLen } = require('../src/title-utils');
 const fs = require('fs');
@@ -22,6 +23,7 @@ program
   .option('--format <type>', '输出格式: table / json / both', 'both')
   .option('--research', '分析并推荐去生意参谋查哪些关键词')
   .option('--keyword-file <path>', '加载生意参谋搜索分析数据文件')
+  .option('--keywords <keywords>', '批量关键词模式（逗号分隔，如 "纯银项链女,925银手链"）')
   .action(async (keywords, options) => {
     const jsonMode = !!options.json;
     const origLog = console.log;
@@ -33,6 +35,62 @@ program
       console.error = () => {};
     }
     try {
+      // 批量模式：--keywords 传入逗号分隔的多个关键词
+      if (options.keywords) {
+        const kwList = options.keywords.split(',').map(k => k.trim()).filter(Boolean);
+        console.log(`🔄 批量选品模式：${kwList.length} 个关键词`);
+
+        const result = await batchRun(kwList, {
+          maxLength: parseInt(options.length) || 60,
+          silent: jsonMode,
+          onProgress: ({ completed, total, currentKeyword }) => {
+            if (currentKeyword) {
+              console.log(`  📋 进度: ${completed}/${total} — 当前: ${currentKeyword}`);
+            }
+          },
+        });
+
+        if (jsonMode) {
+          console.log = origLog;
+          console.warn = origWarn;
+          console.error = origError;
+          process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+          return;
+        }
+
+        // 输出每个关键词的结果
+        for (const item of result.results) {
+          console.log('\n' + '='.repeat(50));
+          console.log(`📝 关键词: ${item.keyword} (核心词: ${item.coreWord})`);
+          console.log(`  过滤后商品: ${item.filteredCount} 个`);
+          if (item.titles && item.titles.length > 0) {
+            console.log('  生成标题:');
+            item.titles.forEach((t, i) => {
+              const title = typeof t === 'string' ? t : (t.title || t['铺货标题'] || '');
+              console.log(`    ${i + 1}. ${title}`);
+            });
+          } else {
+            console.log('  ⚠️ 未生成标题');
+          }
+        }
+
+        if (result.failed.length > 0) {
+          console.log('\n' + '-'.repeat(50));
+          console.log(`❌ 失败的关键词 (${result.failed.length} 个):`);
+          result.failed.forEach(f => {
+            console.log(`  - ${f.keyword}: ${f.error}`);
+          });
+        }
+
+        console.log('\n' + '='.repeat(50));
+        console.log(`📊 批量选品汇总:`);
+        console.log(`  总计: ${result.summary.total} 个`);
+        console.log(`  成功: ${result.summary.success} 个`);
+        console.log(`  失败: ${result.summary.failed} 个`);
+        console.log(`  去重核心词: ${result.summary.dedupedCoreWords} 个`);
+        return;
+      }
+
       // --research 模式：只分析并推荐关键词
       if (options.research) {
         const result = await run(keywords, {

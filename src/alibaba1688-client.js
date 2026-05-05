@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const axios = require('axios');
+const { getRateLimiter, RateLimitError } = require('./rate-limiter');
 
 class Alibaba1688Client {
   /**
@@ -124,6 +125,23 @@ class Alibaba1688Client {
     // 可控的请求间隔，默认不强制等待，但在多请求场景下应实现节流策略
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+    // 限流器检查：请求前获取令牌
+    const rateLimiter = getRateLimiter();
+    const acquireResult = await rateLimiter.acquire();
+    if (!acquireResult.allowed) {
+      if (acquireResult.cooldown) {
+        throw new RateLimitError(
+          `1688 API 冷却中，剩余 ${Math.ceil(acquireResult.waitMs / 1000)} 秒`,
+          acquireResult.waitMs
+        );
+      }
+      // 排队已满或其他限流原因
+      throw new RateLimitError(
+        `1688 API 请求限流，请稍后重试（预计等待 ${Math.ceil(acquireResult.waitMs / 1000)} 秒）`,
+        acquireResult.waitMs
+      );
+    }
+
     while (attempt <= MAX_RETRIES) {
       try {
         // 可选：在每次请求前引入一个随机的短暂停顿，避免请求集中
@@ -191,9 +209,14 @@ class Alibaba1688Client {
           };
         });
 
+        rateLimiter.reportSuccess();
         return products;
       } catch (err) {
         lastError = err;
+        // 429 时触发冷却
+        if (err.response && err.response.status === 429) {
+          rateLimiter.report429();
+        }
         // 429 或网络错误时重试
         const isRetryable =
           (err.response && (err.response.status === 429 || err.response.status === 503)) ||
@@ -236,6 +259,23 @@ class Alibaba1688Client {
 
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+    // 限流器检查：请求前获取令牌
+    const rateLimiter = getRateLimiter();
+    const acquireResult = await rateLimiter.acquire();
+    if (!acquireResult.allowed) {
+      if (acquireResult.cooldown) {
+        throw new RateLimitError(
+          `1688 API 冷却中，剩余 ${Math.ceil(acquireResult.waitMs / 1000)} 秒`,
+          acquireResult.waitMs
+        );
+      }
+      // 排队已满或其他限流原因
+      throw new RateLimitError(
+        `1688 API 请求限流，请稍后重试（预计等待 ${Math.ceil(acquireResult.waitMs / 1000)} 秒）`,
+        acquireResult.waitMs
+      );
+    }
+
     while (attempt <= MAX_RETRIES) {
       try {
         if (process.env.ENABLE_DELAY === 'true') {
@@ -252,10 +292,15 @@ class Alibaba1688Client {
           throw new Error(`1688 API error: ${JSON.stringify(response.data)}`);
         }
 
+        rateLimiter.reportSuccess();
         // 返回完整响应，供调用方提取需要的字段（如主图）
         return response.data;
       } catch (err) {
         lastError = err;
+        // 429 时触发冷却
+        if (err.response && err.response.status === 429) {
+          rateLimiter.report429();
+        }
         const isRetryable =
           (err.response && (err.response.status === 429 || err.response.status === 503)) ||
           (!err.response && (err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT')) ||
@@ -294,6 +339,23 @@ class Alibaba1688Client {
 
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+    // 限流器检查：请求前获取令牌
+    const rateLimiter = getRateLimiter();
+    const acquireResult = await rateLimiter.acquire();
+    if (!acquireResult.allowed) {
+      if (acquireResult.cooldown) {
+        throw new RateLimitError(
+          `1688 API 冷却中，剩余 ${Math.ceil(acquireResult.waitMs / 1000)} 秒`,
+          acquireResult.waitMs
+        );
+      }
+      // 排队已满或其他限流原因
+      throw new RateLimitError(
+        `1688 API 请求限流，请稍后重试（预计等待 ${Math.ceil(acquireResult.waitMs / 1000)} 秒）`,
+        acquireResult.waitMs
+      );
+    }
+
     while (attempt <= MAX_RETRIES) {
       try {
         if (process.env.ENABLE_DELAY === 'true') {
@@ -310,9 +372,14 @@ class Alibaba1688Client {
           throw new Error(`1688 API error: ${JSON.stringify(response.data)}`);
         }
 
+        rateLimiter.reportSuccess();
         return response.data.model.bizData;
       } catch (err) {
         lastError = err;
+        // 429 时触发冷却
+        if (err.response && err.response.status === 429) {
+          rateLimiter.report429();
+        }
         const isRetryable =
           (err.response && (err.response.status === 429 || err.response.status === 503)) ||
           (!err.response && (err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT')) ||
@@ -357,6 +424,23 @@ class Alibaba1688Client {
 
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+    // 限流器检查：请求前获取令牌
+    const rateLimiter = getRateLimiter();
+    const acquireResult = await rateLimiter.acquire();
+    if (!acquireResult.allowed) {
+      if (acquireResult.cooldown) {
+        throw new RateLimitError(
+          `1688 API 冷却中，剩余 ${Math.ceil(acquireResult.waitMs / 1000)} 秒`,
+          acquireResult.waitMs
+        );
+      }
+      // 排队已满或其他限流原因
+      throw new RateLimitError(
+        `1688 API 请求限流，请稍后重试（预计等待 ${Math.ceil(acquireResult.waitMs / 1000)} 秒）`,
+        acquireResult.waitMs
+      );
+    }
+
     while (attempt <= MAX_RETRIES) {
       try {
         if (process.env.ENABLE_DELAY === 'true') {
@@ -373,9 +457,14 @@ class Alibaba1688Client {
           throw new Error(`1688 API error: ${JSON.stringify(response.data)}`);
         }
 
+        rateLimiter.reportSuccess();
         return response.data.model.bizData;
       } catch (err) {
         lastError = err;
+        // 429 时触发冷却
+        if (err.response && err.response.status === 429) {
+          rateLimiter.report429();
+        }
         const isRetryable =
           (err.response && (err.response.status === 429 || err.response.status === 503)) ||
           (!err.response && (err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT')) ||
@@ -433,3 +522,4 @@ function parse1688Url(url) {
  */
 module.exports = Alibaba1688Client;
 module.exports.parse1688Url = parse1688Url;
+module.exports.RateLimitError = RateLimitError;
