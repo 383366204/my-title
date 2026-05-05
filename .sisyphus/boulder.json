@@ -1,59 +1,50 @@
 {
-  "active_plan": "/mnt/d/project/my-title/.sisyphus/plans/opportunities-trend.md",
-  "started_at": "2026-05-01T04:02:43.706Z",
+  "active_plan": "/mnt/d/project/my-title/.sisyphus/plans/chatbot-integration.md",
+  "started_at": "2026-05-05T23:10:20Z",
   "session_ids": [
-    "ses_24eeea21cffeaJqJy0o2z956be"
+    "ses_225ecfd74ffemq4Osu7Iq0Q40D"
   ],
-  "plan_name": "opportunities-trend",
+  "plan_name": "chatbot-integration",
+  "worktree_path": null,
   "session_origins": {
-    "ses_24eeea21cffeaJqJy0o2z956be": "direct"
+    "ses_225ecfd74ffemq4Osu7Iq0Q40D": "direct"
   },
   "task_sessions": {
     "todo:1": {
       "task_key": "todo:1",
       "task_label": "1",
-      "task_title": "Alibaba1688Client 新增 fetchOpportunities + fetchTrend 方法",
-      "session_id": "ses_21e4a0844ffeeVW7GyFZkxXKFa",
+      "task_title": "目录脚手架 + npm 依赖安装",
+      "session_id": "ses_205967e80ffesHJomuJYO4QNoJ",
       "agent": "Sisyphus-Junior",
       "category": "quick",
-      "updated_at": "2026-05-01T04:08:33.293Z"
+      "updated_at": "2026-05-05T23:13:13.217Z"
     },
-    "todo:3": {
-      "task_key": "todo:3",
-      "task_label": "3",
-      "task_title": "CLI 新增 opportunities + trend 子命令",
-      "session_id": "ses_21e44b5dcffe0TOkKH7mCOLbPx",
+    "todo:5": {
+      "task_key": "todo:5",
+      "task_label": "5",
+      "task_title": "飞书适配器",
+      "session_id": "ses_20592587affeJU8JdNahVct03V",
       "agent": "Sisyphus-Junior",
-      "category": "quick",
-      "updated_at": "2026-05-01T04:37:16.666Z"
-    },
-    "todo:6": {
-      "task_key": "todo:6",
-      "task_label": "6",
-      "task_title": "E2E 验证 — CLI 入口",
-      "session_id": "ses_21e2b5640ffeLpEU8O0qdBLm6m",
-      "agent": "Sisyphus-Junior",
-      "category": "unspecified-high",
-      "updated_at": "2026-05-01T04:40:20.606Z"
+      "category": "deep",
+      "updated_at": "2026-05-05T23:29:53.303Z"
     },
     "todo:8": {
       "task_key": "todo:8",
       "task_label": "8",
-      "task_title": "E2E 验证 — stats 补全 + 数据格式",
-      "session_id": "ses_21e22c3eaffeM3tuvHOJR60v3i",
+      "task_title": "Bot Server 入口",
+      "session_id": "ses_20584d1c1ffeJSI4Q0RFUb6ao6",
       "agent": "Sisyphus-Junior",
-      "category": "unspecified-high",
-      "updated_at": "2026-05-01T04:50:06.784Z"
+      "category": "deep",
+      "updated_at": "2026-05-05T23:40:56.611Z"
     },
-    "final-wave:f1": {
-      "task_key": "final-wave:f1",
-      "task_label": "F1",
-      "task_title": "**Plan Compliance Audit** — `oracle`",
-      "session_id": "ses_21e200315ffe61dcRAaU82Co5q",
+    "todo:9": {
+      "task_key": "todo:9",
+      "task_label": "9",
+      "task_title": "启动脚本 + 使用文档",
+      "session_id": "ses_2057a9d59ffeAUFX4B9Kahshlh",
       "agent": "Sisyphus-Junior",
-      "category": "unspecified-high",
-      "updated_at": "2026-05-01T04:52:18.978Z"
+      "category": "writing",
+      "updated_at": "2026-05-05T23:42:48.591Z"
     }
-  },
-  "agent": "atlas"
+  }
 }

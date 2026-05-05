@@ -7,7 +7,8 @@
     "my-title": "bin/cli.js"
   },
   "scripts": {
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "bot": "node bin/bot-server.mjs"
   },
   "keywords": [
     "ecommerce",
@@ -19,11 +20,14 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.62.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "axios": "^1.6.0",
     "commander": "^12.0.0",
+    "dingtalk-stream": "^2.1.6-beta.1",
     "dotenv": "^16.4.0",
     "nodejieba": "^3.5.8",
+    "weixin-bot-sdk": "^1.1.0",
     "zod": "^4.3.6"
   }
 }

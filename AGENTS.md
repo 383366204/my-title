@@ -17,8 +17,15 @@
 my-title/
 ├── bin/
 │   ├── cli.js              # CLI 入口（使用 commander）
-│   └── mcp-server.mjs      # MCP Server 入口（stdio 传输，供 agent 调用）
+│   ├── mcp-server.mjs      # MCP Server 入口（stdio 传输，供 agent 调用）
+│   └── bot-server.mjs      # 聊天机器人服务器入口
 ├── src/
+│   ├── bot-adapters/      # 机器人平台适配器
+│   │   ├── index.js        # 统一入口
+│   │   ├── feishu.js       # 飞书适配器
+│   │   ├── dingtalk.js     # 钉钉适配器
+│   │   └── wechat.js       # 微信适配器
+│   ├── index.js            # 主流程编排器（run 函数）
 │   ├── index.js            # 主流程编排器（run 函数）
 │   ├── extract-core.js     # GLM AI 集成 + 降级方案
 │   ├── search-1688.js      # 1688 API 搜索与过滤
