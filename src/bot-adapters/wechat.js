@@ -12,9 +12,11 @@ class WechatAdapter extends BaseAdapter {
   /**
    * @param {object} config - 适配器配置
    * @param {string} [config.credentialsPath] - 凭证文件路径，默认项目根目录 .wx-credentials.json
+   * @param {string} [config.label] - 账号标签，用于多实例日志区分，默认'微信'
    */
   constructor(config) {
     super({ ...config, platform: 'wechat' });
+    this.label = config.label || '微信';
     this.bot = null;
     this.credentialsPath = config.credentialsPath || path.resolve(process.cwd(), '.wx-credentials.json');
     
@@ -44,26 +46,26 @@ class WechatAdapter extends BaseAdapter {
     });
 
     this.bot.on('session:expired', async () => {
-      console.error('[wechat] 会话已过期，正在重新登录...');
+      console.error(`[${this.label}] 会话已过期，正在重新登录...`);
       try {
         await this._login();
         this.bot.start();
       } catch (err) {
-        console.error('[wechat] 重新登录失败:', err.message);
+        console.error(`[${this.label}] 重新登录失败:`, err.message);
       }
     });
 
     this.bot.on('error', (err) => {
-      console.error('[wechat] SDK 错误:', err.message);
+      console.error(`[${this.label}] SDK 错误:`, err.message);
     });
 
     if (!this.bot.isLoggedIn) {
       await this._login();
     } else {
-      console.error('[wechat] 使用已保存的凭证登录...');
+      console.error(`[${this.label}] 使用已保存的凭证登录...`);
     }
 
-    console.error('[wechat] 登录成功，开始接收消息...');
+    console.error(`[${this.label}] 登录成功，开始接收消息...`);
     this.bot.start();
   }
 
@@ -71,13 +73,13 @@ class WechatAdapter extends BaseAdapter {
    * @private
    */
   async _login() {
-    console.error('[wechat] 需要扫码登录，请用微信扫描二维码...');
+    console.error(`[${this.label}] 需要扫码登录，请用微信扫描二维码...`);
     await this.bot.login({
       onQrCode: (qrDataUrl) => {
         this._displayQrCode(qrDataUrl);
       },
       onStatus: (status) => {
-        console.error('[wechat] 登录状态:', status);
+        console.error(`[${this.label}] 登录状态:`, status);
       },
     });
   }
@@ -92,9 +94,9 @@ class WechatAdapter extends BaseAdapter {
       if (base64Match) {
         const tmpFile = path.join(os.tmpdir(), 'wechat-bot-qr.png');
         fs.writeFileSync(tmpFile, Buffer.from(base64Match[1], 'base64'));
-        console.error(`[wechat] 二维码已保存: ${tmpFile}`);
+        console.error(`[${this.label}] 二维码已保存: ${tmpFile}`);
         if (process.env.WSL_DISTRO_NAME) {
-          console.error(`[wechat] WSL 用户可执行: explorer.exe ${tmpFile}`);
+          console.error(`[${this.label}] WSL 用户可执行: explorer.exe ${tmpFile}`);
         }
       }
 
@@ -103,7 +105,7 @@ class WechatAdapter extends BaseAdapter {
         this._renderQrInTerminal(qrData);
       }
     } catch (err) {
-      console.error('[wechat] 显示二维码失败:', err.message);
+      console.error(`[${this.label}] 显示二维码失败:`, err.message);
     }
   }
 
@@ -116,10 +118,10 @@ class WechatAdapter extends BaseAdapter {
       const QRCode = await import('qrcode');
       const terminal = await QRCode.toString(url, { type: 'terminal', small: true });
       console.error('\n' + terminal);
-      console.error('[wechat] 请用微信扫描上方二维码登录\n');
+      console.error(`[${this.label}] 请用微信扫描上方二维码登录\n`);
     } catch {
       // qrcode 包不可用时，回退到保存 URL
-      console.error('[wechat] 扫码链接:', url);
+      console.error(`[${this.label}] 扫码链接:`, url);
     }
   }
 
@@ -130,7 +132,7 @@ class WechatAdapter extends BaseAdapter {
     if (this.bot) {
       this.bot.stop();
     }
-    console.error('[wechat] 已停止');
+    console.error(`[${this.label}] 已停止`);
   }
 
   /**
@@ -140,11 +142,18 @@ class WechatAdapter extends BaseAdapter {
    */
   async sendMessage(chatId, text) {
     if (!this.bot) throw new Error('微信适配器未启动');
-    const chunks = this._chunkText(text, 3800);
-    for (let i = 0; i < chunks.length; i++) {
-      await this.bot.sendText(chatId, chunks[i]);
-      if (i < chunks.length - 1) {
-        await this._sleep(500); // 防止消息顺序错乱
+    // 按换行符拆分为行，并过滤掉空行
+    const lines = text.split('\n').filter(line => line.trim() !== '');
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      // 对每一行再按 3800 字符分块
+      const chunks = this._chunkText(line, 3800);
+      for (let j = 0; j < chunks.length; j++) {
+        await this.bot.sendText(chatId, chunks[j]);
+        // 每个消息块（包括同一行内的块）之间延迟 500ms
+        if (i < lines.length - 1 || j < chunks.length - 1) {
+          await this._sleep(500);
+        }
       }
     }
   }

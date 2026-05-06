@@ -17,7 +17,44 @@ function loadBotConfig() {
     config.dingtalk = { clientId: process.env.DINGTALK_CLIENT_ID, clientSecret: process.env.DINGTALK_CLIENT_SECRET };
   }
   if (platforms.includes('wechat')) {
-    config.wechat = { credentialsPath: process.env.WECHAT_CREDENTIALS_PATH || '' };
+    // Support multiple WeChat credential paths with backward compatibility
+    // New preferred env: WECHAT_CREDENTIALS_PATHS (comma-separated)
+    // Fallback: WECHAT_CREDENTIALS_PATH (single)
+    // Default: [{ credentialsPath: '', label: '微信1' }]
+    const pathsEnv = process.env.WECHAT_CREDENTIALS_PATHS;
+    const singlePath = process.env.WECHAT_CREDENTIALS_PATH;
+
+    let rawPaths = [];
+    if (pathsEnv && pathsEnv.trim()) {
+      rawPaths = pathsEnv.split(',').map(s => s.trim()).filter(Boolean);
+    } else if (singlePath && singlePath.trim()) {
+      rawPaths = [singlePath.trim()];
+    } else {
+      rawPaths = [];
+    }
+
+    let wechatList;
+    if (rawPaths.length === 0) {
+      wechatList = [{ credentialsPath: '', label: '微信1' }];
+    } else {
+      // Deduplicate while preserving order; log warning on duplicates
+      const seen = new Set();
+      wechatList = [];
+      for (let i = 0; i < rawPaths.length; i++) {
+        const p = rawPaths[i];
+        if (seen.has(p)) {
+          console.error(`微信凭据路径重复检测到: ${p}`);
+          continue;
+        }
+        seen.add(p);
+        wechatList.push({ credentialsPath: p, label: `微信${wechatList.length + 1}` });
+      }
+      if (wechatList.length === 0) {
+        wechatList = [{ credentialsPath: '', label: '微信1' }];
+      }
+    }
+
+    config.wechat = wechatList;
   }
   
   return { ...config, errors };

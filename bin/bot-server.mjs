@@ -62,7 +62,18 @@ for (const platform of platforms) {
     }
     adapter = new DingtalkAdapter(config.dingtalk);
   } else if (platform === 'wechat') {
-    adapter = new WechatAdapter(config.wechat || {});
+    // Part A: multi-WeChat support
+    const wechatList = config.wechat;
+    if (!Array.isArray(wechatList) || wechatList.length === 0) {
+      console.error('[bot-server] 微信配置缺失');
+      continue;
+    }
+    for (const entry of wechatList) {
+      const adapter = new WechatAdapter({ credentialsPath: entry.credentialsPath, label: entry.label });
+      adapters.push({ platform: entry.label, adapter });
+    }
+    // 跳过统一 push，已在循环中完成
+    continue;
   } else {
     console.error(`[bot-server] 未知平台: ${platform}`);
     continue;
