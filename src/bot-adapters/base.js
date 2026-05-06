@@ -15,11 +15,11 @@ class BaseAdapter {
     const cmd = this._parseCommand(text);
     if (cmd.type === 'command') {
       if (cmd.value === 'help') {
-        return this.sendMessage(chatId, 
-          '🤖 my-title 标题生成机器人\\n\\n' +
-          '使用方法：直接发送商品关键词\\n' +
-          '例如：纯银项链女高级感\\n\\n' +
-          '命令：\\n/help — 显示帮助'
+        return this.sendMessage(chatId,
+          '🤖 my-title 标题生成机器人\n\n' +
+          '使用方法：直接发送商品关键词\n' +
+          '例如：纯银项链女高级感\n\n' +
+          '命令：/help — 显示帮助'
         );
       }
       return this.sendMessage(chatId, '未知命令，发送 /help 查看帮助');
