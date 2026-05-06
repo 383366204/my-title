@@ -41,7 +41,7 @@ class GLMClient {
   constructor(config) {
     this.apiKey = config.apiKey;
     this.apiBase = config.apiBase || 'https://open.bigmodel.cn/api/paas/v4';
-    this.model = config.model || 'glm-4-flash';
+    this.model = config.model || 'glm-4.7-flash';
   }
 
   /**

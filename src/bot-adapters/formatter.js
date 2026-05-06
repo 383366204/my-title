@@ -41,6 +41,63 @@ function formatAsDingtalkCard(result) {
   return { msgtype: 'action_card', action_card: { title: '标题生成结果', markdown: text, single_title: '查看全部', single_url: btns[0]?.actionURL || '#', btns } };
 }
 
+// 新增：搜索结果格式化
+function formatSearchResult(result) {
+  // 输入：{ coreWord, blueOceanWord, modifiers, products }
+  const coreWord = result?.coreWord ?? '';
+  const blueOceanWord = result?.blueOceanWord ?? '';
+  const modifiers = result?.modifiers || [];
+  const products = (result?.products || []).slice(0, 15);
+
+  const lines = [];
+  lines.push(`📝 核心词: ${coreWord} | 蓝海词: ${blueOceanWord}`);
+  if (modifiers.length > 0) {
+    const modsText = modifiers.map(m => `${m.word}(${m.rigidity || ''})`).join(', ');
+    lines.push(`修饰词: ${modsText}`);
+  }
+  lines.push(``);
+  lines.push(`📊 找到 ${products.length} 个商品:`);
+  lines.push(``);
+  products.forEach((p, idx) => {
+    const title = p['链接原标题'] || p['title'] || '无标题';
+    lines.push(`${idx+1}. [${title}]`);
+    const price = p['商品原价'] != null ? `${p['商品原价']}元` : '无价格';
+    const sales = p['30天销量'] != null ? p['30天销量'] : 0;
+    const link = p['产品链接'] || '';
+    lines.push(`   💰 价格: ${price} | 📈 30天销量: ${sales}`);
+    lines.push(`   🔗 ${link}`);
+    lines.push('');
+  });
+  return lines.join('\n');
+}
+
+// 新增：分析结果格式化
+function formatAnalysisResult(result) {
+  // 输入：{ coreWord, blueOceanWord, modifiers, semanticGroups }
+  const coreWord = result?.coreWord ?? '';
+  const blueOceanWord = result?.blueOceanWord ?? '';
+  const modifiers = result?.modifiers || [];
+  const semanticGroups = result?.semanticGroups || {};
+
+  const lines = [];
+  lines.push(`📝 关键词分析: ${blueOceanWord}`);
+  lines.push('');
+  lines.push(`核心词: ${coreWord}`);
+  lines.push(`蓝海词: ${blueOceanWord}`);
+  lines.push('');
+  lines.push('修饰词:');
+  modifiers.forEach(m => {
+    const rigidityLabel = m.rigidity === 'rigid' ? '刚性' : m.rigidity === 'optional' ? '可选' : m.rigidity;
+    lines.push(`  • ${m.word} — ${rigidityLabel}（${m.group || ''}）`);
+  });
+  lines.push('');
+  lines.push('语义族:');
+  Object.entries(semanticGroups).forEach(([groupName, syns]) => {
+    lines.push(`  ${groupName}: ${Array.isArray(syns) ? syns.join(', ') : syns}`);
+  });
+  return lines.join('\n');
+}
+
 function formatProgress(coreWord, step) {
   const msgs = { extracting: '⏳ 正在提取核心词...', searching: '⏳ 正在搜索1688商品...', generating: '⏳ 正在生成标题...' };
   return msgs[step] || '⏳ 正在处理...';
@@ -53,4 +110,12 @@ function formatError(error) {
   return '生成失败，请稍后重试';
 }
 
-module.exports = { formatAsText, formatAsFeishuCard, formatAsDingtalkCard, formatProgress, formatError };
+module.exports = {
+  formatAsText,
+  formatAsFeishuCard,
+  formatAsDingtalkCard,
+  formatProgress,
+  formatError,
+  formatSearchResult,
+  formatAnalysisResult,
+};

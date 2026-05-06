@@ -62,11 +62,7 @@ for (const platform of platforms) {
     }
     adapter = new DingtalkAdapter(config.dingtalk);
   } else if (platform === 'wechat') {
-    if (!config.wechat) {
-      console.error(`[bot-server] 微信配置缺失，请检查 WECHAT_BOT_TOKEN 环境变量`);
-      continue;
-    }
-    adapter = new WechatAdapter(config.wechat);
+    adapter = new WechatAdapter(config.wechat || {});
   } else {
     console.error(`[bot-server] 未知平台: ${platform}`);
     continue;

@@ -17,8 +17,7 @@ function loadBotConfig() {
     config.dingtalk = { clientId: process.env.DINGTALK_CLIENT_ID, clientSecret: process.env.DINGTALK_CLIENT_SECRET };
   }
   if (platforms.includes('wechat')) {
-    if (!process.env.WECHAT_BOT_TOKEN) errors.push('WECHAT_BOT_TOKEN 未配置');
-    config.wechat = { botToken: process.env.WECHAT_BOT_TOKEN };
+    config.wechat = { credentialsPath: process.env.WECHAT_CREDENTIALS_PATH || '' };
   }
   
   return { ...config, errors };

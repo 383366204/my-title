@@ -41,8 +41,12 @@ npm run bot -- --platform feishu --dry-run
 4. 开启 Stream 模式
 
 #### 微信
-1. 扫码登录获取 bot_token
-2. 配置 WECHAT_BOT_TOKEN
+1. 启动时自动获取二维码：`npm run bot -- --platform wechat`
+2. 二维码保存为临时 PNG 文件（WSL 用户可用 `explorer.exe` 打开）
+3. 用微信扫描二维码登录
+4. 凭证自动保存到 `.wx-credentials.json`，下次启动无需重新扫码
+5. 会话过期时自动重新登录
+6. 微信版本要求：iOS 8.0.70+，安卓最新版
 
 ## 使用
 在对应平台内 @机器人 或直接私聊发送商品关键词：
