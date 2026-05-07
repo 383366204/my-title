@@ -429,4 +429,117 @@ program
     }
   });
 
+program
+  .command('sycm <keyword>')
+  .description('查询生意参谋搜索分析数据（需要 Chrome 调试模式）')
+  .option('--json', '纯 JSON 输出模式')
+  .option('--port <number>', 'Chrome 调试端口', '9222')
+  .action(async (keyword, options) => {
+    const jsonMode = !!options.json;
+    const port = parseInt(options.port) || 9222;
+    
+    try {
+      const { isChromeDevToolsAvailable, generateChromeLaunchCommand, checkSycmLoginStatus, ERRORS } = require('../src/sycm-browser-helper');
+      const { generateSycmQueryInstructions } = require('../src/sycm-instruction-generator');
+      const { waitForSycmData, isHttpServerRunning } = require('../src/sycm-extract-fallback');
+
+      // 步骤1：检测 Chrome 是否在调试模式运行
+      const chromeAvailable = await isChromeDevToolsAvailable(port);
+      
+      if (!chromeAvailable) {
+        const launchCmd = generateChromeLaunchCommand({ port });
+        if (jsonMode) {
+          process.stdout.write(JSON.stringify({
+            ok: false,
+            status: 'chrome_not_running',
+            chromeLaunchCmd: launchCmd.command,
+            message: ERRORS.CHROME_NOT_RUNNING.trim(),
+            hint: '请先用上述命令启动 Chrome，然后重新运行此命令'
+          }, null, 2) + '\n');
+        } else {
+          console.error('\n❌ Chrome 未运行调试模式');
+          console.error('\n请先用以下命令启动 Chrome：');
+          console.error(`  ${launchCmd.command}`);
+          console.error('\n启动后重新运行此命令即可。');
+        }
+        process.exit(1);
+      }
+
+      // 步骤2：检查生意参谋登录状态
+      const loginStatus = await checkSycmLoginStatus(port);
+      
+      // 步骤3：生成操作指引
+      const instructions = generateSycmQueryInstructions(keyword, { port });
+      
+      // 步骤4：检查是否已有缓存数据
+      const httpRunning = await isHttpServerRunning();
+      let cachedData = null;
+      if (httpRunning) {
+        const { getSycmCachedKeywords } = require('../src/sycm-extract-fallback');
+        const cacheResult = await getSycmCachedKeywords();
+        if (cacheResult.available && cacheResult.keywords.includes(keyword)) {
+          cachedData = { keyword, cached: true };
+        }
+      }
+
+      if (jsonMode) {
+        const output = {
+          ok: true,
+          keyword,
+          chromeAvailable: true,
+          sycmLoggedIn: loginStatus.loggedIn,
+          sycmTabs: loginStatus.sycmTabs,
+          hasCachedData: !!cachedData,
+          instructions: instructions.instructions,
+          targetUrl: instructions.targetUrl,
+          chromeLaunchCmd: instructions.chromeLaunchCmd,
+          extractionScript: instructions.extractionScript,
+          fallbackHint: instructions.fallbackHint,
+          captchaHint: instructions.captchaHint
+        };
+        process.stdout.write(JSON.stringify(output, null, 2) + '\n');
+        return;
+      }
+
+      // 人类可读输出
+      console.log(`\n🔍 生意参谋查询: ${keyword}`);
+      console.log('='.repeat(50));
+      
+      if (loginStatus.loggedIn) {
+        console.log('✅ Chrome 已运行，已检测到生意参谋登录');
+        if (loginStatus.sycmTabs.length > 0) {
+          console.log(`   当前打开的生意参谋页面: ${loginStatus.sycmTabs.length} 个`);
+        }
+      } else {
+        console.log('⚠️  Chrome 已运行，但未检测到生意参谋登录');
+        console.log('   请先在 Chrome 中访问 sycm.taobao.com 并登录');
+      }
+
+      if (cachedData) {
+        console.log(`\n📦 已有缓存数据: 关键词 "${keyword}" 已在本地缓存中`);
+      }
+
+      console.log(`\n📋 操作指引（供 AI Agent 通过 chrome-devtools-mcp 执行）：`);
+      console.log(`   目标 URL: ${instructions.targetUrl}`);
+      instructions.instructions.forEach(step => {
+        console.log(`   步骤${step.step}: ${step.description}`);
+        console.log(`     工具: ${step.tool}`);
+        if (step.args.url) console.log(`     URL: ${step.args.url}`);
+        if (step.args.timeout) console.log(`     超时: ${step.args.timeout}ms`);
+      });
+
+      console.log(`\n💡 ${instructions.fallbackHint}`);
+      console.log(`\n⚠️  ${instructions.captchaHint}`);
+      console.log();
+
+    } catch (error) {
+      if (jsonMode) {
+        process.stdout.write(JSON.stringify({ ok: false, error: error.message }) + '\n');
+      } else {
+        console.error('\n❌ 错误:', error.message);
+      }
+      process.exit(1);
+    }
+  });
+
 program.parse();
