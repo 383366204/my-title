@@ -142,18 +142,12 @@ class WechatAdapter extends BaseAdapter {
    */
   async sendMessage(chatId, text) {
     if (!this.bot) throw new Error('微信适配器未启动');
-    // 按换行符拆分为行，并过滤掉空行
-    const lines = text.split('\n').filter(line => line.trim() !== '');
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      // 对每一行再按 3800 字符分块
-      const chunks = this._chunkText(line, 3800);
-      for (let j = 0; j < chunks.length; j++) {
-        await this.bot.sendText(chatId, chunks[j]);
-        // 每个消息块（包括同一行内的块）之间延迟 500ms
-        if (i < lines.length - 1 || j < chunks.length - 1) {
-          await this._sleep(500);
-        }
+    // 单条消息发送，保留真实换行符（iLink API 可能渲染为分行）
+    const chunks = this._chunkText(text, 3800);
+    for (let i = 0; i < chunks.length; i++) {
+      await this.bot.sendText(chatId, chunks[i]);
+      if (i < chunks.length - 1) {
+        await this._sleep(500);
       }
     }
   }
@@ -216,6 +210,8 @@ class WechatAdapter extends BaseAdapter {
           return await this._handleAnalyze(chatId, arg);
         case 'help':
           return await this._handleHelp(chatId);
+        case '链接':
+          return await this._handleLink(chatId, arg);
         default:
           return await this.sendMessage(chatId, '未知命令，发送 /help 查看帮助');
       }
@@ -323,6 +319,7 @@ class WechatAdapter extends BaseAdapter {
 /选品 关键词 - 生成选品标题（例如：/选品 纯银项链女）
 /搜索 关键词 - 搜索1688商品（例如：/搜索 纯银项链女）
 /分析 关键词 - 分析关键词结构（例如：/分析 纯银项链女）
+/链接 1688链接 - 从1688商品链接生成标题（例如：/链接 https://detail.1688.com/offer/xxx.html）
 /help - 显示此帮助信息
 
 💬 自由聊天：
@@ -330,6 +327,37 @@ class WechatAdapter extends BaseAdapter {
 如果提到选品、找货等意图，助手会引导您使用 /选品 命令`;
     
     return await this.sendMessage(chatId, helpText);
+  }
+
+  /**
+   * 处理 /链接 命令 — 从1688商品详情页URL生成标题
+   * @private
+   */
+  async _handleLink(chatId, url) {
+    if (!url) {
+      return await this.sendMessage(chatId, '请输入1688商品链接，例如：/链接 https://detail.1688.com/offer/123456.html');
+    }
+    
+    // 简单校验是否像1688链接
+    if (!url.includes('1688') && !url.includes('detail.1688.com')) {
+      return await this.sendMessage(chatId, '❌ 请提供1688商品详情页链接（detail.1688.com）');
+    }
+    
+    try {
+      await this.sendProgress(chatId, '⏳ 正在解析1688链接并搜图...');
+      const { runFromImage } = require('../index.js');
+      const result = await runFromImage(url, { maxLength: 60, silent: true });
+      
+      if (!result || !result.titles || result.titles.length === 0) {
+        return await this.sendMessage(chatId, '❌ 未能从该链接生成标题，请确认链接有效');
+      }
+      
+      const formatter = require('./formatter');
+      const text = formatter.formatAsText(result);
+      return await this.sendMessage(chatId, text);
+    } catch (error) {
+      return await this.sendError(chatId, error);
+    }
   }
 
   /**

@@ -19,8 +19,11 @@ class BaseAdapter {
           '🤖 my-title 标题生成机器人\n\n' +
           '使用方法：直接发送商品关键词\n' +
           '例如：纯银项链女高级感\n\n' +
-          '命令：/help — 显示帮助'
+          '命令：/help — 显示帮助\n/链接 1688链接 — 从1688商品链接生成标题'
         );
+      }
+      if (cmd.value === '链接') {
+        return this._handleLink(chatId, cmd.value);
       }
       return this.sendMessage(chatId, '未知命令，发送 /help 查看帮助');
     }
@@ -41,6 +44,32 @@ class BaseAdapter {
     const trimmed = (text || '').trim();
     if (trimmed.startsWith('/')) return { type: 'command', value: trimmed.slice(1).trim() };
     return { type: 'keyword', value: trimmed };
+  }
+
+  /**
+   * 处理 /链接 命令 — 从1688商品详情页URL生成标题（飞书/钉钉共用）
+   * @private
+   */
+  async _handleLink(chatId, url) {
+    if (!url) {
+      return this.sendMessage(chatId, '请输入1688商品链接，例如：/链接 https://detail.1688.com/offer/123456.html');
+    }
+    if (!url.includes('1688') && !url.includes('detail.1688.com')) {
+      return this.sendMessage(chatId, '❌ 请提供1688商品详情页链接（detail.1688.com）');
+    }
+    try {
+      await this.sendProgress(chatId, '⏳ 正在解析1688链接并搜图...');
+      const { runFromImage } = require('../index.js');
+      const result = await runFromImage(url, { maxLength: 60, silent: true });
+      if (!result || !result.titles || result.titles.length === 0) {
+        return this.sendMessage(chatId, '❌ 未能从该链接生成标题，请确认链接有效');
+      }
+      const formatter = require('./formatter');
+      const text = formatter.formatAsText(result);
+      return this.sendMessage(chatId, text);
+    } catch (error) {
+      return this.sendError(chatId, error);
+    }
   }
 }
 module.exports = { BaseAdapter };
