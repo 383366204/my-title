@@ -212,6 +212,8 @@ class WechatAdapter extends BaseAdapter {
           return await this._handleHelp(chatId);
         case '链接':
           return await this._handleLink(chatId, arg);
+        case '查词':
+          return await this._handleSycmQuery(chatId, arg);
         default:
           return await this.sendMessage(chatId, '未知命令，发送 /help 查看帮助');
       }
@@ -319,7 +321,8 @@ class WechatAdapter extends BaseAdapter {
 /选品 关键词 - 生成选品标题（例如：/选品 纯银项链女）
 /搜索 关键词 - 搜索1688商品（例如：/搜索 纯银项链女）
 /分析 关键词 - 分析关键词结构（例如：/分析 纯银项链女）
-/链接 1688链接 - 从1688商品链接生成标题（例如：/链接 https://detail.1688.com/offer/xxx.html）
+/查词 关键词 - 查询生意参谋数据（例如：/查词 耳钉）
+/链接 1688链接 - 从1688商品链接生成标题
 /help - 显示此帮助信息
 
 💬 自由聊天：
@@ -355,6 +358,66 @@ class WechatAdapter extends BaseAdapter {
       const formatter = require('./formatter');
       const text = formatter.formatAsText(result);
       return await this.sendMessage(chatId, text);
+    } catch (error) {
+      return await this.sendError(chatId, error);
+    }
+  }
+
+  /**
+   * 处理 /查词 命令 — 查询生意参谋搜索分析数据
+   * @private
+   */
+  async _handleSycmQuery(chatId, keyword) {
+    if (!keyword) {
+      return await this.sendMessage(chatId, '请输入查询关键词，例如：/查词 耳钉\n\n返回生意参谋搜索分析数据（搜索人气、点击率、支付转化率等），需要 Chrome 调试模式运行中。');
+    }
+    
+    try {
+      await this.sendProgress(chatId, '⏳ 正在连接 Chrome 并查询生意参谋...');
+      
+      const { isChromeDevToolsAvailable, generateChromeLaunchCommand, ERRORS } = require('../sycm-browser-helper');
+      const { extractSycmData } = require('../sycm-cdp-extractor');
+      
+      const chromeAvailable = await isChromeDevToolsAvailable(9222);
+      if (!chromeAvailable) {
+        const launchCmd = generateChromeLaunchCommand({ port: 9222 });
+        return await this.sendMessage(chatId, '❌ Chrome 未运行调试模式\n\n请先启动：\n' + launchCmd.command + '\n\n启动后重新发送 /查词 ' + keyword);
+      }
+      
+      var progressMsgs = [];
+      const result = await extractSycmData(keyword, {
+        port: 9222,
+        maxPages: 5,
+        onProgress: function(msg) { progressMsgs.push(msg); }
+      });
+      
+      if (!result.data || result.data.length === 0) {
+        return await this.sendMessage(chatId, '❌ 未查询到数据，可能原因：\n1. Chrome 未登录生意参谋\n2. 关键词无搜索数据\n3. 页面加载超时');
+      }
+      
+      // 格式化前10条结果（微信消息长度限制）
+      var fields = ['searchPopularity', 'clickRate', 'conversionRate', 'buyerCount', 'demandSupplyRatio', 'tmallClickShare'];
+      var fieldLabels = ['搜索人气', '点击率', '转化率', '买家数', '供需比', '天猫占比'];
+      var lines = ['📊 生意参谋 — ' + keyword + ' (' + result.totalCount + '条/' + result.totalPages + '页)', ''];
+      
+      var displayCount = Math.min(result.data.length, 10);
+      for (var i = 0; i < displayCount; i++) {
+        var row = result.data[i];
+        var line = (i + 1) + '. ' + (row.keyword || '?');
+        for (var f = 0; f < fields.length; f++) {
+          var v = row[fields[f]];
+          var t = row[fields[f] + '_trend'];
+          line += '\n   ' + fieldLabels[f] + ': ' + (v != null ? v : '-') + (t ? ' (' + t + ')' : '');
+        }
+        lines.push(line);
+      }
+      
+      if (result.data.length > 10) {
+        lines.push('', '... 还有 ' + (result.data.length - 10) + ' 条 ...');
+      }
+      lines.push('', '⏱ 提取时间: ' + new Date(result.extractedAt).toLocaleString('zh-CN'));
+      
+      return await this.sendMessage(chatId, lines.join('\n'));
     } catch (error) {
       return await this.sendError(chatId, error);
     }

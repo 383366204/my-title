@@ -57,6 +57,7 @@ function generateDataExtractionScript() {
 function generateMultiPageInstructions(keyword, options) {
   options = options || {};
   var port = options.port || 9222;
+  var maxPages = options.maxPages || 5;
   var targetUrl = getSycmPageUrl(keyword);
   var singlePageScript = generateDataExtractionScript();
 
@@ -73,6 +74,7 @@ function generateMultiPageInstructions(keyword, options) {
     chromeLaunchCmd: chromeLaunchCmd,
     targetUrl: targetUrl,
     mode: 'multi_page',
+    maxPages: maxPages,
     singlePageScript: singlePageScript,
     instructions: [
       {
@@ -126,7 +128,8 @@ function generateMultiPageInstructions(keyword, options) {
       }
     ],
     loopLogic: {
-      description: '\u5728\u6b65\u9aa44-6 \u4e4b\u540e\u5faa\u73af\u6267\u884c: step4 \u2192 step5 \u2192 step6\uff0c\u76f4\u5230 step5 \u8fd4\u56de disabled',
+      description: '\u5728\u6b65\u9aa44-6 \u4e4b\u540e\u5faa\u73af\u6267\u884c: step4 \u2192 step5 \u2192 step6\uff0c\u76f4\u5230 step5 \u8fd4\u56de disabled \u6216\u5df2\u63d0\u53d6 ' + maxPages + '\u9875',
+      maxPages: maxPages,
       dedupCheck: '\u5bf9\u6bd4\u4e0a\u4e00\u9875\u6700\u540e\u4e00\u6761 keyword\uff0c\u76f8\u540c\u5219\u8df3\u8fc7\u91cd\u8bd5',
       nextPageWaitMs: 4000
     },
