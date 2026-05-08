@@ -431,18 +431,19 @@ program
 
 program
   .command('sycm <keyword>')
-  .description('查询生意参谋搜索分析数据（需要 Chrome 调试模式）')
+  .description('查询生意参谋搜索分析数据（需要 Chrome 调试模式，自动提取前5页数据）')
   .option('--json', '纯 JSON 输出模式')
   .option('--port <number>', 'Chrome 调试端口', '9222')
+  .option('--pages <number>', '最大提取页数（默认5）', '5')
   .action(async function(keyword, options, command) {
     const mainOpts = command && command.parent ? command.parent.opts() : {};
     const jsonMode = !!options.json || !!mainOpts.json;
     const port = parseInt(options.port) || 9222;
+    const maxPages = parseInt(options.pages) || 5;
     
     try {
-      const { isChromeDevToolsAvailable, generateChromeLaunchCommand, checkSycmLoginStatus, ERRORS } = require('../src/sycm-browser-helper');
-      const { generateSycmQueryInstructions } = require('../src/sycm-instruction-generator');
-      const { waitForSycmData, isHttpServerRunning } = require('../src/sycm-extract-fallback');
+      const { isChromeDevToolsAvailable, generateChromeLaunchCommand, ERRORS } = require('../src/sycm-browser-helper');
+      const { extractSycmData } = require('../src/sycm-cdp-extractor');
 
       // 步骤1：检测 Chrome 是否在调试模式运行
       const chromeAvailable = await isChromeDevToolsAvailable(port);
@@ -467,72 +468,49 @@ program
         }
       }
 
-      // 步骤2：检查生意参谋登录状态
-      const loginStatus = await checkSycmLoginStatus(port);
-      
-      // 步骤3：生成操作指引
-      const instructions = generateSycmQueryInstructions(keyword, { port });
-      
-      // 步骤4：检查是否已有缓存数据
-      const httpRunning = await isHttpServerRunning();
-      let cachedData = null;
-      if (httpRunning) {
-        const { getSycmCachedKeywords } = require('../src/sycm-extract-fallback');
-        const cacheResult = await getSycmCachedKeywords();
-        if (cacheResult.available && cacheResult.keywords.includes(keyword)) {
-          cachedData = { keyword, cached: true };
-        }
-      }
+      // 步骤2：通过 CDP 直接提取数据
+      var progressMsgs = [];
+      const result = await extractSycmData(keyword, {
+        port: port,
+        maxPages: maxPages,
+        onProgress: function(msg) { progressMsgs.push(msg); if (!jsonMode) console.log('  ' + msg); }
+      });
 
       if (jsonMode) {
-        const output = {
+        process.stdout.write(JSON.stringify({
           ok: true,
-          keyword,
-          chromeAvailable: true,
-          sycmLoggedIn: loginStatus.loggedIn,
-          sycmTabs: loginStatus.sycmTabs,
-          hasCachedData: !!cachedData,
-          instructions: instructions.instructions,
-          targetUrl: instructions.targetUrl,
-          chromeLaunchCmd: instructions.chromeLaunchCmd,
-          extractionScript: instructions.extractionScript,
-          fallbackHint: instructions.fallbackHint,
-          captchaHint: instructions.captchaHint
-        };
-        process.stdout.write(JSON.stringify(output, null, 2) + '\n');
+          keyword: result.keyword,
+          source: result.source,
+          extractedAt: result.extractedAt,
+          method: result.method,
+          totalPages: result.totalPages,
+          totalCount: result.totalCount,
+          headers: result.headers,
+          data: result.data
+        }, null, 2) + '\n');
         return;
       }
 
       // 人类可读输出
-      console.log(`\n🔍 生意参谋查询: ${keyword}`);
-      console.log('='.repeat(50));
-      
-      if (loginStatus.loggedIn) {
-        console.log('✅ Chrome 已运行，已检测到生意参谋登录');
-        if (loginStatus.sycmTabs.length > 0) {
-          console.log(`   当前打开的生意参谋页面: ${loginStatus.sycmTabs.length} 个`);
-        }
-      } else {
-        console.log('⚠️  Chrome 已运行，但未检测到生意参谋登录');
-        console.log('   请先在 Chrome 中访问 sycm.taobao.com 并登录');
-      }
+      console.log('\n' + '='.repeat(100));
+      console.log('\u{1f4ca} SYCM \u641c\u7d22\u5206\u6790 \u2014 ' + result.keyword + ' | \u524d' + result.maxPages + '\u9875 | 6\u5217 | \u5171 ' + result.totalCount + ' \u6761');
+      console.log('-'.repeat(100));
 
-      if (cachedData) {
-        console.log(`\n📦 已有缓存数据: 关键词 "${keyword}" 已在本地缓存中`);
-      }
+      var displayRows = result.data.slice(0, 20);
+      if (result.data.length > 20) displayRows.push({ keyword: '...' });
+      var fields = ['searchPopularity', 'clickRate', 'conversionRate', 'buyerCount', 'demandSupplyRatio', 'tmallClickShare'];
 
-      console.log(`\n📋 操作指引（供 AI Agent 通过 chrome-devtools-mcp 执行）：`);
-      console.log(`   目标 URL: ${instructions.targetUrl}`);
-      instructions.instructions.forEach(step => {
-        console.log(`   步骤${step.step}: ${step.description}`);
-        console.log(`     工具: ${step.tool}`);
-        if (step.args.url) console.log(`     URL: ${step.args.url}`);
-        if (step.args.timeout) console.log(`     超时: ${step.args.timeout}ms`);
+      displayRows.forEach(function(row, idx) {
+        var line = String(idx + 1).padStart(3) + '. ' + (row.keyword || '?').padEnd(18);
+        fields.forEach(function(f) {
+          var v = row[f], t = row[f + '_trend'];
+          line += ' | ' + (String(v != null ? v : '-').padStart(14) + (t ? ' (' + t + ')' : ''));
+        });
+        console.log(line);
       });
-
-      console.log(`\n💡 ${instructions.fallbackHint}`);
-      console.log(`\n⚠️  ${instructions.captchaHint}`);
-      console.log();
+      if (result.data.length > 20) console.log('... \u8fd8\u5176 ' + (result.data.length - 20) + ' \u6761 ...');
+      console.log('-'.repeat(100));
+      console.log('\u2705 \u63d0\u53d6\u5b8c\u6210\uff01 ' + result.totalCount + ' \u6761\u6570\u636e (' + result.totalPages + '\u9875)');
 
     } catch (error) {
       if (jsonMode) {

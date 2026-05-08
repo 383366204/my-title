@@ -1039,28 +1039,27 @@ server.tool(
 server.tool(
   'sycm_query',
   [
-    '生意参谋搜索分析自动查询工具。检测 Chrome 连接状态，生成 chrome-devtools-mcp 操作指引，让 AI Agent 自动化打开生意参谋页面并提取搜索分析数据。',
+    '生意参谋搜索分析数据查询工具。自动通过 CDP 连接 Chrome，打开生意参谋搜索分析页面，勾选全部指标，提取前5页数据并返回。',
     '',
     '使用前提：用户必须先用 --remote-debugging-port=9222 启动 Chrome 并登录 sycm.taobao.com。',
-    '如果 Chrome 未运行，工具会返回启动命令指引。',
-    '如果已有缓存数据（通过 sycm-extractor 插件或 /api/extract 提交），工具会直接返回缓存。'
+    '如果 Chrome 未运行，工具会返回启动命令指引。'
   ].join('\n'),
   {
     keyword: z.string().describe('要查询的搜索关键词，如：耳钉、纯银项链'),
     port: z.number().default(9222).describe('Chrome 远程调试端口，默认 9222'),
+    maxPages: z.number().default(5).describe('最大提取页数，默认 5'),
   },
-  async ({ keyword, port }) => {
+  async ({ keyword, port, maxPages }) => {
     try {
-      const { isChromeDevToolsAvailable, generateChromeLaunchCommand, checkSycmLoginStatus, ERRORS } = require('../src/sycm-browser-helper.js');
-      const { generateSycmQueryInstructions } = require('../src/sycm-instruction-generator.js');
+      const { isChromeDevToolsAvailable, generateChromeLaunchCommand, ERRORS } = require('../src/sycm-browser-helper.js');
+      const { extractSycmData } = require('../src/sycm-cdp-extractor.js');
 
-      // 步骤1：检测 Chrome 是否在调试模式运行
       const chromeAvailable = await isChromeDevToolsAvailable(port);
       
       if (!chromeAvailable) {
         const launchCmd = generateChromeLaunchCommand({ port });
         return { content: [{ type: 'text', text: JSON.stringify({
-          ok: true,
+          ok: false,
           status: 'chrome_not_running',
           chromeLaunchCmd: launchCmd.command,
           message: ERRORS.CHROME_NOT_RUNNING.trim(),
@@ -1068,35 +1067,25 @@ server.tool(
         }, null, 2) }] };
       }
 
-      // 步骤2：检查生意参谋登录状态
-      const loginStatus = await checkSycmLoginStatus(port);
-      
-      // 步骤3：生成操作指引
-      const instructions = generateSycmQueryInstructions(keyword, { port });
-      
-      // 步骤4：检查 sycmDataStore 缓存
-      const cachedEntry = sycmDataStore.get(keyword);
-      
-      const result = {
-        ok: true,
-        keyword,
-        chromeAvailable: true,
-        sycmLoggedIn: loginStatus.loggedIn,
-        sycmTabs: loginStatus.sycmTabs,
-        hasCachedData: !!cachedEntry,
-        cachedDataAge: cachedEntry ? Date.now() - cachedEntry.createdAt : null,
-        instructions: instructions.instructions,
-        targetUrl: instructions.targetUrl,
-        chromeLaunchCmd: instructions.chromeLaunchCmd,
-        extractionScript: instructions.extractionScript,
-        fallbackHint: instructions.fallbackHint,
-        captchaHint: instructions.captchaHint,
-        _hint: loginStatus.loggedIn
-          ? 'Chrome 已连接且已登录生意参谋。请按 instructions 中的步骤，使用 chrome-devtools-mcp 工具（navigate_page → wait_for → evaluate_script）自动执行查询。'
-          : 'Chrome 已连接但未检测到生意参谋登录。请让用户先在 Chrome 中登录 sycm.taobao.com，然后重新调用此工具。'
-      };
+      var progressLog = [];
+      const result = await extractSycmData(keyword, {
+        port: port,
+        maxPages: maxPages,
+        onProgress: function(msg) { progressLog.push(msg); }
+      });
 
-      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+      return { content: [{ type: 'text', text: JSON.stringify({
+        ok: true,
+        keyword: result.keyword,
+        source: result.source,
+        extractedAt: result.extractedAt,
+        method: result.method,
+        totalPages: result.totalPages,
+        totalCount: result.totalCount,
+        headers: result.headers,
+        data: result.data,
+        _progress: progressLog
+      }, null, 2) }] };
     } catch (err) {
       console.error(`[my-title] sycm_query error:`, err.message);
       return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: err.message }) }], isError: true };
