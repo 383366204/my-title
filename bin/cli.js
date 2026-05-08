@@ -434,8 +434,9 @@ program
   .description('查询生意参谋搜索分析数据（需要 Chrome 调试模式）')
   .option('--json', '纯 JSON 输出模式')
   .option('--port <number>', 'Chrome 调试端口', '9222')
-  .action(async (keyword, options) => {
-    const jsonMode = !!options.json;
+  .action(async function(keyword, options, command) {
+    const mainOpts = command && command.parent ? command.parent.opts() : {};
+    const jsonMode = !!options.json || !!mainOpts.json;
     const port = parseInt(options.port) || 9222;
     
     try {
@@ -456,13 +457,14 @@ program
             message: ERRORS.CHROME_NOT_RUNNING.trim(),
             hint: '请先用上述命令启动 Chrome，然后重新运行此命令'
           }, null, 2) + '\n');
+          return;
         } else {
           console.error('\n❌ Chrome 未运行调试模式');
           console.error('\n请先用以下命令启动 Chrome：');
           console.error(`  ${launchCmd.command}`);
           console.error('\n启动后重新运行此命令即可。');
+          process.exit(1);
         }
-        process.exit(1);
       }
 
       // 步骤2：检查生意参谋登录状态
