@@ -1036,6 +1036,133 @@ server.tool(
   }
 );
 
+server.tool(
+  'sycm_query',
+  [
+    '生意参谋搜索分析自动查询工具。检测 Chrome 连接状态，生成 chrome-devtools-mcp 操作指引，让 AI Agent 自动化打开生意参谋页面并提取搜索分析数据。',
+    '',
+    '使用前提：用户必须先用 --remote-debugging-port=9222 启动 Chrome 并登录 sycm.taobao.com。',
+    '如果 Chrome 未运行，工具会返回启动命令指引。',
+    '如果已有缓存数据（通过 sycm-extractor 插件或 /api/extract 提交），工具会直接返回缓存。'
+  ].join('\n'),
+  {
+    keyword: z.string().describe('要查询的搜索关键词，如：耳钉、纯银项链'),
+    port: z.number().default(9222).describe('Chrome 远程调试端口，默认 9222'),
+  },
+  async ({ keyword, port }) => {
+    try {
+      const { isChromeDevToolsAvailable, generateChromeLaunchCommand, checkSycmLoginStatus, ERRORS } = require('../src/sycm-browser-helper.js');
+      const { generateSycmQueryInstructions } = require('../src/sycm-instruction-generator.js');
+
+      // 步骤1：检测 Chrome 是否在调试模式运行
+      const chromeAvailable = await isChromeDevToolsAvailable(port);
+      
+      if (!chromeAvailable) {
+        const launchCmd = generateChromeLaunchCommand({ port });
+        return { content: [{ type: 'text', text: JSON.stringify({
+          ok: true,
+          status: 'chrome_not_running',
+          chromeLaunchCmd: launchCmd.command,
+          message: ERRORS.CHROME_NOT_RUNNING.trim(),
+          hint: '请让用户先用上述命令启动 Chrome（注意保留 --user-data-dir 以复用登录态），然后重新调用此工具。'
+        }, null, 2) }] };
+      }
+
+      // 步骤2：检查生意参谋登录状态
+      const loginStatus = await checkSycmLoginStatus(port);
+      
+      // 步骤3：生成操作指引
+      const instructions = generateSycmQueryInstructions(keyword, { port });
+      
+      // 步骤4：检查 sycmDataStore 缓存
+      const cachedEntry = sycmDataStore.get(keyword);
+      
+      const result = {
+        ok: true,
+        keyword,
+        chromeAvailable: true,
+        sycmLoggedIn: loginStatus.loggedIn,
+        sycmTabs: loginStatus.sycmTabs,
+        hasCachedData: !!cachedEntry,
+        cachedDataAge: cachedEntry ? Date.now() - cachedEntry.createdAt : null,
+        instructions: instructions.instructions,
+        targetUrl: instructions.targetUrl,
+        chromeLaunchCmd: instructions.chromeLaunchCmd,
+        extractionScript: instructions.extractionScript,
+        fallbackHint: instructions.fallbackHint,
+        captchaHint: instructions.captchaHint,
+        _hint: loginStatus.loggedIn
+          ? 'Chrome 已连接且已登录生意参谋。请按 instructions 中的步骤，使用 chrome-devtools-mcp 工具（navigate_page → wait_for → evaluate_script）自动执行查询。'
+          : 'Chrome 已连接但未检测到生意参谋登录。请让用户先在 Chrome 中登录 sycm.taobao.com，然后重新调用此工具。'
+      };
+
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    } catch (err) {
+      console.error(`[my-title] sycm_query error:`, err.message);
+      return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: err.message }) }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  'sycm_status',
+  '生意参谋数据缓存状态查询。返回 sycmDataStore 中已缓存的关键词列表和详细信息，包括数据创建时间、TTL 剩余等。',
+  {
+    keyword: z.string().optional().describe('可选：只查看指定关键词的缓存详情'),
+  },
+  async ({ keyword }) => {
+    try {
+      if (keyword) {
+        // 查询指定关键词的缓存
+        const entry = sycmDataStore.get(keyword);
+        if (!entry) {
+          return { content: [{ type: 'text', text: JSON.stringify({
+            ok: true,
+            keyword,
+            cached: false,
+            message: `关键词 "${keyword}" 没有缓存数据`
+          }, null, 2) }] };
+        }
+        const ageMs = Date.now() - entry.createdAt;
+        const ttlRemainingMs = SYCM_DATA_TTL - ageMs;
+        return { content: [{ type: 'text', text: JSON.stringify({
+          ok: true,
+          keyword,
+          cached: true,
+          createdAt: new Date(entry.createdAt).toISOString(),
+          ageSeconds: Math.round(ageMs / 1000),
+          ttlRemainingSeconds: Math.max(0, Math.round(ttlRemainingMs / 1000)),
+          dataSize: typeof entry.data === 'string' ? entry.data.length : 0,
+        }, null, 2) }] };
+      }
+
+      // 查询所有缓存
+      const allKeywords = Array.from(sycmDataStore.keys());
+      const details = allKeywords.map(kw => {
+        const entry = sycmDataStore.get(kw);
+        const ageMs = Date.now() - entry.createdAt;
+        return {
+          keyword: kw,
+          createdAt: new Date(entry.createdAt).toISOString(),
+          ageSeconds: Math.round(ageMs / 1000),
+          ttlRemainingSeconds: Math.max(0, Math.round((SYCM_DATA_TTL - ageMs) / 1000)),
+        };
+      });
+
+      return { content: [{ type: 'text', text: JSON.stringify({
+        ok: true,
+        cachedKeywords: allKeywords,
+        count: allKeywords.length,
+        details,
+        ttlMinutes: SYCM_DATA_TTL / 60000,
+      }, null, 2) }] };
+    } catch (err) {
+      console.error(`[my-title] sycm_status error:`, err.message);
+      return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: err.message }) }], isError: true };
+    }
+  }
+);
+
 async function main() {
   // Parse command line arguments for HTTP mode
   const args = process.argv.slice(2);
