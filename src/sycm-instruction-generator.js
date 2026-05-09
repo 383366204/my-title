@@ -57,7 +57,7 @@ function generateDataExtractionScript() {
 function generateMultiPageInstructions(keyword, options) {
   options = options || {};
   var port = options.port || 9222;
-  var maxPages = options.maxPages || 5;
+  var maxPages = options.maxPages || 1;
   var targetUrl = getSycmPageUrl(keyword);
   var singlePageScript = generateDataExtractionScript();
 

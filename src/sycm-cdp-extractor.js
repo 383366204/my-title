@@ -7,7 +7,7 @@ var http = require('http');
 var WebSocket = require('ws');
 
 var DEFAULT_PORT = 9222;
-var DEFAULT_MAX_PAGES = 5;
+var DEFAULT_MAX_PAGES = 1;
 var PAGE_WAIT_MS = 4000;
 var COLUMN_POLL_INTERVAL = 5000;
 var COLUMN_POLL_MAX = 8;
@@ -102,7 +102,8 @@ function _buildExtractScript() {
  * @param {string} keyword - 搜索关键词
  * @param {Object} [options={}] - 配置选项
  * @param {number} [options.port=9222] - Chrome 调试端口
- * @param {number} [options.maxPages=5] - 最大提取页数
+ * @param {number} [options.maxPages=1] - 最大提取页数
+ * @param {string} [options.mode='hot'] - 查询模式: 'hot'=相关热搜词, 'blue'=相关蓝海词
  * @param {Function} [options.onProgress] - 进度回调 fn(stepMsg)
  * @returns {Promise<Object>} 提取结果 { keyword, data[], totalCount, totalPages, headers, extractedAt }
  */
@@ -110,6 +111,7 @@ async function extractSycmData(keyword, options) {
   options = options || {};
   var port = options.port || DEFAULT_PORT;
   var maxPages = options.maxPages || DEFAULT_MAX_PAGES;
+  var mode = options.mode || 'hot';
   var onProgress = options.onProgress || function() {};
 
   if (!keyword) throw new Error('keyword is required');
@@ -130,8 +132,20 @@ async function extractSycmData(keyword, options) {
     tab = await _connectToTab(port, 'search_analysis');
     cdp = await _createCdpClient(tab.webSocketDebuggerUrl);
 
+    // 先切换到蓝海词模式（如果需要），再勾选指标
+    if (mode === 'blue') {
+      onProgress('[2/6] Switching to 蓝海词 mode...');
+      await cdp.runAction(
+        "(() => { var labels = document.querySelectorAll('label.ant-radio-wrapper'); " +
+        "for(var i=0;i<labels.length;i++){if(labels[i].textContent.includes('蓝海')){labels[i].click();return 'clicked'}} " +
+        "return 'not_found' })()",
+        5000
+      );
+      await new Promise(function(r) { setTimeout(r, 3000); });
+    }
+
     // 勾选全部 6 个指标 checkbox
-    onProgress('[2/6] Checking metric checkboxes...');
+    onProgress('[3/6] Checking metric checkboxes...');
     await cdp.runAction(
       "(() => { var g=document.querySelector('.ant-checkbox-group.low-Checkbox-v2'); " +
       "if(!g)return'no_group'; " +
@@ -208,6 +222,7 @@ async function extractSycmData(keyword, options) {
       source: 'sycm_search_analysis',
       extractedAt: new Date().toISOString(),
       method: 'cdp_multi_page',
+      mode: mode,
       maxPages: maxPages,
       totalPages: totalPages,
       headers: parsed ? parsed.h : [],
