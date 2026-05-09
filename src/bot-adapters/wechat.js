@@ -49,7 +49,7 @@ class WechatAdapter extends BaseAdapter {
       console.error(`[${this.label}] 会话已过期，正在重新登录...`);
       try {
         await this._login();
-        this.bot.start();
+        await this.bot.start();
       } catch (err) {
         console.error(`[${this.label}] 重新登录失败:`, err.message);
       }
@@ -391,7 +391,7 @@ class WechatAdapter extends BaseAdapter {
       var modeLabel = (mode === 'blue') ? '蓝海词' : '热搜词';
       var fields = ['searchPopularity', 'clickRate', 'conversionRate', 'buyerCount', 'demandSupplyRatio', 'tmallClickShare'];
       var fieldLabels = ['搜索人气', '点击率', '支付转化率', '支付买家数', '需求供给比', '天猫商品点击占比'];
-      var pctFields = { clickRate: true, conversionRate: false, tmallClickShare: true };
+      var pctFields = { clickRate: true, conversionRate: true, tmallClickShare: true };
       var allLines = [];
       var displayCount = isBatch ? 5 : 10;
 
@@ -441,8 +441,8 @@ class WechatAdapter extends BaseAdapter {
             }
             allLines.push(line);
           }
-          if (result.data.length > displayCount) {
-            allLines.push('   ... 还有 ' + (result.data.length - displayCount) + ' 条');
+          if (deduped.length > displayCount) {
+            allLines.push('   ... 还有 ' + Math.max(0, deduped.length - displayCount) + ' 条');
           }
         } catch (err) {
           allLines.push('📊 ' + kw + ' — ❌ ' + (err.message || '查询失败'));

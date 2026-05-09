@@ -20,8 +20,11 @@ class BaseAdapter {
           '命令：\n' +
           '/help — 显示帮助\n' +
           '/链接 1688链接 — 从1688商品链接生成标题\n' +
-          '/查词 关键词 — 查询生意参谋热搜词（支持批量）\n' +
-          '/查词蓝海 关键词 — 查询相关蓝海词（支持批量）\n\n' +
+           '/查词 关键词 — 查询生意参谋热搜词（支持批量）\n' +
+           '/查词蓝海 关键词 — 查询相关蓝海词（支持批量）\n' +
+           '/选品 关键词 — 生成选品标题\n' +
+           '/搜索 关键词 — 搜索1688商品\n' +
+           '/分析 关键词 — 分析关键词结构\n\n' +
           '直接发送关键词可生成选品标题'
         );
       }
@@ -35,6 +38,57 @@ class BaseAdapter {
       if (cmd.value === '查词蓝海' || cmd.value.indexOf('查词蓝海 ') === 0) {
         var blueKeyword = cmd.value.replace(/^查词蓝海\s*/, '') || cmd.arg;
         return this._handleSycmQuery(chatId, blueKeyword, 'blue');
+      }
+      if (cmd.value === '选品' || cmd.value.indexOf('选品 ') === 0) {
+        var selectKeyword = cmd.value.replace(/^选品\s*/, '') || cmd.arg;
+        if (!selectKeyword) {
+          return this.sendMessage(chatId, '请输入关键词，例如：/选品 纯银项链女');
+        }
+        try {
+          const { run } = require('../index.js');
+          const result = await run(selectKeyword, { maxLength: 60, silent: true });
+          const formatter = require('./formatter');
+          const text = formatter.formatAsText(result);
+          return this.sendCard(chatId, text);
+        } catch (err) {
+          return this.sendError(chatId, err);
+        }
+      }
+      if (cmd.value === '搜索' || cmd.value.indexOf('搜索 ') === 0) {
+        var searchKeyword = cmd.value.replace(/^搜索\s*/, '') || cmd.arg;
+        if (!searchKeyword) {
+          return this.sendMessage(chatId, '请输入关键词，例如：/搜索 纯银项链女');
+        }
+        try {
+          const GLMClient = require('../glm-client.js');
+          const glmClient = new GLMClient({ apiKey: process.env.GLM_API_KEY, apiBase: process.env.GLM_API_BASE, model: process.env.GLM_API_MODEL });
+          const extraction = await glmClient.extractCoreAndModifiers(searchKeyword);
+          const { coreWord, modifiers, semanticGroups } = extraction;
+          const searchAll = require('../search-1688').searchAll;
+          const products = await searchAll(coreWord, searchKeyword, modifiers, semanticGroups);
+          const formatter = require('./formatter');
+          const text = formatter.formatSearchResult({ coreWord, blueOceanWord: searchKeyword, modifiers, products });
+          return this.sendMessage(chatId, text);
+        } catch (error) {
+          return this.sendError(chatId, error);
+        }
+      }
+      if (cmd.value === '分析' || cmd.value.indexOf('分析 ') === 0) {
+        var analyzeKeyword = cmd.value.replace(/^分析\s*/, '') || cmd.arg;
+        if (!analyzeKeyword) {
+          return this.sendMessage(chatId, '请输入关键词，例如：/分析 纯银项链女');
+        }
+        try {
+          const GLMClient = require('../glm-client.js');
+          const glmClient = new GLMClient({ apiKey: process.env.GLM_API_KEY, apiBase: process.env.GLM_API_BASE, model: process.env.GLM_API_MODEL });
+          const extraction = await glmClient.extractCoreAndModifiers(analyzeKeyword);
+          const { coreWord, modifiers, semanticGroups } = extraction;
+          const formatter = require('./formatter');
+          const text = formatter.formatAnalysisResult({ coreWord, blueOceanWord: analyzeKeyword, modifiers, semanticGroups });
+          return this.sendMessage(chatId, text);
+        } catch (error) {
+          return this.sendError(chatId, error);
+        }
       }
       return this.sendMessage(chatId, '未知命令，发送 /help 查看帮助');
     }
@@ -112,7 +166,7 @@ class BaseAdapter {
       var modeLabel = (mode === 'blue') ? '蓝海词' : '热搜词';
       var fields = ['searchPopularity', 'clickRate', 'conversionRate', 'buyerCount', 'demandSupplyRatio', 'tmallClickShare'];
       var fieldLabels = ['搜索人气', '点击率', '支付转化率', '支付买家数', '需求供给比', '天猫商品点击占比'];
-      var pctFields = { clickRate: true, conversionRate: false, tmallClickShare: true };
+      var pctFields = { clickRate: true, conversionRate: true, tmallClickShare: true };
       var allLines = [];
       var displayCount = isBatch ? 5 : 10;
 
@@ -161,8 +215,8 @@ class BaseAdapter {
             }
             allLines.push(line);
           }
-          if (result.data.length > displayCount) {
-            allLines.push('   ... 还有 ' + (result.data.length - displayCount) + ' 条');
+          if (deduped.length > displayCount) {
+            allLines.push('   ... 还有 ' + Math.max(0, deduped.length - displayCount) + ' 条');
           }
         } catch (err) {
           allLines.push('📊 ' + kw + ' — ❌ ' + (err.message || '查询失败'));
