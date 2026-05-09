@@ -39,9 +39,18 @@ class GLMClient {
    * @param {string} [config.model] - 模型名称
    */
   constructor(config) {
-    this.apiKey = config.apiKey;
-    this.apiBase = config.apiBase || 'https://open.bigmodel.cn/api/paas/v4';
-    this.model = config.model || 'glm-4.7-flash';
+    // 优先使用火山引擎方舟（付费模型，质量更高）
+    if (process.env.VOLC_API_KEY) {
+      this.apiKey = process.env.VOLC_API_KEY;
+      this.apiBase = process.env.VOLC_API_BASE || 'https://ark.cn-beijing.volces.com/api/coding/v3';
+      this.model = config.model || 'glm-5.1';
+    } else {
+      this.apiKey = config.apiKey;
+      this.apiBase = config.apiBase || 'https://open.bigmodel.cn/api/paas/v4';
+      this.model = config.model || 'glm-4-flash';
+    }
+    this._timeout = this.apiBase.includes('volces.com') ? 60000 : 15000;
+    this._longTimeout = this._timeout * 2;
   }
 
   /**
@@ -111,7 +120,7 @@ synonyms 每组最多10个，只列最常见的变体
           'Authorization': `Bearer ${this.apiKey}`,
           'Content-Type': 'application/json'
         },
-        timeout: 15000
+        timeout: this._timeout
       }
     );
 
@@ -214,7 +223,7 @@ synonyms 每组最多10个，只列最常见的变体
           'Authorization': `Bearer ${this.apiKey}`,
           'Content-Type': 'application/json'
         },
-        timeout: 15000
+        timeout: this._timeout
       }
     );
 
@@ -313,7 +322,7 @@ synonyms 每组最多10个，只列最常见的变体
           'Authorization': `Bearer ${this.apiKey}`,
           'Content-Type': 'application/json'
         },
-        timeout: 15000
+        timeout: this._timeout
       }
     );
 
@@ -379,7 +388,7 @@ synonyms 每组最多10个，只列最常见的变体
             'Authorization': `Bearer ${this.apiKey}`,
             'Content-Type': 'application/json'
           },
-          timeout: 20000
+          timeout: this._timeout
         }
       );
       return res;
@@ -500,7 +509,7 @@ ${sycmLines}
             'Authorization': `Bearer ${this.apiKey}`,
             'Content-Type': 'application/json'
           },
-          timeout: 30000
+          timeout: this._longTimeout
         }
       );
     }, 1, 2000);
@@ -564,7 +573,7 @@ ${sycmLines}
             'Authorization': `Bearer ${this.apiKey}`,
             'Content-Type': 'application/json'
           },
-          timeout: 15000
+          timeout: this._timeout
         }
       );
     }, 1, 2000);
