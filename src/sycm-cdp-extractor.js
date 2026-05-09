@@ -36,6 +36,15 @@ function _createCdpClient(wsUrl) {
   var ws = new WebSocket(wsUrl);
   var msgId = 1;
   var pending = new Map();
+  var resolved = false;
+
+  function cleanupPending(errMsg) {
+    pending.forEach(function(p, id) {
+      clearTimeout(p.timer);
+      p.reject(new Error(errMsg));
+    });
+    pending.clear();
+  }
 
   ws.on('message', function(raw) {
     try {
@@ -49,6 +58,14 @@ function _createCdpClient(wsUrl) {
         p.resolve(val !== undefined ? (val.type ? val.value : val) : msg.result);
       }
     } catch(e) {}
+  });
+
+  ws.on('error', function(err) {
+    cleanupPending('CDP WebSocket error: ' + (err && err.message || err));
+  });
+
+  ws.on('close', function() {
+    if (!resolved) cleanupPending('CDP WebSocket closed unexpectedly');
   });
 
   function evaluate(expr, timeoutMs) {
@@ -77,8 +94,24 @@ function _createCdpClient(wsUrl) {
     });
   }
 
-  return new Promise(function(resolve) {
-    ws.on('open', function() { resolve({ evaluate: evaluate, runAction: runAction, close: function() { ws.close(); } }); });
+  // 连接超时：10秒内未建立则拒绝
+  var connectTimeout = setTimeout(function() {
+    if (!resolved && ws.readyState === ws.CONNECTING) {
+      ws.terminate();
+      cleanupPending('CDP connection timeout (10s)');
+    }
+  }, 10000);
+
+  return new Promise(function(resolve, reject) {
+    ws.on('open', function() {
+      clearTimeout(connectTimeout);
+      resolved = true;
+      resolve({ evaluate: evaluate, runAction: runAction, close: function() { cleanupPending('CDP client closed'); ws.close(); } });
+    });
+    ws.on('error', function(err) {
+      clearTimeout(connectTimeout);
+      if (!resolved) { resolved = true; reject(new Error('CDP WebSocket error: ' + (err && err.message || err))); }
+    });
   });
 }
 
@@ -204,8 +237,16 @@ async function extractSycmData(keyword, options) {
 
       if (pd && pd.d && pd.d.length > 0) {
         var lastKw = allData.length > 0 ? allData[allData.length - 1].keyword : '';
-        if (pd.d[0].keyword === lastKw) continue;
-        allData = allData.concat(pd.d);
+        var dedupedPage = pd.d;
+        while (dedupedPage.length > 0 && lastKw && dedupedPage[0].keyword === lastKw) {
+          dedupedPage = dedupedPage.slice(1);
+        }
+        if (dedupedPage.length > 0) {
+          allData = allData.concat(dedupedPage);
+          onProgress('  Page ' + page + ': ' + pd.n + ' rows (total: ' + allData.length + ')');
+        } else {
+          onProgress('  Page ' + page + ': all duplicates, skipped');
+        }
         onProgress('  Page ' + page + ': ' + pd.n + ' rows (total: ' + allData.length + ')');
       }
     }
