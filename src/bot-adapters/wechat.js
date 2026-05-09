@@ -115,6 +115,7 @@ class WechatAdapter extends BaseAdapter {
    */
   async _renderQrInTerminal(url) {
     try {
+      console.error(`[${this.label}] 扫码链接: ${url}`);
       const QRCode = await import('qrcode');
       const terminal = await QRCode.toString(url, { type: 'terminal', small: true });
       console.error('\n' + terminal);
@@ -214,6 +215,8 @@ class WechatAdapter extends BaseAdapter {
           return await this._handleLink(chatId, arg);
         case '查词':
           return await this._handleSycmQuery(chatId, arg);
+        case '查词蓝海':
+          return await this._handleSycmQuery(chatId, arg, 'blue');
         default:
           return await this.sendMessage(chatId, '未知命令，发送 /help 查看帮助');
       }
@@ -321,7 +324,8 @@ class WechatAdapter extends BaseAdapter {
 /选品 关键词 - 生成选品标题（例如：/选品 纯银项链女）
 /搜索 关键词 - 搜索1688商品（例如：/搜索 纯银项链女）
 /分析 关键词 - 分析关键词结构（例如：/分析 纯银项链女）
-/查词 关键词 - 查询生意参谋数据（例如：/查词 耳钉）
+/查词 关键词 - 查询生意参谋热搜词（支持批量：/查词 耳钉 项链 手链）
+/查词蓝海 关键词 - 查询相关蓝海词（支持批量）
 /链接 1688链接 - 从1688商品链接生成标题
 /help - 显示此帮助信息
 
@@ -367,57 +371,90 @@ class WechatAdapter extends BaseAdapter {
    * 处理 /查词 命令 — 查询生意参谋搜索分析数据
    * @private
    */
-  async _handleSycmQuery(chatId, keyword) {
+  async _handleSycmQuery(chatId, keyword, mode) {
     if (!keyword) {
-      return await this.sendMessage(chatId, '请输入查询关键词，例如：/查词 耳钉\n\n返回生意参谋搜索分析数据（搜索人气、点击率、支付转化率等），需要 Chrome 调试模式运行中。');
+      return await this.sendMessage(chatId, '请输入查询关键词，例如：\n/查词 耳钉 — 查询相关热搜词\n/查词蓝海 耳钉 — 查询相关蓝海词\n\n支持批量：/查词 耳钉 项链 手链\n需要 Chrome 调试模式运行中。');
     }
-    
+
     try {
-      await this.sendProgress(chatId, '⏳ 正在连接 Chrome 并查询生意参谋...');
-      
-      const { isChromeDevToolsAvailable, generateChromeLaunchCommand, ERRORS } = require('../sycm-browser-helper');
+      const { isChromeDevToolsAvailable, generateChromeLaunchCommand } = require('../sycm-browser-helper');
       const { extractSycmData } = require('../sycm-cdp-extractor');
-      
+
       const chromeAvailable = await isChromeDevToolsAvailable(9222);
       if (!chromeAvailable) {
         const launchCmd = generateChromeLaunchCommand({ port: 9222 });
-        return await this.sendMessage(chatId, '❌ Chrome 未运行调试模式\n\n请先启动：\n' + launchCmd.command + '\n\n启动后重新发送 /查词 ' + keyword);
+        return await this.sendMessage(chatId, '❌ Chrome 未运行调试模式\n\n请先启动：\n' + launchCmd.command);
       }
-      
-      var progressMsgs = [];
-      const result = await extractSycmData(keyword, {
-        port: 9222,
-        maxPages: 5,
-        onProgress: function(msg) { progressMsgs.push(msg); }
-      });
-      
-      if (!result.data || result.data.length === 0) {
-        return await this.sendMessage(chatId, '❌ 未查询到数据，可能原因：\n1. Chrome 未登录生意参谋\n2. 关键词无搜索数据\n3. 页面加载超时');
-      }
-      
-      // 格式化前10条结果（微信消息长度限制）
+
+      var keywords = keyword.split(/[\s,，]+/).filter(function(k) { return k.trim(); });
+      var isBatch = keywords.length > 1;
+      var modeLabel = (mode === 'blue') ? '蓝海词' : '热搜词';
       var fields = ['searchPopularity', 'clickRate', 'conversionRate', 'buyerCount', 'demandSupplyRatio', 'tmallClickShare'];
-      var fieldLabels = ['搜索人气', '点击率', '转化率', '买家数', '供需比', '天猫占比'];
-      var lines = ['📊 生意参谋 — ' + keyword + ' (' + result.totalCount + '条/' + result.totalPages + '页)', ''];
-      
-      var displayCount = Math.min(result.data.length, 10);
-      for (var i = 0; i < displayCount; i++) {
-        var row = result.data[i];
-        var line = (i + 1) + '. ' + (row.keyword || '?');
-        for (var f = 0; f < fields.length; f++) {
-          var v = row[fields[f]];
-          var t = row[fields[f] + '_trend'];
-          line += '\n   ' + fieldLabels[f] + ': ' + (v != null ? v : '-') + (t ? ' (' + t + ')' : '');
+      var fieldLabels = ['搜索人气', '点击率', '支付转化率', '支付买家数', '需求供给比', '天猫商品点击占比'];
+      var pctFields = { clickRate: true, conversionRate: false, tmallClickShare: true };
+      var allLines = [];
+      var displayCount = isBatch ? 5 : 10;
+
+      for (var ki = 0; ki < keywords.length; ki++) {
+        var kw = keywords[ki];
+        if (isBatch) {
+          await this.sendProgress(chatId, '⏳ [' + (ki + 1) + '/' + keywords.length + '] 正在查询 ' + kw + '...');
+        } else {
+          await this.sendProgress(chatId, '⏳ 正在连接 Chrome 并查询生意参谋...');
         }
-        lines.push(line);
+
+        try {
+          var result = await extractSycmData(kw, {
+            port: 9222,
+            maxPages: 1,
+            mode: mode || 'hot'
+          });
+
+          if (!result.data || result.data.length === 0) {
+            allLines.push('📊 ' + kw + ' 【' + modeLabel + '】— 无数据');
+            continue;
+          }
+
+           allLines.push('📊 ' + kw + ' 【' + modeLabel + '】(' + result.totalCount + '条)');
+           // 按关键词去重（SYCM可能返回重复行）
+           var seenKw = {};
+           var deduped = [];
+           for (var di = 0; di < result.data.length; di++) {
+             var dk = result.data[di].keyword;
+             if (dk && !seenKw[dk]) { seenKw[dk] = true; deduped.push(result.data[di]); }
+           }
+           var count = Math.min(deduped.length, displayCount);
+           for (var i = 0; i < count; i++) {
+             var row = deduped[i];
+            var rkw = (row.keyword || '?');
+            if (rkw.endsWith('搜索词')) {
+              rkw = rkw.replace(/搜索词$/, '') + ' 【搜索词】';
+            }
+            var line = (i + 1) + '. ' + rkw;
+            for (var f = 0; f < fields.length; f++) {
+              var v = row[fields[f]];
+              var displayVal = v != null ? v : '-';
+              if (pctFields[fields[f]] && typeof v === 'number') {
+                displayVal = v + '%';
+              }
+              line += '\n   ' + fieldLabels[f] + ': ' + displayVal;
+            }
+            allLines.push(line);
+          }
+          if (result.data.length > displayCount) {
+            allLines.push('   ... 还有 ' + (result.data.length - displayCount) + ' 条');
+          }
+        } catch (err) {
+          allLines.push('📊 ' + kw + ' — ❌ ' + (err.message || '查询失败'));
+        }
+
+        if (ki < keywords.length - 1) {
+          allLines.push('');
+        }
       }
-      
-      if (result.data.length > 10) {
-        lines.push('', '... 还有 ' + (result.data.length - 10) + ' 条 ...');
-      }
-      lines.push('', '⏱ 提取时间: ' + new Date(result.extractedAt).toLocaleString('zh-CN'));
-      
-      return await this.sendMessage(chatId, lines.join('\n'));
+
+      allLines.push('', '⏱ ' + new Date().toLocaleString('zh-CN'));
+      return await this.sendMessage(chatId, allLines.join('\n'));
     } catch (error) {
       return await this.sendError(chatId, error);
     }
