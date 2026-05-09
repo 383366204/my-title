@@ -293,16 +293,16 @@ async function _searchPeerTitles({ products, blueOceanWord, peerTitles, glmClien
             }
             console.error('[peerTitles] 以图搜图结果: peerTitles=' + taobaoTitles.length + ', source=' + peerSource);
            } catch (err) {
-             console.error('[peerTitles] 以图搜图失败:', err && err.message ? err.message : err);
-             taobaoTitles = await require('./search-taobao').searchTaobaoTitles(blueOceanWord).catch((e) => { console.error('[peerTitles] 以图搜图失败后文字搜索也失败:', e.message); return []; });
-             peerSource = taobaoTitles.length > 0 ? 'taobao_text' : 'none';
+              console.error('[peerTitles] 以图搜图失败:', err && err.message ? err.message : err);
+              taobaoTitles = await require('./search-taobao').searchTaobaoTitles(blueOceanWord).catch((e2) => { console.error('[peerTitles] 以图搜图失败后文字搜索也失败:', e2.message); return []; });
+              peerSource = taobaoTitles.length > 0 ? 'taobao_text' : 'none';
            }
          } else if (useImageSearch && !isImageSearchAvailable()) {
            console.error('[peerTitles] 用户要求图搜但不可用，降级到文字搜索');
-           taobaoTitles = await require('./search-taobao').searchTaobaoTitles(blueOceanWord);
-           peerSource = taobaoTitles.length > 0 ? 'taobao_text' : 'none';
-         } else {
-           console.error('[peerTitles] 以图搜图不可用，尝试文字搜索');
+            taobaoTitles = await require('./search-taobao').searchTaobaoTitles(blueOceanWord).catch((e) => { console.error('[peerTitles] 文字搜索失败:', e.message); return []; });
+            peerSource = taobaoTitles.length > 0 ? 'taobao_text' : 'none';
+          } else {
+            console.error('[peerTitles] 以图搜图不可用，尝试文字搜索');
            try {
             taobaoTitles = await require('./search-taobao').searchTaobaoTitles(blueOceanWord);
            peerSource = taobaoTitles.length > 0 ? 'taobao_text' : 'none';
@@ -586,12 +586,13 @@ async function run(blueOceanWord, options = {}) {
   if (minPrice > 0 || maxPrice > 0) {
     const beforeCount = products.length;
     products = (products || []).filter(p => {
-      const price = parseFloat(p.price || p.salePrice || '0');
+      const rawPrice = String(p.price || p.salePrice || '0');
+      const price = parseFloat(rawPrice.replace(/[^\d.\-]/g, '')) || 0;
       if (minPrice > 0 && price < minPrice) return false;
       if (maxPrice > 0 && price > maxPrice) return false;
       return true;
     });
-    console.error(`[价格过滤] ${beforeCount} → ${products.length} 个商品 (min=${minPrice}, max=${maxPrice})`);
+    warn(`[价格过滤] ${beforeCount} → ${products.length} 个商品 (min=${minPrice}, max=${maxPrice})`);
     if (onProductsFound) onProductsFound(products.length); // 更新预估
   }
 
@@ -645,15 +646,15 @@ async function run(blueOceanWord, options = {}) {
      trace
    };
 
+  var _raceTimeoutId = null;
   const timeoutPromise = new Promise((resolve, reject) => {
-    const timeoutId = setTimeout(() => 
+    _raceTimeoutId = setTimeout(() => 
       reject(new Error(`标题生成超时(${RUN_TIMEOUT/1000}s)，请简化关键词或减少数量`)), RUN_TIMEOUT
     );
     
-    // 如果提供了 signal，监听取消事件
     if (signal) {
       signal.addEventListener('abort', () => {
-        clearTimeout(timeoutId);
+        clearTimeout(_raceTimeoutId);
         const err = new Error('标题生成已取消');
         err.name = 'AbortError';
         reject(err);
@@ -663,8 +664,8 @@ async function run(blueOceanWord, options = {}) {
 
   return Promise.race([
      _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles, products, taobaoTitles, maxLength, imageSearchResults, stats, cache, _peerTitlesHash, glmClient, log, warn, limit, sycmKeywords, sycmDataHash: _sycmDataHash, signal, useImageSearch, maxImageSearch, minPrice, maxPrice }),
-    timeoutPromise
-  ]);
+     timeoutPromise
+  ]).finally(() => { if (_raceTimeoutId) clearTimeout(_raceTimeoutId); });
 }
 
 /**

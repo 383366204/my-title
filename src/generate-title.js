@@ -48,7 +48,7 @@ async function generateTitles(blueOceanWord, coreWord, modifiers = [], peerTitle
   const glmClient = new GLMClient({
     apiKey: process.env.GLM_API_KEY,
     apiBase: process.env.GLM_API_BASE,
-    model: process.env.GLM_MODEL
+    model: process.env.GLM_API_MODEL
   });
 
   // 尝试通过 GLM 生成标题
