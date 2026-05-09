@@ -434,12 +434,12 @@ program
   .description('查询生意参谋搜索分析数据（需要 Chrome 调试模式，自动提取前5页数据）')
   .option('--json', '纯 JSON 输出模式')
   .option('--port <number>', 'Chrome 调试端口', '9222')
-  .option('--pages <number>', '最大提取页数（默认5）', '5')
+  .option('--pages <number>', '最大提取页数（默认1）', '1')
   .action(async function(keyword, options, command) {
     const mainOpts = command && command.parent ? command.parent.opts() : {};
     const jsonMode = !!options.json || !!mainOpts.json;
     const port = parseInt(options.port) || 9222;
-    const maxPages = parseInt(options.pages) || 5;
+    const maxPages = parseInt(options.pages) || 1;
     
     try {
       const { isChromeDevToolsAvailable, generateChromeLaunchCommand, ERRORS } = require('../src/sycm-browser-helper');

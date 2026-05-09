@@ -1047,7 +1047,7 @@ server.tool(
   {
     keyword: z.string().describe('要查询的搜索关键词，如：耳钉、纯银项链'),
     port: z.number().default(9222).describe('Chrome 远程调试端口，默认 9222'),
-    maxPages: z.number().default(5).describe('最大提取页数，默认 5'),
+    maxPages: z.number().default(1).describe('最大提取页数，默认 1'),
   },
   async ({ keyword, port, maxPages }) => {
     try {
