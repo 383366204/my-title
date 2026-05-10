@@ -972,7 +972,7 @@ server.tool(
 
     const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     const abortController = new AbortController();
-    const estimatedSeconds = keywords.length * 60;
+    const estimatedSeconds = keywords.length * 120;
     tasks.set(id, {
       status: 'processing',
       createdAt: Date.now(),
