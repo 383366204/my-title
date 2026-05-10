@@ -4,7 +4,7 @@ let bannedRegexes = [];
 
 try {
   bannedWords = require('../data/banned-words.json');
-  allBanned = [...new Set(Object.values(bannedWords).flat())];
+  allBanned = [...new Set(Object.values(bannedWords).flat())].sort((a, b) => b.length - a.length);
   bannedRegexes = allBanned.map(w =>
     new RegExp(w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')
   );

@@ -46,28 +46,100 @@ function fallbackExtract(input) {
   if (input == null || typeof input !== 'string') {
     return { coreWord: String(input), modifiers: [] };
   }
-  const words = input.split(/\s+/).filter(Boolean);
-  if (words.length === 0) {
-    return {
-      coreWord: input,
-      modifiers: []
-    };
+
+  // 判断刚性的简单规则（与 fallbackExtractFromPeers 保持一致）
+  const rigidPattern = /纯银|合金|纯棉|羊毛|真丝|真皮|不锈钢|黄铜|金色|银色|黑色|白色|红色|蓝色|女|男|女款|男款|XL|L|M|S|加大|长款|短款|中长款/;
+
+  // 品类核心词正则（用于从中文输入中提取核心词）
+  const categoryPattern = /(项链|手链|耳环|戒指|手镯|连衣裙|T恤|衬衫|外套|裤子|鞋子|包包|卫衣|毛衣|羽绒服|夹克|西装|裙|裤|袜|帽|围巾|腰带|眼镜|手表|背包|钱包|皮带|鞋|靴|拖鞋|凉鞋|高跟鞋)/;
+
+  // 先尝试空格分词（兼容英文/已有空格分隔的输入）
+  const spaceWords = input.split(/\s+/).filter(Boolean);
+  if (spaceWords.length >= 2) {
+    // 有空格分隔：最后一个词作为核心词，其余为修饰词
+    const coreWord = spaceWords.pop();
+    const modifiers = spaceWords.map(word => ({
+      word,
+      rigidity: rigidPattern.test(word) ? 'rigid' : 'optional'
+    }));
+    return { coreWord, modifiers };
   }
 
-  // 简单规则：最后一个词作为核心词，其余作为修饰词
-  const coreWord = words.pop();
+  // 无空格 / 纯中文输入：使用品类正则提取核心词
+  const categoryMatch = input.match(categoryPattern);
+  let coreWord;
+  let prefix = '';
 
-  // 判断刚性的简单规则
-  const rigidPattern = /纯银|合金|纯棉|羊毛|真丝|真皮|不锈钢|黄铜|金色|银色|黑色|白色|红色|蓝色|女|男|女款|男款|XL|L|M|S|加大|长款|短款|中长款/;
-  const modifiers = words.map(word => {
-    const rigidity = rigidPattern.test(word) ? 'rigid' : 'optional';
-    return { word, rigidity };
-  });
+  if (categoryMatch) {
+    // 找到品类词作为核心词
+    coreWord = categoryMatch[0];
+    const matchIndex = input.indexOf(coreWord);
+    // 品类词之前的部分作为修饰词来源
+    prefix = input.substring(0, matchIndex);
+    // 品类词之后的部分也作为修饰词
+    const suffix = input.substring(matchIndex + coreWord.length);
 
-  return {
-    coreWord,
-    modifiers
-  };
+    // 从前缀和后缀中提取修饰词
+    const allModifiers = [];
+
+    // 前缀按常见修饰词长度切分（优先匹配长词）
+    if (prefix) {
+      const prefixModifiers = extractChineseModifiers(prefix, rigidPattern);
+      allModifiers.push(...prefixModifiers);
+    }
+
+    if (suffix) {
+      const suffixModifiers = extractChineseModifiers(suffix, rigidPattern);
+      allModifiers.push(...suffixModifiers);
+    }
+
+    return { coreWord, modifiers: allModifiers };
+  }
+
+  // 无品类词匹配：取最后 2+ 字符的中文词作为核心词，其余为修饰词
+  const chineseWordMatch = input.match(/[\u4e00-\u9fa5]{2,}$/g);
+  if (chineseWordMatch && chineseWordMatch.length > 0) {
+    coreWord = chineseWordMatch[0];
+    prefix = input.substring(0, input.lastIndexOf(coreWord));
+    if (prefix) {
+      const modifiers = extractChineseModifiers(prefix, rigidPattern);
+      return { coreWord, modifiers };
+    }
+    return { coreWord, modifiers: [] };
+  }
+
+  // 兜底：整个输入作为核心词
+  return { coreWord: input, modifiers: [] };
+}
+
+/**
+ * 从中文字符串中提取修饰词（辅助函数）
+ * @param {string} text - 中文文本
+ * @param {RegExp} rigidPattern - 刚性词正则
+ * @returns {Array<{word: string, rigidity: string}>}
+ */
+function extractChineseModifiers(text, rigidPattern) {
+  const modifiers = [];
+  // 按刚性词优先切分（最长匹配优先）
+  const rigidWords = [...rigidPattern.source.split('|')].sort((a, b) => b.length - a.length);
+  let remaining = text;
+
+  for (const rw of rigidWords) {
+    if (remaining.includes(rw)) {
+      modifiers.push({ word: rw, rigidity: 'rigid' });
+      remaining = remaining.replace(rw, '');
+    }
+  }
+
+  // 剩余部分中提取 2+ 字符的可选修饰词
+  const optionalMatches = remaining.match(/[\u4e00-\u9fa5]{2,}/g) || [];
+  for (const ow of optionalMatches) {
+    if (ow.length >= 2) {
+      modifiers.push({ word: ow, rigidity: 'optional' });
+    }
+  }
+
+  return modifiers;
 }
 
 /**

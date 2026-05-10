@@ -90,7 +90,7 @@ async function searchPeerTitlesByImage(products, options = {}) {
       hasMatch: false
     }));
     console.error('⚠️  无有效商品可处理，返回空结果');
-    return emptyResults;
+    return { results: emptyResults, captchaDetected: false };
   }
 
   // 确保淘宝桌面版已启动并就绪（同进程只启动一次）
@@ -150,7 +150,7 @@ async function searchPeerTitlesByImage(products, options = {}) {
    
   if (signal?.aborted) {
     console.error('🛑 搜索任务已取消，直接返回空结果');
-    return finalResults;
+    return { results: finalResults, captchaDetected: false };
   }
   
   const { results: processedResults, captchaDetected } = await withRateLimit(
