@@ -14,7 +14,7 @@ var COLUMN_POLL_MAX = 8;
 
 var DEFAULT_FILTER_CONDITIONS = {
   demandSupplyRatio: 1,
-  searchPopularity: 1000,
+  searchPopularity: 50,
   conversionRate: 0,
   buyerCount: 0,
   referencePrice: 0
