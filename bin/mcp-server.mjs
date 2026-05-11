@@ -1048,8 +1048,9 @@ server.tool(
     keyword: z.string().describe('要查询的搜索关键词，如：耳钉、纯银项链'),
     port: z.number().default(9222).describe('Chrome 远程调试端口，默认 9222'),
     maxPages: z.number().default(1).describe('最大提取页数，默认 1'),
+    mode: z.enum(['hot', 'blue']).default('hot').describe('查询模式，hot=相关热搜词，blue=相关蓝海词'),
   },
-  async ({ keyword, port, maxPages }) => {
+  async ({ keyword, port, maxPages, mode }) => {
     try {
       const { isChromeDevToolsAvailable, generateChromeLaunchCommand, ERRORS } = require('../src/sycm-browser-helper.js');
       const { extractSycmData } = require('../src/sycm-cdp-extractor.js');
@@ -1071,6 +1072,7 @@ server.tool(
       const result = await extractSycmData(keyword, {
         port: port,
         maxPages: maxPages,
+        mode: mode,
         onProgress: function(msg) { progressLog.push(msg); }
       });
 
