@@ -435,7 +435,7 @@ program
   .option('--json', '纯 JSON 输出模式')
   .option('--port <number>', 'Chrome 调试端口', '9222')
   .option('--pages <number>', '最大提取页数（默认1）', '1')
-  .option('--mode <hot|blue>', '查询模式，hot=相关热搜词，blue=相关蓝海词', 'hot')
+  .option('--mode <hot|blue>', '查询模式，hot=相关热搜词，blue=相关蓝海词', 'blue')
   .option('--filter <conditions>', '过滤条件，格式: demandSupplyRatio=1,searchPopularity=1000')
   .option('--no-default-filters', '禁用默认过滤条件')
   .action(async function(keyword, options, command) {
