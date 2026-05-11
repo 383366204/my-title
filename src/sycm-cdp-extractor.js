@@ -128,7 +128,7 @@ var FILTER_FIELD_SELECTORS = {
   searchPopularity: { label: '搜索人气', selector: null },
   conversionRate: { label: '支付转化率', selector: null },
   buyerCount: { label: '支付买家数', selector: null },
-  referencePrice: { label: '推广参考价', selector: null }
+  referencePrice: { label: '关键词推广参考价', selector: null }
 };
 
 /**
@@ -148,6 +148,8 @@ function _applyFilterConditions(cdp, filterConditions, onProgress) {
     // Step 1: Find and click the filter button
     var btnResult = await cdp.runAction(
       "(() => { " +
+      "var trigger = document.querySelector('.op-market-search-blue-ocean-trigger-text'); " +
+      "if (trigger) { trigger.click(); return 'clicked:' + (trigger.textContent || '').trim().substring(0, 20); } " +
       "var btns = document.querySelectorAll('button, .ant-btn, [role=\"button\"]'); " +
       "for (var i = 0; i < btns.length; i++) { " +
       "  var text = (btns[i].textContent || '').trim(); " +
@@ -197,14 +199,18 @@ function _applyFilterConditions(cdp, filterConditions, onProgress) {
       // Try to find the input by label text in the modal
       var fillResult = await cdp.runAction(
         "(() => { " +
-        "var modal = document.querySelector('.ant-modal, [role=\"dialog\"]'); " +
+        "var modal = document.querySelector('.op-market-search-blue-ocean-modal'); " +
+        "if (!modal) { modal = document.querySelector('.ant-modal, [role=\"dialog\"]'); } " +
         "if (!modal) return 'no_modal'; " +
-        "var formItems = modal.querySelectorAll('.ant-form-item, .ant-row'); " +
-        "for (var i = 0; i < formItems.length; i++) { " +
-        "  var label = formItems[i].querySelector('label'); " +
+        "var rows = modal.querySelectorAll('.op-market-search-blue-ocean-modal-row'); " +
+        "if (rows.length === 0) { rows = modal.querySelectorAll('.ant-form-item, .ant-row'); } " +
+        "for (var i = 0; i < rows.length; i++) { " +
+        "  var label = rows[i].querySelector('.op-market-search-blue-ocean-modal-row-label'); " +
+        "  if (!label) { label = rows[i].querySelector('label'); } " +
         "  if (label && label.textContent.indexOf('" + fieldConfig.label + "') >= 0) { " +
-        "    var input = formItems[i].querySelector('input'); " +
+        "    var input = rows[i].querySelector('input.ant-input-number-input') || rows[i].querySelector('input'); " +
         "    if (input) { " +
+        "      input.focus(); " +
         "      var nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set; " +
         "      nativeSetter.call(input, '" + String(value) + "'); " +
         "      input.dispatchEvent(new Event('input', { bubbles: true })); " +
@@ -233,11 +239,9 @@ function _applyFilterConditions(cdp, filterConditions, onProgress) {
       "if (!modal) return 'no_modal'; " +
       "var btns = modal.querySelectorAll('button, .ant-btn'); " +
       "for (var i = 0; i < btns.length; i++) { " +
-      "  var text = (btns[i].textContent || '').trim(); " +
-      "  if (text.indexOf('确定') >= 0 || text.indexOf('应用') >= 0 || text.indexOf('确认') >= 0) { " +
-      "    if (btns[i].className.indexOf('ant-btn-primary') >= 0 || text.indexOf('确定') >= 0) { " +
-      "      btns[i].click(); return 'confirmed'; " +
-      "    } " +
+      "  var text = (btns[i].textContent || '').trim().replace(/\\s+/g, ''); " +
+      "  if (text === '确定' || text === '应用' || text === '确认') { " +
+      "    btns[i].click(); return 'confirmed'; " +
       "  } " +
       "} " +
       "return 'confirm_not_found'; " +
