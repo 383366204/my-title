@@ -436,16 +436,39 @@ program
   .option('--port <number>', 'Chrome 调试端口', '9222')
   .option('--pages <number>', '最大提取页数（默认1）', '1')
   .option('--mode <hot|blue>', '查询模式，hot=相关热搜词，blue=相关蓝海词', 'hot')
+  .option('--filter <conditions>', '过滤条件，格式: demandSupplyRatio=1,searchPopularity=1000')
+  .option('--no-default-filters', '禁用默认过滤条件')
   .action(async function(keyword, options, command) {
     const mainOpts = command && command.parent ? command.parent.opts() : {};
     const jsonMode = !!options.json || !!mainOpts.json;
     const port = parseInt(options.port) || 9222;
     const maxPages = parseInt(options.pages) || 1;
-    const mode = options.mode || 'hot';
+      const mode = options.mode || 'hot';
+      
+      // 解析过滤条件
+      var filterConditions = null;
+      if (mode === 'blue') {
+        var userFilters = {};
+        if (options.filter) {
+          options.filter.split(',').forEach(function(pair) {
+            var parts = pair.split('=');
+            if (parts.length === 2) {
+              var key = parts[0].trim();
+              var val = parseFloat(parts[1].trim());
+              if (!isNaN(val)) userFilters[key] = val;
+            }
+          });
+        }
+        if (options.defaultFilters !== false) {
+          filterConditions = Object.assign({}, DEFAULT_FILTER_CONDITIONS, userFilters);
+        } else if (Object.keys(userFilters).length > 0) {
+          filterConditions = userFilters;
+        }
+      }
     
     try {
       const { isChromeDevToolsAvailable, generateChromeLaunchCommand, ERRORS } = require('../src/sycm-browser-helper');
-      const { extractSycmData } = require('../src/sycm-cdp-extractor');
+      const { extractSycmData, DEFAULT_FILTER_CONDITIONS } = require('../src/sycm-cdp-extractor');
 
       // 步骤1：检测 Chrome 是否在调试模式运行
       const chromeAvailable = await isChromeDevToolsAvailable(port);
@@ -476,6 +499,7 @@ program
         port: port,
         maxPages: maxPages,
         mode: mode,
+        filterConditions: filterConditions,
         onProgress: function(msg) { progressMsgs.push(msg); if (!jsonMode) console.log('  ' + msg); }
       });
 

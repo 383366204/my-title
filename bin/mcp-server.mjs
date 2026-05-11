@@ -1049,11 +1049,19 @@ server.tool(
     port: z.number().default(9222).describe('Chrome 远程调试端口，默认 9222'),
     maxPages: z.number().default(1).describe('最大提取页数，默认 1'),
     mode: z.enum(['hot', 'blue']).default('hot').describe('查询模式，hot=相关热搜词，blue=相关蓝海词'),
+    filterConditions: z.object({
+      demandSupplyRatio: z.number().optional().describe('需求供给比最小值'),
+      searchPopularity: z.number().optional().describe('搜索人气最小值'),
+      conversionRate: z.number().optional().describe('支付转化率最小值'),
+      buyerCount: z.number().optional().describe('支付买家数最小值'),
+      referencePrice: z.number().optional().describe('关键词推广参考价'),
+    }).optional().describe('过滤条件（仅蓝海词模式生效）'),
+    noDefaultFilters: z.boolean().default(false).describe('禁用默认过滤条件'),
   },
-  async ({ keyword, port, maxPages, mode }) => {
+  async ({ keyword, port, maxPages, mode, filterConditions, noDefaultFilters }) => {
     try {
       const { isChromeDevToolsAvailable, generateChromeLaunchCommand, ERRORS } = require('../src/sycm-browser-helper.js');
-      const { extractSycmData } = require('../src/sycm-cdp-extractor.js');
+      const { extractSycmData, DEFAULT_FILTER_CONDITIONS } = require('../src/sycm-cdp-extractor.js');
 
       const chromeAvailable = await isChromeDevToolsAvailable(port);
       
@@ -1069,10 +1077,19 @@ server.tool(
       }
 
       var progressLog = [];
+      var mergedFilters = null;
+      if (mode === 'blue') {
+        if (noDefaultFilters) {
+          mergedFilters = filterConditions || null;
+        } else {
+          mergedFilters = Object.assign({}, DEFAULT_FILTER_CONDITIONS, filterConditions || {});
+        }
+      }
       const result = await extractSycmData(keyword, {
         port: port,
         maxPages: maxPages,
         mode: mode,
+        filterConditions: mergedFilters,
         onProgress: function(msg) { progressLog.push(msg); }
       });
 

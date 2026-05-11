@@ -12,6 +12,14 @@ var PAGE_WAIT_MS = 4000;
 var COLUMN_POLL_INTERVAL = 5000;
 var COLUMN_POLL_MAX = 8;
 
+var DEFAULT_FILTER_CONDITIONS = {
+  demandSupplyRatio: 1,
+  searchPopularity: 1000,
+  conversionRate: 0,
+  buyerCount: 0,
+  referencePrice: 0
+};
+
 function _connectToTab(port, urlFilter) {
   port = port || DEFAULT_PORT;
   return new Promise(function(resolve, reject) {
@@ -278,5 +286,6 @@ async function extractSycmData(keyword, options) {
 module.exports = {
   extractSycmData: extractSycmData,
   DEFAULT_PORT: DEFAULT_PORT,
-  DEFAULT_MAX_PAGES: DEFAULT_MAX_PAGES
+  DEFAULT_MAX_PAGES: DEFAULT_MAX_PAGES,
+  DEFAULT_FILTER_CONDITIONS: DEFAULT_FILTER_CONDITIONS
 };
