@@ -445,6 +445,9 @@ program
     const maxPages = parseInt(options.pages) || 1;
       const mode = options.mode || 'hot';
       
+      const { isChromeDevToolsAvailable, generateChromeLaunchCommand, ERRORS } = require('../src/sycm-browser-helper');
+      const { extractSycmData, DEFAULT_FILTER_CONDITIONS } = require('../src/sycm-cdp-extractor');
+      
       // 解析过滤条件
       var filterConditions = null;
       if (mode === 'blue') {
@@ -467,8 +470,6 @@ program
       }
     
     try {
-      const { isChromeDevToolsAvailable, generateChromeLaunchCommand, ERRORS } = require('../src/sycm-browser-helper');
-      const { extractSycmData, DEFAULT_FILTER_CONDITIONS } = require('../src/sycm-cdp-extractor');
 
       // 步骤1：检测 Chrome 是否在调试模式运行
       const chromeAvailable = await isChromeDevToolsAvailable(port);
