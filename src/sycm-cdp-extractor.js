@@ -123,6 +123,146 @@ function _createCdpClient(wsUrl) {
   });
 }
 
+var FILTER_FIELD_SELECTORS = {
+  demandSupplyRatio: { label: '需求供给比', selector: null },
+  searchPopularity: { label: '搜索人气', selector: null },
+  conversionRate: { label: '支付转化率', selector: null },
+  buyerCount: { label: '支付买家数', selector: null },
+  referencePrice: { label: '推广参考价', selector: null }
+};
+
+/**
+ * CDP 过滤条件应用
+ * @param {object} cdp - CDP client with evaluate/runAction
+ * @param {object} filterConditions - { demandSupplyRatio, searchPopularity, ... }
+ * @param {function} onProgress - progress callback
+ * @returns {Promise<boolean|string>} true=全部应用, 'partial'=部分应用, false=未应用
+ */
+function _applyFilterConditions(cdp, filterConditions, onProgress) {
+  return new Promise(async function(resolve) {
+    if (!filterConditions || typeof filterConditions !== 'object') {
+      resolve(false);
+      return;
+    }
+
+    // Step 1: Find and click the filter button
+    var btnResult = await cdp.runAction(
+      "(() => { " +
+      "var btns = document.querySelectorAll('button, .ant-btn, [role=\"button\"]'); " +
+      "for (var i = 0; i < btns.length; i++) { " +
+      "  var text = (btns[i].textContent || '').trim(); " +
+      "  if (text.indexOf('设置过滤') >= 0 || text.indexOf('过滤条件') >= 0 || text.indexOf('筛选') >= 0) { " +
+      "    btns[i].click(); return 'clicked:' + text.substring(0, 20); " +
+      "  } " +
+      "} " +
+      "return 'not_found'; " +
+      "})()",
+      10000
+    );
+
+    if (String(btnResult).indexOf('not_found') >= 0) {
+      onProgress('[WARN] Filter button not found, skipping filter step');
+      resolve(false);
+      return;
+    }
+
+    onProgress('Filter button clicked, waiting for popup...');
+    await new Promise(function(r) { setTimeout(r, 2000); });
+
+    // Step 2: Find the modal/popup
+    var modalCheck = await cdp.evaluate(
+      "document.querySelector('.ant-modal, [role=\"dialog\"]') ? 'found' : 'not_found'",
+      5000
+    );
+
+    if (String(modalCheck).indexOf('not_found') >= 0) {
+      onProgress('[WARN] Filter popup not found after clicking button');
+      resolve(false);
+      return;
+    }
+
+    // Step 3: Fill in filter fields by matching label text
+    var appliedFields = 0;
+    var totalFields = 0;
+    var fieldKeys = Object.keys(filterConditions).filter(function(k) { return filterConditions[k] > 0; });
+
+    for (var fi = 0; fi < fieldKeys.length; fi++) {
+      var key = fieldKeys[fi];
+      var value = filterConditions[key];
+      var fieldConfig = FILTER_FIELD_SELECTORS[key];
+      if (!fieldConfig) continue;
+
+      totalFields++;
+
+      // Try to find the input by label text in the modal
+      var fillResult = await cdp.runAction(
+        "(() => { " +
+        "var modal = document.querySelector('.ant-modal, [role=\"dialog\"]'); " +
+        "if (!modal) return 'no_modal'; " +
+        "var formItems = modal.querySelectorAll('.ant-form-item, .ant-row'); " +
+        "for (var i = 0; i < formItems.length; i++) { " +
+        "  var label = formItems[i].querySelector('label'); " +
+        "  if (label && label.textContent.indexOf('" + fieldConfig.label + "') >= 0) { " +
+        "    var input = formItems[i].querySelector('input'); " +
+        "    if (input) { " +
+        "      var nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set; " +
+        "      nativeSetter.call(input, '" + String(value) + "'); " +
+        "      input.dispatchEvent(new Event('input', { bubbles: true })); " +
+        "      input.dispatchEvent(new Event('change', { bubbles: true })); " +
+        "      return 'filled:' + label.textContent.trim(); " +
+        "    } " +
+        "  } " +
+        "} " +
+        "return 'field_not_found:" + fieldConfig.label + "'; " +
+        "})()",
+        10000
+      );
+
+      if (String(fillResult).indexOf('filled:') >= 0) {
+        appliedFields++;
+        onProgress('Filter field applied: ' + fieldConfig.label + ' = ' + value);
+      } else {
+        onProgress('[WARN] Filter field not found: ' + fieldConfig.label);
+      }
+    }
+
+    // Step 4: Click the confirm/apply button
+    var confirmResult = await cdp.runAction(
+      "(() => { " +
+      "var modal = document.querySelector('.ant-modal, [role=\"dialog\"]'); " +
+      "if (!modal) return 'no_modal'; " +
+      "var btns = modal.querySelectorAll('button, .ant-btn'); " +
+      "for (var i = 0; i < btns.length; i++) { " +
+      "  var text = (btns[i].textContent || '').trim(); " +
+      "  if (text.indexOf('确定') >= 0 || text.indexOf('应用') >= 0 || text.indexOf('确认') >= 0) { " +
+      "    if (btns[i].className.indexOf('ant-btn-primary') >= 0 || text.indexOf('确定') >= 0) { " +
+      "      btns[i].click(); return 'confirmed'; " +
+      "    } " +
+      "  } " +
+      "} " +
+      "return 'confirm_not_found'; " +
+      "})()",
+      10000
+    );
+
+    if (String(confirmResult).indexOf('confirmed') >= 0) {
+      onProgress('Filter confirmed, waiting for data refresh...');
+      await new Promise(function(r) { setTimeout(r, 3000); });
+    } else {
+      onProgress('[WARN] Confirm button not found in filter popup');
+    }
+
+    // Step 5: Return result
+    if (appliedFields === 0) {
+      resolve(false);
+    } else if (totalFields > 0 && appliedFields < totalFields) {
+      resolve('partial');
+    } else {
+      resolve(true);
+    }
+  });
+}
+
 function _buildExtractScript() {
   return `(() => {
     var H={'\u76f8\u5173\u641c\u7d22\u8bcd':'keyword','\u641c\u7d22\u8bcd':'keyword','\u641c\u7d22\u4eba\u6c14':'searchPopularity','\u70b9\u51fb\u7387':'clickRate','\u652f\u4ed8\u8f6c\u5316\u7387':'conversionRate','\u652f\u4ed8\u4e70\u5bb6\u6570':'buyerCount','\u9700\u6c42\u4f9b\u7ed9\u6bd4':'demandSupplyRatio','\u5929\u732b\u5546\u54c1\u70b9\u51fb\u5360\u6bd4':'tmallClickShare'};
@@ -210,6 +350,33 @@ async function extractSycmData(keyword, options) {
 
     if (!colReady) onProgress('[WARN] Table columns may not be fully loaded');
 
+    // 设置过滤条件（仅蓝海词模式）
+    var filterApplied = false;
+    if (mode === 'blue' && options.filterConditions) {
+      onProgress('[3.5/6] Applying filter conditions...');
+      try {
+        filterApplied = await _applyFilterConditions(cdp, options.filterConditions, onProgress);
+      } catch (filterErr) {
+        onProgress('[WARN] Filter step failed: ' + (filterErr.message || filterErr) + ', skipping');
+        filterApplied = false;
+      }
+
+      if (filterApplied) {
+        // 过滤后等待表格重渲染
+        await new Promise(function(r) { setTimeout(r, 3000); });
+        var reColReady = false;
+        for (var fi = 0; fi < 4; fi++) {
+          await new Promise(function(r) { setTimeout(r, 3000); });
+          var reHCount = await cdp.evaluate(
+            "document.querySelector('.ant-table-thead') ? document.querySelector('.ant-table-thead').querySelectorAll('th').length : 0",
+            5000
+          );
+          if (reHCount >= 1) { reColReady = true; break; }
+        }
+        if (!reColReady) onProgress('[WARN] Table may not have re-rendered after filter');
+      }
+    }
+
     // 获取总页数并限制
     onProgress('[4/6] Detecting pagination...');
     var totalInfo = await cdp.evaluate(
@@ -272,6 +439,7 @@ async function extractSycmData(keyword, options) {
       extractedAt: new Date().toISOString(),
       method: 'cdp_multi_page',
       mode: mode,
+      filterApplied: filterApplied,
       maxPages: maxPages,
       totalPages: totalPages,
       headers: parsed ? parsed.h : [],
@@ -287,5 +455,6 @@ module.exports = {
   extractSycmData: extractSycmData,
   DEFAULT_PORT: DEFAULT_PORT,
   DEFAULT_MAX_PAGES: DEFAULT_MAX_PAGES,
-  DEFAULT_FILTER_CONDITIONS: DEFAULT_FILTER_CONDITIONS
+  DEFAULT_FILTER_CONDITIONS: DEFAULT_FILTER_CONDITIONS,
+  FILTER_FIELD_SELECTORS: FILTER_FIELD_SELECTORS
 };

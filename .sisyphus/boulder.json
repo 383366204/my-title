@@ -1,7 +1,31 @@
 {
-  "active_plan": "/mnt/d/project/my-title/.sisyphus/plans/cyber-dragon-boat.md",
-  "started_at": "2026-05-11T05:13:07.143Z",
-  "session_ids": ["ses_1eacb889dffep42wctpOJ8Ymcc"],
-  "plan_name": "cyber-dragon-boat",
-  "worktree_path": null
+  "active_plan": "/mnt/d/project/my-title/.sisyphus/plans/sycm-filter-conditions.md",
+  "started_at": "2026-05-11T13:36:07.256Z",
+  "session_ids": [
+    "ses_20f5bc9e9ffeQV4ULKGChAYHbq"
+  ],
+  "plan_name": "sycm-filter-conditions",
+  "session_origins": {
+    "ses_20f5bc9e9ffeQV4ULKGChAYHbq": "direct"
+  },
+  "task_sessions": {
+    "todo:0": {
+      "task_key": "todo:0",
+      "task_label": "0",
+      "task_title": "前置条件：CLI + MCP 添加 `--mode` 参数",
+      "session_id": "ses_1e8be1e3effezNneyCJkdM8GXt",
+      "agent": "Sisyphus-Junior",
+      "category": "quick",
+      "updated_at": "2026-05-11T13:39:29.238Z"
+    },
+    "todo:1": {
+      "task_key": "todo:1",
+      "task_label": "1",
+      "task_title": "CDP 调研：截图 + DOM dump + React 输入验证",
+      "session_id": "ses_1e8901f4effeuR1MSec5E5egK8",
+      "agent": "Sisyphus-Junior",
+      "category": "quick",
+      "updated_at": "2026-05-11T14:28:30.509Z"
+    }
+  }
 }

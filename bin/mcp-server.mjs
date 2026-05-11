@@ -1099,6 +1099,8 @@ server.tool(
         source: result.source,
         extractedAt: result.extractedAt,
         method: result.method,
+        mode: result.mode,
+        filterApplied: result.filterApplied,
         totalPages: result.totalPages,
         totalCount: result.totalCount,
         headers: result.headers,
