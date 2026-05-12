@@ -27,11 +27,11 @@ var DEFAULT_PAGE_FILTERS = {
 
 // CLI/MCP 时间周期参数 → SYCM URL 参数映射
 var PERIOD_URL_MAP = {
-  '7d':   { dateType: 'day',   dateRange: '7'  },
-  '30d':  { dateType: 'day',   dateRange: '30' },
-  'day':  { dateType: 'day',   dateRange: '20' },
-  'week': { dateType: 'week',  dateRange: '20' },
-  'month':{ dateType: 'month', dateRange: '20' }
+  '7d':   { dateType: 'day' },
+  '30d':  { dateType: 'day' },
+  'day':  { dateType: 'day' },
+  'week': { dateType: 'week' },
+  'month':{ dateType: 'month' }
 };
 
 // CLI/MCP 环比类型参数 → DOM value 映射
@@ -306,6 +306,45 @@ function _buildExtractScript() {
 }
 
 /**
+ * 根据时间周期计算 SYCM 所需的日期范围字符串
+ * @param {string} period - 时间周期: '7d'|'30d'|'day'|'week'|'month'
+ * @returns {string} 日期范围字符串，格式 "YYYY-MM-DD|YYYY-MM-DD"
+ */
+function _computeDateRange(period) {
+  var now = new Date();
+  var y = now.getFullYear();
+  var m = String(now.getMonth() + 1).padStart(2, '0');
+  var d = String(now.getDate()).padStart(2, '0');
+
+  switch (period) {
+    case '7d':
+      var weekAgo = new Date(now.getTime() - 7 * 86400000);
+      return _formatDate(weekAgo) + '|' + _formatDate(now);
+    case '30d':
+      var monthAgo = new Date(now.getTime() - 30 * 86400000);
+      return _formatDate(monthAgo) + '|' + _formatDate(now);
+    case 'day':
+      return y + '-' + m + '-' + d + '|' + y + '-' + m + '-' + d;
+    case 'week':
+      // 本周一到今天
+      var dayOfWeek = now.getDay() || 7;
+      var monday = new Date(now.getTime() - (dayOfWeek - 1) * 86400000);
+      return _formatDate(monday) + '|' + _formatDate(now);
+    case 'month':
+      // 本月1号到今天
+      return y + '-' + m + '-01|' + y + '-' + m + '-' + d;
+    default:
+      return y + '-' + m + '-' + d + '|' + y + '-' + m + '-' + d;
+  }
+}
+
+function _formatDate(date) {
+  return date.getFullYear() + '-' +
+    String(date.getMonth() + 1).padStart(2, '0') + '-' +
+    String(date.getDate()).padStart(2, '0');
+}
+
+/**
  * 通过 CDP 从生意参谋提取搜索分析数据
  * @param {string} keyword - 搜索关键词
  * @param {Object} [options={}] - 配置选项
@@ -319,8 +358,13 @@ async function extractSycmData(keyword, options) {
   options = options || {};
   var port = options.port || DEFAULT_PORT;
   var maxPages = options.maxPages || DEFAULT_MAX_PAGES;
-  var mode = options.mode || 'hot';
+  var mode = options.mode || 'blue';
   var onProgress = options.onProgress || function() {};
+  
+  // 页面级筛选参数（环比/年同比 + 时间周期）
+  var pageFilters = options.pageFilters || DEFAULT_PAGE_FILTERS;
+  var pfCompare = pageFilters.compareType || DEFAULT_PAGE_FILTERS.compareType;
+  var pfPeriod = pageFilters.timePeriod || DEFAULT_PAGE_FILTERS.timePeriod;
 
   if (!keyword) throw new Error('keyword is required');
 
@@ -329,9 +373,10 @@ async function extractSycmData(keyword, options) {
   var cdp = await _createCdpClient(tab.webSocketDebuggerUrl);
 
   try {
-    // 导航到目标关键词页面（导航会断开 CDP，需要重连）
-    var targetUrl = 'https://sycm.taobao.com/mc/free/search_analysis?keyWord=' + encodeURIComponent(keyword) + '&dateType=day&dateRange=20';
-    onProgress('[1/6] Navigating to: ' + keyword);
+    // 构建 URL 时使用时间周期参数
+    var periodConfig = PERIOD_URL_MAP[pageFilters.timePeriod] || PERIOD_URL_MAP['7d'];
+    var targetUrl = 'https://sycm.taobao.com/mc/free/search_analysis?keyWord=' + encodeURIComponent(keyword) + '&dateType=' + periodConfig.dateType + '&dateRange=' + periodConfig.dateRange;
+    onProgress('[1/6] Navigating to: ' + keyword + ' (period: ' + pageFilters.timePeriod + ')');
     await cdp.runAction("window.location.href='" + targetUrl.replace(/'/g, "\\'") + "'", 5000);
     cdp.close();
     onProgress('[1/6] Waiting for page load...');
@@ -351,6 +396,38 @@ async function extractSycmData(keyword, options) {
       );
       await new Promise(function(r) { setTimeout(r, 3000); });
     }
+    
+    // 设置环比/年同比
+    var pageFiltersApplied = {};
+    onProgress('[2.1/6] Setting compare type: ' + pageFilters.compareType);
+    var compareResult = await cdp.runAction(
+      "(() => { " +
+      "var compareValue = '" + COMPARE_TYPE_MAP[pageFilters.compareType] + "'; " +
+      "// Try to find radio buttons for compare type " +
+      "var radios = document.querySelectorAll('input[type=radio][name*=\"compare\"], input[type=radio][value*=\"cycle\"], input[type=radio][value*=\"yearSync\"]'); " +
+      "for (var i = 0; i < radios.length; i++) { " +
+      "  if (radios[i].value === compareValue || radios[i].nextElementSibling && radios[i].nextElementSibling.textContent.includes(pageFilters.compareType === 'yearSync' ? '年同比' : '环比')) { " +
+      "    radios[i].click(); " +
+      "    return 'applied'; " +
+      "  } " +
+      "} " +
+      "// Fallback: try to find labels with text " +
+      "var labels = document.querySelectorAll('label'); " +
+      "for (var i = 0; i < labels.length; i++) { " +
+      "  var text = labels[i].textContent.trim(); " +
+      "  if ((pageFilters.compareType === 'yearSync' && text.includes('年同比')) || (pageFilters.compareType === 'cycle' && text.includes('环比'))) { " +
+      "    labels[i].click(); " +
+      "    return 'applied'; " +
+      "  } " +
+      "} " +
+      "return 'not_found'; " +
+      "})()",
+      8000
+    );
+    pageFiltersApplied.compareType = String(compareResult).includes('applied');
+    pageFiltersApplied.timePeriod = true; // We set this via URL
+    
+    await new Promise(function(r) { setTimeout(r, 2000); });
 
     // 勾选全部 6 个指标 checkbox
     onProgress('[3/6] Checking metric checkboxes...');
@@ -467,6 +544,7 @@ async function extractSycmData(keyword, options) {
       method: 'cdp_multi_page',
       mode: mode,
       filterApplied: filterApplied,
+      pageFiltersApplied: pageFiltersApplied,
       maxPages: maxPages,
       totalPages: totalPages,
       currentPage: 1,

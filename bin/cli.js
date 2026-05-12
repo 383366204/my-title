@@ -438,6 +438,8 @@ program
   .option('--mode <hot|blue>', '查询模式，hot=相关热搜词，blue=相关蓝海词', 'blue')
   .option('--filter <conditions>', '过滤条件，格式: demandSupplyRatio=1,searchPopularity=1000')
   .option('--no-default-filters', '禁用默认过滤条件')
+  .option('--compare <type>', '环比类型: cycle=环比(默认), yearSync=年同比', 'cycle')
+  .option('--period <period>', '时间周期: 7d(默认), 30d, day, week, month', '7d')
   .action(async function(keyword, options, command) {
     const mainOpts = command && command.parent ? command.parent.opts() : {};
     const jsonMode = !!options.json || !!mainOpts.json;
@@ -446,7 +448,20 @@ program
       const mode = options.mode || 'hot';
       
       const { isChromeDevToolsAvailable, generateChromeLaunchCommand, ERRORS } = require('../src/sycm-browser-helper');
-      const { extractSycmData, DEFAULT_FILTER_CONDITIONS } = require('../src/sycm-cdp-extractor');
+      const { extractSycmData, DEFAULT_FILTER_CONDITIONS, VALID_COMPARE_TYPES, VALID_PERIODS, DEFAULT_PAGE_FILTERS } = require('../src/sycm-cdp-extractor');
+      
+      // 解析页面级筛选参数（环比/年同比 + 时间周期）
+      var userCompare = options.compare || DEFAULT_PAGE_FILTERS.compareType;
+      var userPeriod = options.period || DEFAULT_PAGE_FILTERS.timePeriod;
+      
+      if (!VALID_COMPARE_TYPES.includes(userCompare)) {
+        console.error('错误: 无效的 --compare 值 "' + userCompare + '", 有效选项: ' + VALID_COMPARE_TYPES.join(', '));
+        process.exit(1);
+      }
+      if (!VALID_PERIODS.includes(userPeriod)) {
+        console.error('错误: 无效的 --period 值 "' + userPeriod + '", 有效选项: ' + VALID_PERIODS.join(', '));
+        process.exit(1);
+      }
       
       // 解析过滤条件
       var filterConditions = null;
@@ -494,33 +509,35 @@ program
         }
       }
 
-      // 步骤2：通过 CDP 直接提取数据
-      var progressMsgs = [];
-      const result = await extractSycmData(keyword, {
-        port: port,
-        maxPages: maxPages,
-        mode: mode,
-        filterConditions: filterConditions,
-        onProgress: function(msg) { progressMsgs.push(msg); if (!jsonMode) console.log('  ' + msg); }
-      });
+       // 步骤2：通过 CDP 直接提取数据
+       var progressMsgs = [];
+       const result = await extractSycmData(keyword, {
+         port: port,
+         maxPages: maxPages,
+         mode: mode,
+         filterConditions: filterConditions,
+         pageFilters: { compareType: userCompare, timePeriod: userPeriod },
+         onProgress: function(msg) { progressMsgs.push(msg); if (!jsonMode) console.log('  ' + msg); }
+       });
 
-      if (jsonMode) {
-        process.stdout.write(JSON.stringify({
-          ok: true,
-          keyword: result.keyword,
-          source: result.source,
-          extractedAt: result.extractedAt,
-          method: result.method,
-          mode: result.mode,
-          filterApplied: result.filterApplied,
-          totalPages: result.totalPages,
-          currentPage: result.currentPage,
-          totalCount: result.totalCount,
-          headers: result.headers,
-          data: result.data
-        }, null, 2) + '\n');
-        return;
-      }
+       if (jsonMode) {
+         process.stdout.write(JSON.stringify({
+           ok: true,
+           keyword: result.keyword,
+           source: result.source,
+           extractedAt: result.extractedAt,
+           method: result.method,
+           mode: result.mode,
+           filterApplied: result.filterApplied,
+           pageFiltersApplied: result.pageFiltersApplied,
+           totalPages: result.totalPages,
+           currentPage: result.currentPage,
+           totalCount: result.totalCount,
+           headers: result.headers,
+           data: result.data
+         }, null, 2) + '\n');
+         return;
+       }
 
       // 人类可读输出
       console.log('\n' + '='.repeat(100));
