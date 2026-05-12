@@ -1049,6 +1049,8 @@ server.tool(
     port: z.number().default(9222).describe('Chrome 远程调试端口，默认 9222'),
     maxPages: z.number().default(1).describe('最大提取页数，默认 1'),
     mode: z.enum(['hot', 'blue']).default('blue').describe('查询模式，hot=相关热搜词，blue=相关蓝海词'),
+    compareType: z.enum(['cycle', 'yearSync']).optional().default('cycle').describe('数据对比类型，cycle=环比，yearSync=同比，默认cycle'),
+    timePeriod: z.enum(['7d', '30d', 'day', 'week', 'month']).optional().default('7d').describe('时间周期，7d=7天，30d=30天，day=日，week=周，month=月，默认7d'),
     filterConditions: z.object({
       demandSupplyRatio: z.number().optional().describe('需求供给比最小值'),
       searchPopularity: z.number().optional().describe('搜索人气最小值'),
@@ -1058,7 +1060,7 @@ server.tool(
     }).optional().describe('过滤条件（仅蓝海词模式生效）'),
     noDefaultFilters: z.boolean().default(false).describe('禁用默认过滤条件'),
   },
-  async ({ keyword, port, maxPages, mode, filterConditions, noDefaultFilters }) => {
+  async ({ keyword, port, maxPages, mode, compareType, timePeriod, filterConditions, noDefaultFilters }) => {
     try {
       const { isChromeDevToolsAvailable, generateChromeLaunchCommand, ERRORS } = require('../src/sycm-browser-helper.js');
       const { extractSycmData, DEFAULT_FILTER_CONDITIONS } = require('../src/sycm-cdp-extractor.js');
@@ -1090,6 +1092,10 @@ server.tool(
         maxPages: maxPages,
         mode: mode,
         filterConditions: mergedFilters,
+        pageFilters: {
+          compareType: compareType,
+          timePeriod: timePeriod
+        },
         onProgress: function(msg) { progressLog.push(msg); }
       });
 
@@ -1101,6 +1107,7 @@ server.tool(
         method: result.method,
         mode: result.mode,
         filterApplied: result.filterApplied,
+        pageFiltersApplied: result.pageFiltersApplied,
         totalPages: result.totalPages,
         currentPage: result.currentPage,
         totalCount: result.totalCount,
