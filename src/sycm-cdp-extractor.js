@@ -350,9 +350,10 @@ function _formatDate(date) {
  * @param {Object} [options={}] - 配置选项
  * @param {number} [options.port=9222] - Chrome 调试端口
  * @param {number} [options.maxPages=1] - 最大提取页数
- * @param {string} [options.mode='hot'] - 查询模式: 'hot'=相关热搜词, 'blue'=相关蓝海词
+ * @param {string} [options.mode='blue'] - 查询模式: 'hot'=相关热搜词, 'blue'=相关蓝海词
+ * @param {Object} [options.pageFilters] - 页面级筛选参数 { compareType: 'cycle'|'yearSync', timePeriod: '7d'|'30d'|'day'|'week'|'month' }
  * @param {Function} [options.onProgress] - 进度回调 fn(stepMsg)
- * @returns {Promise<Object>} 提取结果 { keyword, data[], totalCount, totalPages, currentPage, headers, extractedAt }
+ * @returns {Promise<Object>} 提取结果 { keyword, data[], totalCount, totalPages, currentPage, headers, extractedAt, pageFiltersApplied }
  */
 async function extractSycmData(keyword, options) {
   options = options || {};
@@ -373,10 +374,15 @@ async function extractSycmData(keyword, options) {
   var cdp = await _createCdpClient(tab.webSocketDebuggerUrl);
 
   try {
-    // 构建 URL 时使用时间周期参数
-    var periodConfig = PERIOD_URL_MAP[pageFilters.timePeriod] || PERIOD_URL_MAP['7d'];
-    var targetUrl = 'https://sycm.taobao.com/mc/free/search_analysis?keyWord=' + encodeURIComponent(keyword) + '&dateType=' + periodConfig.dateType + '&dateRange=' + periodConfig.dateRange;
-    onProgress('[1/6] Navigating to: ' + keyword + ' (period: ' + pageFilters.timePeriod + ')');
+    // 动态构建 URL：时间维度 + 日期范围 + 环比类型
+    var periodConfig = PERIOD_URL_MAP[pfPeriod] || PERIOD_URL_MAP['7d'];
+    var dateRangeStr = _computeDateRange(pfPeriod);
+    var targetUrl = 'https://sycm.taobao.com/mc/free/search_analysis?keyWord='
+      + encodeURIComponent(keyword)
+      + '&dateType=' + periodConfig.dateType
+      + '&dateRange=' + encodeURIComponent(dateRangeStr)
+      + '&searchAnalysisRadio=' + pfCompare;
+    onProgress('[1/6] Navigating to: ' + keyword + ' (period: ' + pfPeriod + ', compare: ' + pfCompare + ')');
     await cdp.runAction("window.location.href='" + targetUrl.replace(/'/g, "\\'") + "'", 5000);
     cdp.close();
     onProgress('[1/6] Waiting for page load...');
@@ -397,37 +403,11 @@ async function extractSycmData(keyword, options) {
       await new Promise(function(r) { setTimeout(r, 3000); });
     }
     
-    // 设置环比/年同比
-    var pageFiltersApplied = {};
-    onProgress('[2.1/6] Setting compare type: ' + pageFilters.compareType);
-    var compareResult = await cdp.runAction(
-      "(() => { " +
-      "var compareValue = '" + COMPARE_TYPE_MAP[pageFilters.compareType] + "'; " +
-      "// Try to find radio buttons for compare type " +
-      "var radios = document.querySelectorAll('input[type=radio][name*=\"compare\"], input[type=radio][value*=\"cycle\"], input[type=radio][value*=\"yearSync\"]'); " +
-      "for (var i = 0; i < radios.length; i++) { " +
-      "  if (radios[i].value === compareValue || radios[i].nextElementSibling && radios[i].nextElementSibling.textContent.includes(pageFilters.compareType === 'yearSync' ? '年同比' : '环比')) { " +
-      "    radios[i].click(); " +
-      "    return 'applied'; " +
-      "  } " +
-      "} " +
-      "// Fallback: try to find labels with text " +
-      "var labels = document.querySelectorAll('label'); " +
-      "for (var i = 0; i < labels.length; i++) { " +
-      "  var text = labels[i].textContent.trim(); " +
-      "  if ((pageFilters.compareType === 'yearSync' && text.includes('年同比')) || (pageFilters.compareType === 'cycle' && text.includes('环比'))) { " +
-      "    labels[i].click(); " +
-      "    return 'applied'; " +
-      "  } " +
-      "} " +
-      "return 'not_found'; " +
-      "})()",
-      8000
-    );
-    pageFiltersApplied.compareType = String(compareResult).includes('applied');
-    pageFiltersApplied.timePeriod = true; // We set this via URL
-    
-    await new Promise(function(r) { setTimeout(r, 2000); });
+    // 页面筛选参数已通过 URL 设置，记录应用状态
+    var pageFiltersApplied = {
+      compareType: pfCompare,
+      timePeriod: pfPeriod
+    };
 
     // 勾选全部 6 个指标 checkbox
     onProgress('[3/6] Checking metric checkboxes...');
