@@ -471,11 +471,55 @@ async function extractSycmData(keyword, options) {
     );
     var totalPages = Math.min(totalInfo || maxPages, maxPages);
 
-    // 提取第 1 页
+    // 提取第 1 页（含关键词校验，防止 SPA 缓存返回旧数据）
     onProgress('[5/6] Extracting page 1/' + totalPages + '...');
     var result = await cdp.evaluate(_buildExtractScript(), 25000);
     var parsed = (typeof result === 'string') ? JSON.parse(result) : null;
     var allData = parsed ? parsed.d : [];
+
+    // 关键词校验：首条结果必须包含搜索词，否则强制刷新重试一次
+    if (allData.length > 0 && keyword) {
+      var firstKw = allData[0].keyword || '';
+      if (firstKw.indexOf(keyword) < 0) {
+        onProgress('[WARN] 首条结果 "' + firstKw + '" 不匹配搜索词 "' + keyword + '"，强制刷新重试...');
+        cdp.close();
+        tab = await _connectToTab(port, 'search_analysis');
+        cdp = await _createCdpClient(tab.webSocketDebuggerUrl);
+        // 用 location.replace() 强制完整刷新，绕过 SPA 缓存
+        await cdp.runAction("window.location.replace('" + targetUrl.replace(/'/g, "\\'") + "')", 5000);
+        cdp.close();
+        await new Promise(function(r) { setTimeout(r, 12000); });
+        tab = await _connectToTab(port, 'search_analysis');
+        cdp = await _createCdpClient(tab.webSocketDebuggerUrl);
+        // 蓝海词模式需要重新切换
+        if (mode === 'blue') {
+          await cdp.runAction(
+            "(() => { var labels = document.querySelectorAll('label.ant-radio-wrapper'); " +
+            "for(var i=0;i<labels.length;i++){if(labels[i].textContent.includes('蓝海')){labels[i].click();return 'clicked'}} " +
+            "return 'not_found' })()",
+            5000
+          );
+          await new Promise(function(r) { setTimeout(r, 3000); });
+        }
+        // 勾选指标
+        await cdp.runAction(
+          "(() => { var g=document.querySelector('.ant-checkbox-group.low-Checkbox-v2'); " +
+          "if(!g)return'no_group'; " +
+          "var ins=g.querySelectorAll('input[type=checkbox]'); " +
+          "ins.forEach(function(i){if(!i.checked)i.click()}); " +
+          "return'checked:'+ins.length })()",
+          10000
+        );
+        await new Promise(function(r) { setTimeout(r, COLUMN_POLL_INTERVAL); });
+        // 重新提取
+        result = await cdp.evaluate(_buildExtractScript(), 25000);
+        parsed = (typeof result === 'string') ? JSON.parse(result) : null;
+        allData = parsed ? parsed.d : [];
+        if (allData.length > 0) {
+          onProgress('[OK] 重试后首条结果: ' + (allData[0].keyword || '(empty)'));
+        }
+      }
+    }
 
     // 遍历剩余页面
     onProgress('[6/6] Traversing pages 2-' + totalPages + '...');
