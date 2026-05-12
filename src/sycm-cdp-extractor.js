@@ -20,6 +20,29 @@ var DEFAULT_FILTER_CONDITIONS = {
   referencePrice: 0
 };
 
+var DEFAULT_PAGE_FILTERS = {
+  compareType: 'cycle',     // 环比 (cycle) | 年同比 (yearSync)
+  timePeriod: '7d'          // 7d | 30d | day | week | month
+};
+
+// CLI/MCP 时间周期参数 → SYCM URL 参数映射
+var PERIOD_URL_MAP = {
+  '7d':   { dateType: 'day',   dateRange: '7'  },
+  '30d':  { dateType: 'day',   dateRange: '30' },
+  'day':  { dateType: 'day',   dateRange: '20' },
+  'week': { dateType: 'week',  dateRange: '20' },
+  'month':{ dateType: 'month', dateRange: '20' }
+};
+
+// CLI/MCP 环比类型参数 → DOM value 映射
+var COMPARE_TYPE_MAP = {
+  'cycle': 'cycle',       // 环比
+  'yearSync': 'yearSync'  // 年同比
+};
+
+var VALID_COMPARE_TYPES = Object.keys(COMPARE_TYPE_MAP);
+var VALID_PERIODS = Object.keys(PERIOD_URL_MAP);
+
 function _connectToTab(port, urlFilter) {
   port = port || DEFAULT_PORT;
   return new Promise(function(resolve, reject) {
@@ -461,5 +484,10 @@ module.exports = {
   DEFAULT_PORT: DEFAULT_PORT,
   DEFAULT_MAX_PAGES: DEFAULT_MAX_PAGES,
   DEFAULT_FILTER_CONDITIONS: DEFAULT_FILTER_CONDITIONS,
-  FILTER_FIELD_SELECTORS: FILTER_FIELD_SELECTORS
+  FILTER_FIELD_SELECTORS: FILTER_FIELD_SELECTORS,
+  DEFAULT_PAGE_FILTERS: DEFAULT_PAGE_FILTERS,
+  PERIOD_URL_MAP: PERIOD_URL_MAP,
+  COMPARE_TYPE_MAP: COMPARE_TYPE_MAP,
+  VALID_COMPARE_TYPES: VALID_COMPARE_TYPES,
+  VALID_PERIODS: VALID_PERIODS
 };
