@@ -1102,6 +1102,7 @@ server.tool(
         mode: result.mode,
         filterApplied: result.filterApplied,
         totalPages: result.totalPages,
+        currentPage: result.currentPage,
         totalCount: result.totalCount,
         headers: result.headers,
         data: result.data,

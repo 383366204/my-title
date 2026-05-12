@@ -290,7 +290,7 @@ function _buildExtractScript() {
  * @param {number} [options.maxPages=1] - 最大提取页数
  * @param {string} [options.mode='hot'] - 查询模式: 'hot'=相关热搜词, 'blue'=相关蓝海词
  * @param {Function} [options.onProgress] - 进度回调 fn(stepMsg)
- * @returns {Promise<Object>} 提取结果 { keyword, data[], totalCount, totalPages, headers, extractedAt }
+ * @returns {Promise<Object>} 提取结果 { keyword, data[], totalCount, totalPages, currentPage, headers, extractedAt }
  */
 async function extractSycmData(keyword, options) {
   options = options || {};
@@ -446,6 +446,7 @@ async function extractSycmData(keyword, options) {
       filterApplied: filterApplied,
       maxPages: maxPages,
       totalPages: totalPages,
+      currentPage: 1,
       headers: parsed ? parsed.h : [],
       totalCount: cleanData.length,
       data: cleanData
