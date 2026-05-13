@@ -97,9 +97,10 @@ function fallbackExtract(input) {
   }
 
   // 无品类词匹配：取最后 2+ 字符的中文词作为核心词，其余为修饰词
-  const chineseWordMatch = input.match(/[\u4e00-\u9fa5]{2,}$/g);
-  if (chineseWordMatch && chineseWordMatch.length > 0) {
-    coreWord = chineseWordMatch[0];
+  const chineseWordMatches = input.match(/[\u4e00-\u9fa5]{2,}/g);
+  if (chineseWordMatches && chineseWordMatches.length > 0) {
+    let categoryWord = chineseWordMatches.find(word => categoryPattern.test(word));
+    coreWord = categoryWord || chineseWordMatches[chineseWordMatches.length - 1];
     prefix = input.substring(0, input.lastIndexOf(coreWord));
     if (prefix) {
       const modifiers = extractChineseModifiers(prefix, rigidPattern);

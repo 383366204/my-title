@@ -5,7 +5,7 @@
 
 /**
  * 对产品列表进行本地评分
- * @param {Array<{title: string, sales30days?: number, goodRate?: number}>} products - 产品列表
+ * @param {Array<{title: string, stats?: {last30DaysSales?: number, goodRates?: number}}>} products - 产品列表
  * @param {string} coreWord - 核心词
  * @param {string} blueOceanWord - 蓝海词
  * @param {string[]} modifiers - 刚性修饰词数组
@@ -22,19 +22,19 @@ function scoreLocally(products, coreWord, blueOceanWord, modifiers, semanticGrou
       score += 30;
     }
 
-    // 刚性修饰词匹配: 每个+10分
-    modifiers.forEach(modifier => {
-      // 1. 精确命中（快速路径）
-      if (title.includes(modifier)) {
-        score += 10;
-        return;
-      }
-      // 2. 语义族命中（AI 驱动的新路径）
-      const group = semanticGroups[modifier] || semanticGroups[modifier.toLowerCase()];
-      if (group && group.some(synonym => title.includes(synonym) || title.includes(synonym.toLowerCase()))) {
-        score += 10;
-      }
-    });
+    let rigidAllMatched = true;
+    if (modifiers.length > 0) {
+      modifiers.forEach(modifier => {
+        const exactHit = title.includes(modifier);
+        const group = semanticGroups[modifier] || semanticGroups[modifier.toLowerCase()];
+        const synonymHit = group && group.some(function(s) { return title.includes(s) || title.includes(s.toLowerCase()); });
+        if (exactHit || synonymHit) {
+          score += 10;
+        } else {
+          rigidAllMatched = false;
+        }
+      });
+    }
 
     // 蓝海词匹配: +20分
     if (blueOceanWord && title.includes(blueOceanWord)) {
@@ -42,17 +42,23 @@ function scoreLocally(products, coreWord, blueOceanWord, modifiers, semanticGrou
     }
 
     // 30天销量>100: +15分
-    if (product.sales30days && product.sales30days > 100) {
+    const last30DaysSales = (product.stats && product.stats.last30DaysSales) || 0;
+    if (last30DaysSales > 100) {
       score += 15;
     }
 
     // 好评率>95%: +5分
-    if (product.goodRate && product.goodRate > 95) {
+    const goodRates = (product.stats && product.stats.goodRates) || 0;
+    if (goodRates > 95) {
       score += 5;
     }
 
-    // 阈值>=40通过
-    const passed = score >= 30;
+    let passed;
+    if (modifiers.length === 0) {
+      passed = true;
+    } else {
+      passed = score >= 30 && rigidAllMatched;
+    }
 
     return { product, score, passed };
   });

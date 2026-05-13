@@ -57,6 +57,7 @@ const COLUMNS = [
  * @returns {string} 截断后的字符串
  */
 function truncate(str, width) {
+  if (str === null || str === undefined || str === '') return '';
   const s = String(str);
   if (s.length <= width) return s;
   return s.substring(0, width - 1) + '…';
@@ -73,9 +74,9 @@ function formatRow(row, columns) {
     let value = row[col.key];
     
     // 特殊格式化
-    if (col.key === 'positiveRate' || col.key === 'repurchaseRate') {
+    if (col.key === '好评率' || col.key === '复购率') {
       value = formatPercent(value);
-    } else if (col.key === 'sales30Days' || col.key === 'originalPrice') {
+    } else if (col.key === '30天销量' || col.key === '商品原价') {
       value = formatNumber(value);
     }
     

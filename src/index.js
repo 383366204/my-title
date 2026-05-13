@@ -84,10 +84,10 @@ function buildOutput({ coreWord, blueOceanWord, modifiers, products, selectedPro
 
   const enriched = products.map((p, idx) => {
     // Use ID-based lookup for selected products
-    const productId = p.id || p.offerId || p.productId;
+    const productId = p.id;
     const selected = selectedMap.get(String(productId || '').trim()) || {};
     // 构建1688产品详情页链接
-    const detailUrl = productId ? `https://detail.1688.com/offer/${productId}.html` : p.url;
+    const detailUrl = productId ? `https://detail.1688.com/offer/${productId}.html` : `https://s.1688.com/searchoffer/searchOffer.htm?keywords=${encodeURIComponent(p.title || coreWord || '')}`;
     // 归一化用于 titleMap 的键
     const normalizedId = String(productId || '').trim();
     let shopTitle = titleMap[normalizedId];
@@ -109,7 +109,7 @@ function buildOutput({ coreWord, blueOceanWord, modifiers, products, selectedPro
       // 原输出字段
       '链接原标题': p.title,
       '产品链接': detailUrl,
-      '主图链接': p.url || p.image,
+      '主图链接': p.url,
       '铺货标题': shopTitle,
       '商品原价': p.price,
       '30天销量': p.stats && typeof p.stats.last30DaysSales === 'number' ? p.stats.last30DaysSales : 0,
@@ -198,12 +198,10 @@ async function _search1688(coreWord, blueOceanWord, modifiers, limit, log, warn,
       const rigidModifiers = modifiers
         .filter(m => m.rigidity === 'rigid')
         .map(m => m.word.toLowerCase());
-      searchResult = rigidModifiers.length === 0 ? fallbackProducts : fallbackProducts.filter(product => {
-        const title = (product.subject || product.title || '').toLowerCase();
-        const description = (product.description || '').toLowerCase();
-        const combinedText = `${title} ${description}`;
-        return rigidModifiers.every(word => combinedText.includes(word));
-      });
+        searchResult = rigidModifiers.length === 0 ? fallbackProducts : fallbackProducts.filter(product => {
+          const title = (product.title || '').toLowerCase();
+          return rigidModifiers.every(word => title.includes(word));
+        });
     } catch (e2) {
       searchResult = [];
     }
@@ -432,8 +430,8 @@ async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles,
       err.name = 'AbortError';
       throw err;
     }
-    // 降级：本地化标题生成
-    warn('⚠️ GLM selectAndGenerate 失败，降级到本地标题生成... ', e && e.message ? e.message : e);
+    // 降级：简化 GLM 调用
+    warn('⚠️ GLM selectAndGenerate 失败，降级到简化 GLM 调用... ', e && e.message ? e.message : e);
     try {
       const fallbackPeerTitles = (peerTitles || []).map(t => cleanTitle(removeBannedWords(t || ''))).filter(Boolean);
       const titles = await glmClient.generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles: fallbackPeerTitles, products, maxLength });
@@ -586,7 +584,7 @@ async function run(blueOceanWord, options = {}) {
   if (minPrice > 0 || maxPrice > 0) {
     const beforeCount = products.length;
     products = (products || []).filter(p => {
-      const rawPrice = String(p.price || p.salePrice || '0');
+        const rawPrice = String(p.price || '0');
       const price = parseFloat(rawPrice.replace(/[^\d.\-]/g, '')) || 0;
       if (minPrice > 0 && price < minPrice) return false;
       if (maxPrice > 0 && price > maxPrice) return false;
@@ -646,7 +644,7 @@ async function run(blueOceanWord, options = {}) {
      trace
    };
 
-  var _raceTimeoutId = null;
+  let _raceTimeoutId = null;
   const timeoutPromise = new Promise((resolve, reject) => {
     _raceTimeoutId = setTimeout(() => 
       reject(new Error(`标题生成超时(${RUN_TIMEOUT/1000}s)，请简化关键词或减少数量`)), RUN_TIMEOUT

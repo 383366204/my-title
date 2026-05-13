@@ -66,7 +66,7 @@ program
           if (item.titles && item.titles.length > 0) {
             console.log('  生成标题:');
             item.titles.forEach((t, i) => {
-              const title = typeof t === 'string' ? t : (t.title || t['铺货标题'] || '');
+              const title = (!t || typeof t === 'string') ? (t || '') : (t.title || t['铺货标题'] || '');
               console.log(`    ${i + 1}. ${title}`);
             });
           } else {
@@ -451,8 +451,8 @@ program
       const { extractSycmData, DEFAULT_FILTER_CONDITIONS, VALID_COMPARE_TYPES, VALID_PERIODS, DEFAULT_PAGE_FILTERS } = require('../src/sycm-cdp-extractor');
       
       // 解析页面级筛选参数（环比/年同比 + 时间周期）
-      var userCompare = options.compare || DEFAULT_PAGE_FILTERS.compareType;
-      var userPeriod = options.period || DEFAULT_PAGE_FILTERS.timePeriod;
+      let userCompare = options.compare || DEFAULT_PAGE_FILTERS.compareType;
+      let userPeriod = options.period || DEFAULT_PAGE_FILTERS.timePeriod;
       
       if (!VALID_COMPARE_TYPES.includes(userCompare)) {
         console.error('错误: 无效的 --compare 值 "' + userCompare + '", 有效选项: ' + VALID_COMPARE_TYPES.join(', '));
@@ -464,15 +464,15 @@ program
       }
       
       // 解析过滤条件
-      var filterConditions = null;
+      let filterConditions = null;
       if (mode === 'blue') {
-        var userFilters = {};
+        const userFilters = {};
         if (options.filter) {
           options.filter.split(',').forEach(function(pair) {
-            var parts = pair.split('=');
+            const parts = pair.split('=');
             if (parts.length === 2) {
-              var key = parts[0].trim();
-              var val = parseFloat(parts[1].trim());
+              const key = parts[0].trim();
+              const val = parseFloat(parts[1].trim());
               if (!isNaN(val)) userFilters[key] = val;
             }
           });
@@ -509,16 +509,16 @@ program
         }
       }
 
-       // 步骤2：通过 CDP 直接提取数据
-       var progressMsgs = [];
-       const result = await extractSycmData(keyword, {
-         port: port,
-         maxPages: maxPages,
-         mode: mode,
-         filterConditions: filterConditions,
-         pageFilters: { compareType: userCompare, timePeriod: userPeriod },
-         onProgress: function(msg) { progressMsgs.push(msg); if (!jsonMode) console.log('  ' + msg); }
-       });
+        // 步骤2：通过 CDP 直接提取数据
+        const progressMsgs = [];
+        const result = await extractSycmData(keyword, {
+          port: port,
+          maxPages: maxPages,
+          mode: mode,
+          filterConditions: filterConditions,
+          pageFilters: { compareType: userCompare, timePeriod: userPeriod },
+          onProgress: function(msg) { progressMsgs.push(msg); if (!jsonMode) console.log('  ' + msg); }
+        });
 
        if (jsonMode) {
          process.stdout.write(JSON.stringify({
@@ -544,12 +544,12 @@ program
       console.log('\u{1f4ca} SYCM \u641c\u7d22\u5206\u6790 \u2014 ' + result.keyword + ' | \u524d' + result.maxPages + '\u9875 | 6\u5217 | \u5171 ' + result.totalCount + ' \u6761');
       console.log('-'.repeat(100));
 
-      var displayRows = result.data.slice(0, 20);
+      const displayRows = result.data.slice(0, 20);
       if (result.data.length > 20) displayRows.push({ keyword: '...' });
-      var fields = ['searchPopularity', 'clickRate', 'conversionRate', 'buyerCount', 'demandSupplyRatio', 'tmallClickShare'];
+      const fields = ['searchPopularity', 'clickRate', 'conversionRate', 'buyerCount', 'demandSupplyRatio', 'tmallClickShare'];
 
       displayRows.forEach(function(row, idx) {
-        var line = String(idx + 1).padStart(3) + '. ' + (row.keyword || '?').padEnd(18);
+        let line = String(idx + 1).padStart(3) + '. ' + (row.keyword || '?').padEnd(18);
         fields.forEach(function(f) {
           var v = row[f], t = row[f + '_trend'];
           line += ' | ' + (String(v != null ? v : '-').padStart(14) + (t ? ' (' + t + ')' : ''));

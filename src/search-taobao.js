@@ -17,7 +17,7 @@ async function searchTaobaoTitles(keyword, options = {}) {
 
   // 检测是否安装
   if (!isTaobaoNativeInstalled()) {
-    console.warn('⚠️  taobao-native CLI 未安装，请使用 --peer-titles 手动提供同行标题');
+    console.warn('[taobao] taobao-native CLI 未安装，请使用 --peer-titles 手动提供同行标题');
     return [];
   }
 
@@ -67,8 +67,12 @@ async function searchTaobaoTitles(keyword, options = {}) {
     console.warn('⚠️  搜索结果格式异常，数据结构:', Object.keys(data || {}));
     return [];
   } catch (error) {
-    console.warn('⚠️  淘宝搜索失败:', error.message);
-    console.warn('   请使用 --peer-titles 手动提供同行标题');
+    if (error && error.message && error.message.includes('timeout')) {
+      console.warn('[taobao] peer title search timed out: ' + error.message);
+    } else {
+      console.warn('[taobao] peer title search failed: ' + (error ? error.message : error));
+    }
+    console.warn('[taobao]   请使用 --peer-titles 手动提供同行标题');
     return [];
   }
 }

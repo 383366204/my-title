@@ -64,7 +64,7 @@ async function searchAll(coreWord, blueOceanWord, modifiers = [], semanticGroups
   // 渐进组合：coreWord + rigid[0], coreWord + rigid[0] + rigid[1], ...（最多4个）
   let currentQuery = coreWord;
   for (let i = 0; i < dedupedRigids.length && queries.length < 4; i++) {
-    currentQuery = dedupedRigids[i] + currentQuery; // rigid 前置！如 "猫咪" + "衣服" = "猫咪衣服"
+    currentQuery = currentQuery + dedupedRigids[i]; // rigid 后置！如 "衣服" + "猫咪" = "衣服猫咪"
     queries.push(currentQuery);
   }
   
@@ -79,12 +79,16 @@ async function searchAll(coreWord, blueOceanWord, modifiers = [], semanticGroups
   // 合并并去重（根据 product.id 或 id 字段）
   const productMap = new Map();
 
-  // 依次搜索每个查询并合并结果
-  for (const query of uniqueQueries) {
-    const products = await client.searchOffers(query);
+  // 并行搜索所有查询并合并结果
+  const searchResults = await Promise.all(
+    uniqueQueries.map(function(query) { return client.searchOffers(query); })
+  );
+  for (var ri = 0; ri < searchResults.length; ri++) {
+    var products = searchResults[ri];
     if (Array.isArray(products)) {
-      for (const product of products) {
-        const id = product.id || product.offerId || product.productId;
+      for (var j = 0; j < products.length; j++) {
+        var product = products[j];
+        var id = product.id || product.offerId || product.productId;
         if (id && !productMap.has(id)) {
           productMap.set(id, product);
         }
