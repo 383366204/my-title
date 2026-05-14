@@ -1113,6 +1113,24 @@ server.tool(
         totalCount: result.totalCount,
         headers: result.headers,
         data: result.data,
+        categoryAnalysis: result.categoryAnalysis ? {
+          recommended: result.categoryAnalysis.recommendation && result.categoryAnalysis.recommendation.recommended ? {
+            category: result.categoryAnalysis.recommendation.recommended.category,
+            clickRatio: result.categoryAnalysis.recommendation.recommended.clickRatio,
+            clickRate: result.categoryAnalysis.recommendation.recommended.clickRate,
+            score: result.categoryAnalysis.recommendation.recommended.score
+          } : null,
+          ranking: (result.categoryAnalysis.recommendation && result.categoryAnalysis.recommendation.ranking) ?
+            result.categoryAnalysis.recommendation.ranking.map(function(r) {
+              return {
+                category: r.category,
+                clickRatio: r.clickRatio,
+                clickRate: r.clickRate,
+                score: r.score
+              };
+            }) : [],
+          reason: (result.categoryAnalysis.recommendation && result.categoryAnalysis.recommendation.reason) || ''
+        } : null,
         _progress: progressLog
       }, null, 2) }] };
     } catch (err) {

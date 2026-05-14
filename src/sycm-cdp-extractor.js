@@ -561,6 +561,22 @@ async function extractSycmData(keyword, options) {
       return obj;
     });
 
+    var categoryAnalysis = null;
+    try {
+      onProgress('[6.5/7] Extracting category analysis...');
+      var catData = await _extractCategoryAnalysis(cdp);
+      if (catData && catData.rows && catData.rows.length > 0) {
+        var categoryRecommendation = _recommendCategory(catData);
+        categoryAnalysis = {
+          data: catData,
+          recommendation: categoryRecommendation
+        };
+        onProgress('[6.5/7] Category: ' + (categoryRecommendation.recommended ? categoryRecommendation.recommended.category : 'none'));
+      }
+    } catch (catErr) {
+      onProgress('[WARN] Category analysis failed: ' + (catErr.message || catErr));
+    }
+
     return {
       keyword: keyword,
       source: 'sycm_search_analysis',
@@ -574,15 +590,132 @@ async function extractSycmData(keyword, options) {
       currentPage: 1,
       headers: parsed ? parsed.h : [],
       totalCount: cleanData.length,
-      data: cleanData
+      data: cleanData,
+      categoryAnalysis: categoryAnalysis
     };
   } finally {
     cdp.close();
   }
 }
 
+function _extractCategoryAnalysis(cdp) {
+  return new Promise(async function(resolve) {
+    try {
+      var tabResult = await cdp.runAction(
+        "(() => { " +
+        "  var spans = document.querySelectorAll('span.oui-tab-switch-item'); " +
+        "  for (var i = 0; i < spans.length; i++) { " +
+        "    var text = (spans[i].textContent || '').trim(); " +
+        "    if (text === '类目分析') { " +
+        "      spans[i].click(); " +
+        "      return 'clicked:' + text; " +
+        "    } " +
+        "  } " +
+        "  return 'not_found'; " +
+        "})()",
+        10000
+      );
+
+      if (String(tabResult).indexOf('not_found') >= 0) {
+        resolve({ headers: [], rows: [] });
+        return;
+      }
+
+      var tableFound = false;
+      for (var i = 0; i < 5; i++) {
+        await new Promise(function(r) { setTimeout(r, 2000); });
+        var rowCount = await cdp.evaluate(
+          "document.querySelectorAll('.ant-table-tbody tr').length",
+          5000
+        );
+        if (rowCount > 0) {
+          tableFound = true;
+          break;
+        }
+      }
+
+      if (!tableFound) {
+        resolve({ headers: [], rows: [] });
+        return;
+      }
+
+      var extractResult = await cdp.evaluate(
+        "(() => { " +
+        "  var result = { headers: [], rows: [] }; " +
+        "  var thElements = document.querySelectorAll('.ant-table-thead th'); " +
+        "  for (var i = 0; i < thElements.length; i++) { " +
+        "    result.headers.push(thElements[i].textContent.trim()); " +
+        "  } " +
+        "  var trElements = document.querySelectorAll('.ant-table-tbody tr'); " +
+        "  for (var i = 0; i < trElements.length; i++) { " +
+        "    var row = {}; " +
+        "    var tdElements = trElements[i].querySelectorAll('td'); " +
+        "    for (var j = 0; j < tdElements.length; j++) { " +
+        "      var cellText = tdElements[j].textContent.trim(); " +
+        "      if (result.headers[j]) { " +
+        "        var header = result.headers[j]; " +
+        "        if (header.includes('类目') || header.includes('品类')) { " +
+        "          row.category = cellText; " +
+        "        } else if (header.includes('点击') && header.includes('占比')) { " +
+        "          var numStr = cellText.replace('%', ''); " +
+        "          row.clickRatio = parseFloat(numStr) || 0; " +
+        "        } else if (header.includes('点击') && header.includes('率')) { " +
+        "          var numStr = cellText.replace('%', ''); " +
+        "          row.clickRate = parseFloat(numStr) || 0; " +
+        "        } " +
+        "      } " +
+        "    } " +
+        "    if (row.category) { " +
+        "      result.rows.push(row); " +
+        "    } " +
+        "  } " +
+        "  return JSON.stringify(result); " +
+        "})()",
+        15000
+      );
+
+      var parsed;
+      try {
+        parsed = (typeof extractResult === 'string') ? JSON.parse(extractResult) : extractResult;
+      } catch (e) {
+        parsed = { headers: [], rows: [] };
+      }
+
+      resolve(parsed);
+    } catch (error) {
+      resolve({ headers: [], rows: [], error: error.message || String(error) });
+    }
+  });
+}
+
+function _recommendCategory(categoryData) {
+  if (!categoryData || !categoryData.rows || categoryData.rows.length === 0) {
+    return { recommended: null, ranking: [], reason: '无类目数据' };
+  }
+  
+  var rows = categoryData.rows;
+  var maxClickRatio = Math.max(...rows.map(function(r) { return r.clickRatio; }));
+  var maxClickRate = Math.max(...rows.map(function(r) { return r.clickRate; }));
+  
+  var scoredRows = rows.map(function(r) {
+    var score = (r.clickRatio / maxClickRatio) * 0.6 + (r.clickRate / maxClickRate) * 0.4;
+    return Object.assign({}, r, { score: score });
+  });
+  
+  var sortedRows = scoredRows.sort(function(a, b) { return b.score - a.score; });
+  var recommended = sortedRows[0];
+  
+  return {
+    recommended: recommended,
+    ranking: sortedRows,
+    reason: '点击人数占比' + recommended.clickRatio + '%，点击率' + recommended.clickRate + '%'
+  };
+}
+
 module.exports = {
   extractSycmData: extractSycmData,
+  _extractCategoryAnalysis: _extractCategoryAnalysis,
+  _recommendCategory: _recommendCategory,
   DEFAULT_PORT: DEFAULT_PORT,
   DEFAULT_MAX_PAGES: DEFAULT_MAX_PAGES,
   DEFAULT_FILTER_CONDITIONS: DEFAULT_FILTER_CONDITIONS,

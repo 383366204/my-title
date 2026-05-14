@@ -560,6 +560,28 @@ program
       console.log('-'.repeat(100));
       console.log('\u2705 \u63d0\u53d6\u5b8c\u6210\uff01 ' + result.totalCount + ' \u6761\u6570\u636e (' + result.totalPages + '\u9875)');
 
+      if (result.categoryAnalysis && result.categoryAnalysis.data && result.categoryAnalysis.data.rows && result.categoryAnalysis.data.rows.length > 0) {
+        var rec = result.categoryAnalysis.recommendation;
+        console.log('\n📊 类目分析 — ' + result.keyword);
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        if (rec && rec.recommended) {
+          console.log('⭐ 推荐类目: ' + rec.recommended.category);
+          console.log('   点击人数占比 ' + rec.recommended.clickRatio + '%，点击率 ' + rec.recommended.clickRate + '%');
+          console.log('   ' + rec.reason);
+          console.log('');
+        }
+        console.log('排名 | 类目路径' + ' '.repeat(50) + '| 点击人数占比 | 点击率');
+        console.log('-----|' + '-'.repeat(58) + '|-------------|------');
+        rec.ranking.forEach(function(row, idx) {
+          var cat = row.category.slice(0, 55);
+          var pad = 58 - cat.length;
+          console.log('  ' + (idx + 1) + ' | ' + cat + ' '.repeat(pad) + '| ' + (row.clickRatio + '%').padStart(9) + ' | ' + row.clickRate + '%');
+        });
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      } else {
+        console.log('\n📊 类目分析: 暂无数据');
+      }
+
     } catch (error) {
       if (jsonMode) {
         process.stdout.write(JSON.stringify({ ok: false, error: error.message }) + '\n');
