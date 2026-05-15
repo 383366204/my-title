@@ -43,13 +43,15 @@ class GLMClient {
     if (process.env.VOLC_API_KEY) {
       this.apiKey = process.env.VOLC_API_KEY;
       this.apiBase = process.env.VOLC_API_BASE || 'https://ark.cn-beijing.volces.com/api/coding/v3';
-      this.model = config.model || 'glm-5.1';
+      // doubao-seed-2-0-lite: 比 glm-5.1 快 20%+，且返回有效结果（glm-5.1 selectAndGenerate 返回空）
+      this.model = config.model || 'doubao-seed-2-0-lite-260428';
     } else {
       this.apiKey = config.apiKey;
       this.apiBase = config.apiBase || 'https://open.bigmodel.cn/api/paas/v4';
       this.model = config.model || 'glm-4-flash';
     }
-    this._timeout = this.apiBase.includes('volces.com') ? 60000 : 15000;
+    // 火山引擎 doubao-lite 响应更快，超时适当缩短
+    this._timeout = this.apiBase.includes('volces.com') ? 30000 : 15000;
     this._longTimeout = this._timeout * 2;
   }
 
@@ -470,6 +472,7 @@ ${sycmLines}
     const systemPrompt = `你是一个电商标题选择与生成助手。请在给定的候选商品中，基于核心词和刚性修饰词，选择出最符合意图的若干商品，并给出价格建议与风险提示，同时生成对应的标题候选。
   标题生成必须遵守以下规则：
   ${COMMON_TITLE_RULES_TEXT}
+  - 每个生成的标题必须以蓝海词"${blueOceanWord}"开头（硬性要求，不可省略）
   ${keywordSection}
   输出严格 JSON 格式，不要任何其他文字，字段名必须完全一致：
   {
@@ -526,15 +529,16 @@ ${sycmLines}
     // 兼容性处理：确保字段存在
     const selectedProducts = result.selectedProducts.map(p => ({
       id: p.id,
-      score: Number(p.score),
+      score: !isNaN(Number(p.score)) ? Number(p.score) : 0,
       reason: p.reason || '',
       priceAdvice: p.priceAdvice || '',
       risk: p.risk || ''
     }));
 
+    // Defense-in-depth: 此处先过滤违禁词，后续 postProcessTitle 还会再过滤一次
     const titles = result.titles.map(t => ({
       productId: String(t.productId || t.product_id || '').trim(),
-      title: removeBannedWords(t.title)
+      title: removeBannedWords(t.title) // 双重过滤保护
     }));
 
     return {

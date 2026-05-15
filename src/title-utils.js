@@ -45,7 +45,7 @@ function truncateByBytes(str, maxBytes) {
 
 function cleanTitle(title) {
   if (typeof title !== 'string') return '';
-  return title.replace(/[^a-zA-Z0-9\u4e00-\u9fa5]/g, '');
+  return title.replace(/[^a-zA-Z0-9\u4e00-\u9fff\u3400-\u4dbf·]/g, '');
 }
 
 function ensureBlueOceanPrefix(title, blueOceanWord) {
@@ -94,7 +94,8 @@ function constructFallbackTitle(blueOceanWord, originalTitle, taobaoTitles = [],
   const jieba = getNodejieba();
   // jieba 不可用时降级为简单的空格分词
   if (!jieba) {
-    const fallback = blueOceanWord + (originalTitle || '').replace(/\s+/g, '').substring(0, maxLength - byteLen(blueOceanWord));
+    const raw = blueOceanWord + (originalTitle || '').replace(/\s+/g, '');
+    const fallback = truncateByBytes(raw, maxLength);
     return fallback.replace(/\s+/g, '');
   }
   const blueWords = new Set(jieba.cut(blueOceanWord));

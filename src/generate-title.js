@@ -43,7 +43,7 @@ function dedupeTitles(titles) {
  * @param {number} [maxLength=60] 最大标题长度（字符数）
  * @returns {Promise<string[]>} 3-5 条候选标题
  */
-async function generateTitles(blueOceanWord, coreWord, modifiers = [], peerTitles = [], products = [], maxLength = 60, minLength = 40) {
+async function generateTitles(blueOceanWord, coreWord, modifiers = [], peerTitles = [], products = [], maxLength = 60, minLength = 30) {
   // GLM 客户端实例，API KEY 等由环境变量提供
   const glmClient = new GLMClient({
     apiKey: process.env.GLM_API_KEY,
