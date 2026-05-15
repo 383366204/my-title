@@ -29,8 +29,16 @@ function filterRelevantProducts(products, modifiers, semanticGroups = {}) {
     return rigidModifiers.every(word => {
       // 1. 精确命中
       if (combinedText.includes(word)) return true;
-      // 2. 语义族命中
-      const group = semanticGroups[word] || semanticGroups[word.toLowerCase()];
+      // 2. 语义族命中：先按 word 查 key，再遍历所有组的 values 查找所属族
+      let group = semanticGroups[word] || semanticGroups[word.toLowerCase()];
+      if (!group) {
+        for (const g of Object.values(semanticGroups)) {
+          if (g.some(s => s === word || s === word.toLowerCase())) {
+            group = g;
+            break;
+          }
+        }
+      }
       if (group && group.some(synonym => combinedText.includes(synonym.toLowerCase()))) return true;
       return false;
     });

@@ -26,7 +26,16 @@ function scoreLocally(products, coreWord, blueOceanWord, modifiers, semanticGrou
     if (modifiers.length > 0) {
       modifiers.forEach(modifier => {
         const exactHit = title.includes(modifier);
-        const group = semanticGroups[modifier] || semanticGroups[modifier.toLowerCase()];
+        // 查找 modifier 所属的语义族：先按 word 直接匹配 key，再遍历所有组的 values
+        let group = semanticGroups[modifier] || semanticGroups[modifier.toLowerCase()];
+        if (!group) {
+          for (const g of Object.values(semanticGroups)) {
+            if (g.includes(modifier) || g.includes(modifier.toLowerCase())) {
+              group = g;
+              break;
+            }
+          }
+        }
         const synonymHit = group && group.some(function(s) { return title.includes(s) || title.includes(s.toLowerCase()); });
         if (exactHit || synonymHit) {
           score += 10;
