@@ -337,7 +337,7 @@ async function _searchPeerTitles({ products, blueOceanWord, peerTitles, glmClien
  * @param {AbortSignal|null} [params.signal=null] - 取消信号
  * @returns {Promise<any>}
  */
-async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles, products, taobaoTitles, maxLength, imageSearchResults, stats, cache, _peerTitlesHash, glmClient, log, warn, limit, sycmKeywords = [], sycmDataHash = '', signal = null, useImageSearch = false, maxImageSearch = 0, minPrice = 0, maxPrice = 0 }) {
+async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles, products, taobaoTitles, maxLength, imageSearchResults, stats, cache, _peerTitlesHash, glmClient, log, warn, limit, sycmKeywords = [], sycmDataHash = '', signal = null, useImageSearch = false, maxImageSearch = 0, minPrice = 0, maxPrice = 0, bannedWordVersion = 0 }) {
   // Step 4: 尝试 GLM selectAndGenerate 以输出更多字段...
   // 使用与原实现相同的流程与降级策略
   const glmInvoke = async () => {
@@ -422,7 +422,7 @@ async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles,
       taobaoTitles,
       maxLength
      });
-     if (!signal?.aborted) cache.set(blueOceanWord, maxLength, limit, result, _peerTitlesHash, sycmDataHash, useImageSearch, maxImageSearch, minPrice, maxPrice);
+     if (!signal?.aborted) cache.set(blueOceanWord, maxLength, limit, result, _peerTitlesHash, sycmDataHash, useImageSearch, maxImageSearch, minPrice, maxPrice, bannedWordVersion);
      return result;
    };
   // 调用 GLM 与降级逻辑
@@ -455,7 +455,7 @@ async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles,
            ? mappedTitles[idx]
            : (Array.isArray(mappedTitles) && mappedTitles.length > 0 ? mappedTitles[idx % mappedTitles.length] : p['链接原标题']);
        });
-       if (!signal?.aborted) cache.set(blueOceanWord, maxLength, limit, result, _peerTitlesHash, sycmDataHash, useImageSearch, maxImageSearch, minPrice, maxPrice);
+       if (!signal?.aborted) cache.set(blueOceanWord, maxLength, limit, result, _peerTitlesHash, sycmDataHash, useImageSearch, maxImageSearch, minPrice, maxPrice, bannedWordVersion);
        return result;
     } catch (e2) {
       // 最后降级：直接返回简单结构，避免中断流程
@@ -475,7 +475,7 @@ async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles,
        result.products.forEach((p, idx) => {
          p['铺货标题'] = simpleTitles[idx] || p['链接原标题'];
        });
-       if (!signal?.aborted) cache.set(blueOceanWord, maxLength, limit, result, _peerTitlesHash, sycmDataHash, useImageSearch, maxImageSearch, minPrice, maxPrice);
+       if (!signal?.aborted) cache.set(blueOceanWord, maxLength, limit, result, _peerTitlesHash, sycmDataHash, useImageSearch, maxImageSearch, minPrice, maxPrice, bannedWordVersion);
        return result;
     }
   }
@@ -494,6 +494,7 @@ async function run(blueOceanWord, options = {}) {
     : '';
   // 计算 SYCM 数据哈希，用于缓存键区分（如果存在）
   const _sycmDataHash = sycmData ? require('crypto').createHash('md5').update(sycmData).digest('hex').slice(0, 8) : '';
+  const _bannedWordVersion = require('./banned-words').getBannedWordVersion();
 
   // 追踪信息：记录各决策点的执行路径
   const trace = {
@@ -504,7 +505,7 @@ async function run(blueOceanWord, options = {}) {
     taobaoInstalled: false
   };
 
-  const cached = cache.get(blueOceanWord, maxLength, limit, _peerTitlesHash, _sycmDataHash, useImageSearch, maxImageSearch, minPrice, maxPrice);
+  const cached = cache.get(blueOceanWord, maxLength, limit, _peerTitlesHash, _sycmDataHash, useImageSearch, maxImageSearch, minPrice, maxPrice, _bannedWordVersion);
   if (cached) {
     log('📦 命中缓存，直接返回');
     if (cached.stats && cached.stats.trace) {
@@ -749,7 +750,7 @@ async function run(blueOceanWord, options = {}) {
   });
 
    return Promise.race([
-      _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles, products, taobaoTitles: finalTaobaoTitles, maxLength, imageSearchResults, stats, cache, _peerTitlesHash, glmClient, log, warn, limit, sycmKeywords, sycmDataHash: _sycmDataHash, signal, useImageSearch, maxImageSearch, minPrice, maxPrice }),
+      _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles, products, taobaoTitles: finalTaobaoTitles, maxLength, imageSearchResults, stats, cache, _peerTitlesHash, glmClient, log, warn, limit, sycmKeywords, sycmDataHash: _sycmDataHash, signal, useImageSearch, maxImageSearch, minPrice, maxPrice, bannedWordVersion: _bannedWordVersion }),
       timeoutPromise
     ]).finally(() => { if (_raceTimeoutId) clearTimeout(_raceTimeoutId); });
 }

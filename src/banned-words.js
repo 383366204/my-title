@@ -43,4 +43,4 @@ function removeBannedWords(title) {
   return result.replace(/\s+/g, ' ').trim();
 }
 
-module.exports = { checkBannedWords, removeBannedWords };
+module.exports = { checkBannedWords, removeBannedWords, getBannedWordVersion: () => allBanned.length };
