@@ -494,7 +494,7 @@ async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles,
 }
 
 async function run(blueOceanWord, options = {}) {
-  const { maxLength = 60, peerTitles = [], silent = false, limit = 0, onBatch = null, research = false, sycmData, useImageSearch = false, maxImageSearch = 0, minPrice = 0, maxPrice = 0, signal = null, onProductsFound = null, onProgress = null, skipFlag = null } = options;
+  const { maxLength = 60, peerTitles = [], silent = false, limit = 0, onBatch = null, research = false, sycmData, sycmAuto = false, useImageSearch = false, maxImageSearch = 0, minPrice = 0, maxPrice = 0, signal = null, onProductsFound = null, onProgress = null, skipFlag = null } = options;
   
   const log = silent ? () => {} : console.log.bind(console);
   const warn = silent ? () => {} : console.warn.bind(console);
@@ -558,14 +558,66 @@ async function run(blueOceanWord, options = {}) {
 
   log(`🔍 正在处理: ${blueOceanWord}`);
 
-  // 步骤 1: 提取核心词和修饰词
-  log('📝 提取核心词和修饰词...');
-  const { coreWord, modifiers, semanticGroups = {} } = await _extractCore(blueOceanWord, log);
-  log(`  核心词: ${coreWord}`);
-  log(`  修饰词: ${modifiers.map(m => `${m.word}(${m.rigidity})`).join(', ')}`);
-  if (Object.keys(semanticGroups).length > 0) {
-    log('  📊 语义族: ' + Object.entries(semanticGroups).map(([k,v]) => `${k}(${v.length}词)`).join(', '));
+// 步骤 1: 提取核心词和修饰词
+log('📝 提取核心词和修饰词...');
+const { coreWord, modifiers, semanticGroups = {} } = await _extractCore(blueOceanWord, log);
+log(`  核心词: ${coreWord}`);
+log(`  修饰词: ${modifiers.map(m => `${m.word}(${m.rigidity})`).join(', ')}`);
+if (Object.keys(semanticGroups).length > 0) {
+  log('  📊 语义族: ' + Object.entries(semanticGroups).map(([k,v]) => `${k}(${v.length}词)`).join(', '));
+}
+
+// SYCM 自动查词（如果启用）
+let finalSycmData = sycmData; // 保留手动传入的数据
+let sycmExtracted = null;
+if (sycmAuto === true) {
+  try {
+    const { isChromeDevToolsAvailable } = require('./sycm-browser-helper');
+    const { extractSycmData } = require('./sycm-cdp-extractor');
+    
+    const chromeAvailable = await isChromeDevToolsAvailable(9222);
+    if (chromeAvailable) {
+      log('  🔍 Chrome 检测到，开始自动查询生意参谋蓝海数据...');
+      try {
+        // 设置 30 秒超时
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('生意参谋查词超时')), 30000)
+        );
+        
+        sycmExtracted = await Promise.race([
+          extractSycmData(coreWord, { mode: 'blue' }),
+          timeoutPromise
+        ]);
+        
+        if (sycmExtracted && sycmExtracted.data && sycmExtracted.data.length > 0) {
+          log(`  ✅ SYCM 数据获取成功: ${sycmExtracted.data.length} 条记录`);
+          // 将提取的数据转换为 tab 分隔文本格式以便 parseSycmData 解析
+          const sycmRows = sycmExtracted.data.map(item => {
+            // 构建与生意参谋复制格式兼容的 tab 分隔行
+            return [
+              item.keyword || '',
+              item.searchPopularity || 0,
+              item.clickRate || 0,
+              item.conversionRate || 0,
+              item.buyerCount || 0,
+              item.demandSupplyRatio || 0,
+              item.tmallClickShare || 0
+            ].join('\t');
+          });
+          finalSycmData = sycmRows.join('\n');
+        }
+      } catch (sycmErr) {
+        warn('  ℹ️ 生意参谋查词失败:', sycmErr.message || sycmErr);
+        warn('  ℹ️ 继续使用现有数据');
+      }
+    } else {
+      log('  ℹ️ Chrome 未检测到，跳过生意参谋自动查词');
+    }
+  } catch (chromeErr) {
+    warn('  ℹ️ Chrome 检测失败:', chromeErr.message || chromeErr);
+    warn('  ℹ️ 继续使用现有数据');
   }
+}
 
   // 如果开启 research 模式，先进行研究数据收集，不生成标题
     if (research === true) {
@@ -706,12 +758,14 @@ async function run(blueOceanWord, options = {}) {
 
   // 若提供了 SYCM 数据，解析并增强关键词，随后在 _generateTitles 调用中注入 sycmKeywords
   let sycmKeywords = [];
-  if (sycmData) {
+  let sycmParsedData = [];
+  if (finalSycmData) {
     try {
       const titlesForAnalysis = (taobaoTitles && taobaoTitles.length > 0) ? taobaoTitles : peerTitles;
       const productTitles = products.map(p => p.title || '');
       const topKeys = analyzePeerTitles(titlesForAnalysis, productTitles);
-      const { sycmKeywords: _sycmKeywords } = enrichWithSycmData(topKeys, parseSycmData(sycmData));
+      sycmParsedData = parseSycmData(finalSycmData);
+      const { sycmKeywords: _sycmKeywords } = enrichWithSycmData(topKeys, sycmParsedData);
       sycmKeywords = _sycmKeywords || [];
       trace.sycmEnhanced = sycmKeywords.length > 0;
     } catch (e) {
@@ -730,7 +784,7 @@ async function run(blueOceanWord, options = {}) {
       products: [],
       filteredCount: 0,
       titles: [],
-      stats: { coreWord, modifiers: modifiers.map(m => m.word), trace }
+      stats: { coreWord, modifiers: modifiers.map(m => m.word), trace, blueOceanIndex: null }
     };
   }
 
@@ -738,12 +792,23 @@ async function run(blueOceanWord, options = {}) {
 
   // 步骤 4: GLM 标题生成（含降级路径 + 超时保护）
   log('✍️  尝试 GLM selectAndGenerate 以输出更多字段...');
+    // 计算蓝海指数：从 SYCM 数据中取最高的 demandSupplyRatio
+    let blueOceanIndex = null;
+    if (sycmParsedData && sycmParsedData.length > 0) {
+      // 找到最高的 demandSupplyRatio
+      const maxRatio = Math.max(...sycmParsedData.map(item => item.demandSupplyRatio || 0));
+      if (maxRatio > 0) {
+        blueOceanIndex = maxRatio;
+      }
+    }
+    
     const stats = {
       coreWord,
       modifiers: modifiers.map(m => m.word),
       matchedProducts: products.length,
       trace,
-      semanticGroupsUsed: Object.keys(semanticGroups).length > 0
+      semanticGroupsUsed: Object.keys(semanticGroups).length > 0,
+      blueOceanIndex
     };
 
   let _raceTimeoutId = null;

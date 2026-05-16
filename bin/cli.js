@@ -22,6 +22,7 @@ program
   .option('--json', '纯 JSON 输出模式，抑制所有进度信息，适合程序调用')
   .option('--format <type>', '输出格式: table / json / both', 'both')
   .option('--research', '分析并推荐去生意参谋查哪些关键词')
+  .option('--sycm-auto', '自动查询生意参谋蓝海数据（需要Chrome在调试模式运行）')
   .option('--keyword-file <path>', '加载生意参谋搜索分析数据文件')
   .option('--keywords <keywords>', '批量关键词模式（逗号分隔，如 "纯银项链女,925银手链"）')
   .action(async (keywords, options) => {
@@ -43,6 +44,7 @@ program
         const result = await batchRun(kwList, {
           maxLength: parseInt(options.length) || 60,
           silent: jsonMode,
+          sycmAuto: options.sycmAuto,
           onProgress: ({ completed, total, currentKeyword }) => {
             if (currentKeyword) {
               console.log(`  📋 进度: ${completed}/${total} — 当前: ${currentKeyword}`);
@@ -98,7 +100,8 @@ program
           peerTitles: [],
           silent: jsonMode,
           limit: 0,
-          research: true
+          research: true,
+          sycmAuto: options.sycmAuto
         });
 
         if (jsonMode) {
@@ -162,7 +165,8 @@ program
         peerTitles,
         silent: jsonMode,
         limit: parseInt(options.count),
-        sycmData
+        sycmData,
+        sycmAuto: options.sycmAuto
       });
 
       if (jsonMode) {

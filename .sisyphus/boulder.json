@@ -36,6 +36,15 @@
       "agent": "Sisyphus-Junior",
       "category": "deep",
       "updated_at": "2026-05-16T07:46:35.059Z"
+    },
+    "todo:4": {
+      "task_key": "todo:4",
+      "task_label": "4",
+      "task_title": "同行标题位置权重分析",
+      "session_id": "ses_1d0385ee8ffenn6URYGayziIvC",
+      "agent": "Sisyphus-Junior",
+      "category": "unspecified-high",
+      "updated_at": "2026-05-16T07:57:27.001Z"
     }
   }
 }

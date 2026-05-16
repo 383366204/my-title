@@ -41,7 +41,7 @@ function lightExtractCoreWord(keyword) {
  * @returns {Promise<{ok: boolean, results: Array, failed: Array, summary: object}>}
  */
 async function batchRun(keywords, options = {}) {
-  const { maxLength = 60, silent = true, onProgress, signal } = options;
+  const { maxLength = 60, silent = true, onProgress, signal, sycmAuto = false } = options;
 
   // 输入验证
   if (!Array.isArray(keywords) || keywords.length === 0) {
@@ -102,6 +102,7 @@ async function batchRun(keywords, options = {}) {
         silent,
         signal,
         limit: options.limit || DEFAULT_BATCH_LIMIT,
+        sycmAuto,
       });
 
       results.push({
