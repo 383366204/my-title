@@ -27,6 +27,15 @@
       "agent": "Sisyphus-Junior",
       "category": "deep",
       "updated_at": "2026-05-16T07:19:06.144Z"
+    },
+    "todo:2": {
+      "task_key": "todo:2",
+      "task_label": "2",
+      "task_title": "semanticGroups 管线贯通 + 后处理验证",
+      "session_id": "ses_1d04fed1dffe9vIhHhGKXlx9D0",
+      "agent": "Sisyphus-Junior",
+      "category": "deep",
+      "updated_at": "2026-05-16T07:46:35.059Z"
     }
   }
 }

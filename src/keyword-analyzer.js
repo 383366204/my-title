@@ -289,4 +289,69 @@ function enrichWithSycmData({ topKeywords = [], gapKeywords = [] }, sycmDataArra
   };
 }
 
-module.exports = { analyzePeerTitles, recommendResearchKeywords, enrichWithSycmData };
+/**
+ * 移除标题中同一语义族的重复词变体
+ * @param {string} title - 标题
+ * @param {Object} semanticGroups - { "纯银系": ["纯银", "S925银", "925银"], ... }
+ * @returns {string} 去重后的标题
+ */
+function removeSemanticDuplicates(title, semanticGroups) {
+  if (!semanticGroups || Object.keys(semanticGroups).length === 0) return title;
+  
+  let result = title;
+  for (const [groupName, variants] of Object.entries(semanticGroups)) {
+    // 找出标题中包含的该族变体
+    const foundPositions = [];
+    for (const variant of variants) {
+      let pos = 0;
+      while (pos < result.length) {
+        const idx = result.indexOf(variant, pos);
+        if (idx === -1) break;
+        foundPositions.push({ variant, idx });
+        pos = idx + 1; // 继续搜索同一变体的其他出现位置
+      }
+    }
+    
+    // 如果没有找到任何变体，继续下一个语义族
+    if (foundPositions.length === 0) continue;
+    
+    // 按位置排序
+    foundPositions.sort((a, b) => a.idx - b.idx);
+    
+    // 找出要保留的第一个变体（位置最靠前的）
+    // 我们需要处理变体可能是其他变体子串的情况
+    const keepRanges = [];
+    for (const { variant, idx } of foundPositions) {
+      const endIdx = idx + variant.length;
+      
+      // 检查这个范围是否与已保留的范围重叠
+      const overlaps = keepRanges.some(range => 
+        (idx >= range.start && idx < range.end) || // 当前起始在某个保留范围内
+        (endIdx > range.start && endIdx <= range.end) || // 当前结束在某个保留范围内
+        (idx <= range.start && endIdx >= range.end) // 当前包含某个保留范围
+      );
+      
+      if (!overlaps) {
+        keepRanges.push({ start: idx, end: endIdx });
+      }
+    }
+    
+    // 如果只有一个要保留的范围，说明没有重复，继续下一个语义族
+    if (keepRanges.length <= 1) continue;
+    
+    // 保留第一个范围，标记其他范围要删除
+    const toDelete = [];
+    for (let i = 1; i < keepRanges.length; i++) {
+      toDelete.push(keepRanges[i]);
+    }
+    
+    // 从后往前删除，避免索引偏移
+    toDelete.sort((a, b) => b.start - a.start); // 按起始位置降序排序
+    for (const { start, end } of toDelete) {
+      result = result.slice(0, start) + result.slice(end);
+    }
+  }
+  return result;
+}
+
+module.exports = { analyzePeerTitles, recommendResearchKeywords, enrichWithSycmData, removeSemanticDuplicates };
