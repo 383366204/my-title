@@ -90,6 +90,10 @@ function postProcessTitle(title, blueOceanWord, minLength = 30, maxLength = 60) 
 function constructFallbackTitle(blueOceanWord, originalTitle, taobaoTitles = [], maxLength = 60) {
   // 1. 校验 blueOceanWord
   if (typeof blueOceanWord !== 'string' || !blueOceanWord) return '';
+  
+  // 定义中文停用词（内联，不创建外部文件）
+  const STOPWORDS = new Set(['的', '了', '是', '在', '有', '和', '与', '或', '及', '等', '之', '为', '于', '以', '而', '被', '把', '给', '让', '向', '从', '到', '对', '将', '还', '也', '就', '都', '要', '会', '能', '可', '很', '非常']);
+  
   // 2. 获取 jieba 实例，进行分词
   const jieba = getNodejieba();
   // jieba 不可用时降级为简单的空格分词
@@ -103,32 +107,62 @@ function constructFallbackTitle(blueOceanWord, originalTitle, taobaoTitles = [],
   // 4. 清理原标题
   let cleaned = removeBannedWords(originalTitle || '');
   cleaned = cleanTitle(cleaned);
-  // 5. 移除蓝海词整词在 cleaned 中的出现，防止重复前缀
+  let uncleaned = cleaned; // keep original cleaned for later
+  // 5. 移除蓝海词整词在 cleaned 中的出现，防止重复前缀（避免破坏子串）
+  if (blueOceanWord.length >= 2) {
     cleaned = cleaned.replaceAll(blueOceanWord, '');
+  }
 
   // 6. 使用 jieba.cut() 将 cleaned 拆分为词组，按词级过滤
   const titleWords = jieba.cut(cleaned);
-  const filteredWords = [];
+  let filteredWords = [];
+  let needsRelax = false;
+  
+  // First pass: filter single chars and stopwords
   for (const w of titleWords) {
-    if (!blueWords.has(w) && w.trim()) {
+    if (!blueWords.has(w) && w.trim() && w.length >= 2 && !STOPWORDS.has(w)) {
       filteredWords.push(w);
     }
   }
-  // 7. 组装：蓝海词前缀 + 过滤后的词拼接
   let result = blueOceanWord + filteredWords.join('');
+  
+  // If result is still too short, relax constraints (allow single chars except stopwords)
+  if (byteLen(result) < 30) {
+    needsRelax = true;
+    filteredWords = [];
+    for (const w of titleWords) {
+      if (!blueWords.has(w) && w.trim() && !STOPWORDS.has(w)) {
+        filteredWords.push(w);
+      }
+    }
+    result = blueOceanWord + filteredWords.join('');
+  }
+
+  // If still too short, just use the original cleaned without removing blue ocean word
+  if (byteLen(result) < 30) {
+    result = blueOceanWord + uncleaned;
+  }
 
   // 8. 淘宝同行标题辅助：按词级追加，不重复且不过长
   if (Array.isArray(taobaoTitles) && taobaoTitles.length > 0) {
     const resultWords = new Set(jieba.cut(result)); // 词级去重集合
+    needsRelax = byteLen(result) < 30;
     for (const t of taobaoTitles) {
       if (typeof t !== 'string') continue;
       let tClean = removeBannedWords(t);
       tClean = cleanTitle(tClean);
       const tWords = jieba.cut(tClean);
       for (const w of tWords) {
-        if (!blueWords.has(w) && !resultWords.has(w) && w.trim()) {
+        const isValid = 
+          !blueWords.has(w) && 
+          !resultWords.has(w) && 
+          w.trim() && 
+          !STOPWORDS.has(w) && 
+          (needsRelax || w.length >= 2);
+        if (isValid) {
           result += w;
           resultWords.add(w); // 保持Set与result同步
+          if (byteLen(result) >= 30) needsRelax = false;
           if (typeof maxLength === 'number' && byteLen(result) >= maxLength) break;
         }
       }
