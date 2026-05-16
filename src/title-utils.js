@@ -189,4 +189,39 @@ function constructFallbackTitle(blueOceanWord, originalTitle, taobaoTitles = [],
   return result.replace(/\s+/g, '');
 }
 
-module.exports = { byteLen, truncateByBytes, cleanTitle, ensureBlueOceanPrefix, normalizeLength, postProcessTitle, constructFallbackTitle };
+/**
+ * 从全标题提取导购标题（20-30字符，用于主图/短描述）
+ * @param {string} fullTitle - 完整铺货标题
+ * @param {string} blueOceanWord - 蓝海词前缀
+ * @returns {string} 导购标题
+ */
+function extractShoppingGuideTitle(fullTitle, blueOceanWord) {
+  if (!fullTitle || typeof fullTitle !== 'string') return blueOceanWord || '';
+  
+  // 如果全标题 ≤ 30字符，直接作为导购标题
+  if (byteLen(fullTitle) <= 30) return fullTitle;
+  
+  // 确保以蓝海词开头
+  let title = fullTitle;
+  if (!title.startsWith(blueOceanWord)) {
+    title = ensureBlueOceanPrefix(title, blueOceanWord);
+  }
+  
+  // 截断到20-30字符范围
+  // 策略：截断到30字符以内，尽量保留语义完整
+  let guide = truncateByBytes(title, 30);
+  
+  // 如果截断后 < 20字符，尝试放宽（这种情况很少）
+  if (byteLen(guide) < 20 && byteLen(title) >= 20) {
+    // 重新截断到更近的语义点
+    guide = title.slice(0, Math.floor(title.length * 0.8));
+    // 确保不超过30字符
+    if (byteLen(guide) > 30) {
+      guide = truncateByBytes(guide, 30);
+    }
+  }
+  
+  return guide;
+}
+
+module.exports = { byteLen, truncateByBytes, cleanTitle, ensureBlueOceanPrefix, normalizeLength, postProcessTitle, constructFallbackTitle, extractShoppingGuideTitle };

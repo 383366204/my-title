@@ -45,6 +45,15 @@
       "agent": "Sisyphus-Junior",
       "category": "unspecified-high",
       "updated_at": "2026-05-16T07:57:27.001Z"
+    },
+    "todo:7": {
+      "task_key": "todo:7",
+      "task_label": "7",
+      "task_title": "导购标题生成",
+      "session_id": "ses_1d0270c48ffeO1QRmv3r2rhAKl",
+      "agent": "Sisyphus-Junior",
+      "category": "unspecified-high",
+      "updated_at": "2026-05-16T08:15:24.883Z"
     }
   }
 }

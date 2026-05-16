@@ -3,7 +3,7 @@ const { extractKeywords } = require('./extract-core');
 const { searchTaobaoTitles } = require('./search-taobao');
 const GLMClient = require('./glm-client');
 const PROMPT_VERSION = GLMClient.PROMPT_VERSION;
-const { postProcessTitle, constructFallbackTitle, cleanTitle } = require('./title-utils');
+const { postProcessTitle, constructFallbackTitle, cleanTitle, extractShoppingGuideTitle } = require('./title-utils');
 const { removeBannedWords } = require('./banned-words');
 const { ResultCache } = require('./cache');
 const { analyzePeerTitles, recommendResearchKeywords, enrichWithSycmData } = require('./keyword-analyzer');
@@ -109,21 +109,22 @@ function buildOutput({ coreWord, blueOceanWord, modifiers, products, selectedPro
     }
 
     return {
-      // 原输出字段
-      '链接原标题': p.title,
-      '产品链接': detailUrl,
-      '主图链接': p.url,
-      '铺货标题': shopTitle,
-      '商品原价': p.price,
-      '30天销量': p.stats && typeof p.stats.last30DaysSales === 'number' ? p.stats.last30DaysSales : 0,
-      '好评率': p.stats && typeof p.stats.goodRates === 'number' ? p.stats.goodRates : 0,
-      '复购率': p.stats && typeof p.stats.repurchaseRate === 'number' ? p.stats.repurchaseRate : 0,
-      '蓝海词': blueOceanWord,
-      // 新增字段
-      '选品理由': selected.reason || '',
-      '定价建议': selected.priceAdvice || '',
-      '风险提示': selected.risk || ''
-    };
+        // 原输出字段
+        '链接原标题': p.title,
+        '产品链接': detailUrl,
+        '主图链接': p.url,
+        '铺货标题': shopTitle,
+        '商品原价': p.price,
+        '30天销量': p.stats && typeof p.stats.last30DaysSales === 'number' ? p.stats.last30DaysSales : 0,
+        '好评率': p.stats && typeof p.stats.goodRates === 'number' ? p.stats.goodRates : 0,
+        '复购率': p.stats && typeof p.stats.repurchaseRate === 'number' ? p.stats.repurchaseRate : 0,
+        '蓝海词': blueOceanWord,
+        // 新增字段
+        '选品理由': selected.reason || '',
+        '定价建议': selected.priceAdvice || '',
+        '风险提示': selected.risk || '',
+        '导购标题': extractShoppingGuideTitle(shopTitle, blueOceanWord)
+      };
   });
 
   enriched.forEach(fillFallbackAdvice);
