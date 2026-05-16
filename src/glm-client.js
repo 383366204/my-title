@@ -3,6 +3,8 @@ const { removeBannedWords } = require('./banned-words');
 // 引入通用的 LLM 结果解析与重试封装
 const { parseJsonFromLLM, retry } = require('./llm-utils');
 
+const PROMPT_VERSION = 1; // bump when GLM prompts change
+
 // 公共违禁词列表（两个 prompt 共享）
 const BANNED_WORDS_LIST = '最、第一、顶级、正品、专柜、原厂、工厂、批发、直销、厂家、生产、货源、代发、高仿、仿真、同款、包邮、特价、促销、打折、清仓、出厂价、批发价、成本价';
 
@@ -598,3 +600,4 @@ ${sycmLines}
 }
 
 module.exports = GLMClient;
+module.exports.PROMPT_VERSION = PROMPT_VERSION;

@@ -1,31 +1,23 @@
 {
-  "active_plan": "/mnt/d/project/my-title/.sisyphus/plans/sycm-filter-conditions.md",
-  "started_at": "2026-05-11T13:36:07.256Z",
+  "active_plan": "/mnt/d/project/my-title/.sisyphus/plans/strategy-optimization.md",
+  "started_at": "2026-05-16T06:50:17.363Z",
   "session_ids": [
-    "ses_20f5bc9e9ffeQV4ULKGChAYHbq"
+    "ses_1d0ee324bffe8kOIQ0BD9oFfye"
   ],
-  "plan_name": "sycm-filter-conditions",
   "session_origins": {
-    "ses_20f5bc9e9ffeQV4ULKGChAYHbq": "direct"
+    "ses_1d0ee324bffe8kOIQ0BD9oFfye": "direct"
   },
+  "plan_name": "strategy-optimization",
+  "agent": "atlas",
   "task_sessions": {
     "todo:0": {
       "task_key": "todo:0",
       "task_label": "0",
-      "task_title": "前置条件：CLI + MCP 添加 `--mode` 参数",
-      "session_id": "ses_1e8be1e3effezNneyCJkdM8GXt",
+      "task_title": "冒烟测试 + 缓存版本升级",
+      "session_id": "ses_1d071f35bffeYxbSfv5SDAYhzW",
       "agent": "Sisyphus-Junior",
       "category": "quick",
-      "updated_at": "2026-05-11T13:39:29.238Z"
-    },
-    "todo:1": {
-      "task_key": "todo:1",
-      "task_label": "1",
-      "task_title": "CDP 调研：截图 + DOM dump + React 输入验证",
-      "session_id": "ses_1e8901f4effeuR1MSec5E5egK8",
-      "agent": "Sisyphus-Junior",
-      "category": "quick",
-      "updated_at": "2026-05-11T14:28:30.509Z"
+      "updated_at": "2026-05-16T06:56:12.881Z"
     }
   }
 }

@@ -2,12 +2,14 @@ const path = require('path');
 const { extractKeywords } = require('./extract-core');
 const { searchTaobaoTitles } = require('./search-taobao');
 const GLMClient = require('./glm-client');
+const PROMPT_VERSION = GLMClient.PROMPT_VERSION;
 const { postProcessTitle, constructFallbackTitle, cleanTitle } = require('./title-utils');
 const { removeBannedWords } = require('./banned-words');
 const { ResultCache } = require('./cache');
 const { analyzePeerTitles, recommendResearchKeywords, enrichWithSycmData } = require('./keyword-analyzer');
 const { parseSycmData } = require('./sycm-parser');
 
+const SCHEMA_VERSION = 2; // bump when output structure changes
 const RUN_TIMEOUT = parseInt(process.env.RUN_TIMEOUT) || 120000;
 
 function fillFallbackAdvice(item) {
@@ -422,7 +424,7 @@ async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles,
       taobaoTitles,
       maxLength
      });
-     if (!signal?.aborted) cache.set(blueOceanWord, maxLength, limit, result, _peerTitlesHash, sycmDataHash, useImageSearch, maxImageSearch, minPrice, maxPrice, bannedWordVersion);
+     if (!signal?.aborted) cache.set(blueOceanWord, maxLength, limit, result, _peerTitlesHash, sycmDataHash, useImageSearch, maxImageSearch, minPrice, maxPrice, bannedWordVersion, SCHEMA_VERSION, PROMPT_VERSION);
      return result;
    };
   // 调用 GLM 与降级逻辑
@@ -455,7 +457,7 @@ async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles,
            ? mappedTitles[idx]
            : (Array.isArray(mappedTitles) && mappedTitles.length > 0 ? mappedTitles[idx % mappedTitles.length] : p['链接原标题']);
        });
-       if (!signal?.aborted) cache.set(blueOceanWord, maxLength, limit, result, _peerTitlesHash, sycmDataHash, useImageSearch, maxImageSearch, minPrice, maxPrice, bannedWordVersion);
+       if (!signal?.aborted) cache.set(blueOceanWord, maxLength, limit, result, _peerTitlesHash, sycmDataHash, useImageSearch, maxImageSearch, minPrice, maxPrice, bannedWordVersion, SCHEMA_VERSION, PROMPT_VERSION);
        return result;
     } catch (e2) {
       // 最后降级：直接返回简单结构，避免中断流程
@@ -475,7 +477,7 @@ async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles,
        result.products.forEach((p, idx) => {
          p['铺货标题'] = simpleTitles[idx] || p['链接原标题'];
        });
-       if (!signal?.aborted) cache.set(blueOceanWord, maxLength, limit, result, _peerTitlesHash, sycmDataHash, useImageSearch, maxImageSearch, minPrice, maxPrice, bannedWordVersion);
+       if (!signal?.aborted) cache.set(blueOceanWord, maxLength, limit, result, _peerTitlesHash, sycmDataHash, useImageSearch, maxImageSearch, minPrice, maxPrice, bannedWordVersion, SCHEMA_VERSION, PROMPT_VERSION);
        return result;
     }
   }
@@ -505,7 +507,7 @@ async function run(blueOceanWord, options = {}) {
     taobaoInstalled: false
   };
 
-  const cached = cache.get(blueOceanWord, maxLength, limit, _peerTitlesHash, _sycmDataHash, useImageSearch, maxImageSearch, minPrice, maxPrice, _bannedWordVersion);
+  const cached = cache.get(blueOceanWord, maxLength, limit, _peerTitlesHash, _sycmDataHash, useImageSearch, maxImageSearch, minPrice, maxPrice, _bannedWordVersion, SCHEMA_VERSION, PROMPT_VERSION);
   if (cached) {
     log('📦 命中缓存，直接返回');
     if (cached.stats && cached.stats.trace) {
@@ -887,7 +889,6 @@ async function runFromImage(url, options = {}) {
       }];
       
       // 初始化 GLM 客户端（用于可能的标题清洗）
-      const GLMClient = require('./glm-client');
       const glmClient = new GLMClient({
         apiKey: process.env.GLM_API_KEY,
         apiBase: process.env.GLM_API_BASE,

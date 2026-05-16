@@ -26,9 +26,9 @@ class ResultCache {
     return this._bannedHash;
   }
 
-  _key(keyword, maxLength, limit, peerTitlesHash = '', sycmDataHash = '', useImageSearch = false, maxImageSearch = 0, minPrice = 0, maxPrice = 0) {
+  _key(keyword, maxLength, limit, peerTitlesHash = '', sycmDataHash = '', useImageSearch = false, maxImageSearch = 0, minPrice = 0, maxPrice = 0, bannedWordVersion = 0, schemaVersion = 1, promptVersion = 1) {
     const bannedVersion = this._getBannedWordsHash();
-    const raw = `${keyword}::${maxLength}::${limit || 0}::${peerTitlesHash}::${sycmDataHash}::${bannedVersion}::${useImageSearch}::${maxImageSearch}::${minPrice}::${maxPrice}`;
+    const raw = `${keyword}::${maxLength}::${limit || 0}::${peerTitlesHash}::${sycmDataHash}::${bannedVersion}::${useImageSearch}::${maxImageSearch}::${minPrice}::${maxPrice}::${bannedWordVersion}::${schemaVersion}::${promptVersion}`;
     return crypto.createHash('md5').update(raw).digest('hex');
   }
 
@@ -36,9 +36,9 @@ class ResultCache {
     return path.join(this.cacheDir, `${key}.json`);
   }
 
-  get(keyword, maxLength, limit, peerTitlesHash = '', sycmDataHash = '', useImageSearch = false, maxImageSearch = 0, minPrice = 0, maxPrice = 0) {
+  get(keyword, maxLength, limit, peerTitlesHash = '', sycmDataHash = '', useImageSearch = false, maxImageSearch = 0, minPrice = 0, maxPrice = 0, bannedWordVersion = 0, schemaVersion = 1, promptVersion = 1) {
     try {
-      const filePath = this._path(this._key(keyword, maxLength, limit, peerTitlesHash, sycmDataHash, useImageSearch, maxImageSearch, minPrice, maxPrice));
+      const filePath = this._path(this._key(keyword, maxLength, limit, peerTitlesHash, sycmDataHash, useImageSearch, maxImageSearch, minPrice, maxPrice, bannedWordVersion, schemaVersion, promptVersion));
       if (!fs.existsSync(filePath)) return null;
       const stat = fs.statSync(filePath);
       if (Date.now() - stat.mtimeMs > this.ttlMs) {
@@ -51,12 +51,12 @@ class ResultCache {
     }
   }
 
-  set(keyword, maxLength, limit, result, peerTitlesHash = '', sycmDataHash = '', useImageSearch = false, maxImageSearch = 0, minPrice = 0, maxPrice = 0) {
+  set(keyword, maxLength, limit, result, peerTitlesHash = '', sycmDataHash = '', useImageSearch = false, maxImageSearch = 0, minPrice = 0, maxPrice = 0, bannedWordVersion = 0, schemaVersion = 1, promptVersion = 1) {
     try {
       if (!fs.existsSync(this.cacheDir)) {
         fs.mkdirSync(this.cacheDir, { recursive: true });
       }
-      const filePath = this._path(this._key(keyword, maxLength, limit, peerTitlesHash, sycmDataHash, useImageSearch, maxImageSearch, minPrice, maxPrice));
+      const filePath = this._path(this._key(keyword, maxLength, limit, peerTitlesHash, sycmDataHash, useImageSearch, maxImageSearch, minPrice, maxPrice, bannedWordVersion, schemaVersion, promptVersion));
       fs.writeFileSync(filePath, JSON.stringify(result), 'utf8');
       // 随机触发过期清理（10% 概率）
       if (Math.random() < 0.1) this._cleanExpired();
