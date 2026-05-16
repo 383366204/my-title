@@ -3,10 +3,10 @@ const { removeBannedWords } = require('./banned-words');
 // 引入通用的 LLM 结果解析与重试封装
 const { parseJsonFromLLM, retry } = require('./llm-utils');
 
-const PROMPT_VERSION = 1; // bump when GLM prompts change
+const PROMPT_VERSION = 2; // bump when GLM prompts change
 
 // 公共违禁词列表（两个 prompt 共享）
-const BANNED_WORDS_LIST = '最、第一、顶级、正品、专柜、原厂、工厂、批发、直销、厂家、生产、货源、代发、高仿、仿真、同款、包邮、特价、促销、打折、清仓、出厂价、批发价、成本价';
+const BANNED_WORDS_LIST = '最、第一、顶级、正品、专柜、原厂、工厂、批发、直销、厂家、生产、货源、代发、高仿、仿真、同款、包邮、特价、促销、打折、清仓、出厂价、批发价、成本价、治疗、治愈、根治、疗效、处方药、手术、诊断、减肥药、壮阳、速效、万能、神药、特效、抗癌、抗病毒、特供、专供、免检、认证、推荐、品牌、老字号、非遗、品质、御用、政治、色情、暴力、赌博、毒品、分裂、颠覆、邪教、恐怖、血腥、自杀、犯罪、侵权、伪造、非法、泄露、黑客、钓鱼';
 
 // 公共标题规则（不带编号，各 prompt 自行编号）
 const COMMON_TITLE_RULES_TEXT = `标题中不允许出现任何标点符号（包括逗号、句号、感叹号、分号、冒号、顿号、括号、引号等中英文标点）
@@ -354,11 +354,12 @@ synonyms 每组最多10个，只列最常见的变体
    *   modifiers: Array<{word: string, rigidity: 'rigid'|'optional'}>,
    *   peerTitles?: string[],
    *   products?: Array<object>,
-   *   maxLength?: number
+   *   maxLength?: number,
+   *   semanticGroups?: {[group: string]: string[]}
    * }} params
    * @returns {Promise<Array<string>>} 生成的标题列表 (3-5 条)
    */
-  async generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles = [], products = [], maxLength = 60 }) {
+   async generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles = [], products = [], maxLength = 60, semanticGroups = {} }) {
   const systemPrompt = `你是一个电商标题生成专家。请生成3-5个SEO优化标题。
  
   重要规则：
@@ -366,7 +367,10 @@ synonyms 每组最多10个，只列最常见的变体
   2. 标题应参考1688商品标题和淘宝同行标题中的高频词汇
   3. 标题长度控制在${Math.floor(maxLength / 2)}个汉字以内（${maxLength}个字符，1汉字=2字符）
   4. 优先使用刚性修饰词（材质、颜色、规格、人群）
-  5. 每个标题必须差异化：从不同角度（风格、场景、人群、卖点）切入，禁止生成相同或高度相似的标题
+   5. 每个标题必须差异化：从不同角度（风格、场景、人群、卖点）切入，禁止生成相同或高度相似的标题
+   6. 标题中不得包含品牌名称（如周大福、Nike、Adidas等），除非用户输入中明确包含该品牌词
+   7. 当前日期：${new Date().toLocaleDateString('zh-CN')}，避免使用过时的季节描述（如去年年份）
+   8. 同一语义族中的词在单个标题中只使用一个变体（如'纯银'和'S925银'不要同时出现）${Object.keys(semanticGroups).length > 0 ? `\n   9. 已知语义族：${JSON.stringify(semanticGroups)}` : ''}
    ${COMMON_TITLE_RULES_TEXT}
  
  输出严格 JSON 格式，不要任何其他文本：
@@ -426,11 +430,12 @@ synonyms 每组最多10个，只列最常见的变体
    * @param {string} params.coreWord - 核心词
    * @param {Array<{word:string, rigidity:'rigid'|'optional'}>} params.modifiers - 修饰词及其刚性
    * @param {Array<string>} [params.peerTitles] - 备选标题（可选）
-   * @param {Array<{id:string, title:string, price:number, stats?:object}>} [params.products] - 商品列表（简化字段）
-   * @param {number} [params.maxLength=60] - 生成标题的最大长度（字符）
+    * @param {Array<{id:string, title:string, price:number, stats?:object}>} [params.products] - 商品列表（简化字段）
+    * @param {number} [params.maxLength=60] - 生成标题的最大长度（字符）
+    * @param {{[group: string]: string[]}} [params.semanticGroups] - 语义族映射（可选）
    * @returns {Promise<{selectedProducts:Array<{id:string, score:number, reason:string, priceAdvice:string, risk:string}>, titles:Array<{productId:string, title:string}>, overallAdvice:string}>}
    */
-  async selectAndGenerate({ blueOceanWord, coreWord, modifiers, peerTitles = [], keywordAnalysis = null, sycmKeywords = null, products = [], maxLength = 60 }) {
+   async selectAndGenerate({ blueOceanWord, coreWord, modifiers, peerTitles = [], keywordAnalysis = null, sycmKeywords = null, products = [], maxLength = 60, semanticGroups = {} }) {
     // 构造关键词分析区块，优先级：sycmKeywords > keywordAnalysis > 默认文本
     let keywordSection = '';
     if (sycmKeywords && Array.isArray(sycmKeywords) && sycmKeywords.length > 0) {
@@ -475,6 +480,9 @@ ${sycmLines}
   标题生成必须遵守以下规则：
   ${COMMON_TITLE_RULES_TEXT}
   - 每个生成的标题必须以蓝海词"${blueOceanWord}"开头（硬性要求，不可省略）
+  - 标题中不得包含品牌名称（如周大福、Nike、Adidas等），除非用户输入中明确包含该品牌词
+  - 当前日期：${new Date().toLocaleDateString('zh-CN')}，避免使用过时的季节描述（如去年年份）
+  - 同一语义族中的词在单个标题中只使用一个变体（如'纯银'和'S925银'不要同时出现）${Object.keys(semanticGroups).length > 0 ? `\n  已知语义族：${JSON.stringify(semanticGroups)}` : ''}
   ${keywordSection}
   输出严格 JSON 格式，不要任何其他文字，字段名必须完全一致：
   {
