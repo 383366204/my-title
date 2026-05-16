@@ -110,7 +110,18 @@ function constructFallbackTitle(blueOceanWord, originalTitle, taobaoTitles = [],
   let uncleaned = cleaned; // keep original cleaned for later
   // 5. 移除蓝海词整词在 cleaned 中的出现，防止重复前缀（避免破坏子串）
   if (blueOceanWord.length >= 2) {
-    cleaned = cleaned.replaceAll(blueOceanWord, '');
+    // 安全替换：避免破坏子串（如"项链"在"项链款"中）
+    let idx = cleaned.indexOf(blueOceanWord);
+    while (idx !== -1) {
+      const nextChar = cleaned[idx + blueOceanWord.length];
+      // 如果下一个字符是汉字，说明 blueOceanWord 是更长词的前缀，不替换
+      if (nextChar && /[\u4e00-\u9fa5]/.test(nextChar)) {
+        idx = cleaned.indexOf(blueOceanWord, idx + 1);
+        continue;
+      }
+      cleaned = cleaned.slice(0, idx) + cleaned.slice(idx + blueOceanWord.length);
+      idx = cleaned.indexOf(blueOceanWord, idx);
+    }
   }
 
   // 6. 使用 jieba.cut() 将 cleaned 拆分为词组，按词级过滤

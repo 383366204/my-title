@@ -119,7 +119,28 @@ function analyzePeerTitles(peerTitles, sourceTitleOrArray) {
   if (topStr) summary += `同行高频词: ${topStr}`;
   if (gapStr) summary += `。缺口词(淘宝有/1688无): ${gapStr}`;
 
-  return { topKeywords, gapKeywords, summary };
+  // 提取语义族（简单实现：基于关键词子串包含关系）
+  const semanticGroups = {};
+  const processed = new Set();
+  for (let i = 0; i < topKeywords.length; i++) {
+    const word = topKeywords[i].word;
+    if (processed.has(word)) continue;
+    const group = [word];
+    for (let j = i + 1; j < topKeywords.length; j++) {
+      const other = topKeywords[j].word;
+      if (processed.has(other)) continue;
+      if (word.includes(other) || other.includes(word)) {
+        group.push(other);
+        processed.add(other);
+      }
+    }
+    if (group.length > 1) {
+      semanticGroups[word] = group;
+    }
+    processed.add(word);
+  }
+
+  return { topKeywords, gapKeywords, summary, semanticGroups };
 }
 
 function inc(m, k) { m.set(k, (m.get(k) || 0) + 1); }

@@ -339,7 +339,7 @@ async function _searchPeerTitles({ products, blueOceanWord, peerTitles, glmClien
  * @param {AbortSignal|null} [params.signal=null] - 取消信号
  * @returns {Promise<any>}
  */
-async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles, products, taobaoTitles, maxLength, imageSearchResults, stats, cache, _peerTitlesHash, glmClient, log, warn, limit, sycmKeywords = [], sycmDataHash = '', signal = null, useImageSearch = false, maxImageSearch = 0, minPrice = 0, maxPrice = 0, bannedWordVersion = 0 }) {
+async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles, products, taobaoTitles, maxLength, imageSearchResults, stats, cache, _peerTitlesHash, glmClient, log, warn, limit, sycmKeywords = [], sycmDataHash = '', signal = null, useImageSearch = false, maxImageSearch = 0, minPrice = 0, maxPrice = 0, bannedWordVersion = 0, semanticGroups = {} }) {
   // Step 4: 尝试 GLM selectAndGenerate 以输出更多字段...
   // 使用与原实现相同的流程与降级策略
   const glmInvoke = async () => {
@@ -361,6 +361,7 @@ async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles,
         log('  📊 竞品缺口词: ' + keywordAnalysis.gapKeywords.slice(0, 10).map(k => k.word).join(', '));
       }
     }
+    const semanticGroups = keywordAnalysis?.semanticGroups || {};
 
     const BATCH_SIZE = products.length <= 20 ? products.length : 20;
     const batches = [];
@@ -386,7 +387,8 @@ async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles,
         peerTitles: cleanedPeerTitles,
         sycmKeywords: sycmKeywords,
         keywordAnalysis,
-        products: batch, maxLength
+        products: batch, maxLength,
+        semanticGroups
       }).then(result => {
         log(`  第 ${index + 1}/${batches.length} 批完成`);
         return result;
@@ -441,7 +443,7 @@ async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles,
     warn('⚠️ GLM selectAndGenerate 失败，降级到简化 GLM 调用... ', e && e.message ? e.message : e);
     try {
       const fallbackPeerTitles = (peerTitles || []).map(t => cleanTitle(removeBannedWords(t || ''))).filter(Boolean);
-      const titles = await glmClient.generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles: fallbackPeerTitles, products, maxLength });
+      const titles = await glmClient.generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles: fallbackPeerTitles, products, maxLength, semanticGroups });
       const mappedTitles = titles.map(t => postProcessTitle(t, blueOceanWord, 30, maxLength) || removeBannedWords(cleanTitle(t || '')));
       if (stats.trace) stats.trace.titleGeneration = 'local_generation';
       const result = buildOutput({
@@ -751,10 +753,10 @@ async function run(blueOceanWord, options = {}) {
     }
   });
 
-   return Promise.race([
-      _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles, products, taobaoTitles: finalTaobaoTitles, maxLength, imageSearchResults, stats, cache, _peerTitlesHash, glmClient, log, warn, limit, sycmKeywords, sycmDataHash: _sycmDataHash, signal, useImageSearch, maxImageSearch, minPrice, maxPrice, bannedWordVersion: _bannedWordVersion }),
-      timeoutPromise
-    ]).finally(() => { if (_raceTimeoutId) clearTimeout(_raceTimeoutId); });
+    return Promise.race([
+       _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles, products, taobaoTitles: finalTaobaoTitles, maxLength, imageSearchResults, stats, cache, _peerTitlesHash, glmClient, log, warn, limit, sycmKeywords, sycmDataHash: _sycmDataHash, signal, useImageSearch, maxImageSearch, minPrice, maxPrice, bannedWordVersion: _bannedWordVersion }),
+       timeoutPromise
+     ]).finally(() => { if (_raceTimeoutId) clearTimeout(_raceTimeoutId); });
 }
 
 /**
