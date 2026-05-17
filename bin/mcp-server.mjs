@@ -1199,6 +1199,113 @@ server.tool(
   }
 );
 
+server.tool(
+  'suggest_keywords',
+  [
+    '自动选词工具。根据策略(crowd/scene/season/problem/industry)通过 GLM AI 推荐候选关键词，然后通过生意参谋 SYCM 自动验证筛选，返回蓝海词列表。',
+    '',
+    '策略说明:',
+    '- crowd: 人群选词（如"宝妈"、"大学生"）',
+    '- scene: 场景选词（如"办公室"、"露营"）',
+    '- season: 季节选词（自动检测当前月份，推荐应季品类）',
+    '- problem: 痛点选词（如"腰酸背痛"、"收纳困难"）',
+    '- industry: 行业选词（如"程序员"、"摄影师"）',
+    '',
+    '使用前提：Chrome需以调试模式运行并已登录 sycm.taobao.com。',
+    '每个关键词 SYCM 验证约 30-60 秒，5 个候选词约需 3-5 分钟。'
+  ].join('\n'),
+  {
+    strategy: z.enum(['crowd', 'scene', 'season', 'problem', 'industry']).describe('选词策略'),
+    input: z.string().optional().describe('策略输入（人群/场景/痛点/行业描述，season 策略可省略）'),
+    max_candidates: z.number().default(5).describe('GLM 最大候选词数量（1-10，默认 5）'),
+    task_id: z.string().optional().describe('查询任务结果时传入（不需要传 strategy）'),
+    port: z.number().default(9222).describe('Chrome 远程调试端口'),
+  },
+  async ({ strategy, input, max_candidates, task_id, port }) => {
+    // 1. Task polling mode
+    if (task_id) {
+      const task = tasks.get(task_id);
+      if (!task) {
+        return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: 'task_id 不存在' }) }], isError: true };
+      }
+      if (task.createdAt && Date.now() - task.createdAt > TASK_TTL) {
+        tasks.delete(task_id);
+        return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: 'task_id 不存在' }) }], isError: true };
+      }
+      if (task.status === 'processing') {
+        return { content: [{ type: 'text', text: JSON.stringify({
+          ok: true, status: 'processing', task_id,
+          progress: task.progress || { message: '正在验证关键词...' },
+          message: task.progress?.message || '仍在处理中，请 10 秒后再次查询'
+        }) }] };
+      }
+      if (task.status === 'done') {
+        const result = task.result;
+        tasks.delete(task_id);
+        return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+      }
+      if (task.status === 'error') {
+        const err = task.error;
+        tasks.delete(task_id);
+        return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: err }) }], isError: true };
+      }
+    }
+
+    // 2. Start new task
+    const { suggestAndVerify } = require('../src/keyword-suggester.js');
+    
+    const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const estimatedSeconds = (parseInt(max_candidates) || 5) * 45 + 10; // ~45s per keyword
+    
+    tasks.set(id, {
+      status: 'processing',
+      createdAt: Date.now(),
+      progress: { message: '正在生成候选关键词...' },
+      estimatedSeconds
+    });
+
+    console.error(`[my-title] suggest task ${id} started: strategy="${strategy}", max_candidates=${max_candidates}`);
+
+    suggestAndVerify({
+      strategy,
+      input: input || '',
+      maxCandidates: parseInt(max_candidates) || 5,
+      port: port || 9222,
+      onProgress: (msg) => {
+        const task = tasks.get(id);
+        if (task) {
+          task.progress = { message: msg };
+        }
+      }
+    })
+      .then(result => {
+        console.error(`[my-title] suggest task ${id} done: ${result.keywords?.length || 0} keywords verified`);
+        tasks.set(id, {
+          status: 'done',
+          createdAt: Date.now(),
+          result
+        });
+      })
+      .catch(err => {
+        console.error(`[my-title] suggest task ${id} failed:`, err.message);
+        tasks.set(id, { status: 'error', createdAt: Date.now(), error: err.message });
+      });
+
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          ok: true,
+          status: 'processing',
+          task_id: id,
+          estimated_seconds: estimatedSeconds,
+          message: `已开始${strategy}策略自动选词（最多${max_candidates || 5}个候选词），预计约 ${Math.ceil(estimatedSeconds / 60)} 分钟。请用 task_id="${id}" 查询结果。`
+        }),
+      }],
+    };
+  }
+);
+
 async function main() {
   // Parse command line arguments for HTTP mode
   const args = process.argv.slice(2);

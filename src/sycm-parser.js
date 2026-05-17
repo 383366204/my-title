@@ -92,7 +92,7 @@ function parseSycmData(rawText) {
     const fields = trimmed.split('\t');
 
     // 表头行跳过（包含 "搜索人气" 等特征词）
-    if (fields.length >= 7) {
+    if (fields.length >= 6) {
       const headerCheck = fields.join('').toLowerCase();
       if (headerCheck.includes('搜索人气') ||
           headerCheck.includes('相关搜索词') ||
@@ -101,10 +101,18 @@ function parseSycmData(rawText) {
       }
     }
 
-    // 必须有 7 列数据
-    if (fields.length < 7) continue;
+    // 必须有 6 或 7 列数据
+    if (fields.length < 6) continue;
 
-    const [keyword, searchPopularity, clickRate, conversionRate, buyerCount, demandSupplyRatio, tmallClickShare] = fields;
+    let keyword, searchPopularity, clickRate, conversionRate, buyerCount, demandSupplyRatio, tmallClickShare;
+    if (fields.length === 7) {
+      // 7-col format: keyword, searchPopularity, clickRate, conversionRate, buyerCount, demandSupplyRatio, tmallClickShare
+      [keyword, searchPopularity, clickRate, conversionRate, buyerCount, demandSupplyRatio, tmallClickShare] = fields;
+    } else {
+      // 6-col format: keyword, searchPopularity, clickRate, conversionRate, demandSupplyRatio, tmallClickShare
+      [keyword, searchPopularity, clickRate, conversionRate, demandSupplyRatio, tmallClickShare] = fields;
+      buyerCount = ''; // 空字符串，parseRangeValue 会返回 0
+    }
 
     // 关键词不能为空
     if (!keyword || keyword.trim() === '') continue;

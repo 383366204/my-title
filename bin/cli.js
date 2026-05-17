@@ -25,6 +25,10 @@ program
   .option('--sycm-auto', '自动查询生意参谋蓝海数据（需要Chrome在调试模式运行）')
   .option('--keyword-file <path>', '加载生意参谋搜索分析数据文件')
   .option('--keywords <keywords>', '批量关键词模式（逗号分隔，如 "纯银项链女,925银手链"）')
+  .option('--suggest', '自动选词模式：GLM推荐候选词 → SYCM验证 → 输出蓝海词列表')
+  .option('--strategy <type>', '选词策略：crowd(人群) | scene(场景) | season(季节) | problem(痛点) | industry(行业)', 'season')
+  .option('--input <text>', '策略输入（人群/场景/痛点/行业描述，season策略可省略）')
+  .option('--max-candidates <number>', 'GLM最大候选词数量', '5')
   .action(async (keywords, options) => {
     const jsonMode = !!options.json;
     const origLog = console.log;
@@ -90,6 +94,90 @@ program
         console.log(`  成功: ${result.summary.success} 个`);
         console.log(`  失败: ${result.summary.failed} 个`);
         console.log(`  去重核心词: ${result.summary.dedupedCoreWords} 个`);
+        return;
+      }
+
+      // --suggest 模式：自动选词
+      if (options.suggest) {
+        const { suggestAndVerify, VALID_STRATEGIES } = require('../src/keyword-suggester');
+        
+        const strategy = options.strategy || 'season';
+        if (!VALID_STRATEGIES.includes(strategy)) {
+          if (jsonMode) {
+            console.log = origLog;
+            console.warn = origWarn;
+            console.error = origError;
+            process.stdout.write(JSON.stringify({
+              ok: false,
+              error: `无效策略 "${strategy}"。有效策略: ${VALID_STRATEGIES.join(', ')}`
+            }, null, 2) + '\n');
+          } else {
+            console.error(`\n❌ 无效策略 "${strategy}"`);
+            console.error(`有效策略: ${VALID_STRATEGIES.join(', ')}`);
+          }
+          process.exit(1);
+          return;
+        }
+        
+        // input: use --input if provided, otherwise use positional keywords argument
+        const input = options.input || keywords || '';
+        
+        const suggestOptions = {
+          strategy,
+          input,
+          maxCandidates: parseInt(options.maxCandidates) || 5,
+          onProgress: (msg) => {
+            if (!jsonMode) console.log(`  ${msg}`);
+          }
+        };
+        
+        const result = await suggestAndVerify(suggestOptions);
+        
+        if (jsonMode) {
+          console.log = origLog;
+          console.warn = origWarn;
+          console.error = origError;
+          process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+          return;
+        }
+        
+        // Human-readable output
+        if (!result.ok) {
+          console.error(`\n❌ ${result.error}`);
+          if (result.chromeLaunchCmd) {
+            console.error(`\n请先用以下命令启动 Chrome：`);
+            console.error(`  ${result.chromeLaunchCmd}`);
+          }
+          process.exit(1);
+          return;
+        }
+        
+        console.log('\n' + '='.repeat(60));
+        console.log('🔍 自动选词结果');
+        console.log(`策略: ${strategy} | 验证通过: ${result.verified} | 未通过: ${result.failed}`);
+        console.log('-'.repeat(60));
+        
+        if (result.keywords && result.keywords.length > 0) {
+          result.keywords.forEach((kw, i) => {
+            console.log(`${i + 1}. ${kw.keyword}`);
+            console.log(`   搜索人气: ${kw.searchPopularity} | 转化率: ${(kw.conversionRate * 100).toFixed(1)}% | 需求供给比: ${kw.demandSupplyRatio} | 天猫占比: ${(kw.tmallClickShare * 100).toFixed(1)}%`);
+          });
+        } else {
+          console.log('未找到符合蓝海条件的关键词');
+        }
+        
+        if (result.message) {
+          console.log(`\n💡 ${result.message}`);
+        }
+        
+        if (result.errors && result.errors.length > 0) {
+          console.log('\n验证失败的关键词:');
+          result.errors.forEach(e => {
+            console.log(`  - ${e.keyword}: ${e.error}`);
+          });
+        }
+        
+        console.log();
         return;
       }
 
