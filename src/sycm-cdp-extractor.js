@@ -388,6 +388,23 @@ async function extractSycmData(keyword, options) {
     onProgress('[1/6] Waiting for page load...');
     await new Promise(function(r) { setTimeout(r, 10000); });
 
+    tab = await _connectToTab(port);
+    cdp = await _createCdpClient(tab.webSocketDebuggerUrl);
+    var currentUrl = await cdp.evaluate("window.location.href", 5000);
+
+    if (currentUrl.includes('login.taobao.com') || currentUrl.includes('passport.taobao.com')) {
+      await _ensureSycmLoggedIn(cdp, onProgress);
+      cdp.close();
+      tab = await _connectToTab(port);
+      cdp = await _createCdpClient(tab.webSocketDebuggerUrl);
+      await cdp.runAction("window.location.href='" + targetUrl.replace(/'/g, "\\'") + "'", 5000);
+      cdp.close();
+      onProgress('[1/6] Logged in, waiting for page load...');
+      await new Promise(function(r) { setTimeout(r, 10000); });
+    } else {
+      cdp.close();
+    }
+
     tab = await _connectToTab(port, 'search_analysis');
     cdp = await _createCdpClient(tab.webSocketDebuggerUrl);
 
@@ -596,6 +613,83 @@ async function extractSycmData(keyword, options) {
   } finally {
     cdp.close();
   }
+}
+
+async function _ensureSycmLoggedIn(cdp, onProgress) {
+  var username = process.env.SYCM_USERNAME;
+  var password = process.env.SYCM_PASSWORD;
+
+  if (!username || !password) {
+    throw new Error('未配置 SYCM 账号密码。请在 .env 中设置 SYCM_USERNAME 和 SYCM_PASSWORD，或在浏览器中手动登录 sycm.taobao.com 后重试。');
+  }
+
+  onProgress('[AUTH] 未登录，自动切换到密码登录...');
+
+  var switched = await cdp.runAction(
+    "(() => { var els = document.querySelectorAll('div,a,span,button,label'); " +
+    "for (var i = 0; i < els.length; i++) { " +
+    "  var t = (els[i].textContent || '').trim(); " +
+    "  if (t === '密码登录' || t === '账户密码登录' || t === '账号密码登录') { els[i].click(); return 'ok'; } " +
+    "} return 'not_found'; })()",
+    5000
+  );
+  if (String(switched) !== 'ok') {
+    onProgress('[AUTH] 未找到密码登录入口，尝试直接填充...');
+  }
+  await new Promise(function(r) { setTimeout(r, 1000); });
+
+  var safeUser = username.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  var safePwd = password.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+
+  var fillUser = await cdp.runAction(
+    "(() => { var inputs = document.querySelectorAll('input'); " +
+    "for (var i = 0; i < inputs.length; i++) { " +
+    "  var tp = (inputs[i].type || '').toLowerCase(); " +
+    "  var ph = (inputs[i].placeholder || '').toLowerCase(); " +
+    "  if (tp === 'text' || tp === 'tel' || ph.includes('手机') || ph.includes('账号') || ph.includes('邮箱') || ph.includes('会员名')) { " +
+    "    inputs[i].focus(); " +
+    "    var s = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set; " +
+    "    s.call(inputs[i], '" + safeUser + "'); " +
+    "    inputs[i].dispatchEvent(new Event('input', { bubbles: true })); " +
+    "    inputs[i].dispatchEvent(new Event('change', { bubbles: true })); " +
+    "    return 'ok'; " +
+    "  } " +
+    "} return 'not_found'; })()",
+    5000
+  );
+  if (String(fillUser) === 'not_found') {
+    throw new Error('未找到账号输入框，请手动登录 sycm.taobao.com 后重试');
+  }
+
+  var fillPwd = await cdp.runAction(
+    "(() => { var inputs = document.querySelectorAll('input[type=password]'); " +
+    "if (inputs.length === 0) return 'not_found'; " +
+    "var inp = inputs[0]; inp.focus(); " +
+    "var s = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set; " +
+    "s.call(inp, '" + safePwd + "'); " +
+    "inp.dispatchEvent(new Event('input', { bubbles: true })); " +
+    "inp.dispatchEvent(new Event('change', { bubbles: true })); " +
+    "return 'ok'; })()",
+    5000
+  );
+  if (String(fillPwd) === 'not_found') {
+    throw new Error('未找到密码输入框，请手动登录 sycm.taobao.com 后重试');
+  }
+
+  onProgress('[AUTH] 账号密码已填入，请完成滑块验证后自动继续...');
+  onProgress('[AUTH] 等待最多 120 秒...');
+
+  var startTime = Date.now();
+  while (Date.now() - startTime < 120000) {
+    await new Promise(function(r) { setTimeout(r, 3000); });
+    var url;
+    try { url = await cdp.evaluate("window.location.href", 5000); } catch (e) { continue; }
+    if (!url.includes('login') && !url.includes('passport')) {
+      onProgress('[AUTH] 登录成功');
+      return;
+    }
+  }
+  throw new Error('等待登录超时（120秒），请手动登录后重试');
 }
 
 function _extractCategoryAnalysis(cdp) {

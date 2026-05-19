@@ -6,6 +6,9 @@
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
+const { exec } = require('child_process');
+const util = require('util');
+const execAsync = util.promisify(exec);
 
 // 错误提示常量
 const ERRORS = {
@@ -100,6 +103,13 @@ function getDefaultUserDataDir() {
   }
 }
 
+function getDedicatedProfileDir() {
+  var home = process.env.HOME || '';
+  var match = home.match(/\/mnt\/[a-z]\/Users\/([^/]+)/i);
+  var winUser = match ? match[1] : '38336';
+  return 'C:\\Users\\' + winUser + '\\AppData\\Local\\my-title-chrome';
+}
+
 /**
  * 查找 Windows 上的 Chrome 可执行文件路径
  * @returns {string} Chrome 路径或 'chrome' 作为降级
@@ -175,11 +185,61 @@ async function checkSycmLoginStatus(port = 9222) {
   }
 }
 
+/**
+ * 自动启动 Chrome 调试模式并等待就绪
+ * 检测到 Chrome DevTools 不可用时，通过 cmd.exe 启动 Windows Chrome 并轮询等待端口就绪
+ * @param {number} [port=9222] - Chrome 调试端口
+ * @param {Object} [options={}] - 配置选项
+ * @param {number} [options.waitTimeout=30000] - 等待就绪超时时间（毫秒）
+ * @param {number} [options.pollInterval=1000] - 检测间隔（毫秒）
+ * @returns {Promise<{success: boolean, message: string}>} 启动结果
+ */
+async function autoLaunchChrome(port, options = {}) {
+  port = port || 9222;
+  const waitTimeout = options.waitTimeout || 30000;
+  const pollInterval = options.pollInterval || 1000;
+
+  if (await isChromeDevToolsAvailable(port)) {
+    return { success: true, message: 'Chrome 已在运行' };
+  }
+
+  const userDataDir = options.userDataDir || getDedicatedProfileDir();
+  const chromePath = findWindowsChrome();
+
+  // 从 WSL 通过 cmd.exe start 启动 Windows Chrome（非阻塞）
+  const cmd = [
+    '/mnt/c/Windows/System32/cmd.exe', '/c',
+    'start', '""',
+    '"' + chromePath + '"',
+    '--remote-debugging-port=' + port,
+    '--user-data-dir="' + userDataDir + '"',
+    '--no-first-run'
+  ].join(' ');
+
+  try {
+    await execAsync(cmd, { timeout: 10000 });
+  } catch (err) {
+    return { success: false, message: '启动 Chrome 失败: ' + (err.message || err) };
+  }
+
+  const startTime = Date.now();
+  while (Date.now() - startTime < waitTimeout) {
+    await new Promise(function (r) { setTimeout(r, pollInterval); });
+    if (await isChromeDevToolsAvailable(port)) {
+      return { success: true, message: 'Chrome 已启动并就绪' };
+    }
+  }
+
+  return { success: false, message: 'Chrome 启动超时（等待 ' + (waitTimeout / 1000) + '秒），请检查 Chrome 是否已安装' };
+}
+
 module.exports = {
   isChromeDevToolsAvailable,
   getChromeDevToolsInfo,
   generateChromeLaunchCommand,
   checkSycmLoginStatus,
+  autoLaunchChrome,
+  getDedicatedProfileDir,
   ERRORS,
   SYCM_SELECTORS
 };
