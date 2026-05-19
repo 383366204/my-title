@@ -152,13 +152,15 @@ class BaseAdapter {
     }
 
     try {
-      const { isChromeDevToolsAvailable, generateChromeLaunchCommand } = require('../sycm-browser-helper');
+      const { isChromeDevToolsAvailable, autoLaunchChrome } = require('../sycm-browser-helper');
       const { extractSycmData } = require('../sycm-cdp-extractor');
 
-      const chromeAvailable = await isChromeDevToolsAvailable(9222);
-      if (!chromeAvailable) {
-        const launchCmd = generateChromeLaunchCommand({ port: 9222 });
-        return this.sendMessage(chatId, '❌ Chrome 未运行调试模式\n\n请先启动：\n' + launchCmd.command);
+      if (!await isChromeDevToolsAvailable(9222)) {
+        await this.sendProgress(chatId, '⏳ Chrome 未运行，正在自动启动...');
+        const launchResult = await autoLaunchChrome(9222);
+        if (!launchResult.success) {
+          return this.sendMessage(chatId, '❌ ' + launchResult.message);
+        }
       }
 
       var keywords = keyword.split(/[\s,，]+/).filter(function(k) { return k.trim(); });
