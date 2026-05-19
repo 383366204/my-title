@@ -1,0 +1,327 @@
+- generic [active] [ref=e1]:
+  - navigation [ref=e2]:
+    - generic [ref=e5]:
+      - link "1688牛顿Hub logo 1688牛顿Hub" [ref=e6] [cursor=pointer]:
+        - /url: /
+        - img "1688牛顿Hub logo" [ref=e7]
+        - text: 1688牛顿Hub
+      - generic [ref=e8]:
+        - link "首页" [ref=e9] [cursor=pointer]:
+          - /url: /
+          - text: 首页
+        - link "社区" [ref=e11] [cursor=pointer]:
+          - /url: /community/
+          - text: 社区
+        - link "文档" [ref=e13] [cursor=pointer]:
+          - /url: /docs/
+          - text: 文档
+      - generic [ref=e15]:
+        - button [ref=e16] [cursor=pointer]:
+          - img [ref=e17]
+        - generic [ref=e19] [cursor=pointer]: 登录
+  - main [ref=e20]:
+    - generic [ref=e21]:
+      - navigation [ref=e22]:
+        - link "首页" [ref=e23] [cursor=pointer]:
+          - /url: /
+        - text: /
+        - link "社区" [ref=e24] [cursor=pointer]:
+          - /url: /community/
+        - text: /商机品类发现(蓝海/趋势等)
+      - generic [ref=e25]:
+        - generic [ref=e26]:
+          - generic [ref=e27]:
+            - heading "商机品类发现(蓝海/趋势等)" [level=1] [ref=e28]
+            - generic [ref=e29]: v0.1.0
+            - generic [ref=e30]:
+              - img [ref=e31]
+              - text: 官方
+          - generic [ref=e33]:
+            - generic [ref=e34]: "作者: 1688官方"
+            - generic [ref=e35]: ★
+            - generic [ref=e36]: ↓
+          - generic [ref=e37]:
+            - generic [ref=e39]:
+              - img [ref=e40]
+              - text: 收藏
+            - generic [ref=e42]:
+              - generic [ref=e43]:
+                - heading "安装 社区来源" [level=3] [ref=e44]:
+                  - text: 安装
+                  - generic [ref=e45]: 社区来源
+                - generic [ref=e46]:
+                  - code [ref=e47]: "帮我从社区安装技能 商机品类发现(蓝海/趋势等)，下载地址: https://wry-manatee-359.convex.site/api/v1/download?slug=1688-product-keyword-research，下载后解压到 .agents/skills/1688-product-keyword-research 目录"
+                  - button "复制安装指令" [ref=e48] [cursor=pointer]
+                - button "手动安装步骤" [ref=e49] [cursor=pointer]:
+                  - img [ref=e50]
+                  - text: 手动安装步骤
+              - generic [ref=e52]:
+                - heading "描述" [level=3] [ref=e53]
+                - paragraph
+              - generic [ref=e54]:
+                - heading "README" [level=3] [ref=e55]
+                - article [ref=e57]:
+                  - paragraph [ref=e58]: 蓝海关键词发现技能思路。收到用户查询后，解析意图并调用脚本获取蓝海词列表。
+                  - heading "执行流程" [level=2] [ref=e59]
+                  - 'heading "Step 1: 解析用户意图" [level=3] [ref=e60]'
+                  - paragraph [ref=e61]: 从用户 query 中提取参数：
+                  - table [ref=e62]:
+                    - rowgroup [ref=e63]:
+                      - row "参数 说明 必填 默认值" [ref=e64]:
+                        - columnheader "参数" [ref=e65]
+                        - columnheader "说明" [ref=e66]
+                        - columnheader "必填" [ref=e67]
+                        - columnheader "默认值" [ref=e68]
+                    - rowgroup [ref=e69]:
+                      - 'row "platform 枚举值: amazon / tiktok / ozon / ae / TB / XHS 是 -" [ref=e70]':
+                        - cell "platform" [ref=e71]
+                        - 'cell "枚举值: amazon / tiktok / ozon / ae / TB / XHS" [ref=e72]':
+                          - text: "枚举值:"
+                          - code [ref=e73]: amazon
+                          - text: /
+                          - code [ref=e74]: tiktok
+                          - text: /
+                          - code [ref=e75]: ozon
+                          - text: /
+                          - code [ref=e76]: ae
+                          - text: /
+                          - code [ref=e77]: TB
+                          - text: /
+                          - code [ref=e78]: XHS
+                        - cell "是" [ref=e79]
+                        - cell "-" [ref=e80]
+                      - 'row "market 地区代码: US / UK / DE / JP / RU / BR / CN 等 是 -" [ref=e81]':
+                        - cell "market" [ref=e82]
+                        - 'cell "地区代码: US / UK / DE / JP / RU / BR / CN 等" [ref=e83]'
+                        - cell "是" [ref=e84]
+                        - cell "-" [ref=e85]
+                      - row "seed_keyword 品类种子词，如 pet supplies、美妆 是 -" [ref=e86]:
+                        - cell "seed_keyword" [ref=e87]
+                        - cell "品类种子词，如 pet supplies、美妆" [ref=e88]:
+                          - text: 品类种子词，如
+                          - code [ref=e89]: pet supplies
+                          - text: 、
+                          - code [ref=e90]: 美妆
+                        - cell "是" [ref=e91]
+                        - cell "-" [ref=e92]
+                      - row "top_k 返回蓝海词数量，最大 30 否 10" [ref=e93]:
+                        - cell "top_k" [ref=e94]
+                        - cell "返回蓝海词数量，最大 30" [ref=e95]
+                        - cell "否" [ref=e96]
+                        - cell "10" [ref=e97]
+                      - row "language 返回词语种，按 market 自动推断 否 auto" [ref=e98]:
+                        - cell "language" [ref=e99]
+                        - cell "返回词语种，按 market 自动推断" [ref=e100]
+                        - cell "否" [ref=e101]
+                        - cell "auto" [ref=e102]
+                  - paragraph [ref=e103]:
+                    - strong [ref=e104]: 意图映射示例：
+                  - list [ref=e105]:
+                    - listitem [ref=e106]: "\"小红书美妆找新词\" → platform=XHS, market=CN, seed_keyword=美妆"
+                    - listitem [ref=e107]: "\"淘宝家居挖词\" → platform=TB, market=CN, seed_keyword=家居收纳"
+                    - listitem [ref=e108]: "\"Ozon 俄罗斯家居蓝海词\" → platform=ozon, market=RU, seed_keyword=товары для дома"
+                  - paragraph [ref=e109]:
+                    - strong [ref=e110]: 支持的平台和市场
+                  - table [ref=e111]:
+                    - rowgroup [ref=e112]:
+                      - row "平台 Code 已支持市场" [ref=e113]:
+                        - columnheader "平台" [ref=e114]
+                        - columnheader "Code" [ref=e115]
+                        - columnheader "已支持市场" [ref=e116]
+                    - rowgroup [ref=e117]:
+                      - row "亚马逊 amazon US, GB, DE, FR, JP, CA, IT, ES" [ref=e118]:
+                        - cell "亚马逊" [ref=e119]
+                        - cell "amazon" [ref=e120]
+                        - cell "US, GB, DE, FR, JP, CA, IT, ES" [ref=e121]
+                      - row "TikTok tiktok US, GB, DE, FR, IT, ES, JP, PH, ID, MX, VN, TH, SG, BR, MY" [ref=e122]:
+                        - cell "TikTok" [ref=e123]
+                        - cell "tiktok" [ref=e124]
+                        - cell "US, GB, DE, FR, IT, ES, JP, PH, ID, MX, VN, TH, SG, BR, MY" [ref=e125]
+                      - row "小红书 XHS CN" [ref=e126]:
+                        - cell "小红书" [ref=e127]
+                        - cell "XHS" [ref=e128]
+                        - cell "CN" [ref=e129]
+                      - row "淘宝 TB CN" [ref=e130]:
+                        - cell "淘宝" [ref=e131]
+                        - cell "TB" [ref=e132]
+                        - cell "CN" [ref=e133]
+                  - 'heading "Step 2: 调用查询（按平台分路由）" [level=3] [ref=e134]'
+                  - paragraph [ref=e135]: 根据 platform 选择不同的查询方式：
+                  - paragraph [ref=e136]:
+                    - strong [ref=e137]: 情况 A — 走查询脚本
+                    - text: （amazon / tiktok / TB / XHS）
+                  - code [ref=e139]: python3 scripts/market_search.py \ --platform <platform> \ --market <market> \ --seed-keyword <seed_keyword> \ --trend-tags BLUE_OCEAN \ [--top-k <top_k>]
+                  - paragraph [ref=e140]: 若查询脚本返回空结果，降级走情况 B 的网络搜索兜底。
+                  - paragraph [ref=e141]:
+                    - strong [ref=e142]: 情况 B — 走 web_search 工具
+                    - text: （douyin / ae / ozon，或情况 A 兜底）
+                  - paragraph [ref=e143]:
+                    - text: 用
+                    - code [ref=e144]: web_search
+                    - text: 工具获取蓝海词数据：
+                  - list [ref=e145]:
+                    - listitem [ref=e146]:
+                      - text: 构造搜索 query，例如：
+                      - code [ref=e147]: "{platform} {market} {seed_keyword} 蓝海关键词 blue ocean keywords"
+                    - listitem [ref=e148]: 调用网络搜索工具执行查询
+                  - 'heading "Step 3: 展示结果" [level=3] [ref=e149]'
+                  - paragraph [ref=e150]:
+                    - text: 将脚本返回的数据 按 Output Format 章节定义的规范渲染给用户，
+                    - strong [ref=e151]: 禁止
+                    - text: 直接抛 JSON。
+                  - heading "Output Format" [level=2] [ref=e152]
+                  - heading "成功场景" [level=3] [ref=e153]
+                  - paragraph [ref=e154]: 按以下两段式输出(必须遵守,有且仅有两段)
+                  - paragraph [ref=e155]:
+                    - strong [ref=e156]: 1) 一句概述
+                  - paragraph [ref=e157]:
+                    - text: 格式：
+                    - code [ref=e158]: "为你在 {platform} {region} 找到 {total} 个「{seed_keyword}」蓝海词，{聚合摘要}。"
+                  - paragraph [ref=e159]:
+                    - strong [ref=e160]: 2) Markdown 表格
+                  - paragraph [ref=e161]:
+                    - text: 根据用户意图从下方"列字典"中挑
+                    - strong [ref=e162]: 5~8 列
+                    - text: 输出）
+                  - paragraph [ref=e163]:
+                    - strong [ref=e164]: 选列硬约束：
+                  - list [ref=e165]:
+                    - listitem [ref=e166]:
+                      - text: 总列数必须在
+                      - strong [ref=e167]: 5~8 列
+                      - text: 之间
+                    - listitem [ref=e168]:
+                      - text: 第 1 列
+                      - strong [ref=e169]: 固定
+                      - text: 为「关键词」
+                    - listitem [ref=e170]: 其余 3~6 列从下方「列字典」中按"用户意图触发规则"动态挑选
+                    - listitem [ref=e171]: 同一指标只挑一种粒度（如已选「近30天销量」就不要再选「近30天销量所处水位」）
+                  - paragraph [ref=e172]:
+                    - strong [ref=e173]: 示例
+                    - text: ：
+                  - table [ref=e174]:
+                    - rowgroup [ref=e175]:
+                      - row "关键词 搜索量 竞争 增长率 销售额 数据指标摘要" [ref=e176]:
+                        - columnheader "关键词" [ref=e177]
+                        - columnheader "搜索量" [ref=e178]
+                        - columnheader "竞争" [ref=e179]
+                        - columnheader "增长率" [ref=e180]
+                        - columnheader "销售额" [ref=e181]
+                        - columnheader "数据指标摘要" [ref=e182]
+                    - rowgroup [ref=e183]:
+                      - row "smart cat feeder 第 528 名 蓝海 +18.5% $96,000 市场为蓝海；增速高；销量月增 +18.5%" [ref=e184]:
+                        - cell "smart cat feeder" [ref=e185]
+                        - cell "第 528 名" [ref=e186]
+                        - cell "蓝海" [ref=e187]
+                        - cell "+18.5%" [ref=e188]
+                        - cell "$96,000" [ref=e189]
+                        - cell "市场为蓝海；增速高；销量月增 +18.5%" [ref=e190]
+                  - heading "空结果场景" [level=3] [ref=e191]
+                  - paragraph [ref=e192]: 不要输出表格，用自然语言告知并给替代方案：
+                  - blockquote [ref=e193]:
+                    - paragraph [ref=e194]: "在 {platform} {region} 没有找到「{seed_keyword}」相关的蓝海词。可能原因：种子词过于冷门或该品类已充分竞争。 建议：①更换更宽泛的种子词（如「pet supplies」→「pet」）；②尝试相邻市场（参考下方\"市场邻近表\"）；③切换到 {推荐平台} 试试。"
+                  - heading "Edge Cases" [level=2] [ref=e195]
+                  - table [ref=e196]:
+                    - rowgroup [ref=e197]:
+                      - row "场景 上游表现（response 字段） 模型应对" [ref=e198]:
+                        - columnheader "场景" [ref=e199]
+                        - columnheader "上游表现（response 字段）" [ref=e200]:
+                          - text: 上游表现（
+                          - code [ref=e201]: response
+                          - text: 字段）
+                        - columnheader "模型应对" [ref=e202]
+                    - rowgroup [ref=e203]:
+                      - 'row "platform 不在 6 平台白名单 品类词市场数据集合 缺失，msg 含「不支持」/「unsupported」 命中\"失败场景\"表第 1 行，话术：暂不支持 {platform}……" [ref=e204]':
+                        - cell "platform 不在 6 平台白名单" [ref=e205]:
+                          - code [ref=e206]: platform
+                          - text: 不在 6 平台白名单
+                        - cell "品类词市场数据集合 缺失，msg 含「不支持」/「unsupported」" [ref=e207]:
+                          - code [ref=e208]: 品类词市场数据集合
+                          - text: 缺失，
+                          - code [ref=e209]: msg
+                          - text: 含「不支持」/「unsupported」
+                        - 'cell "命中\"失败场景\"表第 1 行，话术：暂不支持 {platform}……" [ref=e210]'
+                      - 'row "平台-市场组合不支持（如 TikTok+RU） 同上，msg 含具体地区描述（如「不支持该地区: RU」） 命中\"失败场景\"表第 2 行，按\"市场邻近映射表\"推荐替代" [ref=e211]':
+                        - cell "平台-市场组合不支持（如 TikTok+RU）" [ref=e212]
+                        - 'cell "同上，msg 含具体地区描述（如「不支持该地区: RU」）" [ref=e213]':
+                          - text: 同上，
+                          - code [ref=e214]: msg
+                          - text: "含具体地区描述（如「不支持该地区: RU」）"
+                        - cell "命中\"失败场景\"表第 2 行，按\"市场邻近映射表\"推荐替代" [ref=e215]
+                      - row "上游 HSF 超时 品类词市场数据集合 缺失，msg 含「timeout」/「超时」 命中\"失败场景\"表第 4 行" [ref=e216]:
+                        - cell "上游 HSF 超时" [ref=e217]
+                        - cell "品类词市场数据集合 缺失，msg 含「timeout」/「超时」" [ref=e218]:
+                          - code [ref=e219]: 品类词市场数据集合
+                          - text: 缺失，
+                          - code [ref=e220]: msg
+                          - text: 含「timeout」/「超时」
+                        - cell "命中\"失败场景\"表第 4 行" [ref=e221]
+                      - 'row "上游返回空列表 品类词市场数据集合 为 {}（被 @JsonInclude(NON_EMPTY) 过滤后字段不出现），msg = 「品类词查询结果为空」 命中\"空结果场景\"" [ref=e222]':
+                        - cell "上游返回空列表" [ref=e223]
+                        - 'cell "品类词市场数据集合 为 {}（被 @JsonInclude(NON_EMPTY) 过滤后字段不出现），msg = 「品类词查询结果为空」" [ref=e224]':
+                          - code [ref=e225]: 品类词市场数据集合
+                          - text: 为
+                          - code [ref=e226]: "{}"
+                          - text: （被
+                          - code [ref=e227]: "@JsonInclude(NON_EMPTY)"
+                          - text: 过滤后字段不出现），
+                          - code [ref=e228]: msg
+                          - text: = 「品类词查询结果为空」
+                        - cell "命中\"空结果场景\"" [ref=e229]
+                      - row "seed_keyword 为空 品类词市场数据集合 缺失，msg = 「品类词为空」 命中\"失败场景\"表第 3 行" [ref=e230]:
+                        - cell "seed_keyword 为空" [ref=e231]:
+                          - code [ref=e232]: seed_keyword
+                          - text: 为空
+                        - cell "品类词市场数据集合 缺失，msg = 「品类词为空」" [ref=e233]:
+                          - code [ref=e234]: 品类词市场数据集合
+                          - text: 缺失，
+                          - code [ref=e235]: msg
+                          - text: = 「品类词为空」
+                        - cell "命中\"失败场景\"表第 3 行" [ref=e236]
+                      - 'row "国内平台 MCP 调用失败 品类词市场数据集合 缺失，msg = 「品类词查询失败：{MCP errorMsg}」 命中\"失败场景\"表第 5 行（兜底）" [ref=e237]':
+                        - cell "国内平台 MCP 调用失败" [ref=e238]
+                        - 'cell "品类词市场数据集合 缺失，msg = 「品类词查询失败：{MCP errorMsg}」" [ref=e239]':
+                          - code [ref=e240]: 品类词市场数据集合
+                          - text: 缺失，
+                          - code [ref=e241]: msg
+                          - text: "= 「品类词查询失败：{MCP errorMsg}」"
+                        - cell "命中\"失败场景\"表第 5 行（兜底）" [ref=e242]
+                      - row "同参数 5 分钟内重复调用 命中 @Cacheable(\"marketSearchTool\") 本地缓存，直接返回缓存结果 模型无感知，按正常成功/空结果场景处理" [ref=e243]:
+                        - cell "同参数 5 分钟内重复调用" [ref=e244]
+                        - cell "命中 @Cacheable(\"marketSearchTool\") 本地缓存，直接返回缓存结果" [ref=e245]:
+                          - text: 命中
+                          - code [ref=e246]: "@Cacheable(\"marketSearchTool\")"
+                          - text: 本地缓存，直接返回缓存结果
+                        - cell "模型无感知，按正常成功/空结果场景处理" [ref=e247]
+        - complementary [ref=e248]:
+          - generic [ref=e249]:
+            - heading "统计数据" [level=3] [ref=e250]
+            - generic [ref=e251]:
+              - generic [ref=e253]: 总下载
+              - generic [ref=e255]: 当前安装
+              - generic [ref=e257]: 收藏数
+          - generic [ref=e258]:
+            - heading "Skill 信息" [level=3] [ref=e259]
+            - generic [ref=e260]:
+              - generic [ref=e261]:
+                - term [ref=e262]: Slug
+                - definition [ref=e263]: 1688-product-keyword-research
+              - generic [ref=e264]:
+                - term [ref=e265]: 最新版本
+                - definition [ref=e266]: 0.1.0
+              - generic [ref=e267]:
+                - term [ref=e268]: 作者
+                - definition [ref=e269]: 1688官方
+              - generic [ref=e270]:
+                - term [ref=e271]: 来源
+                - definition [ref=e272]: 1688官方
+  - contentinfo [ref=e273]:
+    - generic [ref=e275]:
+      - generic [ref=e276]:
+        - paragraph [ref=e277]: 1688牛顿Hub -- AI Agent Skill 托管与分发平台
+        - generic [ref=e278] [cursor=pointer]: 服务条款
+      - generic [ref=e279]:
+        - generic [ref=e280]: v0.1.0
+        - generic [ref=e281]: ·
+        - generic [ref=e282]: © 2026 1688牛顿Hub
+  - alert [ref=e283]

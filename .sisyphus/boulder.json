@@ -1,59 +1,78 @@
 {
-  "active_plan": "/mnt/d/project/my-title/.sisyphus/plans/strategy-optimization.md",
-  "started_at": "2026-05-16T06:50:17.363Z",
+  "active_plan": "/mnt/d/project/my-title/.sisyphus/plans/keyword-suggester.md",
+  "started_at": "2026-05-16T15:43:11.171Z",
   "session_ids": [
-    "ses_1d0ee324bffe8kOIQ0BD9oFfye"
+    "ses_1cf1b09efffeVJc2zAN1hCQZ3z",
+    "ses_1ce88e691ffeYDslZqlmtt7p4M",
+    "ses_1ce88d253ffe4uJmMarq3Xn2BW",
+    "ses_1ce88ba1cffeYTYDxNwu3dIigq",
+    "ses_1ce88911effeiveHEAqdIzc9Re",
+    "ses_1ce82a0f4ffe5OeypokniCSLRi",
+    "ses_1cd85f3e5ffewx70FeJ8K62wAp",
+    "ses_1cc6a5c1effe2kVpUM7Obon5Rw",
+    "ses_1cc69bcb5ffeVOOQse1ZjvZU5K",
+    "ses_1cc69961bffeSHFRVQ8o6gvhuc",
+    "ses_1cc697ae0ffe70OexhaerraZlp"
   ],
   "session_origins": {
-    "ses_1d0ee324bffe8kOIQ0BD9oFfye": "direct"
+    "ses_1cf1b09efffeVJc2zAN1hCQZ3z": "direct",
+    "ses_1ce88e691ffeYDslZqlmtt7p4M": "appended",
+    "ses_1ce88d253ffe4uJmMarq3Xn2BW": "appended",
+    "ses_1ce88ba1cffeYTYDxNwu3dIigq": "appended",
+    "ses_1ce88911effeiveHEAqdIzc9Re": "appended",
+    "ses_1ce82a0f4ffe5OeypokniCSLRi": "appended",
+    "ses_1cd85f3e5ffewx70FeJ8K62wAp": "appended",
+    "ses_1cc6a5c1effe2kVpUM7Obon5Rw": "appended",
+    "ses_1cc69bcb5ffeVOOQse1ZjvZU5K": "appended",
+    "ses_1cc69961bffeSHFRVQ8o6gvhuc": "appended",
+    "ses_1cc697ae0ffe70OexhaerraZlp": "appended"
   },
-  "plan_name": "strategy-optimization",
+  "plan_name": "keyword-suggester",
   "agent": "atlas",
   "task_sessions": {
-    "todo:0": {
-      "task_key": "todo:0",
-      "task_label": "0",
-      "task_title": "冒烟测试 + 缓存版本升级",
-      "session_id": "ses_1d071f35bffeYxbSfv5SDAYhzW",
-      "agent": "Sisyphus-Junior",
-      "category": "quick",
-      "updated_at": "2026-05-16T06:56:12.881Z"
-    },
     "todo:1": {
       "task_key": "todo:1",
       "task_label": "1",
-      "task_title": "GLM Prompt 全面增强",
-      "session_id": "ses_1d06ac4c4ffe3qaFmnKkB5aXyB",
+      "task_title": "Create `data/season-data.json` — 24节气 + 12月应季品类数据",
+      "session_id": "ses_1ce88911effeiveHEAqdIzc9Re",
+      "agent": "Sisyphus-Junior",
+      "category": "quick",
+      "updated_at": "2026-05-16T15:47:38.485Z"
+    },
+    "todo:5": {
+      "task_key": "todo:5",
+      "task_label": "5",
+      "task_title": "Create `keyword-suggester.js` — GLM strategy prompts + candidate generation",
+      "session_id": "ses_1cd85f3e5ffewx70FeJ8K62wAp",
       "agent": "Sisyphus-Junior",
       "category": "deep",
-      "updated_at": "2026-05-16T07:19:06.144Z"
+      "updated_at": "2026-05-16T20:29:04.121Z"
     },
-    "todo:2": {
-      "task_key": "todo:2",
-      "task_label": "2",
-      "task_title": "semanticGroups 管线贯通 + 后处理验证",
-      "session_id": "ses_1d04fed1dffe9vIhHhGKXlx9D0",
+    "todo:6": {
+      "task_key": "todo:6",
+      "task_label": "6",
+      "task_title": "Add SYCM verification loop to `keyword-suggester.js`",
+      "session_id": "ses_1cc788ea4ffenIKg72P3YZCnQx",
       "agent": "Sisyphus-Junior",
       "category": "deep",
-      "updated_at": "2026-05-16T07:46:35.059Z"
-    },
-    "todo:4": {
-      "task_key": "todo:4",
-      "task_label": "4",
-      "task_title": "同行标题位置权重分析",
-      "session_id": "ses_1d0385ee8ffenn6URYGayziIvC",
-      "agent": "Sisyphus-Junior",
-      "category": "unspecified-high",
-      "updated_at": "2026-05-16T07:57:27.001Z"
+      "updated_at": "2026-05-17T01:25:28.790Z"
     },
     "todo:7": {
       "task_key": "todo:7",
       "task_label": "7",
-      "task_title": "导购标题生成",
-      "session_id": "ses_1d0270c48ffeO1QRmv3r2rhAKl",
+      "task_title": "Add `--suggest` CLI parameter",
+      "session_id": "ses_1cc73ce0fffeLpflookARY7uT9",
       "agent": "Sisyphus-Junior",
       "category": "unspecified-high",
-      "updated_at": "2026-05-16T08:15:24.883Z"
+      "updated_at": "2026-05-17T01:36:45.870Z"
+    },
+    "final-wave:f1": {
+      "task_key": "final-wave:f1",
+      "task_label": "F1",
+      "task_title": "**Plan Compliance Audit** — `oracle`",
+      "session_id": "ses_1cc697ae0ffe70OexhaerraZlp",
+      "agent": "general",
+      "updated_at": "2026-05-17T01:43:20.690Z"
     }
   }
 }
