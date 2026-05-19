@@ -573,11 +573,21 @@ let finalSycmData = sycmData; // 保留手动传入的数据
 let sycmExtracted = null;
 if (sycmAuto === true) {
   try {
-    const { isChromeDevToolsAvailable } = require('./sycm-browser-helper');
+    const { isChromeDevToolsAvailable, autoLaunchChrome } = require('./sycm-browser-helper');
     const { extractSycmData } = require('./sycm-cdp-extractor');
     
-    const chromeAvailable = await isChromeDevToolsAvailable(9222);
-    if (chromeAvailable) {
+    if (!await isChromeDevToolsAvailable(9222)) {
+      log('  ⏳ Chrome 未运行，正在自动启动...');
+      const launchResult = await autoLaunchChrome(9222);
+      if (!launchResult.success) {
+        warn('  ℹ️ ' + launchResult.message);
+        warn('  ℹ️ 继续使用现有数据');
+      } else {
+        log('  ✅ ' + launchResult.message);
+      }
+    }
+    
+    if (await isChromeDevToolsAvailable(9222)) {
       log('  🔍 Chrome 检测到，开始自动查询生意参谋蓝海数据...');
       try {
         // 设置 30 秒超时
@@ -840,10 +850,11 @@ if (sycmAuto === true) {
  * @param {object} options - 配置选项
  * @param {number} options.maxLength - 生成标题的最大长度（默认 60）
  * @param {boolean} options.silent - 是否静默模式（默认 false）
+ * @param {string} options.image_url - 直接传入商品主图 URL（跳过 1688 搜索获取图片）
  * @returns {Promise<object>} 返回结果对象
  */
 async function runFromImage(url, options = {}) {
-  const { maxLength = 60, silent = false, keyword = '' } = options;
+  const { maxLength = 60, silent = false, keyword = '', image_url = '' } = options;
   
   const log = silent ? () => {} : console.log.bind(console);
   const warn = silent ? () => {} : console.warn.bind(console);
@@ -853,8 +864,18 @@ async function runFromImage(url, options = {}) {
   // 步骤 1: URL 解析
   log('🔍 第一步：解析 1688 链接...');
   try {
-    const { parse1688Url } = require('./alibaba1688-client');
-    const parsed = parse1688Url(url);
+    const { parse1688Url, resolve1688ShortUrl } = require('./alibaba1688-client');
+    let parsed = parse1688Url(url);
+    
+    // Short link fallback: follow redirects to resolve actual URL
+    if (!parsed) {
+      log('  ⏳ URL 非标准格式，尝试解析短链接...');
+      const resolvedUrl = await resolve1688ShortUrl(url);
+      if (resolvedUrl) {
+        log(`  短链接解析成功: ${resolvedUrl}`);
+        parsed = parse1688Url(resolvedUrl);
+      }
+    }
     
     if (!parsed) {
       return {
@@ -908,25 +929,35 @@ async function runFromImage(url, options = {}) {
     
     log(`  原标题: ${originalTitle.substring(0, 50)}${originalTitle.length > 50 ? '...' : ''}`);
     
-    // offer_detail API 不返回图片URL，需要通过搜索获取主图
-    // 用原标题在 1688 搜索，从搜索结果中匹配同 ID 的商品获取主图
-    log('🖼️ 通过 1688 搜索获取商品主图...');
+    // 步骤 3: 获取主图
+    log('🖼️ 第三步：获取主图和原标题...');
     let imageUrl = '';
-    try {
-      const searchKeyword = originalTitle.substring(0, 20); // 截取标题前20字作为搜索词
-      const searchProducts = await client.searchOffers(searchKeyword);
-      // 优先匹配相同 offerId 的商品
-      const exactMatch = searchProducts.find(p => p.id === offerId);
-      if (exactMatch && exactMatch.url) {
-        imageUrl = exactMatch.url;
-        log('  找到精确匹配的商品主图');
-      } else if (searchProducts.length > 0 && searchProducts[0].url) {
-        // 降级：使用搜索结果中第一个商品的图片（同类商品近似图）
-        imageUrl = searchProducts[0].url;
-        log('  使用搜索结果中首个同类商品主图（未找到精确匹配）');
+
+    // 优先使用外部传入的图片 URL
+    if (image_url && typeof image_url === 'string' && image_url.startsWith('http')) {
+      imageUrl = image_url;
+      log('  使用外部传入的图片 URL');
+    }
+
+    // 如果没有外部图片，通过 1688 搜索获取主图（原有逻辑）
+    if (!imageUrl) {
+      log('🖼️ 通过 1688 搜索获取商品主图...');
+      try {
+        const searchKeyword = originalTitle.substring(0, 20); // 截取标题前20字作为搜索词
+        const searchProducts = await client.searchOffers(searchKeyword);
+        // 优先匹配相同 offerId 的商品
+        const exactMatch = searchProducts.find(p => p.id === offerId);
+        if (exactMatch && exactMatch.url) {
+          imageUrl = exactMatch.url;
+          log('  找到精确匹配的商品主图');
+        } else if (searchProducts.length > 0 && searchProducts[0].url) {
+          // 降级：使用搜索结果中第一个商品的图片（同类商品近似图）
+          imageUrl = searchProducts[0].url;
+          log('  使用搜索结果中首个同类商品主图（未找到精确匹配）');
+        }
+      } catch (searchErr) {
+        warn('⚠️ 1688 搜索获取主图失败:', searchErr.message || searchErr);
       }
-    } catch (searchErr) {
-      warn('⚠️ 1688 搜索获取主图失败:', searchErr.message || searchErr);
     }
     
     if (!imageUrl || typeof imageUrl !== 'string' || !imageUrl.startsWith('http')) {

@@ -489,10 +489,11 @@ class Alibaba1688Client {
  * @param {string} url - 1688 商品详情页 URL
  * @returns {object|null} { offerId: string } 或 null（无效 URL）
  * 
- * 支持格式：
+ * 支持的 URL 格式:
  * - https://detail.1688.com/offer/123456.html
- * - https://detail.1688.com/offer/123456.html?spm=...
- * - https://m.1688.com/offer/123456.html
+ * - https://detail.1688.com/offer/123456.html?spm=xxx (带追踪参数)
+ * - https://m.1688.com/offer/123456.html (移动端)
+ * - https://detail.m.1688.com/page/index.htm?offerId=123456 (移动端H5)
  */
 function parse1688Url(url) {
   if (typeof url !== 'string') return null;
@@ -510,9 +511,71 @@ function parse1688Url(url) {
       return { offerId: pathMatch[1] };
     }
     
+    // 匹配查询参数模式 offerId 或 offer_id
+    let offerId = parsedUrl.searchParams.get('offerId');
+    if (!offerId) {
+      offerId = parsedUrl.searchParams.get('offer_id');
+    }
+    if (offerId) {
+      return { offerId };
+    }
+    
     return null;
   } catch (e) {
     // URL 解析失败
+    return null;
+  }
+}
+
+/**
+ * Resolve 1688 short URL by following HTTP redirects
+ * @param {string} url - Short URL to resolve
+ * @param {number} [maxRedirects=5] - Max redirect hops
+ * @returns {Promise<string|null>} Final URL after redirects, or null if failed
+ */
+async function resolve1688ShortUrl(url, maxRedirects = 5) {
+  let currentUrl = url;
+  let redirects = 0;
+
+  try {
+    while (redirects < maxRedirects) {
+      const response = await axios.head(currentUrl, {
+        maxRedirects: 0,
+        validateStatus: (status) => status < 400,
+        timeout: 5000,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+      });
+
+      const location = response.headers.location;
+      if (!location) {
+        // No more redirects, check if current URL is parseable
+        if (parse1688Url(currentUrl)) {
+          return currentUrl;
+        }
+        return null;
+      }
+
+      // Resolve relative URL if needed
+      if (!location.startsWith('http')) {
+        currentUrl = new URL(location, currentUrl).href;
+      } else {
+        currentUrl = location;
+      }
+
+      // Check if current URL is parseable
+      if (parse1688Url(currentUrl)) {
+        return currentUrl;
+      }
+
+      redirects++;
+    }
+
+    // Exceeded max redirects
+    return null;
+  } catch (err) {
+    // Any error (network, timeout, 4xx, etc.)
     return null;
   }
 }
@@ -522,4 +585,5 @@ function parse1688Url(url) {
  */
 module.exports = Alibaba1688Client;
 module.exports.parse1688Url = parse1688Url;
+module.exports.resolve1688ShortUrl = resolve1688ShortUrl;
 module.exports.RateLimitError = RateLimitError;
