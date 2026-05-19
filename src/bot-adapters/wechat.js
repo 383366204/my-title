@@ -217,6 +217,8 @@ class WechatAdapter extends BaseAdapter {
           return await this._handleSycmQuery(chatId, arg);
         case '查词蓝海':
           return await this._handleSycmQuery(chatId, arg, 'blue');
+        case '选词':
+          return await this._handleSuggest(chatId, arg);
         default:
           return await this.sendMessage(chatId, '未知命令，发送 /help 查看帮助');
       }
@@ -326,6 +328,7 @@ class WechatAdapter extends BaseAdapter {
 /分析 关键词 - 分析关键词结构（例如：/分析 纯银项链女）
 /查词 关键词 - 查询生意参谋热搜词（支持批量：/查词 耳钉 项链 手链）
 /查词蓝海 关键词 - 查询相关蓝海词（支持批量）
+/选词 策略 [输入] - AI自动选词验证蓝海词
 /链接 1688链接 - 从1688商品链接生成标题
 /help - 显示此帮助信息
 
@@ -377,13 +380,15 @@ class WechatAdapter extends BaseAdapter {
     }
 
     try {
-      const { isChromeDevToolsAvailable, generateChromeLaunchCommand } = require('../sycm-browser-helper');
+      const { isChromeDevToolsAvailable, autoLaunchChrome } = require('../sycm-browser-helper');
       const { extractSycmData } = require('../sycm-cdp-extractor');
 
-      const chromeAvailable = await isChromeDevToolsAvailable(9222);
-      if (!chromeAvailable) {
-        const launchCmd = generateChromeLaunchCommand({ port: 9222 });
-        return await this.sendMessage(chatId, '❌ Chrome 未运行调试模式\n\n请先启动：\n' + launchCmd.command);
+      if (!await isChromeDevToolsAvailable(9222)) {
+        await this.sendProgress(chatId, '⏳ Chrome 未运行，正在自动启动...');
+        const launchResult = await autoLaunchChrome(9222);
+        if (!launchResult.success) {
+          return await this.sendMessage(chatId, '❌ ' + launchResult.message);
+        }
       }
 
       var keywords = keyword.split(/[\s,，]+/).filter(function(k) { return k.trim(); });
@@ -455,6 +460,106 @@ class WechatAdapter extends BaseAdapter {
 
       allLines.push('', '⏱ ' + new Date().toLocaleString('zh-CN'));
       return await this.sendMessage(chatId, allLines.join('\n'));
+    } catch (error) {
+      return await this.sendError(chatId, error);
+    }
+  }
+
+  /**
+   * 处理 /选词 命令 — AI推荐候选词 + SYCM蓝海验证
+   * @private
+   */
+  async _handleSuggest(chatId, arg) {
+    var STRATEGY_LABELS = {
+      crowd: '人群选词',
+      scene: '场景选词',
+      season: '季节选词',
+      problem: '痛点选词',
+      industry: '行业选词',
+      holiday: '节日选词',
+      gift: '送礼选词',
+      cross: '跨界选词',
+      guochao: '国潮选词',
+      trend: '趋势选词',
+      niche: '细分选词',
+      emotion: '情绪选词',
+      price: '价格带选词'
+    };
+
+    var parts = arg.split(/[\s,，]+/).filter(function(p) { return p; });
+    var strategy = 'holiday';
+    var input = '';
+
+    if (parts.length === 0) {
+      return await this.sendMessage(chatId,
+        '📊 自动选词 — AI推荐候选词\n\n' +
+        '用法: /选词 [策略] [输入]\n\n' +
+        '策略: crowd=人群 scene=场景 season=季节 problem=痛点 industry=行业 holiday=节日 gift=送礼 cross=跨界 guochao=国潮 trend=趋势 niche=细分 emotion=情绪 price=价格带\n' +
+        '默认: holiday\n\n' +
+        '示例:\n' +
+        '/选词\n' +
+        '/选词 holiday\n' +
+        '/选词 season\n' +
+        '/选词 crowd 宝妈\n' +
+        '/选词 scene 办公室\n' +
+        '/选词 problem 收纳困难\n' +
+        '/选词 gift 送闺蜜\n' +
+        '/选词 cross 宠物+旅行\n' +
+        '/选词 trend 饰品\n' +
+        '/选词 niche 杯子\n' +
+        '/选词 emotion 解压\n' +
+        '/选词 price 百元以内');
+    }
+
+    if (STRATEGY_LABELS[parts[0]]) {
+      strategy = parts[0];
+      input = parts.slice(1).join(' ');
+    } else {
+      input = parts.join(' ');
+    }
+
+    try {
+      await this.sendProgress(chatId, '⏳ ' + STRATEGY_LABELS[strategy] + '，正在生成候选词...');
+
+      var { suggestAndVerify } = require('../keyword-suggester');
+      var result = await suggestAndVerify({
+        strategy: strategy,
+        input: input,
+        maxCandidates: 5,
+        skipSycm: true,
+        onProgress: function(msg) {}
+      });
+
+      if (!result.ok) {
+        return await this.sendMessage(chatId, '❌ ' + (result.error || '选词失败'));
+      }
+
+      var lines = [];
+      lines.push('📊 ' + STRATEGY_LABELS[strategy] + '结果');
+      lines.push('AI推荐词: ' + result.verified + ' 个');
+      lines.push('');
+
+      if (result.keywords && result.keywords.length > 0) {
+        result.keywords.forEach(function(kw, i) {
+          var convRate = typeof kw.conversionRate === 'number' ? (kw.conversionRate * 100).toFixed(1) + '%' : (kw.conversionRate || '-');
+          var tmall = typeof kw.tmallClickShare === 'number' ? (kw.tmallClickShare * 100).toFixed(1) + '%' : (kw.tmallClickShare || '-');
+          lines.push((i + 1) + '. ' + kw.keyword);
+          lines.push('   搜索人气: ' + (kw.searchPopularity || '-') + ' | 转化率: ' + convRate + ' | 供需比: ' + (kw.demandSupplyRatio || '-') + ' | 天猫占比: ' + tmall);
+        });
+      } else {
+        lines.push('未找到符合蓝海条件的关键词');
+      }
+
+      if (result.errors && result.errors.length > 0) {
+        lines.push('');
+        lines.push('验证失败:');
+        result.errors.forEach(function(e) {
+          lines.push('  - ' + e.keyword + ': ' + e.error);
+        });
+      }
+
+      lines.push('', '⏱ ' + new Date().toLocaleString('zh-CN'));
+      return await this.sendMessage(chatId, lines.join('\n'));
     } catch (error) {
       return await this.sendError(chatId, error);
     }

@@ -9,7 +9,15 @@ const STRATEGIES = {
   SCENE: 'scene',      // 场景 → 产品关键词
   SEASON: 'season',    // 季节 → 应季品类关键词
   PROBLEM: 'problem',  // 痛点动词 → 细分产品关键词
-  INDUSTRY: 'industry' // 行业/职业 → 专用工具关键词
+  INDUSTRY: 'industry', // 行业/职业 → 专用工具关键词
+  HOLIDAY: 'holiday',  // 节日 → 节日营销关键词
+  GIFT: 'gift',        // 送礼 → 产品关键词
+  CROSS: 'cross',      // 跨界 → 产品关键词
+  GUOCHAO: 'guochao',  // 国潮 → 产品关键词
+  TREND: 'trend',      // 趋势 → 产品关键词
+  NICHE: 'niche',      // 细分 → 产品关键词
+  EMOTION: 'emotion',  // 情绪 → 产品关键词
+  PRICE: 'price'       // 价格 → 产品关键词
 };
 
 // 有效策略数组（供外部使用）
@@ -26,7 +34,7 @@ const MAX_CANDIDATES_LIMIT = 10;
  * @param {Array<{name: string, keywords: string[]}>} [seasonCategories] - 季节品类列表（仅 season 策略需要）
  * @returns {string} 系统提示词
  */
-function generatePrompt(strategy, input, seasonCategories = []) {
+function generatePrompt(strategy, input, seasonCategories = [], options = {}) {
   switch (strategy) {
     case STRATEGIES.CROWD:
       return `你是一个电商选品专家。请根据以下目标人群，生成相关的产品关键词列表。
@@ -87,6 +95,75 @@ ${categoryList}
 3. 考虑专业需求（如"程序员"→"机械键盘"、"程序员桌垫"）
 4. 返回 JSON 格式: {"keywords": ["关键词1", "关键词2", ...]}`;
 
+    case STRATEGIES.HOLIDAY:
+      var holidayInfo = options._holidayInfo || { name: '当前节日', description: '', keywords: [] };
+      var kwList = holidayInfo.keywords.join('、');
+      return `你是一个电商选品专家。当前日期: ${new Date().toLocaleDateString('zh-CN')}。
+
+即将到来的节日: ${holidayInfo.name}（${holidayInfo.daysUntil > 0 ? holidayInfo.daysUntil + '天后' : '进行中'}）
+节日说明: ${holidayInfo.description}
+
+该节日常见品类参考: ${kwList}
+
+用户输入: ${input}
+
+要求:
+1. 结合节日特性和用户输入，生成相关的电商商品关键词
+2. 每个关键词应为 2-6 个汉字，描述具体商品
+3. 关键词应适合该节日期间的搜索和推广
+4. 可参考常见品类，但不要照搬，要发散出更多具体商品
+5. 返回 JSON 格式: {"keywords": ["关键词1", "关键词2", ...]}`;
+
+    case STRATEGIES.GIFT:
+      return `你是一个电商选品专家。请根据以下送礼场景，生成相关的产品关键词列表。送礼对象/场景: ${input}。考虑收礼人的身份和关系（如送领导→高档钢笔、送闺蜜→香薰礼盒）
+
+要求:
+1. 每个关键词应为 2-6 个汉字，描述具体商品
+2. 返回 JSON 格式: {"keywords": ["关键词1", "关键词2", ...]}`;
+
+    case STRATEGIES.CROSS:
+      return `你是一个电商选品专家。请将以下两个品类/概念进行跨界组合，生成创新的产品关键词。两个品类（用+或空格分隔）: ${input}。组合要自然合理，有真实消费场景（如宠物+旅行→便携猫包）
+
+要求:
+1. 每个关键词应为 2-6 个汉字，描述具体商品
+2. 返回 JSON 格式: {"keywords": ["关键词1", "关键词2", ...]}`;
+
+    case STRATEGIES.GUOCHAO:
+      return `你是一个电商选品专家。请结合中国传统文化元素和现代消费品，生成国潮风格的产品关键词。品类方向: ${input}。风格要年轻化、有设计感（如国风手机壳、新中式茶具、汉元素连衣裙）
+
+要求:
+1. 每个关键词应为 2-6 个汉字，描述具体商品
+2. 返回 JSON 格式: {"keywords": ["关键词1", "关键词2", ...]}`;
+
+    case STRATEGIES.TREND:
+      const hotDataText = options._hotData || '暂无热榜数据，请基于你的知识推荐';
+      return `你是一个电商选品专家。以下是当前市场热榜数据，请结合热榜趋势和用户输入，生成有潜力的产品关键词。当前热榜数据: ${hotDataText}。用户关注方向: ${input}。优先选择热榜中上升势头强的品类
+
+要求:
+1. 每个关键词应为 2-6 个汉字，描述具体商品
+2. 返回 JSON 格式: {"keywords": ["关键词1", "关键词2", ...]}`;
+
+    case STRATEGIES.NICHE:
+      return `你是一个电商选品专家。请从以下大品类中挖掘冷门细分市场的产品关键词。大品类: ${input}。细分方向：特定人群、特定场景、特定功能、特定材质（如杯子→婴儿学饮杯、车载保温杯）。避免大词和通用词，只输出长尾细分词
+
+要求:
+1. 每个关键词应为 2-6 个汉字，描述具体商品
+2. 返回 JSON 格式: {"keywords": ["关键词1", "关键词2", ...]}`;
+
+    case STRATEGIES.EMOTION:
+      return `你是一个电商选品专家。请根据以下消费者情绪/心理需求，生成满足该情绪的商品关键词。情绪/心理: ${input}。情绪可能是: 解压→捏捏乐、仪式感→香薰蜡烛、治愈→毛绒玩具、怀旧→复古摆件等
+
+要求:
+1. 每个关键词应为 2-6 个汉字，描述具体商品
+2. 返回 JSON 格式: {"keywords": ["关键词1", "关键词2", ...]}`;
+
+    case STRATEGIES.PRICE:
+      return `你是一个电商选品专家。请根据以下价格区间，生成适合该价格带的商品关键词。价格带/预算: ${input}。考虑价格带对应的消费心理和品质预期（如10元以内→小商品、百元级→轻奢小物）
+
+要求:
+1. 每个关键词应为 2-6 个汉字，描述具体商品
+2. 返回 JSON 格式: {"keywords": ["关键词1", "关键词2", ...]}`;
+
     default:
       throw new Error(`未知策略: ${strategy}`);
   }
@@ -108,6 +185,40 @@ function loadSeasonCategories(dataPath) {
     console.warn(`⚠️  无法加载季节数据: ${error.message}`);
     return [];
   }
+}
+
+function loadHolidayData(dataPath) {
+  try {
+    var rawData = fs.readFileSync(dataPath, 'utf8');
+    var data = JSON.parse(rawData);
+    return data.holidays || [];
+  } catch (error) {
+    console.warn('⚠️  无法加载节日数据: ' + error.message);
+    return [];
+  }
+}
+
+function findNearestHoliday(holidays) {
+  var now = new Date();
+  var today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  var candidates = holidays.map(function(h) {
+    var holidayDate = new Date(now.getFullYear(), h.month - 1, h.day);
+    if (holidayDate < today) {
+      holidayDate = new Date(now.getFullYear() + 1, h.month - 1, h.day);
+    }
+    var daysUntil = Math.ceil((holidayDate - today) / 86400000);
+    var leadStart = new Date(holidayDate);
+    leadStart.setDate(leadStart.getDate() - h.leadDays);
+    return Object.assign({}, h, {
+      nextDate: holidayDate,
+      daysUntil: daysUntil,
+      inLeadWindow: today >= leadStart
+    });
+  });
+  var inWindow = candidates.filter(function(c) { return c.inLeadWindow; }).sort(function(a, b) { return a.daysUntil - b.daysUntil; });
+  if (inWindow.length > 0) return inWindow[0];
+  candidates.sort(function(a, b) { return a.daysUntil - b.daysUntil; });
+  return candidates[0];
 }
 
 /**
@@ -147,8 +258,8 @@ function deduplicateKeywords(keywords) {
 /**
  * 关键词推荐器
  * @param {Object} options - 配置选项
- * @param {string} options.strategy - 策略类型：'crowd' | 'scene' | 'season' | 'problem' | 'industry'
- * @param {string} options.input - 用户输入（人群、场景、痛点等）
+ * @param {string} options.strategy - 策略类型：'crowd' | 'scene' | 'season' | 'holiday' | 'problem' | 'industry' | 'gift' | 'cross' | 'guochao' | 'trend' | 'niche' | 'emotion' | 'price'
+ * @param {string} options.input - 用户输入（人群、场景、痛点、送礼对象、跨界品类、国潮品类、趋势方向、大品类、情绪、价格区间等，部分策略可省略）
  * @param {number} [options.maxCandidates] - 最大候选词数量（默认 5，最大 10）
  * @param {Object} [options.glmClient] - GLMClient 实例（可选，未提供则自动创建）
  * @returns {Promise<string[]>} 候选关键词数组
@@ -161,14 +272,15 @@ async function suggestKeywords(options) {
     throw new Error(`无效策略 "${strategy}"。有效策略: ${VALID_STRATEGIES.join(', ')}`);
   }
 
-  // 2. 验证输入（season 策略允许省略 input，自动检测月份）
-  if (strategy !== STRATEGIES.SEASON) {
+  // 2. 验证输入（season/holiday/trend 策略允许省略 input）
+  if (strategy !== STRATEGIES.SEASON && strategy !== STRATEGIES.HOLIDAY && strategy !== STRATEGIES.TREND) {
     if (!input || typeof input !== 'string' || input.trim().length === 0) {
       throw new Error('输入不能为空');
     }
   }
-  // season 策略无输入时使用默认描述
-  const effectiveInput = (input && input.trim()) ? input.trim() : '应季热门品类';
+  // season/trend 策略无输入时使用默认描述
+  const effectiveInput = (input && input.trim()) ? input.trim() : 
+    (strategy === STRATEGIES.TREND ? '热门上升品类' : '应季热门品类');
 
   // 3. 限制候选词数量
   const maxCands = Math.min(Math.max(1, maxCandidates), MAX_CANDIDATES_LIMIT);
@@ -184,8 +296,10 @@ async function suggestKeywords(options) {
     });
   }
 
-  // 5. 季节策略特殊处理：加载季节数据
+  // 5. 季节/节日/趋势策略特殊处理：加载对应数据
   let seasonCategories = [];
+  let holidayInfo = null;
+  let hotData = null;
   if (strategy === STRATEGIES.SEASON) {
     const dataPath = path.join(__dirname, '..', 'data', 'season-data.json');
     seasonCategories = loadSeasonCategories(dataPath);
@@ -193,9 +307,35 @@ async function suggestKeywords(options) {
       console.warn('⚠️  季节数据为空，GLM 将仅基于用户输入生成关键词');
     }
   }
+  if (strategy === STRATEGIES.HOLIDAY) {
+    const dataPath = path.join(__dirname, '..', 'data', 'holiday-data.json');
+    var holidays = loadHolidayData(dataPath);
+    if (holidays.length > 0) {
+      holidayInfo = findNearestHoliday(holidays);
+      console.log('🎉 节日选词: ' + holidayInfo.name + '（' + holidayInfo.daysUntil + '天后）');
+    }
+  }
+  if (strategy === STRATEGIES.TREND) {
+    try {
+      const Alibaba1688Client = require('./alibaba1688-client');
+      const client = new Alibaba1688Client(process.env.ALI_1688_AK);
+      const opportunities = await client.fetchOpportunities();
+      hotData = JSON.stringify(opportunities, null, 2);
+      if (hotData.length > 2000) {
+        hotData = hotData.slice(0, 2000) + '...';
+      }
+      console.log('📈 趋势选词: 已加载1688热榜数据');
+    } catch (error) {
+      console.warn('⚠️  1688热榜加载失败，将使用纯GLM推理: ' + error.message);
+      hotData = '';
+    }
+  }
 
   // 6. 生成提示词并调用 GLM
-  const prompt = generatePrompt(strategy, effectiveInput, seasonCategories);
+  const prompt = generatePrompt(strategy, effectiveInput, seasonCategories, { 
+    _holidayInfo: holidayInfo, 
+    _hotData: hotData 
+  });
   const messages = [
     { role: 'system', content: '你是一个电商选品专家，擅长根据用户需求生成商品关键词。' },
     { role: 'user', content: prompt }
@@ -288,10 +428,7 @@ function parseSycmValue(value) {
  * @param {Object} [options={}] - 配置选项
  * @param {number} [options.port=9222] - Chrome 调试端口
  * @param {number} [options.delay=5000] - 连续查询间隔（毫秒）
- * @param {Object} [options.filterCriteria] - 蓝海词筛选标准
- * @param {number} [options.filterCriteria.searchPopularity=50] - 最低搜索人气
- * @param {number} [options.filterCriteria.minConversionRate=0.05] - 最低转化率
- * @param {number} [options.filterCriteria.maxConversionRate=0.15] - 最高转化率
+ * @param {number} [options.maxCandidates] - 返回的最大关键词数量
  * @param {Function} [options.onProgress] - 进度回调 fn(msg)
  * @returns {Promise<Object>} {ok, keywords, verified, failed, errors, message?}
  */
@@ -299,63 +436,41 @@ async function verifyKeywordsWithSycm(candidates, options = {}) {
   const {
     port = 9222,
     delay = 5000,
-    filterCriteria = {},
+    maxCandidates,
     onProgress = (msg) => console.log(`[SYCM] ${msg}`)
   } = options;
 
-  // 规范化筛选标准：将百分比值转换为小数
-  const normalizeFilterValue = (key, value) => {
-    if (key === 'tmallClickShare' && typeof value === 'number' && value >= 1) {
-      return value / 100; // 百分比转换为小数
-    }
-    return value;
-  };
-
-  const normalizedFilterCriteria = Object.fromEntries(
-    Object.entries(filterCriteria).map(([key, value]) => [key, normalizeFilterValue(key, value)])
-  );
-
-  // 默认筛选标准
-  const criteria = {
-    searchPopularity: 50,
-    minConversionRate: 0.05,
-    maxConversionRate: 0.15,
-    tmallClickShare: 0.65, // 65% 转换为小数
-    demandSupplyRatio: 1,
-    ...normalizedFilterCriteria
-  };
-
   // 检查 Chrome DevTools 是否可用
-  const { isChromeDevToolsAvailable, generateChromeLaunchCommand } = require('./sycm-browser-helper');
+  const { isChromeDevToolsAvailable, autoLaunchChrome } = require('./sycm-browser-helper');
   const { extractSycmData } = require('./sycm-cdp-extractor');
 
-  const chromeAvailable = await isChromeDevToolsAvailable(port);
-  if (!chromeAvailable) {
-    const launchCmd = generateChromeLaunchCommand({ port }).command;
-    return {
-      ok: false,
-      error: 'Chrome DevTools 未启动，请先启动 Chrome 调试模式',
-      chromeLaunchCmd: launchCmd,
-      keywords: [],
-      verified: 0,
-      failed: candidates.length,
-      errors: []
-    };
+  if (!await isChromeDevToolsAvailable(port)) {
+    const launchResult = await autoLaunchChrome(port);
+    if (!launchResult.success) {
+      return {
+        ok: false,
+        error: launchResult.message,
+        keywords: [],
+        verified: 0,
+        failed: candidates.length,
+        errors: []
+      };
+    }
   }
 
-  const keywords = [];
+  const keywordMap = new Map(); // 用于去重，key是normalize后的关键词，value是完整对象
   const errors = [];
-  let verified = 0;
   let failed = 0;
 
   for (let i = 0; i < candidates.length; i++) {
     const candidate = candidates[i];
     onProgress(`正在验证关键词 (${i + 1}/${candidates.length}): ${candidate}`);
+    let foundForCandidate = false;
 
     try {
       // 调用 SYCM 数据提取
       const result = await extractSycmData(candidate, {
-        mode: 'blue',
+        mode: 'hot',
         port,
         onProgress: (msg) => onProgress(`[SYCM ${candidate}] ${msg}`)
       });
@@ -364,7 +479,7 @@ async function verifyKeywordsWithSycm(candidates, options = {}) {
         throw new Error('SYCM 返回数据格式无效');
       }
 
-      // 筛选符合蓝海条件的数据行
+      // 筛选符合条件的数据行
       for (const item of result.data) {
         // 解析数值字段
         const searchPopularity = typeof item.searchPopularity === 'number' ? item.searchPopularity : parseSycmValue(item.searchPopularity);
@@ -372,27 +487,32 @@ async function verifyKeywordsWithSycm(candidates, options = {}) {
         const tmallClickShare = typeof item.tmallClickShare === 'number' ? item.tmallClickShare : parseSycmValue(item.tmallClickShare);
         const demandSupplyRatio = typeof item.demandSupplyRatio === 'number' ? item.demandSupplyRatio : parseSycmValue(item.demandSupplyRatio);
         const clickRate = typeof item.clickRate === 'number' ? item.clickRate : parseSycmValue(item.clickRate);
+        const keyword = item.keyword || candidate;
+        const normalizedKeyword = normalizeKeyword(keyword);
 
         // 应用筛选条件
-        if (
-          searchPopularity >= criteria.searchPopularity &&
-          conversionRate >= criteria.minConversionRate &&
-          conversionRate <= criteria.maxConversionRate &&
-          tmallClickShare < criteria.tmallClickShare &&
-          demandSupplyRatio >= criteria.demandSupplyRatio
-        ) {
-          keywords.push({
-            keyword: item.keyword || candidate,
+        if (searchPopularity >= 20) {
+          foundForCandidate = true;
+          const keywordObj = {
+            keyword,
             searchPopularity,
             clickRate,
             conversionRate,
             demandSupplyRatio,
-            tmallClickShare
-          });
-          verified++;
-        } else {
-          failed++;
+            tmallClickShare,
+            source: candidate
+          };
+
+          // 去重：如果已存在，保留搜索热度更高的那个
+          const existing = keywordMap.get(normalizedKeyword);
+          if (!existing || searchPopularity > existing.searchPopularity) {
+            keywordMap.set(normalizedKeyword, keywordObj);
+          }
         }
+      }
+
+      if (!foundForCandidate) {
+        failed++;
       }
 
     } catch (error) {
@@ -410,6 +530,17 @@ async function verifyKeywordsWithSycm(candidates, options = {}) {
     }
   }
 
+  // 将 Map 转换为数组并按 searchPopularity 降序排序
+  let keywords = Array.from(keywordMap.values())
+    .sort((a, b) => b.searchPopularity - a.searchPopularity);
+
+  // 应用 maxCandidates 限制
+  if (maxCandidates && maxCandidates > 0) {
+    keywords = keywords.slice(0, maxCandidates);
+  }
+
+  const verified = keywords.length;
+
   // 构建返回结果
   const result = {
     ok: true,
@@ -421,7 +552,7 @@ async function verifyKeywordsWithSycm(candidates, options = {}) {
 
   // 添加提示信息
   if (verified === 0) {
-    result.message = '未找到符合蓝海条件的关键词';
+    result.message = '未找到有搜索热度的相关词';
   } else if (failed > 0) {
     result.message = `${failed}个关键词验证失败，已返回已验证结果`;
   }
@@ -446,6 +577,28 @@ async function suggestAndVerify(options) {
       failed: 0,
       errors: [],
       message: 'GLM未返回有效候选词'
+    };
+  }
+
+  // 默认跳过 SYCM 验证，除非显式开启
+  const skipSycm = options.skipSycm !== false;
+
+  if (skipSycm) {
+    return {
+      ok: true,
+      keywords: candidates.map(c => ({
+        keyword: c.keyword || c,
+        searchPopularity: c.searchPopularity || null,
+        clickRate: c.clickRate || null,
+        conversionRate: c.conversionRate || null,
+        demandSupplyRatio: c.demandSupplyRatio || null,
+        tmallClickShare: c.tmallClickShare || null,
+        source: 'ai_suggest'
+      })),
+      verified: candidates.length,
+      failed: 0,
+      errors: [],
+      message: '已跳过 SYCM 验证，仅返回 AI 推荐候选词'
     };
   }
 

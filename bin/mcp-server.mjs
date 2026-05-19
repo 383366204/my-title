@@ -781,8 +781,9 @@ server.tool(
     keyword: z.string().optional().describe('手动指定蓝海词/关键词（标题前缀），不传则自动从同行标题提取'),
     length: z.number().default(60).describe('标题最大字符数，默认60'),
     task_id: z.string().optional().describe('查询任务结果时传入（不需要传 url）'),
+    image_url: z.string().optional().describe('商品主图 URL（可选，传入后跳过 1688 搜索获取图片，提高搜图准确性）'),
   },
-  async ({ url, keyword, length, task_id }) => {
+  async ({ url, keyword, length, task_id, image_url }) => {
     // 轮询模式
     if (task_id) {
       const task = tasks.get(task_id);
@@ -818,8 +819,13 @@ server.tool(
 
     console.error(`[my-title] image task ${id} started: url="${url}"`);
 
-    runFromImage(url, { maxLength: length || 60, silent: true, keyword: keyword || '' })
+    runFromImage(url, { maxLength: length || 60, silent: true, keyword: keyword || '', image_url: image_url || '' })
       .then(result => {
+        if (!result.ok) {
+          console.error(`[my-title] image task ${id} failed:`, result.error || 'unknown error', result.step || '');
+          tasks.set(id, { status: 'error', createdAt: Date.now(), error: result.error || '未知错误' });
+          return;
+        }
         console.error(`[my-title] image task ${id} done: ${result.titles?.length || 0} titles`);
         tasks.set(id, {
           status: 'done',
@@ -1062,20 +1068,19 @@ server.tool(
   },
   async ({ keyword, port, maxPages, mode, compareType, timePeriod, filterConditions, noDefaultFilters }) => {
     try {
-      const { isChromeDevToolsAvailable, generateChromeLaunchCommand, ERRORS } = require('../src/sycm-browser-helper.js');
+      const { isChromeDevToolsAvailable, autoLaunchChrome, ERRORS } = require('../src/sycm-browser-helper.js');
       const { extractSycmData, DEFAULT_FILTER_CONDITIONS } = require('../src/sycm-cdp-extractor.js');
 
-      const chromeAvailable = await isChromeDevToolsAvailable(port);
-      
-      if (!chromeAvailable) {
-        const launchCmd = generateChromeLaunchCommand({ port });
-        return { content: [{ type: 'text', text: JSON.stringify({
-          ok: false,
-          status: 'chrome_not_running',
-          chromeLaunchCmd: launchCmd.command,
-          message: ERRORS.CHROME_NOT_RUNNING.trim(),
-          hint: '请让用户先用上述命令启动 Chrome（注意保留 --user-data-dir 以复用登录态），然后重新调用此工具。'
-        }, null, 2) }] };
+      if (!await isChromeDevToolsAvailable(port)) {
+        const launchResult = await autoLaunchChrome(port);
+        if (!launchResult.success) {
+          return { content: [{ type: 'text', text: JSON.stringify({
+            ok: false,
+            status: 'chrome_launch_failed',
+            message: launchResult.message,
+            hint: '请确认 Chrome 已安装，然后重新调用此工具。'
+          }, null, 2) }] };
+        }
       }
 
       var progressLog = [];
@@ -1202,26 +1207,34 @@ server.tool(
 server.tool(
   'suggest_keywords',
   [
-    '自动选词工具。根据策略(crowd/scene/season/problem/industry)通过 GLM AI 推荐候选关键词，然后通过生意参谋 SYCM 自动验证筛选，返回蓝海词列表。',
+    '自动选词工具。根据策略(crowd/scene/season/holiday/problem/industry/gift/cross/guochao/trend/niche/emotion/price)通过 GLM AI 推荐候选关键词，返回蓝海词列表。默认不进行生意参谋验证，设置 sycm_verify=true 可启用验证。',
     '',
     '策略说明:',
     '- crowd: 人群选词（如"宝妈"、"大学生"）',
     '- scene: 场景选词（如"办公室"、"露营"）',
     '- season: 季节选词（自动检测当前月份，推荐应季品类）',
+    '- holiday: 节日选词（自动检测最近节日，推荐节日营销词）',
     '- problem: 痛点选词（如"腰酸背痛"、"收纳困难"）',
     '- industry: 行业选词（如"程序员"、"摄影师"）',
+    '- gift: 送礼选词（如"送闺蜜"、"送领导"）',
+    '- cross: 跨界选词（如"宠物+旅行"，用+号连接两个品类）',
+    '- guochao: 国潮选词（中国风+现代品类结合）',
+    '- trend: 趋势选词（集成1688热榜数据，推荐上升品类）',
+    '- niche: 细分选词（从大品类挖掘冷门长尾词）',
+    '- emotion: 情绪选词（按消费心理选品，如"解压"、"仪式感"）',
+    '- price: 价格带选词（按预算区间选品，如"百元以内"）',
     '',
-    '使用前提：Chrome需以调试模式运行并已登录 sycm.taobao.com。',
-    '每个关键词 SYCM 验证约 30-60 秒，5 个候选词约需 3-5 分钟。'
+    '默认仅返回 AI 推荐候选词（快速）。设置 sycm_verify=true 启用生意参谋验证（需要 Chrome 调试模式，每个词约 30-60 秒）。'
   ].join('\n'),
   {
-    strategy: z.enum(['crowd', 'scene', 'season', 'problem', 'industry']).describe('选词策略'),
-    input: z.string().optional().describe('策略输入（人群/场景/痛点/行业描述，season 策略可省略）'),
+    strategy: z.enum(['crowd', 'scene', 'season', 'problem', 'industry', 'holiday', 'gift', 'cross', 'guochao', 'trend', 'niche', 'emotion', 'price']).describe('选词策略'),
+    input: z.string().optional().describe('策略输入（人群/场景/痛点/行业/送礼对象/跨界品类/预算区间描述，season 策略可省略）'),
     max_candidates: z.number().default(5).describe('GLM 最大候选词数量（1-10，默认 5）'),
     task_id: z.string().optional().describe('查询任务结果时传入（不需要传 strategy）'),
     port: z.number().default(9222).describe('Chrome 远程调试端口'),
+    sycm_verify: z.boolean().default(false).describe('是否启用生意参谋 SYCM 验证（默认关闭，仅返回 AI 推荐候选词）'),
   },
-  async ({ strategy, input, max_candidates, task_id, port }) => {
+  async ({ strategy, input, max_candidates, task_id, port, sycm_verify }) => {
     // 1. Task polling mode
     if (task_id) {
       const task = tasks.get(task_id);
@@ -1271,6 +1284,7 @@ server.tool(
       input: input || '',
       maxCandidates: parseInt(max_candidates) || 5,
       port: port || 9222,
+      skipSycm: !sycm_verify,
       onProgress: (msg) => {
         const task = tasks.get(id);
         if (task) {

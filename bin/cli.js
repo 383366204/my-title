@@ -25,10 +25,11 @@ program
   .option('--sycm-auto', '自动查询生意参谋蓝海数据（需要Chrome在调试模式运行）')
   .option('--keyword-file <path>', '加载生意参谋搜索分析数据文件')
   .option('--keywords <keywords>', '批量关键词模式（逗号分隔，如 "纯银项链女,925银手链"）')
-  .option('--suggest', '自动选词模式：GLM推荐候选词 → SYCM验证 → 输出蓝海词列表')
+  .option('--suggest', '自动选词模式：GLM推荐候选词 → 输出蓝海词列表')
   .option('--strategy <type>', '选词策略：crowd(人群) | scene(场景) | season(季节) | problem(痛点) | industry(行业)', 'season')
   .option('--input <text>', '策略输入（人群/场景/痛点/行业描述，season策略可省略）')
   .option('--max-candidates <number>', 'GLM最大候选词数量', '5')
+  .option('--sycm-verify', '启用生意参谋 SYCM 验证（默认关闭）')
   .action(async (keywords, options) => {
     const jsonMode = !!options.json;
     const origLog = console.log;
@@ -126,6 +127,7 @@ program
           strategy,
           input,
           maxCandidates: parseInt(options.maxCandidates) || 5,
+          skipSycm: !options.sycmVerify,
           onProgress: (msg) => {
             if (!jsonMode) console.log(`  ${msg}`);
           }
@@ -539,16 +541,25 @@ program
     const maxPages = parseInt(options.pages) || 1;
       const mode = options.mode || 'hot';
       
-      const { isChromeDevToolsAvailable, generateChromeLaunchCommand, ERRORS } = require('../src/sycm-browser-helper');
-      const { extractSycmData, DEFAULT_FILTER_CONDITIONS, VALID_COMPARE_TYPES, VALID_PERIODS, DEFAULT_PAGE_FILTERS } = require('../src/sycm-cdp-extractor');
+      const { isChromeDevToolsAvailable, autoLaunchChrome } = require('../src/sycm-browser-helper');
       
-      // 解析页面级筛选参数（环比/年同比 + 时间周期）
-      let userCompare = options.compare || DEFAULT_PAGE_FILTERS.compareType;
-      let userPeriod = options.period || DEFAULT_PAGE_FILTERS.timePeriod;
-      
-      if (!VALID_COMPARE_TYPES.includes(userCompare)) {
-        console.error('错误: 无效的 --compare 值 "' + userCompare + '", 有效选项: ' + VALID_COMPARE_TYPES.join(', '));
-        process.exit(1);
+      if (!await isChromeDevToolsAvailable(port)) {
+        console.error('⏳ Chrome 未运行，正在自动启动...');
+        const launchResult = await autoLaunchChrome(port);
+        if (!launchResult.success) {
+          if (jsonMode) {
+            process.stdout.write(JSON.stringify({
+              ok: false,
+              status: 'chrome_launch_failed',
+              message: launchResult.message,
+            }, null, 2) + '\n');
+            return;
+          } else {
+            console.error('\n❌ ' + launchResult.message);
+            process.exit(1);
+          }
+        }
+        console.error('✅ ' + launchResult.message);
       }
       if (!VALID_PERIODS.includes(userPeriod)) {
         console.error('错误: 无效的 --period 值 "' + userPeriod + '", 有效选项: ' + VALID_PERIODS.join(', '));
