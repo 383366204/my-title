@@ -23,9 +23,9 @@ function checkBannedWords(title) {
     return { valid: true, words: [] };
   }
   const found = [];
-  Object.values(bannedWords).flat().forEach(word => {
+  for (const word of allBanned) {
     if (title.includes(word)) found.push(word);
-  });
+  }
   return { valid: found.length === 0, words: found };
 }
 

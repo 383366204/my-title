@@ -638,8 +638,8 @@ async function _ensureSycmLoggedIn(cdp, onProgress) {
   }
   await new Promise(function(r) { setTimeout(r, 1000); });
 
-  var safeUser = username.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-  var safePwd = password.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  var safeUser = JSON.stringify(username);
+  var safePwd = JSON.stringify(password);
 
   var fillUser = await cdp.runAction(
     "(() => { var inputs = document.querySelectorAll('input'); " +
@@ -649,7 +649,7 @@ async function _ensureSycmLoggedIn(cdp, onProgress) {
     "  if (tp === 'text' || tp === 'tel' || ph.includes('手机') || ph.includes('账号') || ph.includes('邮箱') || ph.includes('会员名')) { " +
     "    inputs[i].focus(); " +
     "    var s = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set; " +
-    "    s.call(inputs[i], '" + safeUser + "'); " +
+    "    s.call(inputs[i], " + safeUser + "); " +
     "    inputs[i].dispatchEvent(new Event('input', { bubbles: true })); " +
     "    inputs[i].dispatchEvent(new Event('change', { bubbles: true })); " +
     "    return 'ok'; " +
@@ -666,7 +666,7 @@ async function _ensureSycmLoggedIn(cdp, onProgress) {
     "if (inputs.length === 0) return 'not_found'; " +
     "var inp = inputs[0]; inp.focus(); " +
     "var s = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set; " +
-    "s.call(inp, '" + safePwd + "'); " +
+    "s.call(inp, " + safePwd + "); " +
     "inp.dispatchEvent(new Event('input', { bubbles: true })); " +
     "inp.dispatchEvent(new Event('change', { bubbles: true })); " +
     "return 'ok'; })()",

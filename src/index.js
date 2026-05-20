@@ -772,7 +772,7 @@ if (sycmAuto === true) {
   let sycmParsedData = [];
   if (finalSycmData) {
     try {
-      const titlesForAnalysis = (taobaoTitles && taobaoTitles.length > 0) ? taobaoTitles : peerTitles;
+      const titlesForAnalysis = (finalTaobaoTitles && finalTaobaoTitles.length > 0) ? finalTaobaoTitles : peerTitles;
       const productTitles = products.map(p => p.title || '');
       const topKeys = analyzePeerTitles(titlesForAnalysis, productTitles);
       sycmParsedData = parseSycmData(finalSycmData);
@@ -906,8 +906,8 @@ async function runFromImage(url, options = {}) {
     const client = new Alibaba1688Client(apiKey);
     const detail = await client.getOfferDetail(offerId);
     
-    // 步骤 3: 提取主图和标题
-    log('🖼️ 第三步：提取主图和原标题...');
+    // 步骤 2.5: 提取标题
+    log('🖼️ 提取商品标题...');
     
     // offer_detail API 返回格式: detail.model.bizData[offerId].all_info (Markdown字符串)
     const bizData = detail.model?.bizData?.[offerId];

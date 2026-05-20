@@ -539,89 +539,73 @@ program
     const jsonMode = !!options.json || !!mainOpts.json;
     const port = parseInt(options.port) || 9222;
     const maxPages = parseInt(options.pages) || 1;
-      const mode = options.mode || 'hot';
-      
-      const { isChromeDevToolsAvailable, autoLaunchChrome } = require('../src/sycm-browser-helper');
-      
-      if (!await isChromeDevToolsAvailable(port)) {
-        console.error('⏳ Chrome 未运行，正在自动启动...');
-        const launchResult = await autoLaunchChrome(port);
-        if (!launchResult.success) {
-          if (jsonMode) {
-            process.stdout.write(JSON.stringify({
-              ok: false,
-              status: 'chrome_launch_failed',
-              message: launchResult.message,
-            }, null, 2) + '\n');
-            return;
-          } else {
-            console.error('\n❌ ' + launchResult.message);
-            process.exit(1);
-          }
-        }
-        console.error('✅ ' + launchResult.message);
-      }
-      if (!VALID_PERIODS.includes(userPeriod)) {
-        console.error('错误: 无效的 --period 值 "' + userPeriod + '", 有效选项: ' + VALID_PERIODS.join(', '));
-        process.exit(1);
-      }
-      
-      // 解析过滤条件
-      let filterConditions = null;
-      if (mode === 'blue') {
-        const userFilters = {};
-        if (options.filter) {
-          options.filter.split(',').forEach(function(pair) {
-            const parts = pair.split('=');
-            if (parts.length === 2) {
-              const key = parts[0].trim();
-              const val = parseFloat(parts[1].trim());
-              if (!isNaN(val)) userFilters[key] = val;
-            }
-          });
-        }
-        if (options.defaultFilters !== false) {
-          filterConditions = Object.assign({}, DEFAULT_FILTER_CONDITIONS, userFilters);
-        } else if (Object.keys(userFilters).length > 0) {
-          filterConditions = userFilters;
-        }
-      }
+    const mode = options.mode || 'blue';
     
-    try {
+    const { isChromeDevToolsAvailable, autoLaunchChrome, ERRORS } = require('../src/sycm-browser-helper');
+    const { extractSycmData, DEFAULT_FILTER_CONDITIONS, VALID_COMPARE_TYPES, VALID_PERIODS, DEFAULT_PAGE_FILTERS } = require('../src/sycm-cdp-extractor');
 
-      // 步骤1：检测 Chrome 是否在调试模式运行
-      const chromeAvailable = await isChromeDevToolsAvailable(port);
-      
-      if (!chromeAvailable) {
-        const launchCmd = generateChromeLaunchCommand({ port });
+    let userCompare = options.compare || DEFAULT_PAGE_FILTERS.compareType;
+    let userPeriod = options.period || DEFAULT_PAGE_FILTERS.timePeriod;
+    
+    if (!VALID_COMPARE_TYPES.includes(userCompare)) {
+      console.error('错误: 无效的 --compare 值 "' + userCompare + '", 有效选项: ' + VALID_COMPARE_TYPES.join(', '));
+      process.exit(1);
+    }
+    if (!VALID_PERIODS.includes(userPeriod)) {
+      console.error('错误: 无效的 --period 值 "' + userPeriod + '", 有效选项: ' + VALID_PERIODS.join(', '));
+      process.exit(1);
+    }
+    
+    // 解析过滤条件
+    let filterConditions = null;
+    if (mode === 'blue') {
+      const userFilters = {};
+      if (options.filter) {
+        options.filter.split(',').forEach(function(pair) {
+          const parts = pair.split('=');
+          if (parts.length === 2) {
+            const key = parts[0].trim();
+            const val = parseFloat(parts[1].trim());
+            if (!isNaN(val)) userFilters[key] = val;
+          }
+        });
+      }
+      if (options.defaultFilters !== false) {
+        filterConditions = Object.assign({}, DEFAULT_FILTER_CONDITIONS, userFilters);
+      } else if (Object.keys(userFilters).length > 0) {
+        filterConditions = userFilters;
+      }
+    }
+
+    if (!await isChromeDevToolsAvailable(port)) {
+      console.error('⏳ Chrome 未运行，正在自动启动...');
+      const launchResult = await autoLaunchChrome(port);
+      if (!launchResult.success) {
         if (jsonMode) {
           process.stdout.write(JSON.stringify({
             ok: false,
-            status: 'chrome_not_running',
-            chromeLaunchCmd: launchCmd.command,
-            message: ERRORS.CHROME_NOT_RUNNING.trim(),
-            hint: '请先用上述命令启动 Chrome，然后重新运行此命令'
+            status: 'chrome_launch_failed',
+            message: launchResult.message,
           }, null, 2) + '\n');
           return;
         } else {
-          console.error('\n❌ Chrome 未运行调试模式');
-          console.error('\n请先用以下命令启动 Chrome：');
-          console.error(`  ${launchCmd.command}`);
-          console.error('\n启动后重新运行此命令即可。');
+          console.error('\n❌ ' + launchResult.message);
           process.exit(1);
         }
       }
+      console.error('✅ ' + launchResult.message);
+    }
 
-        // 步骤2：通过 CDP 直接提取数据
-        const progressMsgs = [];
-        const result = await extractSycmData(keyword, {
-          port: port,
-          maxPages: maxPages,
-          mode: mode,
-          filterConditions: filterConditions,
-          pageFilters: { compareType: userCompare, timePeriod: userPeriod },
-          onProgress: function(msg) { progressMsgs.push(msg); if (!jsonMode) console.log('  ' + msg); }
-        });
+    try {
+      const progressMsgs = [];
+      const result = await extractSycmData(keyword, {
+        port: port,
+        maxPages: maxPages,
+        mode: mode,
+        filterConditions: filterConditions,
+        pageFilters: { compareType: userCompare, timePeriod: userPeriod },
+        onProgress: function(msg) { progressMsgs.push(msg); if (!jsonMode) console.log('  ' + msg); }
+      });
 
        if (jsonMode) {
          process.stdout.write(JSON.stringify({

@@ -58,10 +58,12 @@ class ResultCache {
       }
       const filePath = this._path(this._key(keyword, maxLength, limit, peerTitlesHash, sycmDataHash, useImageSearch, maxImageSearch, minPrice, maxPrice, bannedWordVersion, schemaVersion, promptVersion));
       fs.writeFileSync(filePath, JSON.stringify(result), 'utf8');
-      // 随机触发过期清理（10% 概率）
       if (Math.random() < 0.1) this._cleanExpired();
-    } catch {
-      // cache write failure is non-critical
+    } catch (err) {
+      if (!this._warnedWriteFailure) {
+        this._warnedWriteFailure = true;
+        console.warn('[cache] 写入缓存失败（非致命）:', err.message);
+      }
     }
   }
 

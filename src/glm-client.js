@@ -35,22 +35,17 @@ class GLMClient {
   // Deprecated: use selectAndGenerate() instead. This method remains for compatibility.
   /**
    * 构造函数
-   * @param {object} config - 配置
-   * @param {string} config.apiKey - GLM API Key
-   * @param {string} [config.apiBase] - API 基础地址
-   * @param {string} [config.model] - 模型名称
+   * @param {object} [config] - 配置（可选，不传则从环境变量读取）
    */
-  constructor(config) {
-    // 优先使用火山引擎方舟（付费模型，质量更高）
+  constructor(config = {}) {
     if (process.env.VOLC_API_KEY) {
       this.apiKey = process.env.VOLC_API_KEY;
       this.apiBase = process.env.VOLC_API_BASE || 'https://ark.cn-beijing.volces.com/api/coding/v3';
-      // doubao-seed-2-0-lite: 比 glm-5.1 快 20%+，且返回有效结果（glm-5.1 selectAndGenerate 返回空）
       this.model = config.model || 'doubao-seed-2-0-lite-260428';
     } else {
-      this.apiKey = config.apiKey;
-      this.apiBase = config.apiBase || 'https://open.bigmodel.cn/api/paas/v4';
-      this.model = config.model || 'glm-4-flash';
+      this.apiKey = config.apiKey || process.env.GLM_API_KEY;
+      this.apiBase = config.apiBase || process.env.GLM_API_BASE || 'https://open.bigmodel.cn/api/paas/v4';
+      this.model = config.model || process.env.GLM_API_MODEL || 'glm-4-flash';
     }
     // 火山引擎 doubao-lite 响应更快，超时适当缩短
     this._timeout = this.apiBase.includes('volces.com') ? 30000 : 15000;

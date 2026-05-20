@@ -397,26 +397,16 @@ async function suggestKeywords(options) {
  */
 function parseSycmValue(value) {
   if (typeof value === 'string') {
-    // 去除空格，检查是否以百分号结尾
     const trimmed = value.trim();
     if (trimmed.endsWith('%')) {
       return parseFloat(trimmed) / 100;
     }
-    // 可能是纯数字字符串
     const parsed = parseFloat(trimmed);
     if (!isNaN(parsed)) {
-      // 如果数字大于等于1，假设是百分比（例如 5.2 表示 5.2%）
-      if (parsed >= 1) {
-        return parsed / 100;
-      }
       return parsed;
     }
     return 0;
   } else if (typeof value === 'number') {
-    // 如果数字大于等于1，假设是百分比（例如 5.2 表示 5.2%）
-    if (value >= 1) {
-      return value / 100;
-    }
     return value;
   }
   return 0;
