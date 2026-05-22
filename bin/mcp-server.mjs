@@ -14,7 +14,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
 
-const { run, runFromImage } = require('../src/index.js');
+const { run } = require('../src/index.js');
 const { getRateLimiter, RateLimitError } = require('../src/rate-limiter.js');
 
 const TASK_TTL = 30 * 60 * 1000; // 30 minutes
@@ -773,104 +773,7 @@ server.tool(
   }
 );
 
-server.tool(
-  'generate_title_from_image',
-  '通过 1688 商品链接，自动获取主图并以图搜图生成铺货标题',
-  {
-    url: z.string().optional().describe('1688商品详情页链接，如：https://detail.1688.com/offer/123456.html'),
-    keyword: z.string().optional().describe('手动指定蓝海词/关键词（标题前缀），不传则自动从同行标题提取'),
-    length: z.number().default(60).describe('标题最大字符数，默认60'),
-    task_id: z.string().optional().describe('查询任务结果时传入（不需要传 url）'),
-    image_url: z.string().optional().describe('商品主图 URL（可选，传入后跳过 1688 搜索获取图片，提高搜图准确性）'),
-  },
-  async ({ url, keyword, length, task_id, image_url }) => {
-    // 轮询模式
-    if (task_id) {
-      const task = tasks.get(task_id);
-      if (!task) {
-        return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: 'task_id 不存在' }) }], isError: true };
-      }
-      // Check if task has expired
-      if (task.createdAt && Date.now() - task.createdAt > TASK_TTL) {
-        tasks.delete(task_id);
-        return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: 'task_id 不存在' }) }], isError: true };
-      }
-      if (task.status === 'processing') {
-        return { content: [{ type: 'text', text: JSON.stringify({ ok: true, status: 'processing', task_id, message: '仍在处理中' }) }] };
-      }
-      if (task.status === 'done') {
-        const result = task.result;
-        tasks.delete(task_id);
-        return { content: [{ type: 'text', text: JSON.stringify(result) }] };
-      }
-      if (task.status === 'error') {
-        const err = task.error;
-        tasks.delete(task_id);
-        return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: err }) }], isError: true };
-      }
-    }
 
-    if (!url) {
-      return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: '首次调用必须传 url' }) }], isError: true };
-    }
-
-    const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-    tasks.set(id, { status: 'processing', createdAt: Date.now() });
-
-    console.error(`[my-title] image task ${id} started: url="${url}"`);
-
-    runFromImage(url, { maxLength: length || 60, silent: true, keyword: keyword || '', image_url: image_url || '' })
-      .then(result => {
-        if (!result.ok) {
-          console.error(`[my-title] image task ${id} failed:`, result.error || 'unknown error', result.step || '');
-          tasks.set(id, { status: 'error', createdAt: Date.now(), error: result.error || '未知错误' });
-          return;
-        }
-        console.error(`[my-title] image task ${id} done: ${result.titles?.length || 0} titles`);
-        tasks.set(id, {
-          status: 'done',
-          createdAt: Date.now(),
-          result: {
-            ok: true,
-            sourceUrl: result.sourceUrl,
-            imageUrl: result.imageUrl,
-            originalTitle: result.originalTitle,
-            coreWord: result.coreWord,
-            blueOceanWord: result.blueOceanWord,
-            titles: result.titles,
-            peerTitles: result.peerTitles,
-            peerSource: result.peerSource,
-            stats: result.stats,
-          },
-        });
-      })
-      .catch(err => {
-        if (err.name === 'RateLimitError') {
-          tasks.set(id, {
-            status: 'done',
-            createdAt: Date.now(),
-            result: {
-              ok: true,
-              status: 'rate_limited',
-              retry_after_seconds: Math.ceil(err.cooldownRemainingMs / 1000),
-              cooldown: true,
-              message: `1688 API 冷却中，预计 ${Math.ceil(err.cooldownRemainingMs / 1000)} 秒后恢复`,
-            },
-          });
-          return;
-        }
-        console.error(`[my-title] image task ${id} failed:`, err.message);
-        tasks.set(id, { status: 'error', createdAt: Date.now(), error: err.message });
-      });
-
-    return {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({ ok: true, status: 'processing', task_id: id, message: `已开始处理，请用 task_id="${id}" 查询结果` }),
-      }],
-    };
-  }
-);
 
 server.tool(
   'opportunities',
