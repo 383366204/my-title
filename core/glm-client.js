@@ -168,7 +168,7 @@ synonyms 每组最多10个，只列最常见的变体
    * @returns {Promise<{coreWord: string, blueOceanWord: string, modifiers: Array<{word: string, rigidity: 'rigid'|'optional', group: string, synonyms: string[]}>, semanticGroups: {[group: string]: string[]}}>}
    */
   async extractKeywordsFromPeers(peerTitles) {
-    const { RIGIDITY_RULES_TEXT } = require('../core/constants');
+    const { RIGIDITY_RULES_TEXT } = require('./constants');
 
     const systemPrompt = `你是一个电商标题分析专家。请分析以下同行标题数组，提取：
 
