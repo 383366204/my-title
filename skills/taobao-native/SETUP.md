@@ -10,11 +10,14 @@
 
 ```
 my-title/
-├── taobao-native/              # taobao-native skill 文档（本地可用）
-│   ├── SKILL.md               # 完整功能文档
-│   └── references/
-│       └── install-download.md # 安装参考
-├── src/search-taobao.js       # 淘宝搜索模块（已配置）
+├── skills/
+│   ├── taobao-native/          # taobao-native skill 文档（本地可用）
+│   │   ├── SKILL.md           # 完整功能文档
+│   │   └── references/
+│   │       └── install-download.md # 安装参考
+│   └── title-gen/
+│       └── src/
+│           └── search-taobao.js   # 淘宝搜索模块（已配置）
 └── ...
 ```
 
@@ -57,7 +60,7 @@ CLI 工具已安装在系统中：
 
 ```bash
 # 阅读完整文档
-cat taobao-native/SKILL.md
+cat skills/taobao-native/SKILL.md
 
 # 或查看特定工具帮助
 cmd.exe /c "C:\\Users\\%USERNAME%\\AppData\\Local\\Programs\\taobao\\bin\\taobao-native.cmd --help"
@@ -127,14 +130,14 @@ node bin/cli.js "纯银项链女高级感" \
 
 | 文件 | 说明 |
 |------|------|
-| `taobao-native/SKILL.md` | 完整功能文档（本地） |
-| `src/search-taobao.js` | 淘宝搜索模块实现 |
+| `skills/taobao-native/SKILL.md` | 完整功能文档（本地） |
+| `skills/title-gen/src/search-taobao.js` | 淘宝搜索模块实现 |
 | `bin/cli.js` | CLI 入口（支持 `--peer-titles`） |
-| `setup-taobao.sh` | 环境检查脚本 |
+| `skills/taobao-native/setup.sh` | 环境检查脚本 |
 
 ## 需要帮助?
 
-1. 查看本地文档：`cat taobao-native/SKILL.md`
+1. 查看本地文档：`cat skills/taobao-native/SKILL.md`
 2. 测试 CLI：`cmd.exe /c "taobao-native --help"`
 3. 检查日志：`ls /mnt/c/Users/38336/AppData/Roaming/taobao/logs/`
 

@@ -2,7 +2,7 @@
   "name": "my-title",
   "version": "1.0.0",
   "description": "电商选品标题生成工具 - 关键词 → GLM提取 → 1688搜索 → 相关性过滤 → 生成淘宝标题",
-  "main": "src/index.js",
+  "main": "skills/title-gen/src/index.js",
   "bin": {
     "my-title": "bin/cli.js"
   },
