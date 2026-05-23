@@ -35,7 +35,7 @@ async function searchTaobaoTitles(keyword, options = {}) {
     console.error(`🔍 搜索关键词: ${keyword}`);
     
     // 调用 taobao-native 搜索商品
-    const args = JSON.stringify({ keyword, sourceApp: 'my-title' });
+    const args = JSON.stringify({ keyword, sourceApp: 'ecom-ai-tools' });
     const result = execFileSync('/mnt/c/Windows/System32/cmd.exe', ['/c', winPath, 'search_products', '--args', args], {
       encoding: 'utf8',
       timeout: timeout,

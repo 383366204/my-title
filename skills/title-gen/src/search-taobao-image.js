@@ -281,7 +281,7 @@ async function imageSearchSingle(imageUrl, productId, options = {}) {
     // 将参数写入文件，完全避免 shell 转义问题
     const requestPayload = {
       tool: 'image_search',
-      arguments: { imagePath: imageUrl, sourceApp: 'my-title' }
+      arguments: { imagePath: imageUrl, sourceApp: 'ecom-ai-tools' }
     };
     fs.writeFileSync(reqFile, JSON.stringify(requestPayload), 'utf8');
 

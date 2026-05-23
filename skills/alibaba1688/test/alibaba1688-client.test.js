@@ -1,6 +1,6 @@
 const { test, afterEach } = require('node:test');
 const assert = require('assert');
-const Alibaba1688Client = require('../../../core/alibaba1688-client');
+const Alibaba1688Client = require('../src/client');
 const mock = require('./helpers/mock-data');
 let axios = require('axios');
 

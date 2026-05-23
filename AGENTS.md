@@ -1,7 +1,7 @@
 # 项目知识库
 
 **更新日期:** 2026-05-23
-**项目名称:** my-title
+**项目名称:** ecom-ai-tools
 **技术栈:** Node.js (JavaScript)
 
 ---
@@ -20,10 +20,8 @@ my-title/
 │   └── mcp-server.mjs      # MCP Server 入口（stdio + HTTP）— 编排层
 ├── core/                   # 共享基础层
 │   ├── glm-client.js       # GLM API 客户端
-│   ├── alibaba1688-client.js # 1688 API 客户端
 │   ├── llm-utils.js        # LLM 输出解析与重试
 │   ├── banned-words.js     # 违禁词过滤
-│   ├── rate-limiter.js     # API 限流
 │   ├── constants.js        # 共享常量（刚性规则文本等）
 │   ├── log.js              # 日志
 │   └── types.js            # 类型定义
@@ -33,9 +31,10 @@ my-title/
 │   │   ├── index.js        # 公共接口
 │   │   ├── mcp-server.mjs  # 独立 MCP 入口
 │   │   ├── src/
-│   │   │   ├── client.js   # 1688 API 客户端类
+│   │   │   ├── client.js       # 1688 API 客户端类
+│   │   │   ├── rate-limiter.js # API 限流
 │   │   │   ├── search-1688.js  # 搜索 + 评分 + 过滤
-│   │   │   ├── insights.js # 热榜 + 趋势
+│   │   │   ├── insights.js     # 热榜 + 趋势
 │   │   │   └── score-local.js  # 本地评分算法
 │   │   └── test/
 │   ├── sycm-research/      # Skill: 生意参谋数据提取
@@ -74,7 +73,7 @@ my-title/
 ```json
 {
   "mcpServers": {
-    "my-title": {
+    "ecom-ai-tools": {
       "command": "node",
       "args": ["/absolute/path/to/my-title/bin/mcp-server.mjs"],
       "timeout": 180000,
@@ -99,8 +98,8 @@ my-title/
 | 修改淘宝搜索 | `skills/title-gen/src/search-taobao.js` | taobao-native CLI 集成 |
 | 修改热榜/趋势 | `skills/alibaba1688/src/insights.js` | opportunities + trend |
 | 修改生意参谋 | `skills/sycm-research/src/sycm-cdp-extractor.js` | CDP 提取 |
-| 修改违禁词 | `data/banned-words.json` + `core/banned-words.js` | 数据 + 逻辑 |
-| 添加共享模块 | `core/` | GLM/1688 客户端、工具函数 |
+| 修改违禁词 | `skills/title-gen/data/banned-words.json` + `core/banned-words.js` | 数据 + 逻辑 |
+| 添加共享模块 | `core/` | GLM 客户端、工具函数 |
 | API 密钥设置 | `.env.example` → `.env` | GLM_API_KEY + ALI_1688_AK |
 
 ---

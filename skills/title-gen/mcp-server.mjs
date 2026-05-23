@@ -8,7 +8,7 @@ import {
 } from './index.js';
 
 const server = createServer({
-  name: 'my-title',
+  name: 'ecom-ai-tools-title-gen',
   version: '1.0.0'
 }, {
   capabilities: {
@@ -178,7 +178,7 @@ server.setRequestHandler('tools/call', async (request) => {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('my-title MCP 服务器已启动（标题生成技能）');
+  console.error('ecom-ai-tools 标题生成技能 MCP 服务器已启动');
 }
 
 main().catch(error => {

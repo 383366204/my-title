@@ -147,5 +147,5 @@
 - Chrome 启动命令（手动启动）：
   ```bash
   # Windows
-  "C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="C:\Users\YourUsername\AppData\Local\my-title-chrome"
+  "C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="C:\Users\YourUsername\AppData\Local\ecom-ai-tools-chrome"
   ```

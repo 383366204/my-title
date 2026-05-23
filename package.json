@@ -1,10 +1,10 @@
 {
-  "name": "my-title",
+  "name": "ecom-ai-tools",
   "version": "1.0.0",
-  "description": "电商选品标题生成工具 - 关键词 → GLM提取 → 1688搜索 → 相关性过滤 → 生成淘宝标题",
+  "description": "电商选品AI工具箱 - 基于 GLM AI + 1688 搜索的多 skill 架构",
   "main": "skills/title-gen/src/index.js",
   "bin": {
-    "my-title": "bin/cli.js"
+    "ecom-ai-tools": "bin/cli.js"
   },
   "scripts": {
     "test": "node --test test/*.test.js"

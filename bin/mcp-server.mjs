@@ -16,7 +16,7 @@ require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
 
 const { run, extractKeywords } = require('../skills/title-gen');
 const { searchAll } = require('../skills/alibaba1688');
-const { getRateLimiter, RateLimitError } = require('../core/rate-limiter');
+const { getRateLimiter, RateLimitError } = require('../skills/alibaba1688/src/rate-limiter');
 
 const TASK_TTL = 30 * 60 * 1000; // 30 minutes
 
@@ -537,7 +537,7 @@ function parseJsonBody(req) {
 }
 
 const server = new McpServer({
-  name: 'my-title',
+  name: 'ecom-ai-tools',
   version: '1.0.0',
 });
 
@@ -676,7 +676,7 @@ server.tool(
       skipFlag
     });
 
-    console.error(`[my-title] task ${id} started: keyword="${keyword}", length=${length}, use_image_search=${use_image_search}, max_image_search=${max_image_search}, min_price=${min_price}, max_price=${max_price}`);
+    console.error(`[ecom-ai-tools] task ${id} started: keyword="${keyword}", length=${length}, use_image_search=${use_image_search}, max_image_search=${max_image_search}, min_price=${min_price}, max_price=${max_price}`);
 
     (async () => {
       const { coreWord, modifiers, semanticGroups } = await extractKeywords('keyword', { data: keyword });
@@ -715,7 +715,7 @@ server.tool(
     });
     })
       .then(result => {
-        console.error(`[my-title] task ${id} done: ${result.products.length} products, ${result.titles.length} titles`);
+        console.error(`[ecom-ai-tools] task ${id} done: ${result.products.length} products, ${result.titles.length} titles`);
         // Check if captcha was detected during image search
         if (result.stats?.trace?.captchaDetected) {
           tasks.set(id, {
@@ -759,7 +759,7 @@ server.tool(
           });
           return;
         }
-        console.error(`[my-title] task ${id} failed:`, err.message);
+        console.error(`[ecom-ai-tools] task ${id} failed:`, err.message);
         // Handle abort error
         if (err.name === 'AbortError' && tasks.get(id).status === 'processing') {
           tasks.set(id, { status: 'cancelled', createdAt: Date.now() });
@@ -809,7 +809,7 @@ server.tool(
           message: `1688 API 冷却中，预计 ${Math.ceil(err.cooldownRemainingMs / 1000)} 秒后恢复`,
         }) }] };
       }
-      console.error(`[my-title] opportunities error:`, err.message);
+      console.error(`[ecom-ai-tools] opportunities error:`, err.message);
       return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: err.message }) }], isError: true };
     }
   }
@@ -839,7 +839,7 @@ server.tool(
           message: `1688 API 冷却中，预计 ${Math.ceil(err.cooldownRemainingMs / 1000)} 秒后恢复`,
         }) }] };
       }
-      console.error(`[my-title] trend error:`, err.message);
+      console.error(`[ecom-ai-tools] trend error:`, err.message);
       return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: err.message }) }], isError: true };
     }
   }
@@ -897,7 +897,7 @@ server.tool(
       abortController,
     });
 
-    console.error(`[my-title] batch task ${id} started: ${keywords.length} keywords`);
+    console.error(`[ecom-ai-tools] batch task ${id} started: ${keywords.length} keywords`);
 
     const { batchRun } = require('../skills/title-gen');
     batchRun(keywords, {
@@ -912,7 +912,7 @@ server.tool(
       },
     })
       .then(result => {
-        console.error(`[my-title] batch task ${id} done: ${result.summary.success}/${result.summary.total}`);
+        console.error(`[ecom-ai-tools] batch task ${id} done: ${result.summary.success}/${result.summary.total}`);
         tasks.set(id, {
           status: 'done',
           createdAt: Date.now(),
@@ -934,7 +934,7 @@ server.tool(
           });
           return;
         }
-        console.error(`[my-title] batch task ${id} failed: ${err.message}`);
+        console.error(`[ecom-ai-tools] batch task ${id} failed: ${err.message}`);
         tasks.set(id, { status: 'error', createdAt: Date.now(), error: err.message });
       });
 
@@ -1049,7 +1049,7 @@ server.tool(
         _progress: progressLog
       }, null, 2) }] };
     } catch (err) {
-      console.error(`[my-title] sycm_query error:`, err.message);
+      console.error(`[ecom-ai-tools] sycm_query error:`, err.message);
       return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: err.message }) }], isError: true };
     }
   }
@@ -1108,7 +1108,7 @@ server.tool(
         ttlMinutes: SYCM_DATA_TTL / 60000,
       }, null, 2) }] };
     } catch (err) {
-      console.error(`[my-title] sycm_status error:`, err.message);
+      console.error(`[ecom-ai-tools] sycm_status error:`, err.message);
       return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: err.message }) }], isError: true };
     }
   }
@@ -1187,7 +1187,7 @@ server.tool(
       estimatedSeconds
     });
 
-    console.error(`[my-title] suggest task ${id} started: strategy="${strategy}", max_candidates=${max_candidates}`);
+    console.error(`[ecom-ai-tools] suggest task ${id} started: strategy="${strategy}", max_candidates=${max_candidates}`);
 
     suggestAndVerify({
       strategy,
@@ -1203,7 +1203,7 @@ server.tool(
       }
     })
       .then(result => {
-        console.error(`[my-title] suggest task ${id} done: ${result.keywords?.length || 0} keywords verified`);
+        console.error(`[ecom-ai-tools] suggest task ${id} done: ${result.keywords?.length || 0} keywords verified`);
         tasks.set(id, {
           status: 'done',
           createdAt: Date.now(),
@@ -1211,7 +1211,7 @@ server.tool(
         });
       })
       .catch(err => {
-        console.error(`[my-title] suggest task ${id} failed:`, err.message);
+        console.error(`[ecom-ai-tools] suggest task ${id} failed:`, err.message);
         tasks.set(id, { status: 'error', createdAt: Date.now(), error: err.message });
       });
 
@@ -1278,7 +1278,7 @@ async function main() {
     // Stdio-only mode (original behavior)
     const transport = new StdioServerTransport();
     await server.connect(transport);
-    console.error('my-title MCP Server running on stdio');
+    console.error('ecom-ai-tools MCP Server running on stdio');
   }
 }
 

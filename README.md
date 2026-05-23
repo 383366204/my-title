@@ -1,4 +1,4 @@
-# my-title - 电商选品标题生成工具
+# ecom-ai-tools - 电商选品AI工具箱
 
 > 基于 GLM AI + 1688 搜索的电商标题自动生成工具，支持 CLI、MCP Server、独立 Skill 三种接入方式
 
@@ -58,7 +58,7 @@ node bin/cli.js --help
 ```json
 {
   "mcpServers": {
-    "my-title": {
+    "ecom-ai-tools": {
       "command": "node",
       "args": ["/absolute/path/to/my-title/bin/mcp-server.mjs"],
       "timeout": 180000,

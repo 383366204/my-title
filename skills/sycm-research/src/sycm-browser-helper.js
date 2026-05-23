@@ -107,7 +107,7 @@ function getDedicatedProfileDir() {
   var home = process.env.HOME || '';
   var match = home.match(/\/mnt\/[a-z]\/Users\/([^/]+)/i);
   var winUser = match ? match[1] : '38336';
-  return 'C:\\Users\\' + winUser + '\\AppData\\Local\\my-title-chrome';
+  return 'C:\\Users\\' + winUser + '\\AppData\\Local\\ecom-ai-tools-chrome';
 }
 
 /**

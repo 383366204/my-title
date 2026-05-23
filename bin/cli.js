@@ -12,8 +12,8 @@ const path = require('path');
 const program = new Command();
 
 program
-  .name('my-title')
-  .description('电商选品标题生成工具 - 关键词 → GLM提取 → 1688搜索 → 相关性过滤 → 生成淘宝标题（可参考淘宝同行标题）')
+  .name('ecom-ai-tools')
+  .description('电商选品AI工具箱 - 关键词 → GLM提取 → 1688搜索 → 相关性过滤 → 生成淘宝标题（可参考淘宝同行标题）')
   .argument('[keywords]', '用户输入关键词，如"纯银项链女高级感"')
   .option('-l, --length <number>', '标题最大长度（字符，1汉字=2字符）', '60')
   .option('-c, --count <number>', '输出候选标题数量（0=全部）', '0')
