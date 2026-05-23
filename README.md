@@ -1,13 +1,17 @@
 # my-title - 电商选品标题生成工具
 
-> 基于 GLM AI + 1688 搜索的电商标题自动生成工具
+> 基于 GLM AI + 1688 搜索的电商标题自动生成工具，支持 CLI、MCP Server、独立 Skill 三种接入方式
 
 ## 功能
 - 🤖 **AI 提取**: GLM 自动提取核心词 + 判断修饰词刚性程度
-- 🔍 **1688 搜索**: 调用 1688 AI 版 API 搜索热门商品
+- 🔍 **1688 搜索**: 调用 1688 AI 版 API 搜索热门商品，本地评分过滤
 - 🎯 **相关性过滤**: 只保留匹配刚性修饰词的商品（材质/颜色/人群）
 - ✨ **SEO 优化**: 三段式结构，核心词前置，符合淘宝搜索规则
 - 📏 **长度控制**: 默认 60 字符，支持自定义
+- 📊 **市场洞察**: 1688 商机热榜 + 趋势分析
+- 🔬 **生意参谋**: 自动提取搜索分析数据（蓝海词/热搜词）
+- 💡 **智能选词**: 13 种策略自动推荐候选关键词
+- 🔄 **批量生成**: 支持一次处理多个关键词
 
 ## 安装
 
@@ -15,45 +19,69 @@
 git clone <repo-url>
 cd my-title
 npm install
+cp .env.example .env
+# 编辑 .env，填入 GLM_API_KEY 和 ALI_1688_AK
 ```
 
 ## 使用
 
 ```bash
-# 复制环境变量配置
-cp .env.example .env
-# 编辑 .env，填入你的 API KEY
-
 # 生成标题
 node bin/cli.js "纯银项链女高级感"
 
-# 自定义长度
-node bin/cli.js "纯棉T恤男宽松夏季" --length 60
+# 自定义长度，JSON 输出
+node bin/cli.js "纯棉T恤男宽松夏季" --length 60 --json
 
-# 输出帮助
+# 批量生成
+node bin/cli.js --keywords "纯银项链,925银手链,钛钢戒指" --json
+
+# 自动选词（13 种策略）
+node bin/cli.js --suggest --strategy season --json
+
+# 1688 商机热榜
+node bin/cli.js opportunities --json
+
+# 趋势洞察
+node bin/cli.js trend "项链" --json
+
+# 生意参谋查询（需 Chrome 调试模式）
+node bin/cli.js sycm "项链" --mode blue --json
+
+# 查看帮助
 node bin/cli.js --help
 ```
 
-**示例输出:**
-```
-🔍 正在处理: 纯银项链女高级感
-📝 提取核心词和修饰词...
-  核心词: 项链
-  修饰词: 纯银(rigid), 女(rigid), 高级感(optional)
-🔎 在 1688 搜索 "项链" 并过滤...
-  过滤后剩余 15 个商品
-✍️  生成标题...
+## MCP Server
 
-✅ 处理完成
-==================================================
-核心词: 项链
-过滤后商品: 15 个
+供 AI Agent 调用（Claude Desktop / Cursor 等）：
 
-📝 生成的标题:
-1. 项链 纯银 女 高级感 锁骨链 女款 简约 百搭 (42 字符)
-2. 项链 纯银 女 高级感 925银 韩版 设计感 小众 (40 字符)
-3. 项链 纯银 女 锁骨链 生日礼物 送女友 (30 字符)
+```json
+{
+  "mcpServers": {
+    "my-title": {
+      "command": "node",
+      "args": ["/absolute/path/to/my-title/bin/mcp-server.mjs"],
+      "timeout": 180000,
+      "trust": "trusted"
+    }
+  }
+}
 ```
+
+暴露工具：`generate_title`, `generate_title_from_image`, `batch_generate_titles`, `opportunities`, `trend`, `sycm_query`, `sycm_status`, `suggest_keywords`
+
+## Skill 架构
+
+每个 skill 可独立引入，也可通过统一 MCP Server 使用：
+
+| Skill | 目录 | 功能 |
+|-------|------|------|
+| **alibaba1688** | `skills/alibaba1688/` | 1688 搜索、评分过滤、热榜、趋势 |
+| **sycm-research** | `skills/sycm-research/` | 生意参谋 CDP 数据提取 |
+| **title-gen** | `skills/title-gen/` | 标题生成、批量处理、智能选词 |
+| **taobao-native** | `skills/taobao-native/` | 淘宝 CLI 工具文档 |
+
+共享基础层 `core/`：GLM 客户端、1688 客户端、违禁词过滤、限流、日志
 
 ## 环境变量
 
@@ -63,18 +91,13 @@ node bin/cli.js --help
 | `GLM_API_BASE` | 否 | GLM API 地址，默认官方 |
 | `ALI_1688_AK` | 是 | 1688 AI 版 Access Key |
 
-## 工作流程
+## 测试
 
+```bash
+node --test skills/alibaba1688/test/
+node --test skills/title-gen/test/
+node --test core/test/
 ```
-用户输入关键词 → GLM AI → 提取核心词 + 判断修饰词刚性 → 1688 搜索 → 刚性修饰词过滤 → 高频词提取 → 三段式生成 → 输出标题
-```
-
-## 刚性修饰词 vs 可选修饰词
-
-- **rigid (强制)** → 材质、颜色、规格、人群 → 不匹配则剔除
-  - 示例: `纯银` → 商品必须有"纯银"才会保留
-- **optional (可选)** → 风格、流行词、时间 → 不强制匹配，只用于标题描述
-  - 示例: `高级感`, `ins风`, `2026新款`
 
 ## 许可
 MIT

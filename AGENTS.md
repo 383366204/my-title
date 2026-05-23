@@ -1,13 +1,13 @@
 # 项目知识库
 
-**生成日期:** 2026-04-17
+**更新日期:** 2026-05-23
 **项目名称:** my-title
 **技术栈:** Node.js (JavaScript)
 
 ---
 
 ## 项目概述
-电商选品标题生成工具 - 一个基于 GLM AI + 1688 搜索的 CLI 工具。接收用户关键词，通过 AI 提取核心词，搜索 1688 商品，按相关性过滤，输出 SEO 优化的标题。
+电商选品标题生成工具 - 基于 GLM AI + 1688 搜索的多 skill 架构。每个 skill 可独立被 AI agent 引入，也可通过 CLI / MCP Server 统一使用。
 
 ---
 
@@ -16,43 +16,63 @@
 ```
 my-title/
 ├── bin/
-│   ├── cli.js              # CLI 入口（使用 commander）
-│   ├── mcp-server.mjs      # MCP Server 入口（stdio 传输，供 agent 调用）
-│   └── bot-server.mjs      # 聊天机器人服务器入口
-├── src/
-│   ├── bot-adapters/      # 机器人平台适配器
-│   │   ├── index.js        # 统一入口
-│   │   ├── feishu.js       # 飞书适配器
-│   │   ├── dingtalk.js     # 钉钉适配器
-│   │   └── wechat.js       # 微信适配器
-│   ├── index.js            # 主流程编排器（run 函数）
-│   ├── index.js            # 主流程编排器（run 函数）
-│   ├── extract-core.js     # GLM AI 集成 + 降级方案
-│   ├── search-1688.js      # 1688 API 搜索与过滤
-│   ├── search-taobao.js    # 淘宝同行标题搜索（新增）
-│   ├── generate-title.js   # 标题生成逻辑（GLM AI）
-│   ├── glm-client.js       # GLM API 客户端类
-│   ├── alibaba1688-client.js # 1688 API 客户端类
-│   └── banned-words.js     # 平台合规性过滤
+│   ├── cli.js              # CLI 入口（commander）— 编排层，串联各 skill
+│   └── mcp-server.mjs      # MCP Server 入口（stdio + HTTP）— 编排层
+├── core/                   # 共享基础层
+│   ├── glm-client.js       # GLM API 客户端
+│   ├── alibaba1688-client.js # 1688 API 客户端
+│   ├── llm-utils.js        # LLM 输出解析与重试
+│   ├── banned-words.js     # 违禁词过滤
+│   ├── rate-limiter.js     # API 限流
+│   ├── constants.js        # 共享常量（刚性规则文本等）
+│   ├── log.js              # 日志
+│   └── types.js            # 类型定义
+├── skills/
+│   ├── alibaba1688/        # Skill: 1688 搜索 + 热榜 + 趋势
+│   │   ├── SKILL.md
+│   │   ├── index.js        # 公共接口
+│   │   ├── mcp-server.mjs  # 独立 MCP 入口
+│   │   ├── src/
+│   │   │   ├── client.js   # 1688 API 客户端类
+│   │   │   ├── search-1688.js  # 搜索 + 评分 + 过滤
+│   │   │   ├── insights.js # 热榜 + 趋势
+│   │   │   └── score-local.js  # 本地评分算法
+│   │   └── test/
+│   ├── sycm-research/      # Skill: 生意参谋数据提取
+│   │   ├── SKILL.md
+│   │   ├── index.js
+│   │   ├── mcp-server.mjs
+│   │   └── src/
+│   │       ├── sycm-cdp-extractor.js  # CDP 数据提取
+│   │       └── sycm-browser-helper.js # Chrome 调试辅助
+│   ├── title-gen/          # Skill: 标题生成
+│   │   ├── SKILL.md
+│   │   ├── index.js
+│   │   ├── mcp-server.mjs
+│   │   ├── src/
+│   │   │   ├── index.js    # 主编排器（run 函数）
+│   │   │   ├── extract-core.js
+│   │   │   ├── generate-title.js
+│   │   │   ├── search-taobao.js
+│   │   │   ├── search-taobao-image.js
+│   │   │   ├── keyword-suggester.js
+│   │   │   ├── batch.js
+│   │   │   └── ...（title-utils, cache, output-formatter 等）
+│   │   └── test/
+│   └── taobao-native/      # Skill: 淘宝 CLI 工具文档
+│       ├── SKILL.md
+│       └── references/
 ├── data/
 │   └── banned-words.json   # 违禁词分类数据
-├── taobao-native/          # taobao-native skill 文档（本地）
-│   ├── SKILL.md            # 完整功能文档
-│   └── references/
-├── docs/superpowers/       # 计划/规范文档（非标准命名）
-├── .sisyphus/              # 任务规划与追踪
-│   ├── plans/              # 项目计划
-│   ├── notepads/           # 学习笔记
-│   └── evidence/           # 验证结果
+├── test/                   # 集成测试（e2e, cli, smoke）
 ├── .env.example            # API 密钥模板
 ├── TAOBAO_SETUP.md         # 淘宝配置指南
 ├── setup-taobao.sh         # 淘宝环境安装脚本
-└── package.json            # Main: src/index.js, Bin: bin/cli.js
+├── setup-sycm.sh           # SYCM Chrome 调试模式脚本
+└── package.json            # Bin: bin/cli.js
 ```
 
 ### MCP 接入配置
-
-任何支持 MCP 的客户端（OpenClaw、Claude Desktop、Cursor 等）添加以下配置即可接入：
 
 ```json
 {
@@ -67,7 +87,7 @@ my-title/
 }
 ```
 
-暴露工具：`generate_title(keyword, length)` — 返回含铺货标题、选品理由、定价建议的商品列表。
+暴露工具：`generate_title`, `generate_title_from_image`, `batch_generate_titles`, `opportunities`, `trend`, `sycm_query`, `sycm_status`, `suggest_keywords`
 
 ---
 
@@ -75,16 +95,16 @@ my-title/
 
 | 任务 | 位置 | 备注 |
 |------|------|------|
-| 添加 CLI 命令 | `bin/cli.js` | 使用 commander, dotenv |
-| MCP Server | `bin/mcp-server.mjs` | ESM，注册 generate_title 工具 |
-| 添加 API 客户端 | `src/*-client.js` | 遵循 PascalCase 类命名模式 |
-| 添加工作流步骤 | `src/index.js` | 在 extract/search/generate 之间插入 |
-| 修改标题逻辑 | `src/generate-title.js` | GLM AI 参考同行标题生成 |
-| 修改淘宝搜索 | `src/search-taobao.js` | taobao-native CLI 集成 |
-| 修改违禁词 | `data/banned-words.json` | JSON 数组格式 |
-| API 密钥设置 | `.env.example` | 复制到 `.env` |
-| 淘宝配置指南 | `TAOBAO_SETUP.md` | 安装和配置说明 |
-| 项目计划 | `.sisyphus/plans/` | Sisyphus 工作流计划 |
+| 添加 CLI 命令 | `bin/cli.js` | 使用 commander, 编排各 skill |
+| MCP Server | `bin/mcp-server.mjs` | ESM，注册 8 个工具 |
+| 修改标题逻辑 | `skills/title-gen/src/generate-title.js` | GLM AI 参考同行标题生成 |
+| 修改 1688 搜索 | `skills/alibaba1688/src/search-1688.js` | 搜索 + 评分 + 过滤 |
+| 修改淘宝搜索 | `skills/title-gen/src/search-taobao.js` | taobao-native CLI 集成 |
+| 修改热榜/趋势 | `skills/alibaba1688/src/insights.js` | opportunities + trend |
+| 修改生意参谋 | `skills/sycm-research/src/sycm-cdp-extractor.js` | CDP 提取 |
+| 修改违禁词 | `data/banned-words.json` + `core/banned-words.js` | 数据 + 逻辑 |
+| 添加共享模块 | `core/` | GLM/1688 客户端、工具函数 |
+| API 密钥设置 | `.env.example` → `.env` | GLM_API_KEY + ALI_1688_AK |
 
 ---
 
@@ -107,9 +127,9 @@ my-title/
    [核心词前置] + [刚性修饰词] + [高频属性词/可选修饰词]
    ```
 
-3. **新工作流程** (并行搜索):
+3. **工作流程**:
    ```
-   用户输入 → GLM提取核心词 → parallel(1688搜索 + 淘宝搜索) → GLM生成标题
+   用户输入 → GLM提取核心词 → 1688搜索(评分过滤) + 淘宝搜索(并行) → GLM生成标题
    ```
 
 4. **降级模式**: 
@@ -127,23 +147,30 @@ my-title/
 ## 本项目禁忌（ANTI-PATTERNS）
 
 - ❌ 没有 ESLint/Prettier 配置（项目无代码规范检查）
-- ❌ 没有测试框架（package.json 中的 test 只是占位符）
 - ❌ 没有 CI/CD 流水线
 - ❌ 没有 TypeScript（纯 JavaScript）
+- ✅ 有 `node:test` 单元测试（skills 和 core 下）
 
 ---
 
 ## 常用命令
 
 ```bash
-# 安装依赖
 npm install
 
-# 运行 CLI
+# CLI
 node bin/cli.js "纯银项链女高级感"
 node bin/cli.js "关键词" --length 60 --count 3
+node bin/cli.js opportunities --json
+node bin/cli.js trend "项链" --json
+node bin/cli.js sycm "关键词" --mode blue
 
-# 初始设置（首次使用必须）
+# 测试
+node --test skills/alibaba1688/test/
+node --test skills/title-gen/test/
+node --test core/test/
+
+# 初始设置
 cp .env.example .env
 # 编辑 .env 填入 GLM_API_KEY 和 ALI_1688_AK
 ```
@@ -153,7 +180,7 @@ cp .env.example .env
 ## 注意事项
 
 - **依赖项**: commander, axios, dotenv
-- **入口**: CLI 通过 `bin/cli.js`，MCP 通过 `bin/mcp-server.mjs`，库通过 `src/index.js`
+- **入口**: CLI 通过 `bin/cli.js`，MCP 通过 `bin/mcp-server.mjs`
 - **环境变量**: 需要 GLM_API_KEY 和 ALI_1688_AK
-- **docs/superpowers/**: 计划/规范文档的非标准目录命名
-- **数据冗余**: `data/banned-words.json` 与 `src/banned-words.js` 逻辑重复
+- **Skill 独立性**: 每个 skill 有自己的 index.js 和 mcp-server.mjs，可独立使用
+- **编排层**: bin/ 是 thin shell，负责串联 skills/ 和 core/
