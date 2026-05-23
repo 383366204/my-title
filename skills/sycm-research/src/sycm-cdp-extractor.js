@@ -736,9 +736,12 @@ async function _ensureSycmLoggedIn(cdp, targetUrl, onProgress) {
     if (String(hasSlider) === 'yes') {
       onProgress('[AUTH] 检测到滑块验证，切换到扫码登录模式...');
       // Click QR code entry
-      await cdp.evaluateInFrame('alibaba-login-box',
-        "var el = document.querySelector('div.view-type-qrcode'); if(el) el.click(); return 'ok'"
+      var qrClicked = await cdp.evaluateInFrame('alibaba-login-box',
+        "var el = document.querySelector('div.view-type-qrcode'); if(el) { el.click(); return 'clicked'; } return 'not_found'"
       );
+      if (String(qrClicked) === 'not_found') {
+        onProgress('[AUTH] 未找到扫码入口，等待手动完成滑块验证...');
+      }
       // Fall through to QR wait loop
     } else {
       // No slider, wait for login success
@@ -748,10 +751,9 @@ async function _ensureSycmLoggedIn(cdp, targetUrl, onProgress) {
         await new Promise(function(r) { setTimeout(r, 3000); });
         try {
           var url = await cdp.evaluate("window.location.href", 5000);
-          // Positive match: we're on the target site, not login page
-          if (!url.includes('loginmyseller') && !url.includes('havanalogin') && !url.includes('custom/login')) {
+          // Positive match: left login page, reached taobao.com destination
+          if ((url.includes('myseller.taobao.com') || url.includes('sycm.taobao.com')) && !url.includes('custom/login')) {
             onProgress('[AUTH] 登录成功');
-            // Navigate to original target SYCM URL
             onProgress('[AUTH] 登录成功，导航到目标页面...');
             await cdp.runAction("window.location.href = " + JSON.stringify(targetUrl), 5000);
             await new Promise(function(r) { setTimeout(r, 5000); });
@@ -764,10 +766,12 @@ async function _ensureSycmLoggedIn(cdp, targetUrl, onProgress) {
   } else {
     // No credentials — go straight to QR
     onProgress('[AUTH] 未配置账号密码，切换到扫码登录模式...');
-    // Click QR code entry if exists
-    await cdp.evaluateInFrame('alibaba-login-box',
-      "var el = document.querySelector('div.view-type-qrcode'); if(el) el.click(); return 'ok'"
+    var qrClicked = await cdp.evaluateInFrame('alibaba-login-box',
+      "var el = document.querySelector('div.view-type-qrcode'); if(el) { el.click(); return 'clicked'; } return 'not_found'"
     );
+    if (String(qrClicked) === 'not_found') {
+      onProgress('[AUTH] 默认页面可能已是扫码模式...');
+    }
   }
 
   // QR code wait loop (for both slider fallback and no credentials)
@@ -778,16 +782,12 @@ async function _ensureSycmLoggedIn(cdp, targetUrl, onProgress) {
     await new Promise(function(r) { setTimeout(r, 3000); });
     try {
       var url = await cdp.evaluate("window.location.href", 5000);
-      // Positive match: we're on the target site, not login page
-      if (url.includes('myseller.taobao.com/home') || url.includes('sycm.taobao.com')) {
-        if (!url.includes('login') && !url.includes('custom/login')) {
-          onProgress('[AUTH] 扫码登录成功');
-          // Navigate to original target SYCM URL
-          onProgress('[AUTH] 登录成功，导航到目标页面...');
-          await cdp.runAction("window.location.href = " + JSON.stringify(targetUrl), 5000);
-          await new Promise(function(r) { setTimeout(r, 5000); });
-          return;
-        }
+      if ((url.includes('myseller.taobao.com') || url.includes('sycm.taobao.com')) && !url.includes('custom/login')) {
+        onProgress('[AUTH] 扫码登录成功');
+        onProgress('[AUTH] 登录成功，导航到目标页面...');
+        await cdp.runAction("window.location.href = " + JSON.stringify(targetUrl), 5000);
+        await new Promise(function(r) { setTimeout(r, 5000); });
+        return;
       }
     } catch (e) { continue; }
   }
