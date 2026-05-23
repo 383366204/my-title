@@ -153,7 +153,7 @@ describe('generateTitles', () => {
         60
       );
 
-      const bannedWords = require('../../../data/banned-words.json');
+      const bannedWords = require('../data/banned-words.json');
       const allBanned = [...new Set(Object.values(bannedWords).flat())];
       
       for (const title of titles) {

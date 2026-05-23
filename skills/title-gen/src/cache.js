@@ -17,7 +17,7 @@ class ResultCache {
   _getBannedWordsHash() {
     if (!this._bannedHash) {
       try {
-        const bw = require('../../../data/banned-words.json');
+        const bw = require('../data/banned-words.json');
         this._bannedHash = crypto.createHash('md5').update(JSON.stringify(bw)).digest('hex').slice(0, 8);
       } catch (_) {
         this._bannedHash = 'none';
