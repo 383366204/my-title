@@ -2,7 +2,7 @@
   "name": "ecom-ai-tools",
   "version": "1.0.0",
   "description": "电商选品AI工具箱 - 基于 GLM AI + 1688 搜索的多 skill 架构",
-  "main": "skills/title-gen/src/index.js",
+  "main": "bin/cli.js",
   "bin": {
     "ecom-ai-tools": "bin/cli.js"
   },

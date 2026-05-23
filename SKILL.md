@@ -154,25 +154,22 @@ OpenClaw / Claude Desktop / Cursor 接入：
 ecom-ai-tools/
 ├── bin/
 │   ├── cli.js              # CLI 入口 ⭐ 主要使用
-│   ├── mcp-server.mjs      # MCP Server（供 agent 调用）
-│   └── bot-server.mjs      # 聊天机器人服务器
+│   └── mcp-server.mjs      # MCP Server（供 agent 调用）
 ├── core/                   # 共享基础层
 │   ├── glm-client.js       # GLM API 客户端
-│   ├── alibaba1688-client.js # 1688 API 客户端
 │   └── ...
 ├── skills/                 # 独立技能模块
 │   ├── alibaba1688/        # 1688 搜索、热榜、趋势
 │   ├── sycm-research/      # 生意参谋数据提取
 │   ├── title-gen/          # 标题生成
 │   └── taobao-native/      # 淘宝 CLI 文档
-├── data/banned-words.json  # 违禁词数据
 ├── .env.example            # 环境变量模板
 └── README.md
 ```
 
 ## 注意事项
 
-- 工具内部已做**违禁词过滤**（参考 `data/banned-words.json`），可直接用于淘宝/1688
+- 工具内部已做**违禁词过滤**（参考 `skills/title-gen/data/banned-words.json`），可直接用于淘宝/1688
 - 标题默认 60 字符，符合淘宝主标题规则
 - 输出标题前的 emoji 日志会写到 stderr，stdout 只有最终结果，方便管道处理
 - 工具是 **CommonJS** 项目（不是 ESM），改代码时注意
