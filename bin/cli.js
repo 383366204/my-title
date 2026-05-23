@@ -2,10 +2,10 @@
 
 require('dotenv').config();
 const { Command } = require('commander');
-const { run } = require('../src');
-const { batchRun } = require('../src/batch');
-const { formatResult } = require('../src/output-formatter');
-const { byteLen } = require('../src/title-utils');
+const { run, batchRun, extractKeywords } = require('../skills/title-gen');
+const { searchAll } = require('../skills/alibaba1688');
+const { formatResult } = require('../skills/title-gen/src/output-formatter');
+const { byteLen } = require('../skills/title-gen/src/title-utils');
 const fs = require('fs');
 const path = require('path');
 
@@ -100,7 +100,7 @@ program
 
       // --suggest 模式：自动选词
       if (options.suggest) {
-        const { suggestAndVerify, VALID_STRATEGIES } = require('../src/keyword-suggester');
+        const { suggestAndVerify, VALID_STRATEGIES } = require('../skills/title-gen');
         
         const strategy = options.strategy || 'season';
         if (!VALID_STRATEGIES.includes(strategy)) {
@@ -250,13 +250,17 @@ program
         }
       }
 
+      const { coreWord, modifiers, semanticGroups } = await extractKeywords('keyword', { data: keywords });
+      const products = await searchAll(coreWord, keywords, modifiers, semanticGroups);
+
       const result = await run(keywords, {
         maxLength: parseInt(options.length),
         peerTitles,
         silent: jsonMode,
         limit: parseInt(options.count),
         sycmData,
-        sycmAuto: options.sycmAuto
+        sycmAuto: options.sycmAuto,
+        products
       });
 
       if (jsonMode) {
@@ -343,9 +347,8 @@ program
       console.error = function(){};
     }
     try {
-      const Alibaba1688Client = require('../src/alibaba1688-client');
-      const client = new Alibaba1688Client(process.env.ALI_1688_AK);
-      return client.fetchOpportunities().then(function(result) {
+      const { fetchOpportunities } = require('../skills/alibaba1688');
+        return fetchOpportunities().then(function(result) {
         if (jsonMode) {
           console.log = origLog;
           console.warn = origWarn;
@@ -397,9 +400,8 @@ program
       console.error = () => {};
     }
     try {
-      const Alibaba1688Client = require('../src/alibaba1688-client');
-      const client = new Alibaba1688Client(process.env.ALI_1688_AK);
-      const result = await client.fetchTrend(query);
+      const { fetchTrend } = require('../skills/alibaba1688');
+      const result = await fetchTrend(query);
 
       if (jsonMode) {
         console.log = origLog;
@@ -444,8 +446,7 @@ program
     const maxPages = parseInt(options.pages) || 1;
     const mode = options.mode || 'blue';
     
-    const { isChromeDevToolsAvailable, autoLaunchChrome, ERRORS } = require('../src/sycm-browser-helper');
-    const { extractSycmData, DEFAULT_FILTER_CONDITIONS, VALID_COMPARE_TYPES, VALID_PERIODS, DEFAULT_PAGE_FILTERS } = require('../src/sycm-cdp-extractor');
+    const { isChromeDevToolsAvailable, autoLaunchChrome, extractSycmData, DEFAULT_FILTER_CONDITIONS, VALID_COMPARE_TYPES, VALID_PERIODS, DEFAULT_PAGE_FILTERS } = require('../skills/sycm-research');
 
     let userCompare = options.compare || DEFAULT_PAGE_FILTERS.compareType;
     let userPeriod = options.period || DEFAULT_PAGE_FILTERS.timePeriod;

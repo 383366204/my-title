@@ -14,8 +14,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
 
-const { run } = require('../src/index.js');
-const { getRateLimiter, RateLimitError } = require('../src/rate-limiter.js');
+const { run, extractKeywords } = require('../skills/title-gen');
+const { searchAll } = require('../skills/alibaba1688');
+const { getRateLimiter, RateLimitError } = require('../core/rate-limiter');
 
 const TASK_TTL = 30 * 60 * 1000; // 30 minutes
 
@@ -80,9 +81,8 @@ async function handleApiOpportunities(req, res) {
     return sendErrorResponse(res, 500, 'ALI_1688_AK 未配置');
   }
   try {
-    const Alibaba1688Client = require('../src/alibaba1688-client.js');
-    const client = new Alibaba1688Client(process.env.ALI_1688_AK);
-    const result = await client.fetchOpportunities();
+      const { fetchOpportunities } = require('../skills/alibaba1688');
+      const result = await fetchOpportunities();
     sendJsonResponse(res, 200, { ok: true, data: result });
   } catch (err) {
     if (err.name === 'RateLimitError') {
@@ -107,9 +107,8 @@ async function handleApiTrend(req, res, body) {
     if (!query || typeof query !== 'string') {
       return sendErrorResponse(res, 400, 'Missing or invalid query parameter');
     }
-    const Alibaba1688Client = require('../src/alibaba1688-client.js');
-    const client = new Alibaba1688Client(process.env.ALI_1688_AK);
-    const result = await client.fetchTrend(query);
+      const { fetchTrend } = require('../skills/alibaba1688');
+      const result = await fetchTrend(query);
     sendJsonResponse(res, 200, { ok: true, data: result });
   } catch (err) {
     if (err.name === 'RateLimitError') {
@@ -127,7 +126,7 @@ async function handleApiTrend(req, res, body) {
 
 async function handleApiBatchGenerate(req, res, keywords, length) {
   try {
-    const { batchRun } = require('../src/batch.js');
+    const { batchRun } = require('../skills/title-gen');
     const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     tasks.set(id, { status: 'processing', createdAt: Date.now(), progress: { completed: 0, total: keywords.length } });
 
@@ -234,7 +233,12 @@ async function handleApiGenerate(req, res, body) {
     console.error(`[HTTP] task ${id} started: keyword="${keyword}", length=${length}, sycm_keyword=${sycm_keyword || 'none'}`);
     
     // Start generation in background
-    run(keyword, { maxLength: length || 60, silent: true, sycmData })
+    (async () => {
+      const { coreWord, modifiers, semanticGroups } = await extractKeywords('keyword', { data: keyword });
+      return searchAll(coreWord, keyword, modifiers, semanticGroups);
+    })().then(products => {
+      return run(keyword, { maxLength: length || 60, silent: true, sycmData, products });
+    })
       .then(result => {
         console.error(`[HTTP] task ${id} done: ${result.products.length} products, ${result.titles.length} titles`);
         tasks.set(id, {
@@ -674,7 +678,11 @@ server.tool(
 
     console.error(`[my-title] task ${id} started: keyword="${keyword}", length=${length}, use_image_search=${use_image_search}, max_image_search=${max_image_search}, min_price=${min_price}, max_price=${max_price}`);
 
-    run(keyword, { 
+    (async () => {
+      const { coreWord, modifiers, semanticGroups } = await extractKeywords('keyword', { data: keyword });
+      return searchAll(coreWord, keyword, modifiers, semanticGroups);
+    })().then(products => {
+      return run(keyword, { 
       maxLength: length || 60, 
       silent: true, 
       sycmData: keyword_data,
@@ -684,6 +692,7 @@ server.tool(
       maxPrice: max_price,
       signal: abortController.signal,
       skipFlag: tasks.get(id).skipFlag,
+      products,
       onProductsFound: (count) => {
         const task = tasks.get(id);
         if (task) {
@@ -703,6 +712,7 @@ server.tool(
           };
         }
       }
+    });
     })
       .then(result => {
         console.error(`[my-title] task ${id} done: ${result.products.length} products, ${result.titles.length} titles`);
@@ -786,9 +796,8 @@ server.tool(
       return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: 'ALI_1688_AK 未配置' }) }], isError: true };
     }
     try {
-      const Alibaba1688Client = require('../src/alibaba1688-client.js');
-      const client = new Alibaba1688Client(process.env.ALI_1688_AK);
-      const result = await client.fetchOpportunities();
+      const { fetchOpportunities } = require('../skills/alibaba1688');
+      const result = await fetchOpportunities();
       return { content: [{ type: 'text', text: JSON.stringify({ ok: true, data: result }) }] };
     } catch (err) {
       if (err.name === 'RateLimitError') {
@@ -817,9 +826,8 @@ server.tool(
       return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: 'ALI_1688_AK 未配置' }) }], isError: true };
     }
     try {
-      const Alibaba1688Client = require('../src/alibaba1688-client.js');
-      const client = new Alibaba1688Client(process.env.ALI_1688_AK);
-      const result = await client.fetchTrend(query);
+      const { fetchTrend } = require('../skills/alibaba1688');
+      const result = await fetchTrend(query);
       return { content: [{ type: 'text', text: JSON.stringify({ ok: true, data: result }) }] };
     } catch (err) {
       if (err.name === 'RateLimitError') {
@@ -891,7 +899,7 @@ server.tool(
 
     console.error(`[my-title] batch task ${id} started: ${keywords.length} keywords`);
 
-    const { batchRun } = require('../src/batch.js');
+    const { batchRun } = require('../skills/title-gen');
     batchRun(keywords, {
       maxLength: length || 60,
       silent: true,
@@ -971,8 +979,7 @@ server.tool(
   },
   async ({ keyword, port, maxPages, mode, compareType, timePeriod, filterConditions, noDefaultFilters }) => {
     try {
-      const { isChromeDevToolsAvailable, autoLaunchChrome, ERRORS } = require('../src/sycm-browser-helper.js');
-      const { extractSycmData, DEFAULT_FILTER_CONDITIONS } = require('../src/sycm-cdp-extractor.js');
+      const { isChromeDevToolsAvailable, autoLaunchChrome, extractSycmData, DEFAULT_FILTER_CONDITIONS } = require('../skills/sycm-research');
 
       if (!await isChromeDevToolsAvailable(port)) {
         const launchResult = await autoLaunchChrome(port);
@@ -1168,7 +1175,7 @@ server.tool(
     }
 
     // 2. Start new task
-    const { suggestAndVerify } = require('../src/keyword-suggester.js');
+    const { suggestAndVerify } = require('../skills/title-gen');
     
     const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     const estimatedSeconds = (parseInt(max_candidates) || 5) * 45 + 10; // ~45s per keyword
