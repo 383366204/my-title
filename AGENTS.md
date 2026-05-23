@@ -66,9 +66,6 @@ my-title/
 │   └── banned-words.json   # 违禁词分类数据
 ├── test/                   # 集成测试（e2e, cli, smoke）
 ├── .env.example            # API 密钥模板
-├── TAOBAO_SETUP.md         # 淘宝配置指南
-├── setup-taobao.sh         # 淘宝环境安装脚本
-├── setup-sycm.sh           # SYCM Chrome 调试模式脚本
 └── package.json            # Bin: bin/cli.js
 ```
 
@@ -184,3 +181,66 @@ cp .env.example .env
 - **环境变量**: 需要 GLM_API_KEY 和 ALI_1688_AK
 - **Skill 独立性**: 每个 skill 有自己的 index.js 和 mcp-server.mjs，可独立使用
 - **编排层**: bin/ 是 thin shell，负责串联 skills/ 和 core/
+
+---
+
+## MCP 工具详细说明
+
+### 工具列表
+
+| 工具名 | 功能 | 核心参数 |
+|--------|------|---------|
+| `generate_title` | 标题生成（含 research 模式） | `keyword`, `length`, `keyword_data`, `research`, `use_image_search`, `min_price`, `max_price` |
+| `generate_title_from_image` | 1688 链接以图搜图生成标题 | `image_url`, `length` |
+| `batch_generate_titles` | 批量生成（1-20 个关键词） | `keywords[]`, `length` |
+| `opportunities` | 1688/淘宝/小红书商机热榜 | 无参数 |
+| `trend` | 品类趋势洞察 | `query` |
+| `sycm_query` | 生意参谋搜索分析数据 | `keyword`, `mode`, `port`, `maxPages` |
+| `sycm_status` | 生意参谋数据缓存状态 | `keyword`(可选) |
+| `suggest_keywords` | 自动选词（13 种策略） | `strategy`, `input`, `max_candidates`, `sycm_verify` |
+
+### generate_title 返回结构
+
+```json
+{
+  "ok": true,
+  "coreWord": "项链",
+  "blueOceanWord": "纯银项链",
+  "modifiers": [{ "word": "纯银", "rigidity": "rigid" }],
+  "filteredCount": 25,
+  "titles": ["标题1", "标题2"],
+  "products": [{
+    "链接原标题": "原1688商品标题",
+    "产品链接": "https://detail.1688.com/offer/xxx.html",
+    "主图链接": "https://...",
+    "铺货标题": "AI生成的淘宝SEO标题",
+    "商品原价": "15.80",
+    "30天销量": 1200,
+    "好评率": 0.96,
+    "复购率": 0.12,
+    "蓝海词": "纯银项链",
+    "选品理由": "搜索量大、竞争适中",
+    "定价建议": "建议售价39-59元",
+    "风险提示": "注意材质标注",
+    "导购标题": "截断展示标题"
+  }],
+  "stats": { "coreWord": "项链", "trace": {...} }
+}
+```
+
+### 执行时间
+
+- `generate_title`: 约 60-120 秒（GLM API + 1688 搜索）
+- `generate_title`（含图搜）: 约 3-10 分钟
+- `batch_generate_titles`: 关键词数 × 120 秒
+- `opportunities` / `trend`: 约 5-10 秒
+- `sycm_query`: 约 30-60 秒/页
+- `suggest_keywords`: 约 10 秒（无验证），每词 +45 秒（含验证）
+
+### 推荐工作流
+
+```
+1. generate_title(research=true) → 获取推荐关键词
+2. 用户去生意参谋查数据 → 把数据通过 keyword_data 传回
+3. generate_title(keyword_data=...) → 获得更精准的标题
+```
