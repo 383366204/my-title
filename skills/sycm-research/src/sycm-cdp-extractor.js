@@ -125,6 +125,57 @@ function _createCdpClient(wsUrl) {
     });
   }
 
+  function sendCommand(method, params, timeoutMs) {
+    timeoutMs = timeoutMs || 10000;
+    return new Promise(function(resolve, reject) {
+      var id = msgId++;
+      pending.set(id, {
+        resolve: resolve,
+        reject: reject,
+        timer: setTimeout(function() { pending.delete(id); reject(new Error('CDP command timeout: ' + method)); }, timeoutMs)
+      });
+      ws.send(JSON.stringify({ id: id, method: method, params: params || {} }));
+    });
+  }
+
+  function evaluateInFrame(frameName, expr, timeoutMs) {
+    timeoutMs = timeoutMs || 15000;
+    return new Promise(async function(resolve, reject) {
+      try {
+        // Enable Page domain if not already enabled
+        await sendCommand('Page.enable', {}, timeoutMs);
+        // Get frame tree
+        var tree = await sendCommand('Page.getFrameTree', {}, timeoutMs);
+        var children = tree.frameTree.childFrames || [];
+        var frame = children.find(function(f) { return f.frame.name === frameName; });
+        if (!frame) {
+          reject(new Error('Frame not found: ' + frameName));
+          return;
+        }
+        var frameId = frame.frame.id;
+        // Create isolated world for the frame
+        var world = await sendCommand('Page.createIsolatedWorld', {
+          frameId: frameId,
+          worldName: 'sycm-login-' + Date.now()
+        }, timeoutMs);
+        var contextId = world.executionContextId;
+        if (!contextId) {
+          reject(new Error('Failed to create isolated world'));
+          return;
+        }
+        // Evaluate expression in that context
+        var result = await sendCommand('Runtime.evaluate', {
+          expression: expr,
+          contextId: contextId,
+          returnByValue: true
+        }, timeoutMs);
+        resolve(result);
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+
   // 连接超时：10秒内未建立则拒绝
   var connectTimeout = setTimeout(function() {
     if (!resolved && ws.readyState === ws.CONNECTING) {
@@ -137,7 +188,7 @@ function _createCdpClient(wsUrl) {
     ws.on('open', function() {
       clearTimeout(connectTimeout);
       resolved = true;
-      resolve({ evaluate: evaluate, runAction: runAction, close: function() { cleanupPending('CDP client closed'); ws.close(); } });
+      resolve({ evaluate: evaluate, runAction: runAction, sendCommand: sendCommand, evaluateInFrame: evaluateInFrame, close: function() { cleanupPending('CDP client closed'); ws.close(); } });
     });
     ws.on('error', function(err) {
       clearTimeout(connectTimeout);
@@ -372,6 +423,7 @@ async function extractSycmData(keyword, options) {
   onProgress('[CDP] Connecting to Chrome on port ' + port + '...');
   var tab = await _connectToTab(port);
   var cdp = await _createCdpClient(tab.webSocketDebuggerUrl);
+  await cdp.sendCommand('Page.enable', {});
 
   try {
     // 动态构建 URL：时间维度 + 日期范围 + 环比类型
@@ -390,13 +442,15 @@ async function extractSycmData(keyword, options) {
 
     tab = await _connectToTab(port);
     cdp = await _createCdpClient(tab.webSocketDebuggerUrl);
+    await cdp.sendCommand('Page.enable', {});
     var currentUrl = await cdp.evaluate("window.location.href", 5000);
 
-    if (currentUrl.includes('login.taobao.com') || currentUrl.includes('passport.taobao.com')) {
-      await _ensureSycmLoggedIn(cdp, onProgress);
+    if (currentUrl.includes('login.taobao.com') || currentUrl.includes('passport.taobao.com') || currentUrl.includes('sycm.taobao.com/custom/login')) {
+      await _ensureSycmLoggedIn(cdp, targetUrl, onProgress);
       cdp.close();
       tab = await _connectToTab(port);
       cdp = await _createCdpClient(tab.webSocketDebuggerUrl);
+      await cdp.sendCommand('Page.enable', {});
       await cdp.runAction("window.location.href='" + targetUrl.replace(/'/g, "\\'") + "'", 5000);
       cdp.close();
       onProgress('[1/6] Logged in, waiting for page load...');
@@ -407,6 +461,7 @@ async function extractSycmData(keyword, options) {
 
     tab = await _connectToTab(port, 'search_analysis');
     cdp = await _createCdpClient(tab.webSocketDebuggerUrl);
+    await cdp.sendCommand('Page.enable', {});
 
     // 先切换到蓝海词模式（如果需要），再勾选指标
     if (mode === 'blue') {
@@ -615,79 +670,126 @@ async function extractSycmData(keyword, options) {
   }
 }
 
-async function _ensureSycmLoggedIn(cdp, onProgress) {
+async function _ensureSycmLoggedIn(cdp, targetUrl, onProgress) {
   var username = process.env.SYCM_USERNAME;
   var password = process.env.SYCM_PASSWORD;
 
-  if (!username || !password) {
-    throw new Error('未配置 SYCM 账号密码。请在 .env 中设置 SYCM_USERNAME 和 SYCM_PASSWORD，或在浏览器中手动登录 sycm.taobao.com 后重试。');
+  // Step 1: Navigate to loginmyseller.taobao.com
+  onProgress('[AUTH] 导航到 loginmyseller.taobao.com...');
+  await cdp.runAction("window.location.href = 'https://loginmyseller.taobao.com/'", 5000);
+  await new Promise(function(r) { setTimeout(r, 3000); });
+
+  // Step 2: Wait for iframe to load (poll Page.getFrameTree)
+  onProgress('[AUTH] 等待登录 iframe 加载...');
+  var loginFrameId = null;
+  for (var i = 0; i < 10; i++) {
+    try {
+      var tree = await cdp.sendCommand('Page.getFrameTree', {});
+      var children = tree.frameTree.childFrames || [];
+      var frame = children.find(function(f) { return f.frame.name === 'alibaba-login-box'; });
+      if (frame) { loginFrameId = frame.frame.id; break; }
+    } catch (e) {}
+    await new Promise(function(r) { setTimeout(r, 1000); });
+  }
+  if (!loginFrameId) throw new Error('[AUTH] 未检测到登录 iframe，请重试');
+
+  onProgress('[AUTH] 检测到登录 iframe');
+
+  // Step 3: Decide login mode
+  if (username && password) {
+    // Password login mode
+    onProgress('[AUTH] 密码登录模式...');
+    // Click password login tab
+    await cdp.evaluateInFrame('alibaba-login-box',
+      "var el = document.querySelector('a.password-login-tab-item'); if(el) el.click(); return 'ok'");
+    await new Promise(function(r) { setTimeout(r, 1000); });
+
+    // Fill username using React-compatible value setter
+    await cdp.evaluateInFrame('alibaba-login-box',
+      "var inp = document.querySelector('#fm-login-id'); " +
+      "var s = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set; " +
+      "s.call(inp, " + JSON.stringify(username) + "); " +
+      "inp.dispatchEvent(new Event('input', {bubbles:true})); " +
+      "inp.dispatchEvent(new Event('change', {bubbles:true})); return 'ok'"
+    );
+
+    // Fill password
+    await cdp.evaluateInFrame('alibaba-login-box',
+      "var inp = document.querySelector('#fm-login-password'); " +
+      "var s = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set; " +
+      "s.call(inp, " + JSON.stringify(password) + "); " +
+      "inp.dispatchEvent(new Event('input', {bubbles:true})); " +
+      "inp.dispatchEvent(new Event('change', {bubbles:true})); return 'ok'"
+    );
+
+    // Click login button
+    await cdp.evaluateInFrame('alibaba-login-box',
+      "var btn = document.querySelector('button.fm-submit'); if(btn) btn.click(); return 'ok'"
+    );
+
+    // Wait and check for slider verification
+    await new Promise(function(r) { setTimeout(r, 2000); });
+    var hasSlider = await cdp.evaluateInFrame('alibaba-login-box',
+      "var el = document.querySelector('.nc-lang-cnt'); " +
+      "return el && el.textContent.includes('滑块') ? 'yes' : 'no'"
+    );
+    if (String(hasSlider) === 'yes') {
+      onProgress('[AUTH] 检测到滑块验证，切换到扫码登录模式...');
+      // Click QR code entry
+      await cdp.evaluateInFrame('alibaba-login-box',
+        "var el = document.querySelector('div.view-type-qrcode'); if(el) el.click(); return 'ok'"
+      );
+      // Fall through to QR wait loop
+    } else {
+      // No slider, wait for login success
+      onProgress('[AUTH] 等待登录成功...');
+      var startTime = Date.now();
+      while (Date.now() - startTime < 120000) {
+        await new Promise(function(r) { setTimeout(r, 3000); });
+        try {
+          var url = await cdp.evaluate("window.location.href", 5000);
+          // Positive match: we're on the target site, not login page
+          if (!url.includes('loginmyseller') && !url.includes('havanalogin') && !url.includes('custom/login')) {
+            onProgress('[AUTH] 登录成功');
+            // Navigate to original target SYCM URL
+            onProgress('[AUTH] 登录成功，导航到目标页面...');
+            await cdp.runAction("window.location.href = " + JSON.stringify(targetUrl), 5000);
+            await new Promise(function(r) { setTimeout(r, 5000); });
+            return;
+          }
+        } catch (e) { continue; }
+      }
+      throw new Error('等待登录超时（120秒），请手动登录后重试');
+    }
+  } else {
+    // No credentials — go straight to QR
+    onProgress('[AUTH] 未配置账号密码，切换到扫码登录模式...');
+    // Click QR code entry if exists
+    await cdp.evaluateInFrame('alibaba-login-box',
+      "var el = document.querySelector('div.view-type-qrcode'); if(el) el.click(); return 'ok'"
+    );
   }
 
-  onProgress('[AUTH] 未登录，自动切换到密码登录...');
-
-  var switched = await cdp.runAction(
-    "(() => { var els = document.querySelectorAll('div,a,span,button,label'); " +
-    "for (var i = 0; i < els.length; i++) { " +
-    "  var t = (els[i].textContent || '').trim(); " +
-    "  if (t === '密码登录' || t === '账户密码登录' || t === '账号密码登录') { els[i].click(); return 'ok'; } " +
-    "} return 'not_found'; })()",
-    5000
-  );
-  if (String(switched) !== 'ok') {
-    onProgress('[AUTH] 未找到密码登录入口，尝试直接填充...');
-  }
-  await new Promise(function(r) { setTimeout(r, 1000); });
-
-  var safeUser = JSON.stringify(username);
-  var safePwd = JSON.stringify(password);
-
-  var fillUser = await cdp.runAction(
-    "(() => { var inputs = document.querySelectorAll('input'); " +
-    "for (var i = 0; i < inputs.length; i++) { " +
-    "  var tp = (inputs[i].type || '').toLowerCase(); " +
-    "  var ph = (inputs[i].placeholder || '').toLowerCase(); " +
-    "  if (tp === 'text' || tp === 'tel' || ph.includes('手机') || ph.includes('账号') || ph.includes('邮箱') || ph.includes('会员名')) { " +
-    "    inputs[i].focus(); " +
-    "    var s = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set; " +
-    "    s.call(inputs[i], " + safeUser + "); " +
-    "    inputs[i].dispatchEvent(new Event('input', { bubbles: true })); " +
-    "    inputs[i].dispatchEvent(new Event('change', { bubbles: true })); " +
-    "    return 'ok'; " +
-    "  } " +
-    "} return 'not_found'; })()",
-    5000
-  );
-  if (String(fillUser) === 'not_found') {
-    throw new Error('未找到账号输入框，请手动登录 sycm.taobao.com 后重试');
-  }
-
-  var fillPwd = await cdp.runAction(
-    "(() => { var inputs = document.querySelectorAll('input[type=password]'); " +
-    "if (inputs.length === 0) return 'not_found'; " +
-    "var inp = inputs[0]; inp.focus(); " +
-    "var s = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set; " +
-    "s.call(inp, " + safePwd + "); " +
-    "inp.dispatchEvent(new Event('input', { bubbles: true })); " +
-    "inp.dispatchEvent(new Event('change', { bubbles: true })); " +
-    "return 'ok'; })()",
-    5000
-  );
-  if (String(fillPwd) === 'not_found') {
-    throw new Error('未找到密码输入框，请手动登录 sycm.taobao.com 后重试');
-  }
-
-  onProgress('[AUTH] 账号密码已填入，请完成滑块验证后自动继续...');
+  // QR code wait loop (for both slider fallback and no credentials)
+  onProgress('[AUTH] 请使用淘宝 APP 扫描二维码登录...');
   onProgress('[AUTH] 等待最多 120 秒...');
-
   var startTime = Date.now();
   while (Date.now() - startTime < 120000) {
     await new Promise(function(r) { setTimeout(r, 3000); });
-    var url;
-    try { url = await cdp.evaluate("window.location.href", 5000); } catch (e) { continue; }
-    if (!url.includes('login') && !url.includes('passport')) {
-      onProgress('[AUTH] 登录成功');
-      return;
-    }
+    try {
+      var url = await cdp.evaluate("window.location.href", 5000);
+      // Positive match: we're on the target site, not login page
+      if (url.includes('myseller.taobao.com/home') || url.includes('sycm.taobao.com')) {
+        if (!url.includes('login') && !url.includes('custom/login')) {
+          onProgress('[AUTH] 扫码登录成功');
+          // Navigate to original target SYCM URL
+          onProgress('[AUTH] 登录成功，导航到目标页面...');
+          await cdp.runAction("window.location.href = " + JSON.stringify(targetUrl), 5000);
+          await new Promise(function(r) { setTimeout(r, 5000); });
+          return;
+        }
+      }
+    } catch (e) { continue; }
   }
   throw new Error('等待登录超时（120秒），请手动登录后重试');
 }
