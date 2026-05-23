@@ -752,7 +752,7 @@ async function _ensureSycmLoggedIn(cdp, targetUrl, onProgress) {
         try {
           var url = await cdp.evaluate("window.location.href", 5000);
           // Positive match: left login page, reached taobao.com destination
-          if ((url.includes('myseller.taobao.com') || url.includes('sycm.taobao.com')) && !url.includes('custom/login')) {
+          if ((url.includes('sycm.taobao.com') || url.match(/https?:\/\/(www\.)?myseller\.taobao\.com/)) && !url.includes('custom/login')) {
             onProgress('[AUTH] 登录成功');
             onProgress('[AUTH] 登录成功，导航到目标页面...');
             await cdp.runAction("window.location.href = " + JSON.stringify(targetUrl), 5000);
@@ -782,7 +782,7 @@ async function _ensureSycmLoggedIn(cdp, targetUrl, onProgress) {
     await new Promise(function(r) { setTimeout(r, 3000); });
     try {
       var url = await cdp.evaluate("window.location.href", 5000);
-      if ((url.includes('myseller.taobao.com') || url.includes('sycm.taobao.com')) && !url.includes('custom/login')) {
+      if ((url.includes('sycm.taobao.com') || url.match(/https?:\/\/(www\.)?myseller\.taobao\.com/)) && !url.includes('custom/login')) {
         onProgress('[AUTH] 扫码登录成功');
         onProgress('[AUTH] 登录成功，导航到目标页面...');
         await cdp.runAction("window.location.href = " + JSON.stringify(targetUrl), 5000);
