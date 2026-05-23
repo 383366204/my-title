@@ -1,6 +1,6 @@
 const { test, describe, mock } = require('node:test');
 const assert = require('node:assert');
-const GLMClient = require('../src/glm-client');
+const GLMClient = require('../glm-client');
 
 describe('GLMClient.judgeRelevance', () => {
   const mockApiKey = 'test-api-key';

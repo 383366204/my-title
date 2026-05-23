@@ -12,22 +12,22 @@ describe('generateTitles', () => {
   ];
   const mockPeerTitles = [
     '纯银项链女锁骨链ins风',
-    '925纯银项链女高级感',
+    'S925纯银项链女高级感',
     '纯银项链女简约百搭'
   ];
   const mockProducts = [
     { id: 'p1', title: '纯银项链女锁骨链', price: 99 },
-    { id: 'p2', title: '925纯银项链女高级感', price: 129 }
+    { id: 'p2', title: 'S925纯银项链女高级感', price: 129 }
   ];
 
   test('Test 1: Generated titles start with blue ocean keyword', async () => {
     // Mock GLMClient to return titles that should start with blueOceanWord
-    const GLMClient = require('../src/glm-client');
+    const GLMClient = require('../../../core/glm-client');
     const originalGenerateTitles = GLMClient.prototype.generateTitles;
     
     GLMClient.prototype.generateTitles = mock.fn(() => Promise.resolve([
       '纯银项链女高级感 纯银 女 锁骨链 简约',
-      '纯银项链女高级感 925银 女 高级感 韩版',
+      '纯银项链女高级感 S925银 女 高级感 韩版',
       '纯银项链女高级感 纯银 女 生日礼物'
     ]));
 
@@ -57,13 +57,13 @@ describe('generateTitles', () => {
   });
 
   test('Test 2: Titles contain elements from 1688 original titles and taobao peer titles', async () => {
-    const GLMClient = require('../src/glm-client');
+    const GLMClient = require('../../../core/glm-client');
     const originalGenerateTitles = GLMClient.prototype.generateTitles;
     
     // Mock GLM to return titles that include words from peer titles and products
     GLMClient.prototype.generateTitles = mock.fn(() => Promise.resolve([
       '纯银项链女高级感 纯银 女 锁骨链 ins风',
-      '纯银项链女高级感 925银 女 高级感 简约百搭',
+      '纯银项链女高级感 S925银 女 高级感 简约百搭',
       '纯银项链女高级感 纯银 女 韩版 设计感'
     ]));
 
@@ -101,14 +101,14 @@ describe('generateTitles', () => {
   });
 
   test('Test 3: Title length does not exceed maxLength', async () => {
-    const GLMClient = require('../src/glm-client');
+    const GLMClient = require('../../../core/glm-client');
     const originalGenerateTitles = GLMClient.prototype.generateTitles;
     const maxLength = 30;
     
     GLMClient.prototype.generateTitles = mock.fn(() => Promise.resolve([
       '纯银项链女高级感 纯银 女',
       '纯银项链女高级感 锁骨链',
-      '纯银项链女高级感 925银'
+      '纯银项链女高级感 S925银'
     ]));
 
     try {
@@ -133,7 +133,7 @@ describe('generateTitles', () => {
   });
 
   test('Test 4: Banned words are filtered from generated titles', async () => {
-    const GLMClient = require('../src/glm-client');
+    const GLMClient = require('../../../core/glm-client');
     const originalGenerateTitles = GLMClient.prototype.generateTitles;
     
     // Mock GLM to return titles with banned words
@@ -153,7 +153,7 @@ describe('generateTitles', () => {
         60
       );
 
-      const bannedWords = require('../data/banned-words.json');
+      const bannedWords = require('../../../data/banned-words.json');
       const allBanned = [...new Set(Object.values(bannedWords).flat())];
       
       for (const title of titles) {
@@ -170,11 +170,11 @@ describe('generateTitles', () => {
   });
 
   test('Test 5: Fallback titles still start with blue ocean keyword when GLM fails', async () => {
-    const GLMClient = require('../src/glm-client');
+    const GLMClient = require('../../../core/glm-client');
     const originalGenerateTitles = GLMClient.prototype.generateTitles;
     
     // Mock GLM to throw error (triggering fallback)
-    GLMClient.prototype.generateTitles = mock.fn(() => Promise.reject(new Error('API Error')));
+    GLMClient.prototype.generateTitles = mock.fn(() => Promise.reject(new Error('API failure')));
 
     try {
       const titles = await generateTitles(
@@ -202,12 +202,12 @@ describe('generateTitles', () => {
   });
 
   test('Test 6: Can generate titles even with empty peer titles list', async () => {
-    const GLMClient = require('../src/glm-client');
+    const GLMClient = require('../../../core/glm-client');
     const originalGenerateTitles = GLMClient.prototype.generateTitles;
     
     GLMClient.prototype.generateTitles = mock.fn(() => Promise.resolve([
       '纯银项链女高级感 纯银 女 锁骨链',
-      '纯银项链女高级感 925银 女 高级感',
+      '纯银项链女高级感 S925银 女 高级感',
       '纯银项链女高级感 纯银 女 简约'
     ]));
 

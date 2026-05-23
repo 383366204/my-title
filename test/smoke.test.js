@@ -1,5 +1,5 @@
 const assert = require('assert');
-const { run } = require('../src/index');
+const { run } = require('../skills/title-gen/src/index');
 
 async function smokeTest() {
   console.log('Running smoke test...');

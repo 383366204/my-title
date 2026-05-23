@@ -20,9 +20,9 @@ function reloadIndex() {
   return require('../src/index.js');
 }
 
-test('Test 1: complete flow', async () => {
-  // RED: Run 1 should pass with given mocks
-  mockModule('/mnt/d/project/my-title/src/extract-core.js', {
+test('Test 1: Complete happy path', async () => {
+  // Mock extract-core.js
+  mockModule('/mnt/d/project/my-title/skills/title-gen/src/extract-core.js', {
     extractCoreAndModifiers: async (input) => {
       return {
         coreWord: '项链',
@@ -34,7 +34,9 @@ test('Test 1: complete flow', async () => {
       };
     }
   });
-  mockModule('/mnt/d/project/my-title/src/search-1688.js', {
+
+  // Mock search-1688.js (from skills/alibaba1688!)
+  mockModule('/mnt/d/project/my-title/skills/alibaba1688/src/search-1688.js', {
     searchAll: async () => {
       return [
         { id: 'p1', title: '银质项链', url: 'https://example/p1', price: 100, stats: { last30DaysSales: 20, goodRates: 0.95, repurchaseRate: 0.3 } },
@@ -43,9 +45,12 @@ test('Test 1: complete flow', async () => {
     },
     searchAndFilter: async () => []
   });
-  mockModule('/mnt/d/project/my-title/src/search-taobao.js', {
+
+  // Mock search-taobao.js
+  mockModule('/mnt/d/project/my-title/skills/title-gen/src/search-taobao.js', {
     searchTaobaoTitles: async () => []
   });
+
   class MockGLMClient1 {
     constructor(config) {}
     async selectAndGenerate({ blueOceanWord, coreWord, modifiers, peerTitles, products, maxLength }) {
@@ -63,7 +68,7 @@ test('Test 1: complete flow', async () => {
       };
     }
   }
-  mockModule('/mnt/d/project/my-title/src/glm-client.js', MockGLMClient1);
+  mockModule('/mnt/d/project/my-title/core/glm-client.js', MockGLMClient1);
 
   const { run } = reloadIndex();
   const res = await run('纯银项链女高级感', { maxLength: 60 });
@@ -82,9 +87,9 @@ test('Test 1: complete flow', async () => {
   assert.ok(Array.isArray(res.titles) && res.titles.length === 3);
 });
 
-test('Test 2: delay between searches', async () => {
-  // RED: delay between dual searches (simulate by delaying searchAll)
-  mockModule('/mnt/d/project/my-title/src/search-1688.js', {
+test('Test 2: Delay between searches', async () => {
+  // Delay between dual searches (simulate by delaying searchAll)
+  mockModule('/mnt/d/project/my-title/skills/alibaba1688/src/search-1688.js', {
     searchAll: async () => {
       await new Promise(r => setTimeout(r, 3500));
       return [
@@ -93,10 +98,13 @@ test('Test 2: delay between searches', async () => {
     },
     searchAndFilter: async () => []
   });
-  mockModule('/mnt/d/project/my-title/src/extract-core.js', {
+
+  mockModule('/mnt/d/project/my-title/skills/title-gen/src/extract-core.js', {
     extractCoreAndModifiers: async (input) => ({ coreWord: '项链', modifiers: [{ word: '纯银', rigidity: 'rigid' }] })
   });
-  mockModule('/mnt/d/project/my-title/src/search-taobao.js', { searchTaobaoTitles: async () => [] });
+
+  mockModule('/mnt/d/project/my-title/skills/title-gen/src/search-taobao.js', { searchTaobaoTitles: async () => [] });
+
   class MockGLMClient2 {
     constructor(config) {}
     async selectAndGenerate({ blueOceanWord, coreWord, modifiers, peerTitles, products, maxLength }) {
@@ -110,7 +118,7 @@ test('Test 2: delay between searches', async () => {
       };
     }
   }
-  mockModule('/mnt/d/project/my-title/src/glm-client.js', MockGLMClient2);
+  mockModule('/mnt/d/project/my-title/core/glm-client.js', MockGLMClient2);
 
   const { run } = reloadIndex();
   const start = Date.now();
@@ -123,10 +131,11 @@ test('Test 2: delay between searches', async () => {
 
 test('Test 3: GLM scoring failure falls back to rigid filtering', async () => {
   const { run } = reloadIndex();
-  mockModule('/mnt/d/project/my-title/src/extract-core.js', {
+  mockModule('/mnt/d/project/my-title/skills/title-gen/src/extract-core.js', {
     extractCoreAndModifiers: async (input) => ({ coreWord: '项链', modifiers: [{ word: '纯银', rigidity: 'rigid' }] })
   });
-  mockModule('/mnt/d/project/my-title/src/search-1688.js', {
+
+  mockModule('/mnt/d/project/my-title/skills/alibaba1688/src/search-1688.js', {
     searchAll: async () => { throw new Error('GLM failure'); },
     searchAndFilter: async (coreWord, modifiers) => {
       return [
@@ -134,13 +143,15 @@ test('Test 3: GLM scoring failure falls back to rigid filtering', async () => {
       ];
     }
   });
-  mockModule('/mnt/d/project/my-title/src/search-taobao.js', { searchTaobaoTitles: async () => [] });
+
+  mockModule('/mnt/d/project/my-title/skills/title-gen/src/search-taobao.js', { searchTaobaoTitles: async () => [] });
+
   class MockGLMClient3 {
     constructor(config) {}
     async selectAndGenerate() { throw new Error('GLM failure'); }
     async generateTitles() { return ['蓝海项链 版1']; }
   }
-  mockModule('/mnt/d/project/my-title/src/glm-client.js', MockGLMClient3);
+  mockModule('/mnt/d/project/my-title/core/glm-client.js', MockGLMClient3);
 
   const res = await run('项链', {});
   assert.ok(Array.isArray(res.products));
@@ -148,44 +159,50 @@ test('Test 3: GLM scoring failure falls back to rigid filtering', async () => {
 
 test('Test 4: Taobao search failure still generates titles', async () => {
   // Make taobao search fail, ensure flow still continues
-  mockModule('/mnt/d/project/my-title/src/extract-core.js', {
+  mockModule('/mnt/d/project/my-title/skills/title-gen/src/extract-core.js', {
     extractCoreAndModifiers: async (input) => ({ coreWord: '项链', modifiers: [] })
   });
-  mockModule('/mnt/d/project/my-title/src/search-1688.js', {
+
+  mockModule('/mnt/d/project/my-title/skills/alibaba1688/src/search-1688.js', {
     searchAll: async () => [{ id: 'p1', title: '项链', url: 'u', price: 50, stats: { last30DaysSales: 1, goodRates: 0.5, repurchaseRate: 0.1 } }],
     searchAndFilter: async () => []
   });
-  mockModule('/mnt/d/project/my-title/src/search-taobao.js', {
+
+  mockModule('/mnt/d/project/my-title/skills/title-gen/src/search-taobao.js', {
     searchTaobaoTitles: async () => { throw new Error('taobao fail'); }
   });
+
   class MockGLMClient4 {
     constructor(config) {}
     async selectAndGenerate() { throw new Error('GLM failure'); }
     async generateTitles() { return ['蓝海词']; }
   }
-  mockModule('/mnt/d/project/my-title/src/glm-client.js', MockGLMClient4);
+  mockModule('/mnt/d/project/my-title/core/glm-client.js', MockGLMClient4);
 
   const { run } = reloadIndex();
   const res = await run('项链', {});
   assert.ok(res && Array.isArray(res.titles));
 });
 
-test('Test 5: Empty 1688 results returns empty array', async () => {
+test('Test 5: Empty 1688 search results returns empty array', async () => {
   const { run } = reloadIndex();
-  mockModule('/mnt/d/project/my-title/src/extract-core.js', {
+  mockModule('/mnt/d/project/my-title/skills/title-gen/src/extract-core.js', {
     extractCoreAndModifiers: async (input) => ({ coreWord: '项链', modifiers: [] })
   });
-  mockModule('/mnt/d/project/my-title/src/search-1688.js', {
+
+  mockModule('/mnt/d/project/my-title/skills/alibaba1688/src/search-1688.js', {
     searchAll: async () => [],
     searchAndFilter: async () => []
   });
-  mockModule('/mnt/d/project/my-title/src/search-taobao.js', { searchTaobaoTitles: async () => [] });
+
+  mockModule('/mnt/d/project/my-title/skills/title-gen/src/search-taobao.js', { searchTaobaoTitles: async () => [] });
+
   class MockGLMClient5 {
     constructor(config) {}
     async selectAndGenerate() { throw new Error('GLM failure'); }
     async generateTitles() { return []; }
   }
-  mockModule('/mnt/d/project/my-title/src/glm-client.js', MockGLMClient5);
+  mockModule('/mnt/d/project/my-title/core/glm-client.js', MockGLMClient5);
 
   const res = await run('项链', {});
   assert.strictEqual(res.products.length, 0);
@@ -193,16 +210,19 @@ test('Test 5: Empty 1688 results returns empty array', async () => {
 
 test('Test 6: Ensure 11 fields exist in output products when there are results', async () => {
   const { run } = reloadIndex();
-  mockModule('/mnt/d/project/my-title/src/extract-core.js', {
+  mockModule('/mnt/d/project/my-title/skills/title-gen/src/extract-core.js', {
     extractCoreAndModifiers: async (input) => ({ coreWord: '项链', modifiers: [{ word: '纯银', rigidity: 'rigid' }] })
   });
-  mockModule('/mnt/d/project/my-title/src/search-1688.js', {
+
+  mockModule('/mnt/d/project/my-title/skills/alibaba1688/src/search-1688.js', {
     searchAll: async () => [
       { id: 'p1', title: '银质项链', url: 'https://a', price: 99, stats: { last30DaysSales: 10, goodRates: 0.9, repurchaseRate: 0.4 } }
     ],
     searchAndFilter: async () => []
   });
-  mockModule('/mnt/d/project/my-title/src/search-taobao.js', { searchTaobaoTitles: async () => [] });
+
+  mockModule('/mnt/d/project/my-title/skills/title-gen/src/search-taobao.js', { searchTaobaoTitles: async () => [] });
+
   class MockGLMClient6 {
     constructor(config) {}
     async selectAndGenerate({ blueOceanWord, coreWord, modifiers, peerTitles, products, maxLength }) {
@@ -216,7 +236,7 @@ test('Test 6: Ensure 11 fields exist in output products when there are results',
     }
     async generateTitles() { return ['蓝海项链 版1']; }
   }
-  mockModule('/mnt/d/project/my-title/src/glm-client.js', MockGLMClient6);
+  mockModule('/mnt/d/project/my-title/core/glm-client.js', MockGLMClient6);
 
   const res = await run('项链', {});
   const first = res.products[0];

@@ -7,7 +7,7 @@ const {
   SELECTION_RESULT_TEMPLATE,
   SEARCH_RESULT_TEMPLATE,
   SELECTION_ADVICE_TEMPLATE
-} = require('../src/types');
+} = require('../types');
 
 test('PRODUCT_TEMPLATE has required fields', () => {
   const required = ['id', 'title', 'price', 'url', 'stats'];

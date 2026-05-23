@@ -15,9 +15,9 @@ function mockModule(modulePath, exportsObj) {
 
 function reloadIndex() {
   // Clear index.js from cache to pick up mocks
-  const idxPath = require.resolve('../src/index.js');
+  const idxPath = require.resolve('../skills/title-gen/src/index.js');
   delete require.cache[idxPath];
-  return require('../src/index.js');
+  return require('../skills/title-gen/src/index.js');
 }
 
 /**
@@ -28,7 +28,7 @@ function reloadIndex() {
  */
 test('Test 1: Complete happy path', async () => {
   // Mock extract-core.js
-  mockModule('/mnt/d/project/my-title/src/extract-core.js', {
+  mockModule('/mnt/d/project/my-title/skills/title-gen/src/extract-core.js', {
     extractCoreAndModifiers: async (input) => {
       return {
         coreWord: '项链',
@@ -42,7 +42,7 @@ test('Test 1: Complete happy path', async () => {
   });
 
   // Mock search-1688.js
-  mockModule('/mnt/d/project/my-title/src/search-1688.js', {
+  mockModule('/mnt/d/project/my-title/skills/alibaba1688/src/search-1688.js', {
     searchAll: async () => {
       return [
         { 
@@ -65,7 +65,7 @@ test('Test 1: Complete happy path', async () => {
   });
 
   // Mock search-taobao.js
-  mockModule('/mnt/d/project/my-title/src/search-taobao.js', {
+  mockModule('/mnt/d/project/my-title/skills/title-gen/src/search-taobao.js', {
     searchTaobaoTitles: async () => ['纯银项链女轻奢小众', 'S925银项链女高级感']
   });
 
@@ -87,7 +87,7 @@ test('Test 1: Complete happy path', async () => {
       };
     }
   }
-  mockModule('/mnt/d/project/my-title/src/glm-client.js', MockGLMClient1);
+  mockModule('/mnt/d/project/my-title/core/glm-client.js', MockGLMClient1);
 
   const { run } = reloadIndex();
   const result = await run('纯银项链女高级感', { maxLength: 60 });
@@ -127,19 +127,19 @@ test('Test 1: Complete happy path', async () => {
  * - Verify: returns empty products array gracefully
  */
 test('Test 2: Empty 1688 search results', async () => {
-  mockModule('/mnt/d/project/my-title/src/extract-core.js', {
+  mockModule('/mnt/d/project/my-title/skills/title-gen/src/extract-core.js', {
     extractCoreAndModifiers: async (input) => ({
       coreWord: '项链',
       modifiers: [{ word: '纯银', rigidity: 'rigid' }]
     })
   });
 
-  mockModule('/mnt/d/project/my-title/src/search-1688.js', {
+  mockModule('/mnt/d/project/my-title/skills/alibaba1688/src/search-1688.js', {
     searchAll: async () => [],
     searchAndFilter: async () => []
   });
 
-  mockModule('/mnt/d/project/my-title/src/search-taobao.js', {
+  mockModule('/mnt/d/project/my-title/skills/title-gen/src/search-taobao.js', {
     searchTaobaoTitles: async () => []
   });
 
@@ -156,7 +156,7 @@ test('Test 2: Empty 1688 search results', async () => {
       };
     }
   }
-  mockModule('/mnt/d/project/my-title/src/glm-client.js', MockGLMClient2);
+  mockModule('/mnt/d/project/my-title/core/glm-client.js', MockGLMClient2);
 
   const { run } = reloadIndex();
   const result = await run('纯银项链', { maxLength: 60 });
@@ -175,7 +175,7 @@ test('Test 2: Empty 1688 search results', async () => {
  * - Verify: still returns results using rigid modifier filtering fallback
  */
 test('Test 3: GLM scoring failure fallback', async () => {
-  mockModule('/mnt/d/project/my-title/src/extract-core.js', {
+  mockModule('/mnt/d/project/my-title/skills/title-gen/src/extract-core.js', {
     extractCoreAndModifiers: async (input) => ({
       coreWord: '项链',
       modifiers: [
@@ -186,7 +186,7 @@ test('Test 3: GLM scoring failure fallback', async () => {
   });
 
   // searchAll throws error, fallback to searchAndFilter
-  mockModule('/mnt/d/project/my-title/src/search-1688.js', {
+  mockModule('/mnt/d/project/my-title/skills/alibaba1688/src/search-1688.js', {
     searchAll: async () => { throw new Error('GLM scoring API failure'); },
     searchAndFilter: async (coreWord, modifiers) => {
       // Fallback returns products based on rigid modifier filtering
@@ -202,7 +202,7 @@ test('Test 3: GLM scoring failure fallback', async () => {
     }
   });
 
-  mockModule('/mnt/d/project/my-title/src/search-taobao.js', {
+  mockModule('/mnt/d/project/my-title/skills/title-gen/src/search-taobao.js', {
     searchTaobaoTitles: async () => []
   });
 
@@ -211,7 +211,7 @@ test('Test 3: GLM scoring failure fallback', async () => {
     async selectAndGenerate() { throw new Error('GLM failure'); }
     async generateTitles() { return ['纯银项链女款 高级感']; }
   }
-  mockModule('/mnt/d/project/my-title/src/glm-client.js', MockGLMClient3);
+  mockModule('/mnt/d/project/my-title/core/glm-client.js', MockGLMClient3);
 
   const { run } = reloadIndex();
   const result = await run('纯银项链女', { maxLength: 60 });
@@ -230,14 +230,14 @@ test('Test 3: GLM scoring failure fallback', async () => {
  * - Verify: still generates titles without peer titles
  */
 test('Test 4: Taobao search failure', async () => {
-  mockModule('/mnt/d/project/my-title/src/extract-core.js', {
+  mockModule('/mnt/d/project/my-title/skills/title-gen/src/extract-core.js', {
     extractCoreAndModifiers: async (input) => ({
       coreWord: '项链',
       modifiers: [{ word: '纯银', rigidity: 'rigid' }]
     })
   });
 
-  mockModule('/mnt/d/project/my-title/src/search-1688.js', {
+  mockModule('/mnt/d/project/my-title/skills/alibaba1688/src/search-1688.js', {
     searchAll: async () => [
       { 
         id: 'p1', 
@@ -251,7 +251,7 @@ test('Test 4: Taobao search failure', async () => {
   });
 
   // Taobao search fails
-  mockModule('/mnt/d/project/my-title/src/search-taobao.js', {
+  mockModule('/mnt/d/project/my-title/skills/title-gen/src/search-taobao.js', {
     searchTaobaoTitles: async () => { throw new Error('Taobao search failed'); }
   });
 
@@ -265,7 +265,7 @@ test('Test 4: Taobao search failure', async () => {
       return ['纯银项链 女款 高级感'];
     }
   }
-  mockModule('/mnt/d/project/my-title/src/glm-client.js', MockGLMClient4);
+  mockModule('/mnt/d/project/my-title/core/glm-client.js', MockGLMClient4);
 
   const { run } = reloadIndex();
   const result = await run('纯银项链', { maxLength: 60 });
@@ -282,16 +282,16 @@ test('Test 4: Taobao search failure', async () => {
  * - Verify: returns meaningful error or empty result (not crash)
  */
 test('Test 5: All external dependencies fail', async () => {
-  mockModule('/mnt/d/project/my-title/src/extract-core.js', {
+  mockModule('/mnt/d/project/my-title/skills/title-gen/src/extract-core.js', {
     extractCoreAndModifiers: async () => { throw new Error('GLM extract failed'); }
   });
 
-  mockModule('/mnt/d/project/my-title/src/search-1688.js', {
+  mockModule('/mnt/d/project/my-title/skills/alibaba1688/src/search-1688.js', {
     searchAll: async () => { throw new Error('1688 search failed'); },
     searchAndFilter: async () => { throw new Error('1688 filter failed'); }
   });
 
-  mockModule('/mnt/d/project/my-title/src/search-taobao.js', {
+  mockModule('/mnt/d/project/my-title/skills/title-gen/src/search-taobao.js', {
     searchTaobaoTitles: async () => { throw new Error('Taobao search failed'); }
   });
 
@@ -300,7 +300,7 @@ test('Test 5: All external dependencies fail', async () => {
     async selectAndGenerate() { throw new Error('GLM failure'); }
     async generateTitles() { throw new Error('GLM generate failed'); }
   }
-  mockModule('/mnt/d/project/my-title/src/glm-client.js', MockGLMClient5);
+  mockModule('/mnt/d/project/my-title/core/glm-client.js', MockGLMClient5);
 
   const { run } = reloadIndex();
 
@@ -323,14 +323,14 @@ test('Test 5: All external dependencies fail', async () => {
  * - Verify: output format matches requested format
  */
 test('Test 6: Format switching', async () => {
-  mockModule('/mnt/d/project/my-title/src/extract-core.js', {
+  mockModule('/mnt/d/project/my-title/skills/title-gen/src/extract-core.js', {
     extractCoreAndModifiers: async (input) => ({
       coreWord: '项链',
       modifiers: [{ word: '纯银', rigidity: 'rigid' }]
     })
   });
 
-  mockModule('/mnt/d/project/my-title/src/search-1688.js', {
+  mockModule('/mnt/d/project/my-title/skills/alibaba1688/src/search-1688.js', {
     searchAll: async () => [
       { 
         id: 'p1', 
@@ -343,7 +343,7 @@ test('Test 6: Format switching', async () => {
     searchAndFilter: async () => []
   });
 
-  mockModule('/mnt/d/project/my-title/src/search-taobao.js', {
+  mockModule('/mnt/d/project/my-title/skills/title-gen/src/search-taobao.js', {
     searchTaobaoTitles: async () => []
   });
 
@@ -360,9 +360,9 @@ test('Test 6: Format switching', async () => {
     }
     async generateTitles() { return ['纯银项链 女款']; }
   }
-  mockModule('/mnt/d/project/my-title/src/glm-client.js', MockGLMClient6);
+  mockModule('/mnt/d/project/my-title/core/glm-client.js', MockGLMClient6);
 
-  const { formatResult } = require('../src/output-formatter');
+  const { formatResult } = require('../skills/title-gen/src/output-formatter');
 
   // Create a sample result to test format switching
   const sampleProducts = [

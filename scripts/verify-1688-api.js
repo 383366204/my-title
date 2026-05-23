@@ -3,7 +3,7 @@
  * 用于 Task 0: 验证1688 API真实响应结构
  */
 require('dotenv').config();
-const Alibaba1688Client = require('../src/alibaba1688-client');
+const Alibaba1688Client = require('../skills/alibaba1688/src/client');
 const fs = require('fs');
 const path = require('path');
 

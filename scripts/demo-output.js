@@ -1,4 +1,4 @@
-const { formatResult } = require('../src/output-formatter');
+const { formatResult } = require('../skills/title-gen/src/output-formatter');
 
 const mockResults = [
   {
