@@ -188,7 +188,24 @@ function _createCdpClient(wsUrl) {
     ws.on('open', function() {
       clearTimeout(connectTimeout);
       resolved = true;
-      resolve({ evaluate: evaluate, runAction: runAction, sendCommand: sendCommand, evaluateInFrame: evaluateInFrame, close: function() { cleanupPending('CDP client closed'); ws.close(); } });
+      resolve({
+        evaluate: evaluate,
+        runAction: runAction,
+        sendCommand: sendCommand,
+        evaluateInFrame: evaluateInFrame,
+        dispatchMouseEvent: function(type, x, y, opts) {
+          opts = opts || {};
+          return sendCommand('Input.dispatchMouseEvent', {
+            type: type, x: x, y: y,
+            button: opts.button || 'left',
+            clickCount: opts.clickCount || 1
+          });
+        },
+        captureScreenshot: function(format) {
+          return sendCommand('Page.captureScreenshot', { format: format || 'png' });
+        },
+        close: function() { cleanupPending('CDP client closed'); ws.close(); }
+      });
     });
     ws.on('error', function(err) {
       clearTimeout(connectTimeout);
@@ -446,7 +463,7 @@ async function extractSycmData(keyword, options) {
     var currentUrl = await cdp.evaluate("window.location.href", 5000);
 
     if (currentUrl.includes('login.taobao.com') || currentUrl.includes('passport.taobao.com') || currentUrl.includes('sycm.taobao.com/custom/login')) {
-      await _ensureSycmLoggedIn(cdp, targetUrl, onProgress);
+      var authResult = await _ensureSycmLoggedIn(cdp, targetUrl, onProgress);
       cdp.close();
       tab = await _connectToTab(port);
       cdp = await _createCdpClient(tab.webSocketDebuggerUrl);
@@ -663,10 +680,88 @@ async function extractSycmData(keyword, options) {
       headers: parsed ? parsed.h : [],
       totalCount: cleanData.length,
       data: cleanData,
-      categoryAnalysis: categoryAnalysis
+      categoryAnalysis: categoryAnalysis,
+      qrCode: (authResult && authResult.qrData) ? authResult.qrData : null
     };
   } finally {
     cdp.close();
+  }
+}
+
+/**
+ * 通过 CDP 物理点击切换到扫码登录模式
+ * 注意：必须点 i.icon-qrcode（非外层div），且用 Input.dispatchMouseEvent（el.click对React无效）
+ * @param {object} cdp - CDP client
+ * @returns {Promise<boolean>}
+ */
+async function _switchToQrMode(cdp) {
+  try {
+    var iframeRect = await cdp.evaluate(
+      "(function(){var f=document.getElementById('alibaba-login-box');var r=f.getBoundingClientRect();return{x:r.x,y:r.y,w:r.width,h:r.height}})()"
+    );
+    var iconRect = await cdp.evaluateInFrame('alibaba-login-box',
+      "(function(){var el=document.querySelector('i.icon-qrcode');if(!el)return{found:false};var r=el.getBoundingClientRect();return{found:true,x:r.x,y:r.y,w:r.width,h:r.height}})()"
+    );
+    if (!iconRect || !iconRect.found) return false;
+
+    var clickX = Math.round(iframeRect.x + iconRect.x + iconRect.w / 2);
+    var clickY = Math.round(iframeRect.y + iconRect.y + iconRect.h / 2);
+
+    await cdp.dispatchMouseEvent('mouseMoved', clickX, clickY);
+    await new Promise(function(r) { setTimeout(r, 200); });
+    await cdp.dispatchMouseEvent('mousePressed', clickX, clickY, { button: 'left', clickCount: 1 });
+    await cdp.dispatchMouseEvent('mouseReleased', clickX, clickY, { button: 'left', clickCount: 1 });
+
+    await new Promise(function(r) { setTimeout(r, 3000); });
+
+    var state = await cdp.evaluateInFrame('alibaba-login-box',
+      "(function(){var c=document.querySelector('canvas');return!!c})()"
+    );
+    return !!state;
+  } catch(e) {
+    return false;
+  }
+}
+
+/**
+ * 提取二维码：CDP 裁剪截图（绕过 canvas cross-origin 污染限制）
+ * 返回 base64 PNG 供 agent 展示，同时保存到项目目录供终端用户查看
+ * @param {object} cdp - CDP client（需有 sendCommand / evaluate / evaluateInFrame）
+ * @param {function} onProgress - 进度回调
+ * @returns {Promise<{base64:string}|null>}
+ */
+async function _extractQrCode(cdp, onProgress) {
+  try {
+    var iframeRect = await cdp.evaluate(
+      "(function(){var f=document.getElementById('alibaba-login-box');var r=f.getBoundingClientRect();return{x:r.x,y:r.y,w:r.width,h:r.height}})()"
+    );
+    var canvasRect = await cdp.evaluateInFrame('alibaba-login-box',
+      "(function(){var c=document.querySelector('canvas');if(!c)return{found:false};var r=c.getBoundingClientRect();return{found:true,x:r.x,y:r.y,w:r.width,h:r.height}})()"
+    );
+    if (!canvasRect || !canvasRect.found) return null;
+
+    // CDP 裁剪截图（浏览器级，绕过 canvas cross-origin 污染限制）
+    var pad = 20;
+    var ssResult = await cdp.sendCommand('Page.captureScreenshot', {
+      format: 'png',
+      clip: {
+        x: Math.round(iframeRect.x + canvasRect.x - pad),
+        y: Math.round(iframeRect.y + canvasRect.y - pad),
+        width: Math.round(canvasRect.w + pad * 2),
+        height: Math.round(canvasRect.h + pad * 2),
+        scale: 1
+      }
+    });
+    var base64 = ssResult.data;
+
+    var fs = require('fs');
+    var outPath = require('path').join(__dirname, '..', 'qr-code.png');
+    fs.writeFileSync(outPath, Buffer.from(base64, 'base64'));
+    onProgress('[AUTH] 二维码已生成: ' + outPath);
+
+    return { base64: base64 };
+  } catch(e) {
+    return null;
   }
 }
 
@@ -735,12 +830,9 @@ async function _ensureSycmLoggedIn(cdp, targetUrl, onProgress) {
     );
     if (String(hasSlider) === 'yes') {
       onProgress('[AUTH] 检测到滑块验证，切换到扫码登录模式...');
-      // Click QR code entry
-      var qrClicked = await cdp.evaluateInFrame('alibaba-login-box',
-        "var el = document.querySelector('div.view-type-qrcode'); if(el) { el.click(); return 'clicked'; } return 'not_found'"
-      );
-      if (String(qrClicked) === 'not_found') {
-        onProgress('[AUTH] 未找到扫码入口，等待手动完成滑块验证...');
+      var switched = await _switchToQrMode(cdp);
+      if (!switched) {
+        onProgress('[AUTH] 切换扫码模式失败，等待手动完成滑块验证...');
       }
       // Fall through to QR wait loop
     } else {
@@ -757,7 +849,7 @@ async function _ensureSycmLoggedIn(cdp, targetUrl, onProgress) {
             onProgress('[AUTH] 登录成功，导航到目标页面...');
             await cdp.runAction("window.location.href = " + JSON.stringify(targetUrl), 5000);
             await new Promise(function(r) { setTimeout(r, 5000); });
-            return;
+            return { qrData: null };
           }
         } catch (e) { continue; }
       }
@@ -766,16 +858,16 @@ async function _ensureSycmLoggedIn(cdp, targetUrl, onProgress) {
   } else {
     // No credentials — go straight to QR
     onProgress('[AUTH] 未配置账号密码，切换到扫码登录模式...');
-    var qrClicked = await cdp.evaluateInFrame('alibaba-login-box',
-      "var el = document.querySelector('div.view-type-qrcode'); if(el) { el.click(); return 'clicked'; } return 'not_found'"
-    );
-    if (String(qrClicked) === 'not_found') {
-      onProgress('[AUTH] 默认页面可能已是扫码模式...');
+    var switched = await _switchToQrMode(cdp);
+    if (!switched) {
+      onProgress('[AUTH] 切换扫码模式失败，尝试直接提取二维码...');
     }
   }
 
+  var qrData = await _extractQrCode(cdp, onProgress);
+
   // QR code wait loop (for both slider fallback and no credentials)
-  onProgress('[AUTH] 请使用淘宝 APP 扫描二维码登录...');
+  onProgress('[AUTH] 请使用千牛 APP 扫描二维码登录...');
   onProgress('[AUTH] 等待最多 120 秒...');
   var startTime = Date.now();
   while (Date.now() - startTime < 120000) {
@@ -787,7 +879,7 @@ async function _ensureSycmLoggedIn(cdp, targetUrl, onProgress) {
         onProgress('[AUTH] 登录成功，导航到目标页面...');
         await cdp.runAction("window.location.href = " + JSON.stringify(targetUrl), 5000);
         await new Promise(function(r) { setTimeout(r, 5000); });
-        return;
+        return { qrData: qrData };
       }
     } catch (e) { continue; }
   }
