@@ -10,11 +10,11 @@
 - 多页数据提取和去重
 - 类目分析和推荐
 - Chrome 调试模式自动启动
-- 自动登录（使用环境变量配置的账号密码）
+- 人工登录态复用（管理员先登录一次，后续使用固定 Chrome profile 缓存）
 
 ## 依赖
 - 共享模块：无
-- 环境变量：SYCM_USERNAME (可选), SYCM_PASSWORD (可选)
+- 环境变量：SYCM_LOGIN_MODE (可选), SYCM_CHROME_PROFILE_DIR (可选), SYCM_REMOTE_DEBUGGING_PORT (可选)
 - 外部工具：Chrome 浏览器（必需，需要以调试模式启动）
 - npm 依赖：ws (WebSocket 客户端)
 
@@ -28,6 +28,8 @@
   - `port` (number): Chrome 调试端口（默认 9222）
   - `maxPages` (number): 最大提取页数（默认 1）
   - `mode` (string): 查询模式，'hot'=相关热搜词或 'blue'=相关蓝海词（默认 'blue'）
+  - `loginMode` (string): 登录模式，目前仅支持 'manual'，复用人工登录态
+  - `chromeProfileDir` (string): Chrome 登录态目录，默认读取 `SYCM_CHROME_PROFILE_DIR`
   - `pageFilters` (object): 页面级筛选参数
     - `compareType` (string): 'cycle'（环比）或 'yearSync'（年同比，默认 'cycle'）
     - `timePeriod` (string): '7d', '30d', 'day', 'week', 'month'（默认 '7d'）
@@ -124,7 +126,7 @@
 ## 工作流程
 1. 连接到 Chrome DevTools Protocol
 2. 导航到生意参谋搜索分析页面（根据参数构造 URL）
-3. 检查登录状态，如未登录尝试自动登录或提示
+3. 检查登录状态，如未登录返回 `login_required`
 4. 切换到目标模式（蓝海词/热搜词）
 5. 勾选全部指标
 6. （可选）应用过滤条件（蓝海词模式）
@@ -134,16 +136,17 @@
 
 ## 降级策略
 - Chrome 未运行：提供启动命令提示或使用 autoLaunchChrome 启动
-- 未配置账号密码：提示在 .env 中配置或手动登录
-- 检测验证码/滑块：提示人工处理
+- 登录态失效：返回 `login_required`，提示管理员使用固定 Chrome profile 人工登录
+- 滑块/验证码：不再自动处理，由管理员在浏览器中完成一次登录后缓存
 - 关键词校验失败：强制刷新重试
 - 指标未完全加载：继续提取可用数据
 - 类目分析失败：继续返回搜索分析数据
 
 ## 配置
 - 环境变量：
-  - SYCM_USERNAME (可选): 生意参谋账号
-  - SYCM_PASSWORD (可选): 生意参谋密码
+  - SYCM_LOGIN_MODE (可选): manual，默认 manual
+  - SYCM_CHROME_PROFILE_DIR (可选): Chrome 登录态目录，云服务器建议使用持久化目录 `/data/ecom-ai-tools/chrome-profile/sycm`
+  - SYCM_REMOTE_DEBUGGING_PORT (可选): Chrome 调试端口，默认 9222
 - Chrome 启动命令（手动启动）：
   ```bash
   # Windows

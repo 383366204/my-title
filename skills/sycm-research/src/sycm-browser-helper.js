@@ -104,6 +104,12 @@ function getDefaultUserDataDir() {
 }
 
 function getDedicatedProfileDir() {
+  if (process.env.SYCM_CHROME_PROFILE_DIR) {
+    return process.env.SYCM_CHROME_PROFILE_DIR;
+  }
+  if (process.platform === 'win32' && process.env.USERPROFILE) {
+    return path.join(process.env.USERPROFILE, 'AppData', 'Local', 'ecom-ai-tools-chrome');
+  }
   var home = process.env.HOME || '';
   var match = home.match(/\/mnt\/[a-z]\/Users\/([^/]+)/i);
   var winUser = match ? match[1] : '38336';
@@ -137,7 +143,7 @@ function findWindowsChrome() {
 function generateChromeLaunchCommand(options = {}) {
   const port = options.port || 9222;
   const osType = options.os || process.platform;
-  const userDataDir = options.userDataDir || getDefaultUserDataDir();
+  const userDataDir = options.userDataDir || process.env.SYCM_CHROME_PROFILE_DIR || getDefaultUserDataDir();
 
   let chromePath = '';
   const args = [
@@ -206,15 +212,18 @@ async function autoLaunchChrome(port, options = {}) {
   const userDataDir = options.userDataDir || getDedicatedProfileDir();
   const chromePath = findWindowsChrome();
 
-  // 从 WSL 通过 cmd.exe start 启动 Windows Chrome（非阻塞）
-  const cmd = [
-    '/mnt/c/Windows/System32/cmd.exe', '/c',
-    'start', '""',
-    '"' + chromePath + '"',
+  const args = [
     '--remote-debugging-port=' + port,
     '--user-data-dir="' + userDataDir + '"',
     '--no-first-run'
-  ].join(' ');
+  ];
+  const cmd = process.platform === 'win32'
+    ? ['start', '""', '"' + chromePath + '"'].concat(args).join(' ')
+    : [
+        '/mnt/c/Windows/System32/cmd.exe', '/c',
+        'start', '""',
+        '"' + chromePath + '"'
+      ].concat(args).join(' ');
 
   try {
     await execAsync(cmd, { timeout: 10000 });

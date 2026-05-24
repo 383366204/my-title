@@ -439,6 +439,12 @@ program
   .option('--no-default-filters', '禁用默认过滤条件')
   .option('--compare <type>', '环比类型: cycle=环比(默认), yearSync=年同比', 'cycle')
   .option('--period <period>', '时间周期: 7d(默认), 30d, day, week, month', '7d')
+  .option('--login-mode <mode>', '登录模式: manual(默认，复用人工登录态；不再自动登录)', process.env.SYCM_LOGIN_MODE || 'manual')
+  .option('--chrome-profile-dir <path>', 'Chrome 登录态目录（默认读取 SYCM_CHROME_PROFILE_DIR）')
+  .option('--username <username>', '已废弃：不再自动输入账号')
+  .option('--password <password>', '已废弃：不再自动输入密码')
+  .option('--phone <phone>', '已废弃：不再自动发送验证码')
+  .option('--sms-code <code>', '已废弃：不再自动提交验证码')
   .action(async function(keyword, options, command) {
     const mainOpts = command && command.parent ? command.parent.opts() : {};
     const jsonMode = !!options.json || !!mainOpts.json;
@@ -457,6 +463,10 @@ program
     }
     if (!VALID_PERIODS.includes(userPeriod)) {
       console.error('错误: 无效的 --period 值 "' + userPeriod + '", 有效选项: ' + VALID_PERIODS.join(', '));
+      process.exit(1);
+    }
+    if (!['manual'].includes(String(options.loginMode || '').toLowerCase())) {
+      console.error('错误: 无效的 --login-mode 值 "' + options.loginMode + '", 当前仅支持 manual');
       process.exit(1);
     }
     
@@ -483,7 +493,7 @@ program
 
     if (!await isChromeDevToolsAvailable(port)) {
       console.error('⏳ Chrome 未运行，正在自动启动...');
-      const launchResult = await autoLaunchChrome(port);
+      const launchResult = await autoLaunchChrome(port, { userDataDir: options.chromeProfileDir });
       if (!launchResult.success) {
         if (jsonMode) {
           process.stdout.write(JSON.stringify({
@@ -506,6 +516,12 @@ program
         port: port,
         maxPages: maxPages,
         mode: mode,
+        loginMode: String(options.loginMode || 'manual').toLowerCase(),
+        chromeProfileDir: options.chromeProfileDir,
+        username: options.username,
+        password: options.password,
+        phone: options.phone,
+        smsCode: options.smsCode,
         filterConditions: filterConditions,
         pageFilters: { compareType: userCompare, timePeriod: userPeriod },
         onProgress: function(msg) { progressMsgs.push(msg); if (!jsonMode) console.log('  ' + msg); }
@@ -574,6 +590,23 @@ program
       }
 
     } catch (error) {
+      if (error && error.status === 'login_required') {
+        const payload = error.details || {
+          ok: false,
+          status: 'login_required',
+          message: error.message,
+          loginUrl: error.loginUrl,
+          profileDir: error.profileDir
+        };
+        if (jsonMode) {
+          process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
+        } else {
+          console.error('\n🔐 ' + payload.message);
+          console.error('请用当前 Chrome profile 人工登录: ' + payload.loginUrl);
+          console.error('Profile: ' + payload.profileDir);
+        }
+        process.exit(1);
+      }
       if (jsonMode) {
         process.stdout.write(JSON.stringify({ ok: false, error: error.message }) + '\n');
       } else {

@@ -37,8 +37,8 @@ server.tool(
   [
     '生意参谋搜索分析数据查询工具。自动通过 CDP 连接 Chrome，打开生意参谋搜索分析页面，勾选全部指标，提取数据并返回。',
     '',
-    '使用前提：用户必须先用 --remote-debugging-port=9222 启动 Chrome 并登录 sycm.taobao.com。',
-    '如果 Chrome 未运行，工具会返回启动命令指引。'
+    '使用前提：Chrome 使用固定 profile 目录运行，管理员先人工登录一次。未登录时返回 login_required，不再自动输入账号密码或验证码。',
+    '登录态目录可通过 chromeProfileDir 参数或 SYCM_CHROME_PROFILE_DIR 环境变量配置。'
   ].join('\n'),
   {
     keyword: z.string().describe('要查询的搜索关键词，如：耳钉、纯银项链'),
@@ -47,6 +47,12 @@ server.tool(
     mode: z.enum(['hot', 'blue']).default('blue').describe('查询模式，hot=相关热搜词，blue=相关蓝海词'),
     compareType: z.enum(['cycle', 'yearSync']).optional().default('cycle').describe('数据对比类型，cycle=环比，yearSync=同比，默认cycle'),
     timePeriod: z.enum(['7d', '30d', 'day', 'week', 'month']).optional().default('7d').describe('时间周期，7d=7天，30d=30天，day=日，week=周，month=月，默认7d'),
+    loginMode: z.enum(['manual']).optional().default('manual').describe('登录模式，目前仅支持 manual：复用人工登录态'),
+    chromeProfileDir: z.string().optional().describe('Chrome 登录态目录，未传则读取 SYCM_CHROME_PROFILE_DIR'),
+    username: z.string().optional().describe('已废弃：不再自动输入账号'),
+    password: z.string().optional().describe('已废弃：不再自动输入密码'),
+    phone: z.string().optional().describe('已废弃：不再自动发送验证码'),
+    smsCode: z.string().optional().describe('已废弃：不再自动提交验证码'),
     filterConditions: z.object({
       demandSupplyRatio: z.number().optional().describe('需求供给比最小值'),
       searchPopularity: z.number().optional().describe('搜索人气最小值'),
@@ -56,13 +62,13 @@ server.tool(
     }).optional().describe('过滤条件（仅蓝海词模式生效）'),
     noDefaultFilters: z.boolean().default(false).describe('禁用默认过滤条件'),
   },
-  async ({ keyword, port, maxPages, mode, compareType, timePeriod, filterConditions, noDefaultFilters }) => {
+  async ({ keyword, port, maxPages, mode, compareType, timePeriod, loginMode, chromeProfileDir, username, password, phone, smsCode, filterConditions, noDefaultFilters }) => {
     try {
       const { isChromeDevToolsAvailable, autoLaunchChrome } = sycmSkill;
       const { extractSycmData, DEFAULT_FILTER_CONDITIONS } = require('./src/sycm-cdp-extractor.js');
 
       if (!await isChromeDevToolsAvailable(port)) {
-        const launchResult = await autoLaunchChrome(port);
+        const launchResult = await autoLaunchChrome(port, { userDataDir: chromeProfileDir });
         if (!launchResult.success) {
           return { content: [{ type: 'text', text: JSON.stringify({
             ok: false,
@@ -86,6 +92,12 @@ server.tool(
         port: port,
         maxPages: maxPages,
         mode: mode,
+        loginMode: loginMode,
+        chromeProfileDir: chromeProfileDir,
+        username: username,
+        password: password,
+        phone: phone,
+        smsCode: smsCode,
         filterConditions: mergedFilters,
         pageFilters: {
           compareType: compareType,
@@ -135,6 +147,15 @@ server.tool(
         _progress: progressLog
       }, null, 2) }] };
     } catch (err) {
+      if (err && err.status === 'login_required') {
+        return { content: [{ type: 'text', text: JSON.stringify(err.details || {
+          ok: false,
+          status: 'login_required',
+          message: err.message,
+          loginUrl: err.loginUrl,
+          profileDir: err.profileDir
+        }, null, 2) }] };
+      }
       console.error(`[sycm-research] sycm_query error:`, err.message);
       return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: err.message }) }], isError: true };
     }

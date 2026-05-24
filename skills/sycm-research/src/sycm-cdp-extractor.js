@@ -4,6 +4,7 @@
  * 支持：自动导航 → 勾选指标 → 多页遍历 → 结构化返回
  */
 var http = require('http');
+var path = require('path');
 var WebSocket = require('ws');
 
 var DEFAULT_PORT = 9222;
@@ -42,6 +43,49 @@ var COMPARE_TYPE_MAP = {
 
 var VALID_COMPARE_TYPES = Object.keys(COMPARE_TYPE_MAP);
 var VALID_PERIODS = Object.keys(PERIOD_URL_MAP);
+
+function _getManualLoginProfileDir(options) {
+  options = options || {};
+  return options.chromeProfileDir ||
+    process.env.SYCM_CHROME_PROFILE_DIR ||
+    path.join(process.env.USERPROFILE || process.env.HOME || '/tmp', 'AppData', 'Local', 'ecom-ai-tools-chrome');
+}
+
+function _createLoginRequiredError(options) {
+  var err = new Error('生意参谋登录态已失效，请人工登录后重试');
+  err.code = 'SYCM_LOGIN_REQUIRED';
+  err.status = 'login_required';
+  err.loginUrl = 'https://sycm.taobao.com/custom/login.htm';
+  err.profileDir = _getManualLoginProfileDir(options);
+  err.details = {
+    ok: false,
+    status: err.status,
+    message: err.message,
+    loginUrl: err.loginUrl,
+    profileDir: err.profileDir
+  };
+  return err;
+}
+
+async function _hasLoginIframe(cdp) {
+  try {
+    var tree = await cdp.sendCommand('Page.getFrameTree', {});
+    var found = false;
+    function walk(node) {
+      if (!node || !node.frame) return;
+      var name = node.frame.name || '';
+      var url = node.frame.url || '';
+      if (name === 'alibaba-login-box' || url.includes('havanalogin.taobao.com') || url.includes('login.taobao.com')) {
+        found = true;
+      }
+      (node.childFrames || []).forEach(walk);
+    }
+    walk(tree.frameTree);
+    return found;
+  } catch (e) {
+    return false;
+  }
+}
 
 function _connectToTab(port, urlFilter) {
   port = port || DEFAULT_PORT;
@@ -419,6 +463,8 @@ function _formatDate(date) {
  * @param {number} [options.port=9222] - Chrome 调试端口
  * @param {number} [options.maxPages=1] - 最大提取页数
  * @param {string} [options.mode='blue'] - 查询模式: 'hot'=相关热搜词, 'blue'=相关蓝海词
+ * @param {string} [options.loginMode='manual'] - 登录模式，目前仅支持 manual（复用人工登录态）
+ * @param {string} [options.chromeProfileDir] - Chrome 登录态目录，默认读取 SYCM_CHROME_PROFILE_DIR
  * @param {Object} [options.pageFilters] - 页面级筛选参数 { compareType: 'cycle'|'yearSync', timePeriod: '7d'|'30d'|'day'|'week'|'month' }
  * @param {Function} [options.onProgress] - 进度回调 fn(stepMsg)
  * @returns {Promise<Object>} 提取结果 { keyword, data[], totalCount, totalPages, currentPage, headers, extractedAt, pageFiltersApplied }
@@ -462,16 +508,12 @@ async function extractSycmData(keyword, options) {
     await cdp.sendCommand('Page.enable', {});
     var currentUrl = await cdp.evaluate("window.location.href", 5000);
 
-    if (currentUrl.includes('login.taobao.com') || currentUrl.includes('passport.taobao.com') || currentUrl.includes('sycm.taobao.com/custom/login')) {
-      var authResult = await _ensureSycmLoggedIn(cdp, targetUrl, onProgress);
-      cdp.close();
-      tab = await _connectToTab(port);
-      cdp = await _createCdpClient(tab.webSocketDebuggerUrl);
-      await cdp.sendCommand('Page.enable', {});
-      await cdp.runAction("window.location.href='" + targetUrl.replace(/'/g, "\\'") + "'", 5000);
-      cdp.close();
-      onProgress('[1/6] Logged in, waiting for page load...');
-      await new Promise(function(r) { setTimeout(r, 10000); });
+    if (currentUrl.includes('login.taobao.com') ||
+        currentUrl.includes('passport.taobao.com') ||
+        currentUrl.includes('sycm.taobao.com/custom/login') ||
+        await _hasLoginIframe(cdp)) {
+      onProgress('[AUTH] 检测到 SYCM 未登录或登录态失效，请人工登录后重试');
+      throw _createLoginRequiredError(options);
     } else {
       cdp.close();
     }
@@ -681,7 +723,7 @@ async function extractSycmData(keyword, options) {
       totalCount: cleanData.length,
       data: cleanData,
       categoryAnalysis: categoryAnalysis,
-      qrCode: (authResult && authResult.qrData) ? authResult.qrData : null
+      qrCode: null
     };
   } finally {
     cdp.close();
@@ -765,9 +807,187 @@ async function _extractQrCode(cdp, onProgress) {
   }
 }
 
-async function _ensureSycmLoggedIn(cdp, targetUrl, onProgress) {
-  var username = process.env.SYCM_USERNAME;
-  var password = process.env.SYCM_PASSWORD;
+function _normalizeLoginMode(mode) {
+  mode = String(mode || process.env.SYCM_LOGIN_MODE || 'auto').toLowerCase();
+  return ['auto', 'password', 'sms', 'qr'].includes(mode) ? mode : 'auto';
+}
+
+function _getAuthOptions(options) {
+  options = options || {};
+  return {
+    loginMode: _normalizeLoginMode(options.loginMode),
+    username: options.username || '',
+    password: options.password || '',
+    phone: options.phone || '',
+    smsCode: options.smsCode || '',
+    waitMs: options.loginWaitMs || 120000
+  };
+}
+
+function _loginSucceededUrl(url) {
+  return (url.includes('sycm.taobao.com') || url.match(/https?:\/\/(www\.)?myseller\.taobao\.com/)) && !url.includes('custom/login');
+}
+
+async function _waitForLoginSuccess(cdp, targetUrl, onProgress, waitMs, label) {
+  onProgress('[AUTH] 等待登录成功...');
+  var startTime = Date.now();
+  while (Date.now() - startTime < waitMs) {
+    await new Promise(function(r) { setTimeout(r, 3000); });
+    try {
+      var url = await cdp.evaluate("window.location.href", 5000);
+      if (_loginSucceededUrl(url)) {
+        onProgress('[AUTH] ' + label + '登录成功');
+        onProgress('[AUTH] 登录成功，导航到目标页面...');
+        await cdp.runAction("window.location.href = " + JSON.stringify(targetUrl), 5000);
+        await new Promise(function(r) { setTimeout(r, 5000); });
+        return true;
+      }
+    } catch (e) {}
+  }
+  return false;
+}
+
+async function _setInputValue(cdp, selector, value) {
+  return cdp.evaluateInFrame('alibaba-login-box',
+    "(function(){" +
+    "var selectors=" + JSON.stringify(selector) + ".split(',');" +
+    "var inp=null;" +
+    "for(var i=0;i<selectors.length;i++){inp=document.querySelector(selectors[i].trim());if(inp)break;}" +
+    "if(!inp)return 'not_found';" +
+    "var proto=inp.tagName==='TEXTAREA'?window.HTMLTextAreaElement.prototype:window.HTMLInputElement.prototype;" +
+    "var desc=Object.getOwnPropertyDescriptor(proto,'value');" +
+    "if(desc&&desc.set){desc.set.call(inp," + JSON.stringify(value) + ");}else{inp.value=" + JSON.stringify(value) + ";}" +
+    "inp.dispatchEvent(new Event('input',{bubbles:true}));" +
+    "inp.dispatchEvent(new Event('change',{bubbles:true}));" +
+    "return 'ok';" +
+    "})()"
+  );
+}
+
+async function _clickLoginElement(cdp, selector, textHints) {
+  return cdp.evaluateInFrame('alibaba-login-box',
+    "(function(){" +
+    "var selector=" + JSON.stringify(selector || '') + ";" +
+    "var hints=" + JSON.stringify(textHints || []) + ";" +
+    "var el=selector?document.querySelector(selector):null;" +
+    "if(!el&&hints.length){" +
+    "var nodes=document.querySelectorAll('a,button,div,span,label');" +
+    "for(var i=0;i<nodes.length;i++){" +
+    "var text=(nodes[i].textContent||'').replace(/\\s+/g,'');" +
+    "for(var j=0;j<hints.length;j++){if(text.indexOf(hints[j])>=0){el=nodes[i];break;}}" +
+    "if(el)break;" +
+    "}" +
+    "}" +
+    "if(!el)return 'not_found';" +
+    "el.click();" +
+    "return 'ok';" +
+    "})()"
+  );
+}
+
+async function _hasSlider(cdp) {
+  try {
+    var hasSlider = await cdp.evaluateInFrame('alibaba-login-box',
+      "(function(){var text=document.body?document.body.textContent:'';return /滑块|验证|安全检测/.test(text)||!!document.querySelector('.nc-lang-cnt,#nc_1_n1z,.nc-container')})()"
+    );
+    return !!hasSlider;
+  } catch (e) {
+    return false;
+  }
+}
+
+async function _loginWithPassword(cdp, auth, targetUrl, onProgress) {
+  if (!auth.username || !auth.password) {
+    throw new Error('[AUTH] 自动密码登录已停用，请使用人工登录态缓存');
+  }
+
+  onProgress('[AUTH] 密码登录模式...');
+  await _clickLoginElement(cdp, 'a.password-login-tab-item,.password-login-tab-item', ['密码登录', '账号登录']);
+  await new Promise(function(r) { setTimeout(r, 1000); });
+
+  await _setInputValue(cdp, '#fm-login-id,input[name="fm-login-id"],input[name="loginId"],input[type="text"]', auth.username);
+  await _setInputValue(cdp, '#fm-login-password,input[name="fm-login-password"],input[type="password"]', auth.password);
+  await _clickLoginElement(cdp, 'button.fm-submit,.fm-submit,button[type="submit"]', ['登录']);
+
+  await new Promise(function(r) { setTimeout(r, 2000); });
+  if (await _hasSlider(cdp)) {
+    onProgress('[AUTH] 检测到滑块/安全验证，改用扫码或人工处理...');
+    return false;
+  }
+  return _waitForLoginSuccess(cdp, targetUrl, onProgress, auth.waitMs, '密码');
+}
+
+async function _loginWithSms(cdp, auth, targetUrl, onProgress) {
+  if (!auth.phone) {
+    throw new Error('[AUTH] 自动验证码登录已停用，请使用人工登录态缓存');
+  }
+
+  onProgress('[AUTH] 手机验证码登录模式...');
+  await _clickLoginElement(cdp, '.sms-login-tab-item,a.sms-login-tab-item', ['短信登录', '验证码登录', '手机登录']);
+  await new Promise(function(r) { setTimeout(r, 1000); });
+
+  await _setInputValue(cdp, '#fm-login-id,input[name="fm-login-id"],input[name="loginId"],input[name="phone"],input[type="tel"],input[type="text"]', auth.phone);
+  var sendResult = await _clickLoginElement(cdp, 'a.send-btn-link,.send-btn-link,.sms-send-btn,.send-code', ['获取验证码', '发送验证码', '获取校验码', '发送校验码']);
+  if (String(sendResult) === 'not_found') {
+    onProgress('[AUTH] 未找到发送验证码按钮，请在浏览器里手动点击发送');
+  } else {
+    onProgress('[AUTH] 已点击获取验证码');
+  }
+
+  await new Promise(function(r) { setTimeout(r, 2000); });
+  if (await _hasBaxiaCaptcha(cdp)) {
+    onProgress('[AUTH] 获取验证码前触发滑块验证，请先在浏览器里完成滑动验证');
+    throw new Error('slider_required: 已点击获取验证码，但淘宝要求先完成滑块验证；请在浏览器中滑动验证后重试');
+  }
+
+  if (auth.smsCode) {
+    await _setInputValue(cdp, '#fm-sms-code,#fm-login-code,input[name="smsCode"],input[name="code"],input[placeholder*="验证码"]', auth.smsCode);
+    await _clickLoginElement(cdp, 'button.fm-submit,.fm-submit,button[type="submit"]', ['登录']);
+  } else {
+    onProgress('[AUTH] 未提供验证码，已停在短信验证码登录页');
+    throw new Error('sms_code_required: 已点击获取验证码，请提供短信验证码后使用 --sms-code 继续登录');
+  }
+
+  if (await _waitForLoginSuccess(cdp, targetUrl, onProgress, auth.waitMs, '验证码')) {
+    return true;
+  }
+  if (!auth.smsCode) return false;
+  throw new Error('验证码登录超时（' + Math.round(auth.waitMs / 1000) + '秒），请确认验证码是否正确');
+}
+
+async function _hasBaxiaCaptcha(cdp) {
+  try {
+    var tree = await cdp.sendCommand('Page.getFrameTree', {});
+    var found = false;
+    function walk(node) {
+      if (!node || !node.frame) return;
+      var name = node.frame.name || '';
+      var url = node.frame.url || '';
+      if (name === 'baxia-dialog-content' || url.includes('/punish') || url.includes('action=captcha')) {
+        found = true;
+      }
+      (node.childFrames || []).forEach(walk);
+    }
+    walk(tree.frameTree);
+    return found;
+  } catch (e) {
+    return false;
+  }
+}
+
+async function _waitForQrLogin(cdp, targetUrl, onProgress, waitMs) {
+  var qrData = await _extractQrCode(cdp, onProgress);
+
+  onProgress('[AUTH] 请使用千牛 APP 扫描二维码登录...');
+  onProgress('[AUTH] 等待最多 ' + Math.round(waitMs / 1000) + ' 秒...');
+  if (await _waitForLoginSuccess(cdp, targetUrl, onProgress, waitMs, '扫码')) {
+    return { qrData: qrData };
+  }
+  throw new Error('等待登录超时（' + Math.round(waitMs / 1000) + '秒），请手动登录后重试');
+}
+
+async function _ensureSycmLoggedIn(cdp, targetUrl, onProgress, options) {
+  var auth = _getAuthOptions(options);
 
   // Step 1: Navigate to loginmyseller.taobao.com
   onProgress('[AUTH] 导航到 loginmyseller.taobao.com...');
@@ -790,100 +1010,22 @@ async function _ensureSycmLoggedIn(cdp, targetUrl, onProgress) {
 
   onProgress('[AUTH] 检测到登录 iframe');
 
-  // Step 3: Decide login mode
-  if (username && password) {
-    // Password login mode
-    onProgress('[AUTH] 密码登录模式...');
-    // Click password login tab
-    await cdp.evaluateInFrame('alibaba-login-box',
-      "var el = document.querySelector('a.password-login-tab-item'); if(el) el.click(); return 'ok'");
-    await new Promise(function(r) { setTimeout(r, 1000); });
-
-    // Fill username using React-compatible value setter
-    await cdp.evaluateInFrame('alibaba-login-box',
-      "var inp = document.querySelector('#fm-login-id'); " +
-      "var s = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set; " +
-      "s.call(inp, " + JSON.stringify(username) + "); " +
-      "inp.dispatchEvent(new Event('input', {bubbles:true})); " +
-      "inp.dispatchEvent(new Event('change', {bubbles:true})); return 'ok'"
-    );
-
-    // Fill password
-    await cdp.evaluateInFrame('alibaba-login-box',
-      "var inp = document.querySelector('#fm-login-password'); " +
-      "var s = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set; " +
-      "s.call(inp, " + JSON.stringify(password) + "); " +
-      "inp.dispatchEvent(new Event('input', {bubbles:true})); " +
-      "inp.dispatchEvent(new Event('change', {bubbles:true})); return 'ok'"
-    );
-
-    // Click login button
-    await cdp.evaluateInFrame('alibaba-login-box',
-      "var btn = document.querySelector('button.fm-submit'); if(btn) btn.click(); return 'ok'"
-    );
-
-    // Wait and check for slider verification
-    await new Promise(function(r) { setTimeout(r, 2000); });
-    var hasSlider = await cdp.evaluateInFrame('alibaba-login-box',
-      "var el = document.querySelector('.nc-lang-cnt'); " +
-      "return el && el.textContent.includes('滑块') ? 'yes' : 'no'"
-    );
-    if (String(hasSlider) === 'yes') {
-      onProgress('[AUTH] 检测到滑块验证，切换到扫码登录模式...');
-      var switched = await _switchToQrMode(cdp);
-      if (!switched) {
-        onProgress('[AUTH] 切换扫码模式失败，等待手动完成滑块验证...');
-      }
-      // Fall through to QR wait loop
+  if (auth.loginMode === 'password') {
+    if (await _loginWithPassword(cdp, auth, targetUrl, onProgress)) return { qrData: null };
+    if (auth.phone) {
+      onProgress('[AUTH] 密码登录未完成，尝试手机验证码登录...');
+      if (await _loginWithSms(cdp, auth, targetUrl, onProgress)) return { qrData: null };
     } else {
-      // No slider, wait for login success
-      onProgress('[AUTH] 等待登录成功...');
-      var startTime = Date.now();
-      while (Date.now() - startTime < 120000) {
-        await new Promise(function(r) { setTimeout(r, 3000); });
-        try {
-          var url = await cdp.evaluate("window.location.href", 5000);
-          // Positive match: left login page, reached taobao.com destination
-          if ((url.includes('sycm.taobao.com') || url.match(/https?:\/\/(www\.)?myseller\.taobao\.com/)) && !url.includes('custom/login')) {
-            onProgress('[AUTH] 登录成功');
-            onProgress('[AUTH] 登录成功，导航到目标页面...');
-            await cdp.runAction("window.location.href = " + JSON.stringify(targetUrl), 5000);
-            await new Promise(function(r) { setTimeout(r, 5000); });
-            return { qrData: null };
-          }
-        } catch (e) { continue; }
-      }
-      throw new Error('等待登录超时（120秒），请手动登录后重试');
+      throw new Error('[AUTH] 未配置手机号，无法降级到验证码登录');
     }
-  } else {
-    // No credentials — go straight to QR
-    onProgress('[AUTH] 未配置账号密码，切换到扫码登录模式...');
-    var switched = await _switchToQrMode(cdp);
-    if (!switched) {
-      onProgress('[AUTH] 切换扫码模式失败，尝试直接提取二维码...');
-    }
+  } else if (auth.loginMode === 'sms') {
+    if (await _loginWithSms(cdp, auth, targetUrl, onProgress)) return { qrData: null };
+  } else if (auth.loginMode === 'auto') {
+    if (auth.username && auth.password && await _loginWithPassword(cdp, auth, targetUrl, onProgress)) return { qrData: null };
+    if (auth.phone && await _loginWithSms(cdp, auth, targetUrl, onProgress)) return { qrData: null };
   }
 
-  var qrData = await _extractQrCode(cdp, onProgress);
-
-  // QR code wait loop (for both slider fallback and no credentials)
-  onProgress('[AUTH] 请使用千牛 APP 扫描二维码登录...');
-  onProgress('[AUTH] 等待最多 120 秒...');
-  var startTime = Date.now();
-  while (Date.now() - startTime < 120000) {
-    await new Promise(function(r) { setTimeout(r, 3000); });
-    try {
-      var url = await cdp.evaluate("window.location.href", 5000);
-      if ((url.includes('sycm.taobao.com') || url.match(/https?:\/\/(www\.)?myseller\.taobao\.com/)) && !url.includes('custom/login')) {
-        onProgress('[AUTH] 扫码登录成功');
-        onProgress('[AUTH] 登录成功，导航到目标页面...');
-        await cdp.runAction("window.location.href = " + JSON.stringify(targetUrl), 5000);
-        await new Promise(function(r) { setTimeout(r, 5000); });
-        return { qrData: qrData };
-      }
-    } catch (e) { continue; }
-  }
-  throw new Error('等待登录超时（120秒），请手动登录后重试');
+  throw new Error('[AUTH] 登录未完成；扫码登录已暂停，请使用手机验证码登录');
 }
 
 function _extractCategoryAnalysis(cdp) {
