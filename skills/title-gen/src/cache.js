@@ -26,9 +26,9 @@ class ResultCache {
     return this._bannedHash;
   }
 
-  _key(keyword, maxLength, limit, peerTitlesHash = '', sycmDataHash = '', useImageSearch = false, maxImageSearch = 0, minPrice = 0, maxPrice = 0, bannedWordVersion = 0, schemaVersion = 1, promptVersion = 1) {
+  _key(keyword, maxLength, limit, peerTitlesHash = '', sycmDataHash = '', useImageSearch = false, maxImageSearch = 0, minPrice = 0, maxPrice = 0, bannedWordVersion = 0, schemaVersion = 1, promptVersion = 1, productsHash = '') {
     const bannedVersion = this._getBannedWordsHash();
-    const raw = `${keyword}::${maxLength}::${limit || 0}::${peerTitlesHash}::${sycmDataHash}::${bannedVersion}::${useImageSearch}::${maxImageSearch}::${minPrice}::${maxPrice}::${bannedWordVersion}::${schemaVersion}::${promptVersion}`;
+    const raw = `${keyword}::${maxLength}::${limit || 0}::${peerTitlesHash}::${sycmDataHash}::${bannedVersion}::${useImageSearch}::${maxImageSearch}::${minPrice}::${maxPrice}::${bannedWordVersion}::${schemaVersion}::${promptVersion}::${productsHash}`;
     return crypto.createHash('md5').update(raw).digest('hex');
   }
 
@@ -36,9 +36,9 @@ class ResultCache {
     return path.join(this.cacheDir, `${key}.json`);
   }
 
-  get(keyword, maxLength, limit, peerTitlesHash = '', sycmDataHash = '', useImageSearch = false, maxImageSearch = 0, minPrice = 0, maxPrice = 0, bannedWordVersion = 0, schemaVersion = 1, promptVersion = 1) {
+  get(keyword, maxLength, limit, peerTitlesHash = '', sycmDataHash = '', useImageSearch = false, maxImageSearch = 0, minPrice = 0, maxPrice = 0, bannedWordVersion = 0, schemaVersion = 1, promptVersion = 1, productsHash = '') {
     try {
-      const filePath = this._path(this._key(keyword, maxLength, limit, peerTitlesHash, sycmDataHash, useImageSearch, maxImageSearch, minPrice, maxPrice, bannedWordVersion, schemaVersion, promptVersion));
+      const filePath = this._path(this._key(keyword, maxLength, limit, peerTitlesHash, sycmDataHash, useImageSearch, maxImageSearch, minPrice, maxPrice, bannedWordVersion, schemaVersion, promptVersion, productsHash));
       if (!fs.existsSync(filePath)) return null;
       const stat = fs.statSync(filePath);
       if (Date.now() - stat.mtimeMs > this.ttlMs) {
@@ -51,12 +51,12 @@ class ResultCache {
     }
   }
 
-  set(keyword, maxLength, limit, result, peerTitlesHash = '', sycmDataHash = '', useImageSearch = false, maxImageSearch = 0, minPrice = 0, maxPrice = 0, bannedWordVersion = 0, schemaVersion = 1, promptVersion = 1) {
+  set(keyword, maxLength, limit, result, peerTitlesHash = '', sycmDataHash = '', useImageSearch = false, maxImageSearch = 0, minPrice = 0, maxPrice = 0, bannedWordVersion = 0, schemaVersion = 1, promptVersion = 1, productsHash = '') {
     try {
       if (!fs.existsSync(this.cacheDir)) {
         fs.mkdirSync(this.cacheDir, { recursive: true });
       }
-      const filePath = this._path(this._key(keyword, maxLength, limit, peerTitlesHash, sycmDataHash, useImageSearch, maxImageSearch, minPrice, maxPrice, bannedWordVersion, schemaVersion, promptVersion));
+      const filePath = this._path(this._key(keyword, maxLength, limit, peerTitlesHash, sycmDataHash, useImageSearch, maxImageSearch, minPrice, maxPrice, bannedWordVersion, schemaVersion, promptVersion, productsHash));
       fs.writeFileSync(filePath, JSON.stringify(result), 'utf8');
       if (Math.random() < 0.1) this._cleanExpired();
     } catch (err) {

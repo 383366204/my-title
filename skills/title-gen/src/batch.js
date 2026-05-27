@@ -1,6 +1,6 @@
 'use strict';
 
-const { run } = require('./index');
+const { generateTitlePipeline } = require('./pipeline');
 
 // 批量关键词最大数量
 const BATCH_MAX_KEYWORDS = 20;
@@ -41,7 +41,7 @@ function lightExtractCoreWord(keyword) {
  * @returns {Promise<{ok: boolean, results: Array, failed: Array, summary: object}>}
  */
 async function batchRun(keywords, options = {}) {
-  const { maxLength = 60, silent = true, onProgress, signal, sycmAuto = false } = options;
+  const { maxLength = 60, silent = true, onProgress, signal, sycmAuto = false, searchProducts, searchPeerTitles } = options;
 
   // 输入验证
   if (!Array.isArray(keywords) || keywords.length === 0) {
@@ -97,12 +97,14 @@ async function batchRun(keywords, options = {}) {
       }
 
       // 调用 run() 处理单个关键词（limit 控制商品数，避免 GLM 生成过慢）
-      const result = await run(keyword, {
+      const result = await generateTitlePipeline(keyword, {
         maxLength,
         silent,
         signal,
         limit: options.limit || DEFAULT_BATCH_LIMIT,
         sycmAuto,
+        searchProducts,
+        searchPeerTitles,
       });
 
       results.push({

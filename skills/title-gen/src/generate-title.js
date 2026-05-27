@@ -1,5 +1,5 @@
 const { postProcessTitle, constructFallbackTitle } = require('./title-utils');
-const GLMClient = require('../../../core/glm-client');
+const { createLLMClient } = require('../../../core/llm');
 
 /**
  * 判断两个标题是否高度相似
@@ -43,13 +43,9 @@ function dedupeTitles(titles) {
  * @param {number} [maxLength=60] 最大标题长度（字符数）
  * @returns {Promise<string[]>} 3-5 条候选标题
  */
-async function generateTitles(blueOceanWord, coreWord, modifiers = [], peerTitles = [], products = [], maxLength = 60, minLength = 30) {
+async function generateTitles(blueOceanWord, coreWord, modifiers = [], peerTitles = [], products = [], maxLength = 60, minLength = 52) {
   // GLM 客户端实例，API KEY 等由环境变量提供
-  const glmClient = new GLMClient({
-    apiKey: process.env.GLM_API_KEY,
-    apiBase: process.env.GLM_API_BASE,
-    model: process.env.GLM_API_MODEL
-  });
+  const glmClient = createLLMClient();
 
   // 尝试通过 GLM 生成标题
   try {
@@ -64,8 +60,9 @@ async function generateTitles(blueOceanWord, coreWord, modifiers = [], peerTitle
 
     // 使用统一后处理管线：移除违禁词 → 清理标点 → 蓝海词前置 → 长度归一化 → 去空格
     const processedTitles = glmTitles
-      .map(title => postProcessTitle(title, blueOceanWord, minLength, maxLength))
-      .filter(title => title !== null);
+      .map((title, idx) => postProcessTitle(title, blueOceanWord, minLength, maxLength)
+        || constructFallbackTitle(blueOceanWord, products[idx]?.title || title, peerTitles, maxLength, minLength))
+      .filter(Boolean);
     const unique = dedupeTitles(processedTitles);
     // 返回最多 5 条
     return unique.slice(0, 5);

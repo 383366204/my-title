@@ -1,4 +1,4 @@
-const GLMClient = require('../../../core/glm-client');
+const { createLLMClient } = require('../../../core/llm');
 
 // 共享的刚性/可选修饰词判断规则（供两个 GLM prompt 复用）
 const { RIGIDITY_RULES_TEXT } = require('../../../core/constants');
@@ -13,11 +13,7 @@ const { RIGIDITY_RULES_TEXT } = require('../../../core/constants');
  * }>}>
  */
 async function extractCoreAndModifiers(input) {
-  const client = new GLMClient({
-    apiKey: process.env.GLM_API_KEY,
-    apiBase: process.env.GLM_API_BASE,
-    model: process.env.GLM_API_MODEL
-  });
+  const client = createLLMClient();
 
   try {
     return await client.extractCoreAndModifiers(input);
@@ -147,11 +143,7 @@ function extractChineseModifiers(text, rigidPattern) {
  * }>}
  */
 async function extractCoreFromPeerTitles(peerTitles) {
-  const client = new GLMClient({
-    apiKey: process.env.GLM_API_KEY,
-    apiBase: process.env.GLM_API_BASE,
-    model: process.env.GLM_API_MODEL
-  });
+  const client = createLLMClient();
 
   try {
     return await client.extractKeywordsFromPeers(peerTitles);
