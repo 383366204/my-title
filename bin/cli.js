@@ -2,12 +2,27 @@
 
 require('dotenv').config();
 const { Command } = require('commander');
-const { run, batchRun, extractKeywords } = require('../skills/title-gen');
+const { batchRun, generateTitlePipeline } = require('../skills/title-gen');
 const { searchAll } = require('../skills/alibaba1688');
 const { formatResult } = require('../skills/title-gen/src/output-formatter');
 const { byteLen } = require('../skills/title-gen/src/title-utils');
 const fs = require('fs');
 const path = require('path');
+
+const searchProductsAdapter = ({ coreWord, blueOceanWord, modifiers, semanticGroups }) =>
+  searchAll(coreWord, blueOceanWord, modifiers, semanticGroups);
+
+async function fetchSycmKeywordDataAdapter({ keyword }) {
+  const { extractSycmData, DEFAULT_FILTER_CONDITIONS } = require('../skills/sycm-research');
+  const result = await extractSycmData(keyword, {
+    port: parseInt(process.env.SYCM_DEBUG_PORT || '9222', 10),
+    maxPages: parseInt(process.env.SYCM_MAX_PAGES || '1', 10),
+    mode: process.env.SYCM_TITLE_MODE || 'blue',
+    loginMode: process.env.SYCM_LOGIN_MODE || 'manual',
+    filterConditions: DEFAULT_FILTER_CONDITIONS
+  });
+  return result && Array.isArray(result.data) ? result.data : [];
+}
 
 const program = new Command();
 
@@ -50,6 +65,8 @@ program
           maxLength: parseInt(options.length) || 60,
           silent: jsonMode,
           sycmAuto: options.sycmAuto,
+          searchProducts: searchProductsAdapter,
+          fetchKeywordData: options.sycmAuto ? fetchSycmKeywordDataAdapter : undefined,
           onProgress: ({ completed, total, currentKeyword }) => {
             if (currentKeyword) {
               console.log(`  📋 进度: ${completed}/${total} — 当前: ${currentKeyword}`);
@@ -185,7 +202,7 @@ program
 
       // --research 模式：只分析并推荐关键词
       if (options.research) {
-        const result = await run(keywords, {
+        const result = await generateTitlePipeline(keywords, {
           maxLength: parseInt(options.length),
           peerTitles: [],
           silent: jsonMode,
@@ -250,17 +267,15 @@ program
         }
       }
 
-      const { coreWord, modifiers, semanticGroups } = await extractKeywords('keyword', { data: keywords });
-      const products = await searchAll(coreWord, keywords, modifiers, semanticGroups);
-
-      const result = await run(keywords, {
+      const result = await generateTitlePipeline(keywords, {
         maxLength: parseInt(options.length),
         peerTitles,
         silent: jsonMode,
         limit: parseInt(options.count),
         sycmData,
         sycmAuto: options.sycmAuto,
-        products
+        searchProducts: searchProductsAdapter,
+        fetchKeywordData: options.sycmAuto ? fetchSycmKeywordDataAdapter : undefined
       });
 
       if (jsonMode) {

@@ -3,7 +3,7 @@ const { removeBannedWords } = require('./banned-words');
 // 引入通用的 LLM 结果解析与重试封装
 const { parseJsonFromLLM, retry } = require('./llm-utils');
 
-const PROMPT_VERSION = 2; // bump when GLM prompts change
+const PROMPT_VERSION = 4; // bump when GLM prompts change
 
 // 公共违禁词列表（两个 prompt 共享）
 const BANNED_WORDS_LIST = '最、第一、顶级、正品、专柜、原厂、工厂、批发、直销、厂家、生产、货源、代发、高仿、仿真、同款、包邮、特价、促销、打折、清仓、出厂价、批发价、成本价、治疗、治愈、根治、疗效、处方药、手术、诊断、减肥药、壮阳、速效、万能、神药、特效、抗癌、抗病毒、特供、专供、免检、认证、推荐、品牌、老字号、非遗、品质、御用、政治、色情、暴力、赌博、毒品、分裂、颠覆、邪教、恐怖、血腥、自杀、犯罪、侵权、伪造、非法、泄露、黑客、钓鱼';
@@ -40,7 +40,7 @@ class GLMClient {
   constructor(config = {}) {
     if (process.env.VOLC_API_KEY) {
       this.apiKey = process.env.VOLC_API_KEY;
-      this.apiBase = process.env.VOLC_API_BASE || 'https://ark.cn-beijing.volces.com/api/coding/v3';
+      this.apiBase = process.env.VOLC_API_BASE || 'https://ark.cn-beijing.volces.com/api/plan/v3';
       this.model = config.model || 'doubao-seed-2-0-lite-260428';
     } else {
       this.apiKey = config.apiKey || process.env.GLM_API_KEY;
@@ -360,7 +360,7 @@ synonyms 每组最多10个，只列最常见的变体
   重要规则：
   1. 每个标题必须以蓝海词"${blueOceanWord}"开头
   2. 标题应参考1688商品标题和淘宝同行标题中的高频词汇
-  3. 标题长度控制在${Math.floor(maxLength / 2)}个汉字以内（${maxLength}个字符，1汉字=2字符）
+  3. 标题长度应尽量接近${Math.floor(maxLength / 2)}个汉字，必须达到26-30个汉字，不足时补充高频属性词场景词款式词适用人群词
   4. 优先使用刚性修饰词（材质、颜色、规格、人群）
    5. 每个标题必须差异化：从不同角度（风格、场景、人群、卖点）切入，禁止生成相同或高度相似的标题
    6. 标题中不得包含品牌名称（如周大福、Nike、Adidas等），除非用户输入中明确包含该品牌词
@@ -384,7 +384,7 @@ synonyms 每组最多10个，只列最常见的变体
         {
           model: this.model,
           messages,
-          temperature: 0.7
+          temperature: 0.2
         },
         {
           headers: {
@@ -435,14 +435,14 @@ synonyms 每组最多10个，只列最常见的变体
     let keywordSection = '';
     if (sycmKeywords && Array.isArray(sycmKeywords) && sycmKeywords.length > 0) {
       // 按需求供给比降序排列
-      const sortedSycm = [...sycmKeywords].sort((a, b) => (b.demandSupplyRatio || 0) - (a.demandSupplyRatio || 0));
+      const sortedSycm = [...sycmKeywords].sort((a, b) => (b.score || b.demandSupplyRatio || 0) - (a.score || a.demandSupplyRatio || 0));
       const sycmLines = sortedSycm.map(k => {
         const ratio = k.demandSupplyRatio || 0;
         let stars = '';
         if (ratio >= 5.0) stars = ' ★★★';
         else if (ratio >= 2.0) stars = ' ★★';
         else if (ratio >= 1.0) stars = ' ★';
-        return `${k.keyword} | 搜索人气:${k.searchPopularity || 0} | 倍数:${ratio.toFixed(2)} | 转化率:${k.conversionRate || 0}%${stars}`;
+        return `${k.keyword} | score:${k.score || 0} | role:${k.role || 'optional_add'} | 搜索人气:${k.searchPopularity || 0} | 倍数:${ratio.toFixed(2)} | 转化率:${k.conversionRate || 0}% | ${k.reason || ''}${stars}`;
       }).join('\n');
       keywordSection = `
 【生意参谋搜索数据（按关键词倍数排序，★越多越优先使用）】
@@ -450,6 +450,7 @@ ${sycmLines}
 
 用词策略（基于真实搜索数据）：
 - 优先使用需求供给比高的关键词（★★★ > ★★ > ★）
+- 优先使用 role=must_keep 的关键词，每个标题融入2-4个 SYCM 关键词
 - 标题前段：蓝海词 + 核心词 + 需求供给比最高的修饰词
 - 标题中段：需求供给比次高的词
 - 标题后段：补充高搜索人气但竞争适中的词
@@ -475,6 +476,7 @@ ${sycmLines}
   标题生成必须遵守以下规则：
   ${COMMON_TITLE_RULES_TEXT}
   - 每个生成的标题必须以蓝海词"${blueOceanWord}"开头（硬性要求，不可省略）
+  - 每个标题必须达到26-30个汉字，尽量接近${Math.floor(maxLength / 2)}个汉字；不足时补充高频属性词场景词款式词适用人群词
   - 标题中不得包含品牌名称（如周大福、Nike、Adidas等），除非用户输入中明确包含该品牌词
   - 当前日期：${new Date().toLocaleDateString('zh-CN')}，避免使用过时的季节描述（如去年年份）
   - 同一语义族中的词在单个标题中只使用一个变体（如'纯银'和'S925银'不要同时出现）${Object.keys(semanticGroups).length > 0 ? `\n  已知语义族：${JSON.stringify(semanticGroups)}` : ''}
@@ -510,7 +512,7 @@ ${sycmLines}
         {
           model: this.model,
           messages,
-          temperature: 0.7
+          temperature: 0.2
         },
         {
           headers: {

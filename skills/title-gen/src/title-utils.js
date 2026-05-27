@@ -16,6 +16,22 @@ function getNodejieba() {
   return _nodejieba;
 }
 
+function simpleCut(text) {
+  if (!text || typeof text !== 'string') return [];
+  return text.match(/[\u4e00-\u9fa5]{1,4}|[a-zA-Z0-9]+/g) || [];
+}
+
+function cutWords(text) {
+  const jieba = getNodejieba();
+  if (!jieba) return simpleCut(text);
+  try {
+    return jieba.cut(text);
+  } catch (_) {
+    _nodejieba = null;
+    return simpleCut(text);
+  }
+}
+
 // 电商字符长度计算：1个中文字符=2字节，ASCII字符=1字节
 // 淘宝/1688 标题限制 60 字符 = 最多 30 个汉字
 function byteLen(str) {
@@ -87,22 +103,14 @@ function postProcessTitle(title, blueOceanWord, minLength = 30, maxLength = 60) 
  * @param {number} [maxLength=60] - 最大标题长度
  * @returns {string} 构造的铺货标题
  */
-function constructFallbackTitle(blueOceanWord, originalTitle, taobaoTitles = [], maxLength = 60) {
+function constructFallbackTitle(blueOceanWord, originalTitle, taobaoTitles = [], maxLength = 60, minLength = 52) {
   // 1. 校验 blueOceanWord
   if (typeof blueOceanWord !== 'string' || !blueOceanWord) return '';
   
   // 定义中文停用词（内联，不创建外部文件）
   const STOPWORDS = new Set(['的', '了', '是', '在', '有', '和', '与', '或', '及', '等', '之', '为', '于', '以', '而', '被', '把', '给', '让', '向', '从', '到', '对', '将', '还', '也', '就', '都', '要', '会', '能', '可', '很', '非常']);
   
-  // 2. 获取 jieba 实例，进行分词
-  const jieba = getNodejieba();
-  // jieba 不可用时降级为简单的空格分词
-  if (!jieba) {
-    const raw = blueOceanWord + (originalTitle || '').replace(/\s+/g, '');
-    const fallback = truncateByBytes(raw, maxLength);
-    return fallback.replace(/\s+/g, '');
-  }
-  const blueWords = new Set(jieba.cut(blueOceanWord));
+  const blueWords = new Set(cutWords(blueOceanWord));
 
   // 4. 清理原标题
   let cleaned = removeBannedWords(originalTitle || '');
@@ -125,7 +133,7 @@ function constructFallbackTitle(blueOceanWord, originalTitle, taobaoTitles = [],
   }
 
   // 6. 使用 jieba.cut() 将 cleaned 拆分为词组，按词级过滤
-  const titleWords = jieba.cut(cleaned);
+  const titleWords = cutWords(cleaned);
   let filteredWords = [];
   let needsRelax = false;
   
@@ -138,7 +146,7 @@ function constructFallbackTitle(blueOceanWord, originalTitle, taobaoTitles = [],
   let result = blueOceanWord + filteredWords.join('');
   
   // If result is still too short, relax constraints (allow single chars except stopwords)
-  if (byteLen(result) < 30) {
+  if (byteLen(result) < minLength) {
     needsRelax = true;
     filteredWords = [];
     for (const w of titleWords) {
@@ -150,19 +158,19 @@ function constructFallbackTitle(blueOceanWord, originalTitle, taobaoTitles = [],
   }
 
   // If still too short, just use the original cleaned without removing blue ocean word
-  if (byteLen(result) < 30) {
+  if (byteLen(result) < minLength) {
     result = blueOceanWord + uncleaned;
   }
 
   // 8. 淘宝同行标题辅助：按词级追加，不重复且不过长
   if (Array.isArray(taobaoTitles) && taobaoTitles.length > 0) {
-    const resultWords = new Set(jieba.cut(result)); // 词级去重集合
-    needsRelax = byteLen(result) < 30;
+    const resultWords = new Set(cutWords(result)); // 词级去重集合
+    needsRelax = byteLen(result) < minLength;
     for (const t of taobaoTitles) {
       if (typeof t !== 'string') continue;
       let tClean = removeBannedWords(t);
       tClean = cleanTitle(tClean);
-      const tWords = jieba.cut(tClean);
+      const tWords = cutWords(tClean);
       for (const w of tWords) {
         const isValid = 
           !blueWords.has(w) && 
@@ -173,7 +181,7 @@ function constructFallbackTitle(blueOceanWord, originalTitle, taobaoTitles = [],
         if (isValid) {
           result += w;
           resultWords.add(w); // 保持Set与result同步
-          if (byteLen(result) >= 30) needsRelax = false;
+          if (byteLen(result) >= minLength) needsRelax = false;
           if (typeof maxLength === 'number' && byteLen(result) >= maxLength) break;
         }
       }

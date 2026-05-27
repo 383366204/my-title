@@ -14,9 +14,24 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
 
-const { run, extractKeywords } = require('../skills/title-gen');
+const { generateTitlePipeline } = require('../skills/title-gen');
 const { searchAll } = require('../skills/alibaba1688');
 const { getRateLimiter, RateLimitError } = require('../skills/alibaba1688/src/rate-limiter');
+
+const searchProductsAdapter = ({ coreWord, blueOceanWord, modifiers, semanticGroups }) =>
+  searchAll(coreWord, blueOceanWord, modifiers, semanticGroups);
+
+async function fetchSycmKeywordDataAdapter({ keyword }) {
+  const { extractSycmData, DEFAULT_FILTER_CONDITIONS } = require('../skills/sycm-research');
+  const result = await extractSycmData(keyword, {
+    port: parseInt(process.env.SYCM_DEBUG_PORT || '9222', 10),
+    maxPages: parseInt(process.env.SYCM_MAX_PAGES || '1', 10),
+    mode: process.env.SYCM_TITLE_MODE || 'blue',
+    loginMode: process.env.SYCM_LOGIN_MODE || 'manual',
+    filterConditions: DEFAULT_FILTER_CONDITIONS
+  });
+  return result && Array.isArray(result.data) ? result.data : [];
+}
 
 const TASK_TTL = 30 * 60 * 1000; // 30 minutes
 
@@ -132,7 +147,11 @@ async function handleApiBatchGenerate(req, res, keywords, length) {
 
     console.error(`[HTTP] batch task ${id} started: ${keywords.length} keywords`);
 
-    batchRun(keywords, { maxLength: length || 60, silent: true })
+    batchRun(keywords, {
+      maxLength: length || 60,
+      silent: true,
+      searchProducts: searchProductsAdapter
+    })
       .then(result => {
         console.error(`[HTTP] batch task ${id} done: ${result.summary.success}/${result.summary.total}`);
         tasks.set(id, { status: 'done', createdAt: Date.now(), result });
@@ -169,7 +188,7 @@ async function handleApiResearch(req, res, body) {
       return sendErrorResponse(res, 400, 'Missing or invalid keyword parameter');
     }
     
-    const result = await run(keyword, { research: true, silent: true });
+    const result = await generateTitlePipeline(keyword, { research: true, silent: true });
     
     if (result.ok && result.researchKeywords) {
       sendJsonResponse(res, 200, {
@@ -217,7 +236,7 @@ async function handleApiExtract(req, res, body) {
 
 async function handleApiGenerate(req, res, body) {
   try {
-    const { keyword, length = 60, sycm_keyword } = body;
+    const { keyword, length = 60, sycm_keyword, sycm_auto = false } = body;
     if (!keyword || typeof keyword !== 'string') {
       return sendErrorResponse(res, 400, 'Missing or invalid keyword parameter');
     }
@@ -225,7 +244,7 @@ async function handleApiGenerate(req, res, body) {
     const sycmData = sycm_keyword ? sycmDataStore.get(sycm_keyword)?.data : undefined;
     
     const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-    tasks.set(id, { status: 'processing', createdAt: Date.now(), keyword_data: !!sycmData });
+    tasks.set(id, { status: 'processing', createdAt: Date.now(), keyword_data: !!sycmData || !!sycm_auto });
     
     // Emit task started event
     broadcastEvent('task_started', { task_id: id, keyword, timestamp: new Date().toISOString() });
@@ -233,11 +252,13 @@ async function handleApiGenerate(req, res, body) {
     console.error(`[HTTP] task ${id} started: keyword="${keyword}", length=${length}, sycm_keyword=${sycm_keyword || 'none'}`);
     
     // Start generation in background
-    (async () => {
-      const { coreWord, modifiers, semanticGroups } = await extractKeywords('keyword', { data: keyword });
-      return searchAll(coreWord, keyword, modifiers, semanticGroups);
-    })().then(products => {
-      return run(keyword, { maxLength: length || 60, silent: true, sycmData, products });
+    generateTitlePipeline(keyword, {
+      maxLength: length || 60,
+      silent: true,
+      sycmData,
+      sycmAuto: !!sycm_auto,
+      searchProducts: searchProductsAdapter,
+      fetchKeywordData: sycm_auto ? fetchSycmKeywordDataAdapter : undefined
     })
       .then(result => {
         console.error(`[HTTP] task ${id} done: ${result.products.length} products, ${result.titles.length} titles`);
@@ -570,6 +591,7 @@ server.tool(
     keyword: z.string().optional().describe('商品关键词（首次调用必传），如：戒指男潮牌高级感痞帅'),
     length: z.number().default(60).describe('标题最大字符数（1汉字=2字符），默认60'),
     keyword_data: z.string().optional().describe('生意参谋搜索分析数据（可选，从生意参谋搜索分析页面复制粘贴的Tab分隔文本）'),
+    sycm_auto: z.boolean().default(false).describe('自动查询生意参谋关键词数据（需要已登录的 Chrome 调试会话，失败会降级普通标题生成）'),
     task_id: z.string().optional().describe('查询任务结果时传入（不需要传 keyword）'),
     research: z.boolean().default(false).describe('推荐研究关键词模式（同步返回推荐词列表，不生成标题）'),
     use_image_search: z.boolean().default(false).describe('启用淘宝以图搜词获取同行热门标题（默认false）'),
@@ -579,10 +601,10 @@ server.tool(
     min_price: z.number().default(0).describe('最低价格过滤（元，0=不过滤）'),
     max_price: z.number().default(0).describe('最高价格过滤（元，0=不过滤）'),
   },
-  async ({ keyword, length, keyword_data, task_id, research, use_image_search, cancel, skip_image_search, max_image_search, min_price, max_price }) => {
+  async ({ keyword, length, keyword_data, sycm_auto, task_id, research, use_image_search, cancel, skip_image_search, max_image_search, min_price, max_price }) => {
     // Research mode: sync call, returns keyword recommendations
     if (research) {
-      const result = await run(keyword, { research: true });
+      const result = await generateTitlePipeline(keyword, { research: true, silent: true });
       if (result.ok && result.researchKeywords) {
         return { content: [{ type: 'text', text: JSON.stringify({
           ok: true,
@@ -665,7 +687,7 @@ server.tool(
     tasks.set(id, { 
       status: 'processing', 
       createdAt: Date.now(), 
-      keyword_data: !!keyword_data,
+      keyword_data: !!keyword_data || !!sycm_auto,
       useImageSearch: use_image_search,
       maxImageSearch: max_image_search,
       minPrice: min_price,
@@ -678,21 +700,19 @@ server.tool(
 
     console.error(`[ecom-ai-tools] task ${id} started: keyword="${keyword}", length=${length}, use_image_search=${use_image_search}, max_image_search=${max_image_search}, min_price=${min_price}, max_price=${max_price}`);
 
-    (async () => {
-      const { coreWord, modifiers, semanticGroups } = await extractKeywords('keyword', { data: keyword });
-      return searchAll(coreWord, keyword, modifiers, semanticGroups);
-    })().then(products => {
-      return run(keyword, { 
+    generateTitlePipeline(keyword, { 
       maxLength: length || 60, 
       silent: true, 
       sycmData: keyword_data,
+      sycmAuto: !!sycm_auto,
       useImageSearch: use_image_search,
       maxImageSearch: max_image_search,
       minPrice: min_price,
       maxPrice: max_price,
       signal: abortController.signal,
       skipFlag: tasks.get(id).skipFlag,
-      products,
+      searchProducts: searchProductsAdapter,
+      fetchKeywordData: sycm_auto ? fetchSycmKeywordDataAdapter : undefined,
       onProductsFound: (count) => {
         const task = tasks.get(id);
         if (task) {
@@ -712,7 +732,6 @@ server.tool(
           };
         }
       }
-    });
     })
       .then(result => {
         console.error(`[ecom-ai-tools] task ${id} done: ${result.products.length} products, ${result.titles.length} titles`);
@@ -904,6 +923,7 @@ server.tool(
       maxLength: length || 60,
       silent: true,
       signal: abortController.signal,
+      searchProducts: searchProductsAdapter,
       onProgress: ({ completed, total, currentKeyword }) => {
         const task = tasks.get(id);
         if (task) {
