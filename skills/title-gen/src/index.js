@@ -1,8 +1,7 @@
 const path = require('path');
 const { extractKeywords } = require('./extract-core');
 const { searchTaobaoTitles } = require('./search-taobao');
-const GLMClient = require('../../../core/glm-client');
-const PROMPT_VERSION = GLMClient.PROMPT_VERSION;
+const { createLLMClient, getLLMCacheVersion, PROMPT_VERSION } = require('../../../core/llm');
 const { postProcessTitle, constructFallbackTitle, cleanTitle, extractShoppingGuideTitle } = require('./title-utils');
 const { removeBannedWords } = require('../../../core/banned-words');
 const { ResultCache } = require('./cache');
@@ -302,7 +301,7 @@ async function _searchPeerTitles({ products, blueOceanWord, peerTitles, glmClien
  * @param {AbortSignal|null} [params.signal=null] - 取消信号
  * @returns {Promise<any>}
  */
-async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles, products, taobaoTitles, maxLength, imageSearchResults, stats, cache, _peerTitlesHash, glmClient, log, warn, limit, sycmKeywords = [], sycmDataHash = '', signal = null, useImageSearch = false, maxImageSearch = 0, minPrice = 0, maxPrice = 0, bannedWordVersion = 0, semanticGroups = {}, productsHash = '' }) {
+async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles, products, taobaoTitles, maxLength, imageSearchResults, stats, cache, _peerTitlesHash, glmClient, log, warn, limit, sycmKeywords = [], sycmDataHash = '', signal = null, useImageSearch = false, maxImageSearch = 0, minPrice = 0, maxPrice = 0, bannedWordVersion = 0, semanticGroups = {}, productsHash = '', llmCacheVersion = PROMPT_VERSION }) {
   // Step 4: 尝试 GLM selectAndGenerate 以输出更多字段...
   // 使用与原实现相同的流程与降级策略
   let effectiveSemanticGroups = semanticGroups;
@@ -396,7 +395,7 @@ async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles,
       maxLength,
       overallAdvice
      });
-     if (!signal?.aborted) cache.set(blueOceanWord, maxLength, limit, result, _peerTitlesHash, sycmDataHash, useImageSearch, maxImageSearch, minPrice, maxPrice, bannedWordVersion, SCHEMA_VERSION, PROMPT_VERSION, productsHash);
+     if (!signal?.aborted) cache.set(blueOceanWord, maxLength, limit, result, _peerTitlesHash, sycmDataHash, useImageSearch, maxImageSearch, minPrice, maxPrice, bannedWordVersion, SCHEMA_VERSION, llmCacheVersion, productsHash);
      return result;
    };
   // 调用 GLM 与降级逻辑
@@ -430,7 +429,7 @@ async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles,
            ? mappedTitles[idx]
            : (Array.isArray(mappedTitles) && mappedTitles.length > 0 ? mappedTitles[idx % mappedTitles.length] : p['链接原标题']);
        });
-       if (!signal?.aborted) cache.set(blueOceanWord, maxLength, limit, result, _peerTitlesHash, sycmDataHash, useImageSearch, maxImageSearch, minPrice, maxPrice, bannedWordVersion, SCHEMA_VERSION, PROMPT_VERSION, productsHash);
+       if (!signal?.aborted) cache.set(blueOceanWord, maxLength, limit, result, _peerTitlesHash, sycmDataHash, useImageSearch, maxImageSearch, minPrice, maxPrice, bannedWordVersion, SCHEMA_VERSION, llmCacheVersion, productsHash);
        return result;
     } catch (e2) {
       // 最后降级：直接返回简单结构，避免中断流程
@@ -450,7 +449,7 @@ async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles,
        result.products.forEach((p, idx) => {
          p['铺货标题'] = simpleTitles[idx] || p['链接原标题'];
        });
-       if (!signal?.aborted) cache.set(blueOceanWord, maxLength, limit, result, _peerTitlesHash, sycmDataHash, useImageSearch, maxImageSearch, minPrice, maxPrice, bannedWordVersion, SCHEMA_VERSION, PROMPT_VERSION, productsHash);
+       if (!signal?.aborted) cache.set(blueOceanWord, maxLength, limit, result, _peerTitlesHash, sycmDataHash, useImageSearch, maxImageSearch, minPrice, maxPrice, bannedWordVersion, SCHEMA_VERSION, llmCacheVersion, productsHash);
        return result;
     }
   }
@@ -463,6 +462,8 @@ async function run(blueOceanWord, options = {}) {
   const warn = silent ? () => {} : console.warn.bind(console);
 
   const cache = new ResultCache({ cacheDir: path.join(__dirname, '..', '.cache') });
+  const glmClient = createLLMClient();
+  const _llmCacheVersion = getLLMCacheVersion(glmClient);
   // 计算 peerTitles hash 用于缓存键区分
   let _peerTitlesHash = (peerTitles && peerTitles.length > 0)
     ? require('crypto').createHash('md5').update(peerTitles.join('|')).digest('hex').slice(0, 8)
@@ -495,7 +496,7 @@ async function run(blueOceanWord, options = {}) {
     };
   }
 
-  const cached = cache.get(blueOceanWord, maxLength, limit, _peerTitlesHash, _sycmDataHash, useImageSearch, maxImageSearch, minPrice, maxPrice, _bannedWordVersion, SCHEMA_VERSION, PROMPT_VERSION, _productsHash);
+  const cached = cache.get(blueOceanWord, maxLength, limit, _peerTitlesHash, _sycmDataHash, useImageSearch, maxImageSearch, minPrice, maxPrice, _bannedWordVersion, SCHEMA_VERSION, _llmCacheVersion, _productsHash);
   if (cached) {
     log('📦 命中缓存，直接返回');
     if (cached.stats && cached.stats.trace) {
@@ -575,13 +576,6 @@ if (research) {
 let finalSycmData = sycmData;
 
 
-
-  // 初始化 GLM client 以便在并行步骤中使用
-  const glmClient = new GLMClient({
-    apiKey: process.env.GLM_API_KEY,
-    apiBase: process.env.GLM_API_BASE,
-    model: process.env.GLM_API_MODEL
-  });
 
   // 使用外部提供的商品数据（如果未提供则返回空）
   let rawProducts = externalProducts;
@@ -767,7 +761,7 @@ let finalSycmData = sycmData;
   });
 
     return Promise.race([
-        _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles, products, taobaoTitles: finalTaobaoTitles, maxLength, imageSearchResults, stats, cache, _peerTitlesHash, glmClient, log, warn, limit, sycmKeywords, sycmDataHash: _sycmDataHash, signal, useImageSearch, maxImageSearch, minPrice, maxPrice, bannedWordVersion: _bannedWordVersion, semanticGroups, productsHash: _productsHash }),
+        _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles, products, taobaoTitles: finalTaobaoTitles, maxLength, imageSearchResults, stats, cache, _peerTitlesHash, glmClient, log, warn, limit, sycmKeywords, sycmDataHash: _sycmDataHash, signal, useImageSearch, maxImageSearch, minPrice, maxPrice, bannedWordVersion: _bannedWordVersion, semanticGroups, productsHash: _productsHash, llmCacheVersion: _llmCacheVersion }),
        timeoutPromise
      ]).finally(() => { if (_raceTimeoutId) clearTimeout(_raceTimeoutId); });
 }

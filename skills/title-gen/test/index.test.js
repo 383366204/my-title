@@ -1,13 +1,27 @@
 "use strict";
 const { test } = require('node:test');
 const assert = require('assert');
+const path = require('path');
+
+const PROJECT_ROOT = path.resolve(__dirname, '..', '..', '..');
+
+function resolveProjectModulePath(modulePath) {
+  const normalized = modulePath.replace(/\\/g, '/');
+  const mntMatch = normalized.match(/^\/mnt\/[a-z]\/(.+)$/i);
+  if (mntMatch) return path.join(path.parse(PROJECT_ROOT).root, mntMatch[1]);
+  return modulePath;
+}
 
 // Helper to mock a module's exports by replacing require.cache entry
 function mockModule(modulePath, exportsObj) {
-  const key = require.resolve(modulePath);
+  const resolvedPath = resolveProjectModulePath(modulePath);
+  const key = require.resolve(resolvedPath);
+  if (exportsObj && exportsObj.extractCoreAndModifiers && !exportsObj.extractKeywords) {
+    exportsObj.extractKeywords = async (_type, options = {}) => exportsObj.extractCoreAndModifiers(options.data);
+  }
   require.cache[key] = {
-    id: modulePath,
-    filename: modulePath,
+    id: resolvedPath,
+    filename: resolvedPath,
     loaded: true,
     exports: exportsObj
   };
@@ -16,7 +30,9 @@ function mockModule(modulePath, exportsObj) {
 function reloadIndex() {
   // Clear index.js from cache to pick up mocks
   const idxPath = require.resolve('../src/index.js');
+  const llmPath = require.resolve('../../../core/llm');
   delete require.cache[idxPath];
+  delete require.cache[llmPath];
   return require('../src/index.js');
 }
 
@@ -71,7 +87,13 @@ test('Test 1: Complete happy path', async () => {
   mockModule('/mnt/d/project/my-title/core/glm-client.js', MockGLMClient1);
 
   const { run } = reloadIndex();
-  const res = await run('纯银项链女高级感', { maxLength: 60 });
+  const res = await run('纯银项链女高级感', {
+    maxLength: 60,
+    products: [
+      { id: 'p1', title: '银质项链', url: 'https://example/p1', price: 100, stats: { last30DaysSales: 20, goodRates: 0.95, repurchaseRate: 0.3 } },
+      { id: 'p2', title: '纯银项链女款', url: 'https://example/p2', price: 120, stats: { last30DaysSales: 12, goodRates: 0.9, repurchaseRate: 0.25 } }
+    ]
+  });
 
   // Assertions
   assert.strictEqual(res.coreWord, '项链');
@@ -122,7 +144,12 @@ test('Test 2: Delay between searches', async () => {
 
   const { run } = reloadIndex();
   const start = Date.now();
-  const res = await run('项链', {});
+  const keyword = 'delay-keyword-' + Date.now();
+  const res = await run(keyword, {
+    products: [
+      { id: 'p1', title: '银质项链', url: 'https://example/p1', price: 100, stats: { last30DaysSales: 20, goodRates: 0.95, repurchaseRate: 0.3 } }
+    ]
+  });
   const elapsed = Date.now() - start;
 
   // Ensure the elapsed time reflects the artificial delay
@@ -130,7 +157,6 @@ test('Test 2: Delay between searches', async () => {
 });
 
 test('Test 3: GLM scoring failure falls back to rigid filtering', async () => {
-  const { run } = reloadIndex();
   mockModule('/mnt/d/project/my-title/skills/title-gen/src/extract-core.js', {
     extractCoreAndModifiers: async (input) => ({ coreWord: '项链', modifiers: [{ word: '纯银', rigidity: 'rigid' }] })
   });
@@ -153,7 +179,12 @@ test('Test 3: GLM scoring failure falls back to rigid filtering', async () => {
   }
   mockModule('/mnt/d/project/my-title/core/glm-client.js', MockGLMClient3);
 
-  const res = await run('项链', {});
+  const { run } = reloadIndex();
+  const res = await run('项链', {
+    products: [
+      { id: 'p1', title: '项链', url: 'u', price: 50, stats: { last30DaysSales: 1, goodRates: 0.5, repurchaseRate: 0.1 } }
+    ]
+  });
   assert.ok(Array.isArray(res.products));
 });
 
@@ -180,12 +211,15 @@ test('Test 4: Taobao search failure still generates titles', async () => {
   mockModule('/mnt/d/project/my-title/core/glm-client.js', MockGLMClient4);
 
   const { run } = reloadIndex();
-  const res = await run('项链', {});
+  const res = await run('项链', {
+    products: [
+      { id: 'p1', title: '银质项链', url: 'https://a', price: 99, stats: { last30DaysSales: 10, goodRates: 0.9, repurchaseRate: 0.4 } }
+    ]
+  });
   assert.ok(res && Array.isArray(res.titles));
 });
 
 test('Test 5: Empty 1688 search results returns empty array', async () => {
-  const { run } = reloadIndex();
   mockModule('/mnt/d/project/my-title/skills/title-gen/src/extract-core.js', {
     extractCoreAndModifiers: async (input) => ({ coreWord: '项链', modifiers: [] })
   });
@@ -204,12 +238,12 @@ test('Test 5: Empty 1688 search results returns empty array', async () => {
   }
   mockModule('/mnt/d/project/my-title/core/glm-client.js', MockGLMClient5);
 
+  const { run } = reloadIndex();
   const res = await run('项链', {});
   assert.strictEqual(res.products.length, 0);
 });
 
 test('Test 6: Ensure 11 fields exist in output products when there are results', async () => {
-  const { run } = reloadIndex();
   mockModule('/mnt/d/project/my-title/skills/title-gen/src/extract-core.js', {
     extractCoreAndModifiers: async (input) => ({ coreWord: '项链', modifiers: [{ word: '纯银', rigidity: 'rigid' }] })
   });
@@ -238,7 +272,12 @@ test('Test 6: Ensure 11 fields exist in output products when there are results',
   }
   mockModule('/mnt/d/project/my-title/core/glm-client.js', MockGLMClient6);
 
-  const res = await run('项链', {});
+  const { run } = reloadIndex();
+  const res = await run('necklace', {
+    products: [
+      { id: 'p1', title: 'necklace', url: 'https://a', price: 99, stats: { last30DaysSales: 10, goodRates: 0.9, repurchaseRate: 0.4 } }
+    ]
+  });
   const first = res.products[0];
   assert.ok('链接原标题' in first);
   assert.ok('产品链接' in first);

@@ -1,5 +1,5 @@
 const { postProcessTitle, constructFallbackTitle } = require('./title-utils');
-const GLMClient = require('../../../core/glm-client');
+const { createLLMClient } = require('../../../core/llm');
 
 /**
  * 判断两个标题是否高度相似
@@ -45,11 +45,7 @@ function dedupeTitles(titles) {
  */
 async function generateTitles(blueOceanWord, coreWord, modifiers = [], peerTitles = [], products = [], maxLength = 60, minLength = 52) {
   // GLM 客户端实例，API KEY 等由环境变量提供
-  const glmClient = new GLMClient({
-    apiKey: process.env.GLM_API_KEY,
-    apiBase: process.env.GLM_API_BASE,
-    model: process.env.GLM_API_MODEL
-  });
+  const glmClient = createLLMClient();
 
   // 尝试通过 GLM 生成标题
   try {

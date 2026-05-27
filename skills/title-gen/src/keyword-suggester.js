@@ -288,12 +288,8 @@ async function suggestKeywords(options) {
   // 4. 准备 GLM 客户端
   let client = glmClient;
   if (!client) {
-    const GLMClient = require('../../../core/glm-client');
-    client = new GLMClient({
-      apiKey: process.env.GLM_API_KEY,
-      apiBase: process.env.GLM_API_BASE,
-      model: process.env.GLM_API_MODEL
-    });
+    const { createLLMClient } = require('../../../core/llm');
+    client = createLLMClient();
   }
 
   // 5. 季节/节日/趋势策略特殊处理：加载对应数据

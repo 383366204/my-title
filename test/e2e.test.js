@@ -1,13 +1,27 @@
 "use strict";
 const { test } = require('node:test');
 const assert = require('assert');
+const path = require('path');
+
+const PROJECT_ROOT = path.resolve(__dirname, '..');
+
+function resolveProjectModulePath(modulePath) {
+  const normalized = modulePath.replace(/\\/g, '/');
+  const mntMatch = normalized.match(/^\/mnt\/[a-z]\/(.+)$/i);
+  if (mntMatch) return path.join(path.parse(PROJECT_ROOT).root, mntMatch[1]);
+  return modulePath;
+}
 
 // Helper to mock a module's exports by replacing require.cache entry
 function mockModule(modulePath, exportsObj) {
-  const key = require.resolve(modulePath);
+  const resolvedPath = resolveProjectModulePath(modulePath);
+  const key = require.resolve(resolvedPath);
+  if (exportsObj && exportsObj.extractCoreAndModifiers && !exportsObj.extractKeywords) {
+    exportsObj.extractKeywords = async (_type, options = {}) => exportsObj.extractCoreAndModifiers(options.data);
+  }
   require.cache[key] = {
-    id: modulePath,
-    filename: modulePath,
+    id: resolvedPath,
+    filename: resolvedPath,
     loaded: true,
     exports: exportsObj
   };
@@ -16,7 +30,9 @@ function mockModule(modulePath, exportsObj) {
 function reloadIndex() {
   // Clear index.js from cache to pick up mocks
   const idxPath = require.resolve('../skills/title-gen/src/index.js');
+  const llmPath = require.resolve('../core/llm');
   delete require.cache[idxPath];
+  delete require.cache[llmPath];
   return require('../skills/title-gen/src/index.js');
 }
 
@@ -90,7 +106,13 @@ test('Test 1: Complete happy path', async () => {
   mockModule('/mnt/d/project/my-title/core/glm-client.js', MockGLMClient1);
 
   const { run } = reloadIndex();
-  const result = await run('纯银项链女高级感', { maxLength: 60 });
+  const result = await run('纯银项链女高级感', {
+    maxLength: 60,
+    products: [
+      { id: 'p1', title: '银质项链', url: 'https://example.com/p1', price: 100.00, stats: { last30DaysSales: 100, goodRates: 0.95, repurchaseRate: 0.3 } },
+      { id: 'p2', title: '纯银项链女款', url: 'https://example.com/p2', price: 120.00, stats: { last30DaysSales: 80, goodRates: 0.92, repurchaseRate: 0.25 } }
+    ]
+  });
 
   // Verify coreWord and blueOceanWord
   assert.strictEqual(result.coreWord, '项链');
@@ -214,7 +236,12 @@ test('Test 3: GLM scoring failure fallback', async () => {
   mockModule('/mnt/d/project/my-title/core/glm-client.js', MockGLMClient3);
 
   const { run } = reloadIndex();
-  const result = await run('纯银项链女', { maxLength: 60 });
+  const result = await run('纯银项链女', {
+    maxLength: 60,
+    products: [
+      { id: 'p1', title: '纯银项链女款', url: 'https://example.com/p1', price: 55.00, stats: { last30DaysSales: 200, goodRates: 0.96, repurchaseRate: 0.30 } }
+    ]
+  });
 
   // Verify fallback still returns results
   assert.ok(Array.isArray(result.products));
@@ -268,7 +295,12 @@ test('Test 4: Taobao search failure', async () => {
   mockModule('/mnt/d/project/my-title/core/glm-client.js', MockGLMClient4);
 
   const { run } = reloadIndex();
-  const result = await run('纯银项链', { maxLength: 60 });
+  const result = await run('纯银项链', {
+    maxLength: 60,
+    products: [
+      { id: 'p1', title: '纯银项链', url: 'https://example.com/p1', price: 50.00, stats: { last30DaysSales: 100, goodRates: 0.9, repurchaseRate: 0.2 } }
+    ]
+  });
 
   // Verify titles are still generated without peer titles
   assert.ok(Array.isArray(result.titles));
