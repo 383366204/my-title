@@ -1,4 +1,4 @@
-const { removeBannedWords } = require('../../../core/banned-words');
+const { checkBannedWords, removeBannedWords } = require('../../../core/banned-words');
 
 // 惰性加载 nodejieba（仅 constructFallbackTitle 使用，避免影响其他函数的加载速度）
 let _nodejieba = null;
@@ -64,6 +64,9 @@ function cleanTitle(title) {
   return title.replace(/[^a-zA-Z0-9\u4e00-\u9fff\u3400-\u4dbf·]/g, '');
 }
 
+const STOPWORDS = new Set(['的', '了', '是', '在', '有', '和', '与', '或', '及', '等', '之', '为', '于', '以', '而', '被', '把', '给', '让', '向', '从', '到', '对', '将', '还', '也', '就', '都', '要', '会', '能', '可', '很', '非常']);
+const SAFE_FILLER_WORDS = ['新款', '简约', '百搭', '日常', '通用', '送礼', '创意', '实用', '耐用', '轻便', '精致', '高级感'];
+
 function ensureBlueOceanPrefix(title, blueOceanWord) {
   if (typeof title !== 'string' || typeof blueOceanWord !== 'string') return title || '';
   if (!blueOceanWord) return title;
@@ -74,9 +77,16 @@ function ensureBlueOceanPrefix(title, blueOceanWord) {
   return blueOceanWord + title;
 }
 
+function effectiveMinBytes(minLength, maxLength) {
+  const min = Number.isFinite(Number(minLength)) && Number(minLength) > 0 ? Number(minLength) : 0;
+  const max = Number.isFinite(Number(maxLength)) && Number(maxLength) > 0 ? Number(maxLength) : min;
+  return Math.min(min, max);
+}
+
 function normalizeLength(title, minLength = 30, maxLength = 60) {
   if (typeof title !== 'string') return null;
-  if (byteLen(title) < minLength) return null;
+  const minBytes = effectiveMinBytes(minLength, maxLength);
+  if (byteLen(title) < minBytes) return null;
   if (byteLen(title) > maxLength) return truncateByBytes(title, maxLength);
   return title;
 }
@@ -95,6 +105,112 @@ function postProcessTitle(title, blueOceanWord, minLength = 30, maxLength = 60) 
   return result;
 }
 
+function collectTitleWords(texts) {
+  const words = [];
+  const seen = new Set();
+  for (const text of texts) {
+    if (typeof text !== 'string' || !text.trim()) continue;
+    const cleaned = cleanTitle(removeBannedWords(text));
+    for (const word of cutWords(cleaned)) {
+      const w = cleanTitle(word).trim();
+      if (!w || STOPWORDS.has(w) || seen.has(w)) continue;
+      if (byteLen(w) < 2 || byteLen(w) > 12) continue;
+      words.push(w);
+      seen.add(w);
+    }
+  }
+  return words;
+}
+
+function appendWordsToTarget(title, candidateTexts, minLength = 60, maxLength = 60) {
+  let result = cleanTitle(removeBannedWords(title || '')).replace(/\s+/g, '');
+  const minBytes = effectiveMinBytes(minLength, maxLength);
+  if (!result || byteLen(result) >= minBytes) return result;
+
+  const existing = new Set(cutWords(result));
+  const words = collectTitleWords(candidateTexts).concat(SAFE_FILLER_WORDS);
+  for (const word of words) {
+    if (!word || STOPWORDS.has(word) || existing.has(word) || result.includes(word)) continue;
+    if (byteLen(result + word) > maxLength) continue;
+    result += word;
+    existing.add(word);
+    if (byteLen(result) >= minBytes) break;
+  }
+  return result;
+}
+
+function completeTitle(title, blueOceanWord, candidateTexts = [], minLength = 60, maxLength = 60) {
+  if (typeof title !== 'string' || !title.trim()) return '';
+  let result = removeBannedWords(title);
+  result = cleanTitle(result);
+  result = ensureBlueOceanPrefix(result, blueOceanWord);
+  result = appendWordsToTarget(result, candidateTexts, minLength, maxLength);
+  if (typeof maxLength === 'number' && maxLength > 0 && byteLen(result) > maxLength) {
+    result = truncateByBytes(result, maxLength);
+  }
+  return result.replace(/\s+/g, '');
+}
+
+function uniqueWords(words) {
+  return [...new Set((words || []).map(w => cleanTitle(String(w || '')).trim()).filter(Boolean))];
+}
+
+function scoreTitle({ title, blueOceanWord = '', coreWord = '', modifiers = [], sycmKeywords = [], minLength = 60, maxLength = 60 }) {
+  const normalized = cleanTitle(removeBannedWords(title || '')).replace(/\s+/g, '');
+  const len = byteLen(normalized);
+  const minBytes = effectiveMinBytes(minLength, maxLength);
+  const issues = [];
+  let score = 0;
+
+  const prefixOk = Boolean(blueOceanWord && normalized.startsWith(blueOceanWord));
+  if (prefixOk) score += 20;
+  else issues.push('蓝海词未前置');
+
+  if (len >= minBytes && len <= maxLength) score += 25;
+  else if (len < minBytes) {
+    score += Math.max(0, Math.round((len / Math.max(minBytes, 1)) * 15));
+    issues.push(`标题偏短:${len}/${minBytes}`);
+  } else {
+    score += 10;
+    issues.push(`标题超长:${len}/${maxLength}`);
+  }
+
+  const coreIncluded = !coreWord || normalized.includes(coreWord);
+  if (coreIncluded) score += 10;
+  else issues.push('核心词缺失');
+
+  const rigidWords = uniqueWords((modifiers || [])
+    .filter(m => m && m.rigidity === 'rigid')
+    .map(m => m.word));
+  const rigidHit = rigidWords.filter(w => normalized.includes(w));
+  const rigidCoverage = rigidWords.length === 0 ? 1 : rigidHit.length / rigidWords.length;
+  score += Math.round(rigidCoverage * 15);
+  if (rigidCoverage < 1) issues.push(`刚性词缺失:${rigidWords.filter(w => !normalized.includes(w)).join(',')}`);
+
+  const sycmWords = uniqueWords((sycmKeywords || []).map(k => k && (k.keyword || k.word || k)));
+  const sycmHit = sycmWords.filter(w => normalized.includes(w)).slice(0, 6);
+  score += Math.min(15, sycmHit.length * 4);
+
+  const banned = checkBannedWords(normalized);
+  if (banned.valid) score += 10;
+  else issues.push(`违禁词:${banned.words.join(',')}`);
+
+  const duplicateChars = normalized.match(/(.)\1{2,}/g);
+  if (!duplicateChars) score += 5;
+  else issues.push('存在连续重复字符');
+
+  return {
+    score: Math.max(0, Math.min(100, score)),
+    byteLength: len,
+    prefixOk,
+    coreIncluded,
+    rigidCoverage: Number(rigidCoverage.toFixed(2)),
+    rigidWordsUsed: rigidHit,
+    sycmWordsUsed: sycmHit,
+    issues
+  };
+}
+
 /**
  * 构造回退标题：蓝海词前置 + 从原标题和淘宝同行标题中提取关键词
  * @param {string} blueOceanWord - 蓝海词（用户原始输入）
@@ -103,12 +219,10 @@ function postProcessTitle(title, blueOceanWord, minLength = 30, maxLength = 60) 
  * @param {number} [maxLength=60] - 最大标题长度
  * @returns {string} 构造的铺货标题
  */
-function constructFallbackTitle(blueOceanWord, originalTitle, taobaoTitles = [], maxLength = 60, minLength = 52) {
+function constructFallbackTitle(blueOceanWord, originalTitle, taobaoTitles = [], maxLength = 60, minLength = 60) {
   // 1. 校验 blueOceanWord
   if (typeof blueOceanWord !== 'string' || !blueOceanWord) return '';
-  
-  // 定义中文停用词（内联，不创建外部文件）
-  const STOPWORDS = new Set(['的', '了', '是', '在', '有', '和', '与', '或', '及', '等', '之', '为', '于', '以', '而', '被', '把', '给', '让', '向', '从', '到', '对', '将', '还', '也', '就', '都', '要', '会', '能', '可', '很', '非常']);
+  const minBytes = effectiveMinBytes(minLength, maxLength);
   
   const blueWords = new Set(cutWords(blueOceanWord));
 
@@ -146,7 +260,7 @@ function constructFallbackTitle(blueOceanWord, originalTitle, taobaoTitles = [],
   let result = blueOceanWord + filteredWords.join('');
   
   // If result is still too short, relax constraints (allow single chars except stopwords)
-  if (byteLen(result) < minLength) {
+  if (byteLen(result) < minBytes) {
     needsRelax = true;
     filteredWords = [];
     for (const w of titleWords) {
@@ -158,14 +272,14 @@ function constructFallbackTitle(blueOceanWord, originalTitle, taobaoTitles = [],
   }
 
   // If still too short, just use the original cleaned without removing blue ocean word
-  if (byteLen(result) < minLength) {
+  if (byteLen(result) < minBytes) {
     result = blueOceanWord + uncleaned;
   }
 
   // 8. 淘宝同行标题辅助：按词级追加，不重复且不过长
   if (Array.isArray(taobaoTitles) && taobaoTitles.length > 0) {
     const resultWords = new Set(cutWords(result)); // 词级去重集合
-    needsRelax = byteLen(result) < minLength;
+    needsRelax = byteLen(result) < minBytes;
     for (const t of taobaoTitles) {
       if (typeof t !== 'string') continue;
       let tClean = removeBannedWords(t);
@@ -181,13 +295,15 @@ function constructFallbackTitle(blueOceanWord, originalTitle, taobaoTitles = [],
         if (isValid) {
           result += w;
           resultWords.add(w); // 保持Set与result同步
-          if (byteLen(result) >= minLength) needsRelax = false;
+          if (byteLen(result) >= minBytes) needsRelax = false;
           if (typeof maxLength === 'number' && byteLen(result) >= maxLength) break;
         }
       }
       if (typeof maxLength === 'number' && byteLen(result) >= maxLength) break;
     }
   }
+
+  result = appendWordsToTarget(result, [originalTitle, ...taobaoTitles], minBytes, maxLength);
 
   // 9. 截断
   if (typeof maxLength === 'number' && maxLength > 0 && byteLen(result) > maxLength) {
@@ -232,4 +348,4 @@ function extractShoppingGuideTitle(fullTitle, blueOceanWord) {
   return guide;
 }
 
-module.exports = { byteLen, truncateByBytes, cleanTitle, ensureBlueOceanPrefix, normalizeLength, postProcessTitle, constructFallbackTitle, extractShoppingGuideTitle };
+module.exports = { byteLen, truncateByBytes, cleanTitle, ensureBlueOceanPrefix, normalizeLength, postProcessTitle, constructFallbackTitle, appendWordsToTarget, completeTitle, scoreTitle, extractShoppingGuideTitle };

@@ -2,16 +2,16 @@ const path = require('path');
 const { extractKeywords } = require('./extract-core');
 const { searchTaobaoTitles } = require('./search-taobao');
 const { createLLMClient, getLLMCacheVersion, PROMPT_VERSION } = require('../../../core/llm');
-const { postProcessTitle, constructFallbackTitle, cleanTitle, extractShoppingGuideTitle } = require('./title-utils');
+const { postProcessTitle, constructFallbackTitle, cleanTitle, completeTitle, scoreTitle, extractShoppingGuideTitle } = require('./title-utils');
 const { removeBannedWords } = require('../../../core/banned-words');
 const { ResultCache } = require('./cache');
 const { analyzePeerTitles, recommendResearchKeywords } = require('./keyword-analyzer');
 const { parseSycmData } = require('./sycm-parser');
 const { selectSycmTitleKeywords } = require('./sycm-keyword-selector');
 
-const SCHEMA_VERSION = 2; // bump when output structure changes
+const SCHEMA_VERSION = 4; // bump when output structure changes
 const RUN_TIMEOUT = parseInt(process.env.RUN_TIMEOUT) || 120000;
-const MIN_TITLE_BYTES = parseInt(process.env.MIN_TITLE_BYTES, 10) || 52;
+const MIN_TITLE_BYTES = parseInt(process.env.MIN_TITLE_BYTES, 10) || 60;
 
 function fillFallbackAdvice(item) {
   if (!item['选品理由']) {
@@ -73,7 +73,10 @@ function buildOutput({ coreWord, blueOceanWord, modifiers, products, selectedPro
     });
   }
 
-  const mappedTitles = titleObjs.map(t => t && t.title);
+  const mappedTitles = titleObjs
+    .map(t => t && t.title)
+    .filter(Boolean)
+    .map(t => completeTitle(t, blueOceanWord, taobaoTitles || [], MIN_TITLE_BYTES, maxLength) || t);
 
   // Build a Map for ID-based lookup of selected products
   const selectedMap = new Map();
@@ -106,14 +109,37 @@ function buildOutput({ coreWord, blueOceanWord, modifiers, products, selectedPro
       const fallbackPeerTitles = (imageResult && imageResult.hasMatch && imageResult.peerTitles)
         ? imageResult.peerTitles
         : (taobaoTitles || []);
-      shopTitle = constructFallbackTitle(blueOceanWord, p.title || '', fallbackPeerTitles, maxLength);
+      shopTitle = constructFallbackTitle(blueOceanWord, p.title || '', fallbackPeerTitles, maxLength, MIN_TITLE_BYTES);
     }
+    const imageResult = (imageSearchResults || []).find(r => {
+      if (!r) return false;
+      const rId = String(r.productId || '').trim();
+      const pId = String(productId || '').trim();
+      return rId === pId;
+    });
+    const titlePeerTitles = (imageResult && imageResult.hasMatch && imageResult.peerTitles)
+      ? imageResult.peerTitles
+      : (taobaoTitles || []);
+    const titleBeforeCompletion = shopTitle;
+    shopTitle = completeTitle(shopTitle, blueOceanWord, [p.title || '', ...titlePeerTitles], MIN_TITLE_BYTES, maxLength)
+      || constructFallbackTitle(blueOceanWord, p.title || '', titlePeerTitles, maxLength, MIN_TITLE_BYTES);
+
     const usedSycmWords = (stats && Array.isArray(stats.sycmKeywordsUsed) ? stats.sycmKeywordsUsed : [])
       .filter(k => k && k.keyword && shopTitle && shopTitle.includes(k.keyword))
       .slice(0, 4);
     const titleKeywordBasis = usedSycmWords.length > 0
       ? usedSycmWords.map(k => `${k.keyword}(${k.score})`).join('，')
       : '';
+    const titleQuality = scoreTitle({
+      title: shopTitle,
+      blueOceanWord,
+      coreWord,
+      modifiers,
+      sycmKeywords: stats && Array.isArray(stats.sycmKeywordsUsed) ? stats.sycmKeywordsUsed : [],
+      minLength: MIN_TITLE_BYTES,
+      maxLength
+    });
+    const completionChanged = titleBeforeCompletion !== shopTitle;
 
     return {
         // 原输出字段
@@ -131,6 +157,10 @@ function buildOutput({ coreWord, blueOceanWord, modifiers, products, selectedPro
         '定价建议': selected.priceAdvice || '',
         '风险提示': selected.risk || '',
         '标题用词依据': titleKeywordBasis,
+        '标题字节数': titleQuality.byteLength,
+        '标题质量分': titleQuality.score,
+        '标题诊断': titleQuality.issues.length > 0 ? titleQuality.issues.join('；') : 'OK',
+        '标题补全': completionChanged ? '已补全' : '原始合格',
         '导购标题': extractShoppingGuideTitle(shopTitle, blueOceanWord)
       };
   });
@@ -381,7 +411,7 @@ async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles,
       if (t && t.title) {
         const product = products.find(p => String(p.id || '').trim() === String(t.productId || t.product_id || '').trim());
         const processed = postProcessTitle(t.title, blueOceanWord, MIN_TITLE_BYTES, maxLength);
-        t.title = processed || constructFallbackTitle(blueOceanWord, product?.title || t.title, cleanedPeerTitles, maxLength);
+        t.title = processed || constructFallbackTitle(blueOceanWord, product?.title || t.title, cleanedPeerTitles, maxLength, MIN_TITLE_BYTES);
       }
     });
 
@@ -413,22 +443,21 @@ async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles,
     try {
       const fallbackPeerTitles = (peerTitles || []).map(t => cleanTitle(removeBannedWords(t || ''))).filter(Boolean);
       const titles = await glmClient.generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles: fallbackPeerTitles, products, maxLength, semanticGroups: effectiveSemanticGroups });
-      const mappedTitles = titles.map((t, idx) => postProcessTitle(t, blueOceanWord, MIN_TITLE_BYTES, maxLength) || constructFallbackTitle(blueOceanWord, products[idx]?.title || t, fallbackPeerTitles, maxLength));
+      const mappedTitles = titles.map((t, idx) => postProcessTitle(t, blueOceanWord, MIN_TITLE_BYTES, maxLength) || constructFallbackTitle(blueOceanWord, products[idx]?.title || t, fallbackPeerTitles, maxLength, MIN_TITLE_BYTES));
+      const fallbackTitleObjs = products.map((p, idx) => ({
+        productId: p.id,
+        title: mappedTitles[idx] || (mappedTitles.length > 0 ? mappedTitles[idx % mappedTitles.length] : p.title)
+      }));
       if (stats.trace) stats.trace.titleGeneration = 'local_generation';
       const result = buildOutput({
         coreWord, blueOceanWord, modifiers, products,
+        titleObjs: fallbackTitleObjs,
         stats: { ...stats, degraded: 'local_generation' },
         imageSearchResults,
         taobaoTitles,
         maxLength,
         overallAdvice: '' // 降级路径无 overallAdvice
       });
-      result.titles = mappedTitles;
-       result.products.forEach((p, idx) => {
-         p['铺货标题'] = (Array.isArray(mappedTitles) && mappedTitles.length > idx)
-           ? mappedTitles[idx]
-           : (Array.isArray(mappedTitles) && mappedTitles.length > 0 ? mappedTitles[idx % mappedTitles.length] : p['链接原标题']);
-       });
        if (!signal?.aborted) cache.set(blueOceanWord, maxLength, limit, result, _peerTitlesHash, sycmDataHash, useImageSearch, maxImageSearch, minPrice, maxPrice, bannedWordVersion, SCHEMA_VERSION, llmCacheVersion, productsHash);
        return result;
     } catch (e2) {
@@ -436,19 +465,17 @@ async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles,
       warn('降级失败，返回简化结构：', e2 && e2.message ? e2.message : e2);
       if (stats.trace) stats.trace.titleGeneration = 'simple_fallback';
       const simpleTitles = products.map(p =>
-        postProcessTitle(p.title, blueOceanWord, MIN_TITLE_BYTES, maxLength) || constructFallbackTitle(blueOceanWord, p.title || '', taobaoTitles || [], maxLength)
+        postProcessTitle(p.title, blueOceanWord, MIN_TITLE_BYTES, maxLength) || constructFallbackTitle(blueOceanWord, p.title || '', taobaoTitles || [], maxLength, MIN_TITLE_BYTES)
       );
+      const simpleTitleObjs = products.map((p, idx) => ({ productId: p.id, title: simpleTitles[idx] || p.title }));
       const result = buildOutput({
         coreWord, blueOceanWord, modifiers, products,
+        titleObjs: simpleTitleObjs,
         stats: { ...stats, degraded: 'simple_fallback' },
         imageSearchResults,
         taobaoTitles,
         maxLength
       });
-      result.titles = simpleTitles;
-       result.products.forEach((p, idx) => {
-         p['铺货标题'] = simpleTitles[idx] || p['链接原标题'];
-       });
        if (!signal?.aborted) cache.set(blueOceanWord, maxLength, limit, result, _peerTitlesHash, sycmDataHash, useImageSearch, maxImageSearch, minPrice, maxPrice, bannedWordVersion, SCHEMA_VERSION, llmCacheVersion, productsHash);
        return result;
     }

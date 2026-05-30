@@ -1,43 +1,193 @@
 /**
- * LLM 输出处理工具集
- * 提供以下导出函数:
- *  - parseJsonFromLLM(content): 从可能包含 JSON 的 LLM 输出中提取并解析 JSON
- *  - retry(fn, maxRetries, delayMs): 对异步函数进行简单重试
- *
- * 该文件遵循 CommonJS 模块规范，所有导出均采用 module.exports 暴露。
+ * LLM output helpers.
+ * Provides JSON extraction/parsing and a simple async retry wrapper.
  */
 
 /**
- * 从 LLm 的输出中提取并解析 JSON。
- * 支持常见场景：直接 JSON 字符串、被 Markdown 代码块包裹、文本中嵌入 JSON、以及尾部多出的逗号。
+ * Parse JSON from LLM output.
+ * Supports plain JSON, fenced Markdown JSON, JSON embedded in text,
+ * trailing commas, and reasoning blocks such as MiniMax `<think>...</think>`.
  *
- * @param {string} content 输入文本，可能包含 JSON、markdown 包裹、额外文本、尾逗号等
- * @returns {any} 解析得到的 JSON 对象/数组
+ * @param {string} content LLM output that may contain JSON and extra text
+ * @returns {any} Parsed JSON object or array
  */
 function parseJsonFromLLM(content) {
   if (typeof content !== 'string') throw new Error('Expected string input');
-  let text = content.trim();
-  // 1. 移除 markdown 代码块包裹（```json ... ```）
-  text = text.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?\s*```$/, '');
-  // 2. 如果仍然不是以 { 或 [ 开头，尝试从中提取 JSON
-  if (!text.startsWith('{') && !text.startsWith('[')) {
-    const jsonMatch = text.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
-    if (jsonMatch) text = jsonMatch[0];
+
+  let text = stripReasoningBlocks(content.trim());
+  text = text.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?\s*```$/, '').trim();
+
+  const extractedCandidates = extractJsonCandidates(text);
+  const candidates = [
+    ...extractedCandidates,
+    ...(!extractedCandidates.includes(text) ? [text] : [])
+  ];
+
+  if (extractedCandidates.length === 0) {
+    throw new SyntaxError('No JSON object or array found in LLM output');
   }
-  // 3. 移除尾逗号（JSON 标准不允许，但 LLM 经常输出）
-  text = text.replace(/,\s*([}\]])/g, '$1');
-  // 4. 解析
-  return JSON.parse(text);
+
+  let lastError;
+  for (const candidate of candidates) {
+    try {
+      return parseJsonCandidate(candidate);
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  try {
+    return parseJsonCandidate(text);
+  } catch (err) {
+    throw lastError || err;
+  }
 }
 
 /**
- * 对异步函数进行简单重试。
+ * Validate parsed LLM JSON with a zod schema.
  *
- * @param {Function} fn 需要执行的异步函数，返回一个 Promise
- * @param {number} [maxRetries=2] 最大重试次数（不包含初次尝试）
- * @param {number} [delayMs=1000] 每次重试的延迟（毫秒）
- * @param {Function} [shouldRetry] 可选函数，接收错误对象，返回是否应重试
- * @returns {Promise<any>} 第一次成功返回的值
+ * @param {any} value Parsed JSON value
+ * @param {object} schema Zod schema
+ * @param {string} label Human-readable response label
+ * @returns {any} Validated value
+ */
+function validateLLMJson(value, schema, label = 'LLM response') {
+  const result = schema.safeParse(value);
+  if (result.success) return result.data;
+
+  const details = result.error.issues
+    .map(issue => `${issue.path.join('.') || '<root>'}: ${issue.message}`)
+    .join('; ');
+  throw new Error(`Invalid ${label}: ${details}`);
+}
+
+/**
+ * Repair and parse a JSON candidate.
+ *
+ * @param {string} candidate JSON candidate
+ * @returns {any} Parsed JSON
+ */
+function parseJsonCandidate(candidate) {
+  const normalized = stripTrailingCommas(candidate);
+  try {
+    return JSON.parse(normalized);
+  } catch (err) {
+    return JSON.parse(jsonrepair(normalized));
+  }
+}
+
+/**
+ * Remove model reasoning sections before JSON extraction.
+ *
+ * @param {string} text LLM output
+ * @returns {string} Output with reasoning tags removed
+ */
+function stripReasoningBlocks(text) {
+  return text
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/^<think>[\s\S]*?(?=[{[])/i, '')
+    .trim();
+}
+
+/**
+ * Extract balanced JSON objects or arrays from surrounding text.
+ *
+ * @param {string} text Text that may contain JSON
+ * @returns {string[]} JSON candidates, or the original text when none is found
+ */
+function extractJsonCandidates(text) {
+  const candidates = [];
+
+  for (let start = findJsonStart(text, 0); start !== -1; start = findJsonStart(text, start + 1)) {
+    const candidate = readBalancedJson(text, start);
+    if (candidate) candidates.push(candidate);
+  }
+
+  return candidates;
+}
+
+/**
+ * Read one balanced JSON object or array at a known start offset.
+ *
+ * @param {string} text Text that may contain JSON
+ * @param {number} start Offset of `{` or `[`
+ * @returns {string|null} JSON candidate, or null when unbalanced
+ */
+function readBalancedJson(text, start) {
+  const stack = [];
+  let inString = false;
+  let escaped = false;
+
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === '\\') {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+
+    if (ch === '{' || ch === '[') {
+      stack.push(ch);
+      continue;
+    }
+
+    if (ch === '}' || ch === ']') {
+      const open = stack.pop();
+      if ((ch === '}' && open !== '{') || (ch === ']' && open !== '[')) {
+        return null;
+      }
+      if (stack.length === 0) {
+        return text.slice(start, i + 1);
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Remove JSON trailing commas often produced by LLMs.
+ *
+ * @param {string} text JSON candidate
+ * @returns {string} JSON candidate without trailing commas
+ */
+function stripTrailingCommas(text) {
+  return text.replace(/,\s*([}\]])/g, '$1');
+}
+
+/**
+ * Find the first plausible JSON opening bracket.
+ *
+ * @param {string} text Text to scan
+ * @param {number} [fromIndex=0] Offset to start scanning
+ * @returns {number} Offset of the first JSON opener, or -1
+ */
+function findJsonStart(text, fromIndex = 0) {
+  for (let i = fromIndex; i < text.length; i++) {
+    if (text[i] === '{' || text[i] === '[') return i;
+  }
+  return -1;
+}
+
+/**
+ * Retry an async function.
+ *
+ * @param {Function} fn Async function returning a Promise
+ * @param {number} [maxRetries=2] Max retry count, excluding the first attempt
+ * @param {number} [delayMs=1000] Delay between retries in milliseconds
+ * @param {Function} [shouldRetry] Optional predicate that receives the error
+ * @returns {Promise<any>} First successful return value
  */
 async function retry(fn, maxRetries = 2, delayMs = 1000, shouldRetry = null) {
   let lastError;
@@ -46,13 +196,12 @@ async function retry(fn, maxRetries = 2, delayMs = 1000, shouldRetry = null) {
       return await fn();
     } catch (err) {
       lastError = err;
-      // 如果提供了 shouldRetry 且返回 false，直接抛出不重试
       if (shouldRetry && !shouldRetry(err)) throw err;
-      // 默认行为：只重试有 code（网络错误）或 response（HTTP错误）的错误，跳过解析错误
-      // SyntaxError means LLM returned malformed JSON — retrying won't fix it
+
       const retryable = shouldRetry
         ? shouldRetry(err)
         : (err.code || err.response);
+
       if (!retryable) throw err;
       if (attempt < maxRetries) {
         await new Promise(resolve => setTimeout(resolve, delayMs));
@@ -62,4 +211,5 @@ async function retry(fn, maxRetries = 2, delayMs = 1000, shouldRetry = null) {
   throw lastError;
 }
 
-module.exports = { parseJsonFromLLM, retry };
+module.exports = { parseJsonFromLLM, retry, validateLLMJson };
+const { jsonrepair } = require('jsonrepair');

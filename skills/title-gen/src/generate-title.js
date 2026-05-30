@@ -43,7 +43,7 @@ function dedupeTitles(titles) {
  * @param {number} [maxLength=60] 最大标题长度（字符数）
  * @returns {Promise<string[]>} 3-5 条候选标题
  */
-async function generateTitles(blueOceanWord, coreWord, modifiers = [], peerTitles = [], products = [], maxLength = 60, minLength = 52) {
+async function generateTitles(blueOceanWord, coreWord, modifiers = [], peerTitles = [], products = [], maxLength = 60, minLength = 60) {
   // GLM 客户端实例，API KEY 等由环境变量提供
   const glmClient = createLLMClient();
 
@@ -72,7 +72,7 @@ async function generateTitles(blueOceanWord, coreWord, modifiers = [], peerTitle
     // 优先使用 constructFallbackTitle，基于 1688 第一个商品的标题以及同行标题
     const originalTitle = Array.isArray(products) && products.length > 0 ? products[0].title : '';
     const taobaoTitles = Array.isArray(peerTitles) ? peerTitles : [];
-    const fallback = constructFallbackTitle(blueOceanWord, originalTitle || '', taobaoTitles, maxLength);
+    const fallback = constructFallbackTitle(blueOceanWord, originalTitle || '', taobaoTitles, maxLength, minLength);
     return fallback ? [fallback] : [];
   }
 }
