@@ -22,9 +22,19 @@ function normalizeKeyword(keyword) {
 }
 
 function normalizeMetric(value, maxValue) {
-  const num = Number(value) || 0;
+  const num = parseMetricNumber(value);
   if (num <= 0 || maxValue <= 0) return 0;
   return Math.min(1, num / maxValue);
+}
+
+function parseMetricNumber(value) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  const text = String(value || '').replace(/,/g, '');
+  const matches = text.match(/-?\d+(?:\.\d+)?/g);
+  if (!matches || matches.length === 0) return 0;
+  const numbers = matches.map(Number).filter(Number.isFinite);
+  if (numbers.length === 0) return 0;
+  return Math.max(...numbers);
 }
 
 function getModifierWords(modifiers) {
@@ -47,6 +57,18 @@ function hasRigidConflict(keyword, modifiers) {
   for (const [rigid, conflicts] of MATERIAL_CONFLICTS) {
     if (!rigidWords.includes(rigid.toLowerCase())) continue;
     const conflict = conflicts.find(word => lowerKeyword.includes(word.toLowerCase()));
+    if (conflict) return conflict;
+  }
+  return '';
+}
+
+function hasAudienceConflict(keyword, modifiers) {
+  const rigidWords = (Array.isArray(modifiers) ? modifiers : [])
+    .filter(m => m && m.rigidity === 'rigid')
+    .map(m => String(m.word || '').toLowerCase());
+
+  if (rigidWords.includes('宠物')) {
+    const conflict = ['女孩', '儿童', '宝宝', '婴儿'].find(word => keyword.includes(word));
     if (conflict) return conflict;
   }
   return '';
@@ -100,10 +122,10 @@ function selectSycmTitleKeywords({
 } = {}) {
   const rows = Array.isArray(sycmRows) ? sycmRows : [];
   const modifierWords = getModifierWords(modifiers);
-  const maxSearchPopularity = Math.max(1, ...rows.map(r => Number(r.searchPopularity) || 0));
-  const maxClickRate = Math.max(1, ...rows.map(r => Number(r.clickRate) || 0));
-  const maxConversionRate = Math.max(1, ...rows.map(r => Number(r.conversionRate) || 0));
-  const maxDemandSupplyRatio = Math.max(1, ...rows.map(r => Number(r.demandSupplyRatio) || 0));
+  const maxSearchPopularity = Math.max(1, ...rows.map(r => parseMetricNumber(r.searchPopularity)));
+  const maxClickRate = Math.max(1, ...rows.map(r => parseMetricNumber(r.clickRate)));
+  const maxConversionRate = Math.max(1, ...rows.map(r => parseMetricNumber(r.conversionRate)));
+  const maxDemandSupplyRatio = Math.max(1, ...rows.map(r => parseMetricNumber(r.demandSupplyRatio)));
   const seen = new Set();
   const usedGroups = new Set();
   const acceptedCandidates = [];
@@ -133,6 +155,12 @@ function selectSycmTitleKeywords({
       continue;
     }
 
+    const audienceConflict = hasAudienceConflict(keyword, modifiers);
+    if (audienceConflict) {
+      rejected.push({ keyword, reason: `人群语义冲突: ${audienceConflict}` });
+      continue;
+    }
+
     if (keyword !== blueOceanWord && blueOceanWord.includes(keyword)) {
       rejected.push({ keyword, reason: '已包含在蓝海词中' });
       continue;
@@ -148,11 +176,15 @@ function selectSycmTitleKeywords({
       match * 10;
 
     let score = Math.round(metricScore);
-    if (row.demandSupplyRatio < 1) score -= 15;
+    if (parseMetricNumber(row.demandSupplyRatio) < 1) score -= 15;
     if (keyword.length > 12) score -= 8;
     if (group && usedGroups.has(group)) score -= 20;
 
     const role = classifyRole(score, row);
+    if (role === 'avoid') {
+      rejected.push({ keyword, score, reason: '综合分仅适合观察，不进入标题生成', metrics: row });
+      continue;
+    }
     if (score < 45) {
       rejected.push({ keyword, score, reason: '综合分不足', metrics: row });
       continue;

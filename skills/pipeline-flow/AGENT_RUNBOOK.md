@@ -1,0 +1,131 @@
+# Weak Agent Runbook
+
+This file is written for weaker agents. Follow it literally. Do not invent extra steps.
+
+## Goal
+
+Produce a distribution batch from daily keyword mining:
+
+```text
+mine keywords -> verify with SYCM -> generate titles/products -> export distribution batch
+```
+
+The flow does not automatically distribute products. Human review is required before using `1688-distribution`.
+
+## Golden Path
+
+Run this command first:
+
+```bash
+node bin/cli.js flow daily --mine 50 --verify 20 --generate 10 --export 20 --json
+```
+
+Read the JSON result:
+
+- If `ok` is `true` and `status` is `ready_to_distribute`, open the file in `files.distributionBatch`.
+- If `status` is `verified_empty`, stop. Report that SYCM did not verify any candidates.
+- If `status` is `generate_failed`, stop. Report the run id and inspect `generated-products.jsonl`.
+- Always show `runId`, `status`, `counts`, and `nextCommand` to the user.
+
+## Step-by-step Mode
+
+Use this when the user asks to debug or resume.
+
+1. Mine:
+
+```bash
+node bin/cli.js flow mine --limit 50 --json
+```
+
+Success condition:
+
+- JSON `ok` is `true`
+- `candidates` is greater than 0
+- JSON has `nextCommand`
+
+2. Verify:
+
+```bash
+node bin/cli.js flow verify --run <runId> --limit 20 --json
+```
+
+Rules:
+
+- SYCM verification must be serial. Never run multiple `flow verify` or `sycm` commands in parallel.
+- The verifier first uses strict blue-ocean mode. If rows are insufficient, it tries relaxed blue-ocean mode. If that still fails, it falls back to hot-search mode.
+- If `verifyMode` is `blue`, treat it as high-confidence blue-ocean data.
+- If `verifyMode` is `blue_relaxed`, treat it as medium-confidence blue-ocean data.
+- If `verifyMode` is `hot`, treat it as trend/hot data, not strict blue-ocean data.
+- If `verified` is 0, stop and report `verified_empty`.
+- If `verified` is greater than 0, continue.
+
+3. Generate:
+
+```bash
+node bin/cli.js flow generate --run <runId> --limit 10 --json
+```
+
+Success condition:
+
+- JSON `ok` is `true`
+- `generated` is greater than 0
+
+4. Export:
+
+```bash
+node bin/cli.js flow export --run <runId> --limit 20 --json
+```
+
+Success condition:
+
+- JSON `ok` is `true`
+- `count` is greater than 0
+- `file` points to `distribution-batch.txt`
+
+## Files
+
+Each run writes files here:
+
+```text
+data/pipeline/runs/<runId>/
+```
+
+Important files:
+
+- `run.json`: status and counts
+- `candidates.jsonl`: mined keywords
+- `sycm-results.jsonl`: raw SYCM results and scores
+- `verified-keywords.jsonl`: keywords that passed SYCM
+- `generated-products.jsonl`: products and generated titles
+- `distribution-batch.txt`: input for distribution
+- `distribution-review.md`: human review report; read this before distribution
+
+## Status Meanings
+
+- `mined`: candidates are ready; run verify next.
+- `verified`: SYCM has verified at least one keyword; run generate next.
+- `verified_empty`: no keyword passed SYCM; stop.
+- `generated`: product/title generation produced rows; run export next.
+- `generate_failed`: generation produced no usable rows; stop.
+- `ready_to_distribute`: batch file exists; ask human to review before distribution.
+- `export_empty`: no rows were exported; stop.
+
+## Never Do These
+
+- Do not run SYCM queries in parallel.
+- Do not distribute automatically after `flow daily`.
+- Do not edit `data/pipeline/runs/*` manually.
+- Do not ignore a non-ready status.
+- Do not use a keyword in title generation if SYCM rejected it.
+
+## How To Report Back
+
+Use this exact shape:
+
+```text
+Run: <runId>
+Status: <status>
+Counts: candidates=<n>, verified=<n>, generated=<n>, readyToDistribute=<n>
+Batch: <distribution-batch.txt path or empty>
+Next: <nextCommand>
+```

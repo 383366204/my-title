@@ -12,6 +12,17 @@ const path = require('path');
 const searchProductsAdapter = ({ coreWord, blueOceanWord, modifiers, semanticGroups }) =>
   searchAll(coreWord, blueOceanWord, modifiers, semanticGroups);
 
+function stringifyAsciiJson(value, spaces = 2) {
+  return JSON.stringify(value, null, spaces).replace(/[^\x00-\x7F]/g, ch => {
+    const code = ch.charCodeAt(0).toString(16).padStart(4, '0');
+    return `\\u${code}`;
+  });
+}
+
+function writeAsciiJson(value) {
+  process.stdout.write(stringifyAsciiJson(value, 2) + '\n');
+}
+
 async function fetchSycmKeywordDataAdapter({ keyword }) {
   const { extractSycmData, DEFAULT_FILTER_CONDITIONS } = require('../skills/sycm-research');
   const result = await extractSycmData(keyword, {
@@ -439,6 +450,329 @@ program
       } else {
         console.error('\n❌ 错误:', error.message);
       }
+      process.exit(1);
+    }
+  });
+
+program
+  .command('seed')
+  .description('管理每日蓝海选词种子池')
+  .command('list')
+  .description('查看当前种子池')
+  .option('--json', '纯 JSON 输出模式')
+  .option('--all', '包含 paused 状态的种子')
+  .action(function(options, command) {
+    const mainOpts = command.parent && command.parent.parent ? command.parent.parent.opts() : {};
+    const jsonMode = !!options.json || !!mainOpts.json;
+    try {
+      const { listSeeds } = require('../skills/keyword-mining');
+      const seeds = listSeeds({ includePaused: !!options.all });
+      if (jsonMode) {
+        writeAsciiJson({ ok: true, seeds });
+        return;
+      }
+      console.log('\n🌱 当前种子池');
+      console.log('='.repeat(80));
+      seeds.forEach((seed, idx) => {
+        console.log(`${idx + 1}. ${seed.keyword} | ${seed.category || '-'} | priority=${seed.priority} | score=${seed.priorityScore} | ${seed.source || '-'}`);
+        if (seed.reason) console.log(`   ${seed.reason}`);
+      });
+      console.log();
+    } catch (error) {
+      if (jsonMode) process.stdout.write(JSON.stringify({ ok: false, error: error.message }, null, 2) + '\n');
+      else console.error('\n❌ 错误:', error.message);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('seed-add <keyword>')
+  .description('添加一个蓝海选词种子')
+  .option('--category <category>', '种子类目', '')
+  .option('--priority <number>', '基础优先级', '5')
+  .option('--source <source>', '来源', 'manual')
+  .option('--reason <reason>', '添加原因', '')
+  .option('--json', '纯 JSON 输出模式')
+  .action(function(keyword, options, command) {
+    const mainOpts = command.parent ? command.parent.opts() : {};
+    const jsonMode = !!options.json || !!mainOpts.json;
+    try {
+      const { addSeed } = require('../skills/keyword-mining');
+      const seed = addSeed(keyword, {
+        category: options.category,
+        priority: parseInt(options.priority, 10) || 5,
+        source: options.source,
+        reason: options.reason
+      });
+      if (jsonMode) {
+        writeAsciiJson({ ok: true, seed });
+        return;
+      }
+      console.log(`\n✅ 已加入种子池: ${seed.keyword}`);
+      console.log(`类目: ${seed.category || '-'} | 优先级: ${seed.priority} | 来源: ${seed.source}`);
+      if (seed.reason) console.log(`原因: ${seed.reason}`);
+      console.log();
+    } catch (error) {
+      if (jsonMode) writeAsciiJson({ ok: false, error: error.message });
+      else console.error('\n❌ 错误:', error.message);
+      process.exit(1);
+    }
+  });
+
+program.commands.find(cmd => cmd.name() === 'seed')
+  .command('add <keyword>')
+  .description('添加一个蓝海选词种子')
+  .option('--category <category>', '种子类目', '')
+  .option('--priority <number>', '基础优先级', '5')
+  .option('--source <source>', '来源', 'manual')
+  .option('--reason <reason>', '添加原因', '')
+  .option('--json', '纯 JSON 输出模式')
+  .action(function(keyword, options, command) {
+    const root = command.parent && command.parent.parent ? command.parent.parent.opts() : {};
+    const jsonMode = !!options.json || !!root.json;
+    try {
+      const { addSeed } = require('../skills/keyword-mining');
+      const seed = addSeed(keyword, {
+        category: options.category,
+        priority: parseInt(options.priority, 10) || 5,
+        source: options.source,
+        reason: options.reason
+      });
+      if (jsonMode) {
+        writeAsciiJson({ ok: true, seed });
+        return;
+      }
+      console.log(`\n✅ 已加入种子池: ${seed.keyword}`);
+      console.log(`类目: ${seed.category || '-'} | 优先级: ${seed.priority} | 来源: ${seed.source}`);
+      if (seed.reason) console.log(`原因: ${seed.reason}`);
+      console.log();
+    } catch (error) {
+      if (jsonMode) writeAsciiJson({ ok: false, error: error.message });
+      else console.error('\n❌ 错误:', error.message);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('mine-keywords')
+  .description('从种子词池挖掘每日候选蓝海词')
+  .option('--limit <number>', '输出候选词数量', '50')
+  .option('--count <number>', '输出候选词数量（兼容旧参数，建议使用 --limit）')
+  .option('--max-seeds <number>', '本次使用的最大种子数量', '20')
+  .option('--max-per-seed <number>', '每个种子的最大扩词数量', '30')
+  .option('--output-max-per-seed <number>', '输出结果中每个种子的最大候选数量', '5')
+  .option('--output-max-per-category <number>', '输出结果中每个类目的最大候选数量', '20')
+  .option('--output-max-per-pattern <number>', '输出结果中每种扩词模式的最大候选数量', '20')
+  .option('--no-persist', '不写入 data/keyword-mining/candidates.jsonl')
+  .option('--json', '纯 JSON 输出模式')
+  .action(function(options, command) {
+    const mainOpts = command.parent ? command.parent.opts() : {};
+    const jsonMode = !!options.json || !!mainOpts.json;
+    try {
+      const { mineKeywords } = require('../skills/keyword-mining');
+      const outputLimit = parseInt(options.limit || options.count, 10) || 50;
+      const result = mineKeywords({
+        count: outputLimit,
+        maxSeeds: parseInt(options.maxSeeds, 10) || 20,
+        maxPerSeed: parseInt(options.maxPerSeed, 10) || 30,
+        outputMaxPerSeed: parseInt(options.outputMaxPerSeed, 10) || 5,
+        outputMaxPerCategory: parseInt(options.outputMaxPerCategory, 10) || 20,
+        outputMaxPerPattern: parseInt(options.outputMaxPerPattern, 10) || 20,
+        persist: options.persist !== false
+      });
+      if (jsonMode) {
+        writeAsciiJson(result);
+        return;
+      }
+      console.log('\n🔎 今日候选蓝海词');
+      console.log(`日期: ${result.date} | 使用种子: ${result.seedsUsed} | 候选: ${result.candidates.length}`);
+      console.log('='.repeat(90));
+      result.candidates.forEach((item, idx) => {
+        console.log(`${idx + 1}. ${item.keyword} | 分数 ${item.localScore} | seed=${item.seed} | ${item.nextAction}`);
+        console.log(`   ${item.reason}`);
+        if (item.nextCommands && item.nextCommands.sycm) console.log(`   生意参谋: ${item.nextCommands.sycm}`);
+      });
+      console.log('\n下一步：挑选 10-20 个词去生意参谋验证。');
+      console.log();
+    } catch (error) {
+      if (jsonMode) writeAsciiJson({ ok: false, error: error.message });
+      else console.error('\n❌ 错误:', error.message);
+      process.exit(1);
+    }
+  });
+
+const flowCommand = program
+  .command('flow')
+  .description('每日蓝海选品流水线：选词 → 生意参谋校验 → 标题生成 → 导出铺货清单');
+
+flowCommand
+  .command('daily')
+  .description('执行第一版每日流水线，不自动铺货')
+  .option('--mine <number>', '候选词数量', '50')
+  .option('--verify <number>', '生意参谋校验数量', '20')
+  .option('--generate <number>', '标题生成关键词数量', '10')
+  .option('--export <number>', '导出铺货商品数量', '20')
+  .option('--products-per-keyword <number>', '每个关键词最多导出商品数', '3')
+  .option('--length <number>', '标题最大长度', '60')
+  .option('--port <number>', 'Chrome 调试端口', '9222')
+  .option('--pages <number>', '生意参谋最大提取页数', '1')
+  .option('--min-blue-rows <number>', '蓝海词少于该数量时降级查热搜词', '1')
+  .option('--no-hot-fallback', '蓝海词不足时不降级查热搜词')
+  .option('--json', '纯 JSON 输出模式')
+  .action(async function(options, command) {
+    const mainOpts = command.parent && command.parent.parent ? command.parent.parent.opts() : {};
+    const jsonMode = !!options.json || !!mainOpts.json;
+    try {
+      const { flowDaily } = require('../skills/pipeline-flow');
+      const result = await flowDaily({
+        mine: parseInt(options.mine, 10) || 50,
+        verify: parseInt(options.verify, 10) || 20,
+        generate: parseInt(options.generate, 10) || 10,
+        export: parseInt(options.export, 10) || 20,
+        productsPerKeyword: parseInt(options.productsPerKeyword, 10) || 3,
+        length: parseInt(options.length, 10) || 60,
+        port: parseInt(options.port, 10) || 9222,
+        pages: parseInt(options.pages, 10) || 1,
+        minBlueRows: parseInt(options.minBlueRows, 10) || 1,
+        fallbackHot: options.hotFallback !== false
+      });
+      if (jsonMode) {
+        writeAsciiJson(result);
+        return;
+      }
+      console.log('\n✅ 每日流水线完成');
+      console.log(`Run: ${result.runId}`);
+      console.log(`状态: ${result.status}`);
+      console.log(`候选 ${result.steps.mined} | 验证通过 ${result.steps.verified} | 拒绝 ${result.steps.rejected} | 生成商品 ${result.steps.generated} | 导出 ${result.steps.exported}`);
+      console.log(`铺货清单: ${result.files.distributionBatch}`);
+    } catch (error) {
+      if (jsonMode) writeAsciiJson({ ok: false, error: error.message });
+      else console.error('\n❌ 错误:', error.message);
+      process.exit(1);
+    }
+  });
+
+flowCommand
+  .command('mine')
+  .description('只执行候选词生成并创建 run')
+  .option('--limit <number>', '候选词数量', '50')
+  .option('--json', '纯 JSON 输出模式')
+  .action(async function(options, command) {
+    const mainOpts = command.parent && command.parent.parent ? command.parent.parent.opts() : {};
+    const jsonMode = !!options.json || !!mainOpts.json;
+    try {
+      const { flowMine } = require('../skills/pipeline-flow');
+      const result = await flowMine({ limit: parseInt(options.limit, 10) || 50 });
+      if (jsonMode) {
+        writeAsciiJson({ ok: true, runId: result.runId, status: result.status, runDir: result.runDir, candidates: result.candidates.length, nextCommand: result.nextCommand });
+        return;
+      }
+      console.log(`✅ 已生成候选词: ${result.candidates.length}`);
+      console.log(`Run: ${result.runId}`);
+      console.log(`Next: ${result.nextCommand}`);
+    } catch (error) {
+      if (jsonMode) writeAsciiJson({ ok: false, error: error.message });
+      else console.error('\n❌ 错误:', error.message);
+      process.exit(1);
+    }
+  });
+
+flowCommand
+  .command('verify')
+  .description('串行执行生意参谋校验')
+  .option('--run <id>', '指定 runId，默认 latest')
+  .option('--limit <number>', '校验数量', '20')
+  .option('--port <number>', 'Chrome 调试端口', '9222')
+  .option('--pages <number>', '生意参谋最大提取页数', '1')
+  .option('--min-blue-rows <number>', '蓝海词少于该数量时降级查热搜词', '1')
+  .option('--no-hot-fallback', '蓝海词不足时不降级查热搜词')
+  .option('--json', '纯 JSON 输出模式')
+  .action(async function(options, command) {
+    const mainOpts = command.parent && command.parent.parent ? command.parent.parent.opts() : {};
+    const jsonMode = !!options.json || !!mainOpts.json;
+    try {
+      const { flowVerify } = require('../skills/pipeline-flow');
+      const result = await flowVerify({
+        runId: options.run,
+        limit: parseInt(options.limit, 10) || 20,
+        port: parseInt(options.port, 10) || 9222,
+        pages: parseInt(options.pages, 10) || 1,
+        minBlueRows: parseInt(options.minBlueRows, 10) || 1,
+        fallbackHot: options.hotFallback !== false
+      });
+      if (jsonMode) {
+        writeAsciiJson({ ok: true, runId: result.runId, status: result.status, verified: result.verified.length, rejected: result.rejected.length, nextCommand: result.nextCommand });
+        return;
+      }
+      console.log(`✅ 生意参谋校验完成: 通过 ${result.verified.length}，拒绝 ${result.rejected.length}`);
+      console.log(`Run: ${result.runId}`);
+      console.log(`Next: ${result.nextCommand}`);
+    } catch (error) {
+      if (jsonMode) writeAsciiJson({ ok: false, error: error.message });
+      else console.error('\n❌ 错误:', error.message);
+      process.exit(1);
+    }
+  });
+
+flowCommand
+  .command('generate')
+  .description('对验证通过词执行 1688 选品和标题生成')
+  .option('--run <id>', '指定 runId，默认 latest')
+  .option('--limit <number>', '生成关键词数量', '10')
+  .option('--products-per-keyword <number>', '每个关键词最多导出商品数', '3')
+  .option('--length <number>', '标题最大长度', '60')
+  .option('--json', '纯 JSON 输出模式')
+  .action(async function(options, command) {
+    const mainOpts = command.parent && command.parent.parent ? command.parent.parent.opts() : {};
+    const jsonMode = !!options.json || !!mainOpts.json;
+    try {
+      const { flowGenerate } = require('../skills/pipeline-flow');
+      const result = await flowGenerate({
+        runId: options.run,
+        limit: parseInt(options.limit, 10) || 10,
+        productsPerKeyword: parseInt(options.productsPerKeyword, 10) || 3,
+        length: parseInt(options.length, 10) || 60
+      });
+      const generated = result.generated.filter(row => row.status === 'generated').length;
+      if (jsonMode) {
+        writeAsciiJson({ ok: true, runId: result.runId, status: result.status, generated, nextCommand: result.nextCommand });
+        return;
+      }
+      console.log(`✅ 标题生成完成: 商品 ${generated}`);
+      console.log(`Run: ${result.runId}`);
+      console.log(`Next: ${result.nextCommand}`);
+    } catch (error) {
+      if (jsonMode) writeAsciiJson({ ok: false, error: error.message });
+      else console.error('\n❌ 错误:', error.message);
+      process.exit(1);
+    }
+  });
+
+flowCommand
+  .command('export')
+  .description('导出待铺货清单')
+  .option('--run <id>', '指定 runId，默认 latest')
+  .option('--limit <number>', '导出商品数量', '20')
+  .option('--json', '纯 JSON 输出模式')
+  .action(async function(options, command) {
+    const mainOpts = command.parent && command.parent.parent ? command.parent.parent.opts() : {};
+    const jsonMode = !!options.json || !!mainOpts.json;
+    try {
+      const { flowExport } = require('../skills/pipeline-flow');
+      const result = await flowExport({
+        runId: options.run,
+        limit: parseInt(options.limit, 10) || 20
+      });
+      if (jsonMode) {
+        writeAsciiJson(result);
+        return;
+      }
+      console.log(`✅ 已导出铺货清单: ${result.count}`);
+      console.log(result.file);
+      console.log(`Next: ${result.nextCommand}`);
+    } catch (error) {
+      if (jsonMode) writeAsciiJson({ ok: false, error: error.message });
+      else console.error('\n❌ 错误:', error.message);
       process.exit(1);
     }
   });

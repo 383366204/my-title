@@ -1,0 +1,212 @@
+[
+  {
+    "keyword": "戒指",
+    "category": "饰品",
+    "priority": 10,
+    "source": "manual",
+    "status": "active",
+    "successCount": 0,
+    "failCount": 0,
+    "reason": "饰品长期需求稳定"
+  },
+  {
+    "keyword": "项链",
+    "category": "饰品",
+    "priority": 10,
+    "source": "manual",
+    "status": "active",
+    "successCount": 0,
+    "failCount": 0,
+    "reason": "饰品长期需求稳定"
+  },
+  {
+    "keyword": "手链",
+    "category": "饰品",
+    "priority": 9,
+    "source": "manual",
+    "status": "active",
+    "successCount": 0,
+    "failCount": 0,
+    "reason": "饰品可扩材质和人群词"
+  },
+  {
+    "keyword": "耳环",
+    "category": "饰品",
+    "priority": 8,
+    "source": "manual",
+    "status": "active",
+    "successCount": 0,
+    "failCount": 0,
+    "reason": "女性饰品方向"
+  },
+  {
+    "keyword": "发夹",
+    "category": "发饰",
+    "priority": 8,
+    "source": "manual",
+    "status": "active",
+    "successCount": 0,
+    "failCount": 0,
+    "reason": "小件发饰适合铺货"
+  },
+  {
+    "keyword": "头绳",
+    "category": "发饰",
+    "priority": 7,
+    "source": "manual",
+    "status": "active",
+    "successCount": 0,
+    "failCount": 0,
+    "reason": "低价消耗品方向"
+  },
+  {
+    "keyword": "宠物玩具",
+    "category": "宠物",
+    "priority": 10,
+    "source": "manual",
+    "status": "active",
+    "successCount": 0,
+    "failCount": 0,
+    "reason": "宠物用品复购和长尾词多"
+  },
+  {
+    "keyword": "逗猫棒",
+    "category": "宠物",
+    "priority": 8,
+    "source": "manual",
+    "status": "active",
+    "successCount": 0,
+    "failCount": 0,
+    "reason": "猫用品具体形态词"
+  },
+  {
+    "keyword": "狗狗玩具",
+    "category": "宠物",
+    "priority": 8,
+    "source": "manual",
+    "status": "active",
+    "successCount": 0,
+    "failCount": 0,
+    "reason": "犬用品具体形态词"
+  },
+  {
+    "keyword": "手机壳",
+    "category": "数码配件",
+    "priority": 7,
+    "source": "manual",
+    "status": "active",
+    "successCount": 0,
+    "failCount": 0,
+    "reason": "款式词丰富"
+  },
+  {
+    "keyword": "手机挂绳",
+    "category": "数码配件",
+    "priority": 7,
+    "source": "manual",
+    "status": "active",
+    "successCount": 0,
+    "failCount": 0,
+    "reason": "小配件适合长尾选品"
+  },
+  {
+    "keyword": "钥匙扣",
+    "category": "日用小件",
+    "priority": 7,
+    "source": "manual",
+    "status": "active",
+    "successCount": 0,
+    "failCount": 0,
+    "reason": "礼品和场景词丰富"
+  },
+  {
+    "keyword": "收纳盒",
+    "category": "家居",
+    "priority": 8,
+    "source": "manual",
+    "status": "active",
+    "successCount": 0,
+    "failCount": 0,
+    "reason": "家居刚需方向"
+  },
+  {
+    "keyword": "厨房置物架",
+    "category": "家居",
+    "priority": 7,
+    "source": "manual",
+    "status": "active",
+    "successCount": 0,
+    "failCount": 0,
+    "reason": "厨房收纳长尾词多"
+  },
+  {
+    "keyword": "车载收纳",
+    "category": "车品",
+    "priority": 7,
+    "source": "manual",
+    "status": "active",
+    "successCount": 0,
+    "failCount": 0,
+    "reason": "车品细分场景明确"
+  },
+  {
+    "keyword": "儿童发饰",
+    "category": "母婴",
+    "priority": 8,
+    "source": "manual",
+    "status": "active",
+    "successCount": 0,
+    "failCount": 0,
+    "reason": "人群明确"
+  },
+  {
+    "keyword": "儿童玩具",
+    "category": "玩具",
+    "priority": 7,
+    "source": "manual",
+    "status": "active",
+    "successCount": 0,
+    "failCount": 0,
+    "reason": "可扩年龄和场景词"
+  },
+  {
+    "keyword": "端午手绳",
+    "category": "节日礼品",
+    "priority": 8,
+    "source": "manual",
+    "status": "active",
+    "successCount": 0,
+    "failCount": 0,
+    "reason": "节日季节性方向"
+  },
+  {
+    "keyword": "香包",
+    "category": "节日礼品",
+    "priority": 7,
+    "source": "manual",
+    "status": "active",
+    "successCount": 0,
+    "failCount": 0,
+    "reason": "节日和礼品属性明显"
+  },
+  {
+    "keyword": "小夜灯",
+    "category": "家居",
+    "priority": 7,
+    "source": "manual",
+    "status": "active",
+    "successCount": 0,
+    "failCount": 0,
+    "reason": "场景和人群词丰富"
+  },
+  {
+    "keyword": "玛瑙戒指",
+    "category": "饰品",
+    "priority": 8,
+    "source": "manual",
+    "status": "active",
+    "successCount": 0,
+    "failCount": 0,
+    "reason": "饰品材质细分方向，适合生意参谋验证"
+  }
+]
