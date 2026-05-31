@@ -23,13 +23,14 @@ metadata:
 4. 任何提交动作只能执行一次；提交后必须去复制日志验证，不允许原地重复点击。
 5. 中文输入后必须读回页面内容；只要出现 `????`，立即停止并重填。
 6. 如果当前页面不是 `item.jnesoft.com`，先回 `https://item.jnesoft.com/`，不要在 1688 AI 对话页里继续找按钮。
+7. 全程只使用一个业务 tab。禁止每批铺货都新开 tab；必须复用当前 `item.jnesoft.com` / `ali_multiStore` / `ali_batchLog` tab。
 
 ### 逐步验收表
 
 | 步骤 | 动作 | 通过信号 | 失败处理 |
 |------|------|----------|----------|
-| 0 | 连接用户已登录 Chrome | 能打开 `item.jnesoft.com`，未出现登录弹窗 | 让用户先登录，不要尝试破解登录 |
-| 1 | 打开 `https://item.jnesoft.com/` | 页面正文包含 `复制上货` | 刷新一次；仍没有则提示登录或网络异常 |
+| 0 | 连接用户已登录 Chrome | 能找到或复用一个业务 tab，未出现登录弹窗 | 让用户先登录，不要尝试破解登录 |
+| 1 | 在同一个 tab 打开 `https://item.jnesoft.com/` | 页面正文包含 `复制上货` | 刷新一次；仍没有则提示登录或网络异常 |
 | 2 | hover `复制上货` | 页面出现精确文本 `多店复制` | 触发 `mouseenter`/`mouseover`；不要点击其它复制入口 |
 | 3 | 点击 `多店复制` | URL 含 `ali_multiStore`，或正文含 `商品分配方式` | 直达 `https://item.jnesoft.com/ali_view/ali_multiStore` 兜底 |
 | 4 | 填入商品数据 | 编辑器行数等于输入条数，中文完整 | 清空编辑器，用 `execCommand('insertText')` 重填 |
@@ -49,13 +50,14 @@ metadata:
 - 找不到可见的 `开始批量复制` 按钮。
 - 已点击过 `开始批量复制`，但还没点击 `查看复制记录` 查日志。
 - 无法确认当前页面是 `ali_multiStore` 或 `ali_batchLog`。
+- 检测到当前任务已经新开了第二个业务 tab，先关闭/忽略新 tab，回到原业务 tab 后再继续。
 
 ## 最短执行路径（优先读这里）
 
 给其它 agent 使用时，优先按这 10 步执行，不要自由发挥：
 
 1. 确认已连接用户登录过的 Chrome；未登录就让用户先扫码登录。
-2. 打开主入口 URL：`https://item.jnesoft.com/`。
+2. 找到已有 `item.jnesoft.com` 业务 tab 并复用；没有才在当前空白 tab 打开主入口 URL：`https://item.jnesoft.com/`。
 3. 鼠标悬浮顶部/左侧菜单 **复制上货**，点击二级菜单 **多店复制**。
 4. 确认进入 `ali_multiStore` 页面：URL 包含 `item.jnesoft.com/ali_view/ali_multiStore`，或页面标题/正文包含 `淘宝张飞搬家-多店复制`、`商品分配方式`。
 5. 找 `.ProseMirror` 或 `[contenteditable="true"]`，用 `document.execCommand('insertText', false, data)` 写入商品数据。
@@ -225,6 +227,23 @@ powershell.exe -Command "Start-Process 'C:\\Program Files\\Google\\Chrome\\Appli
 https://item.jnesoft.com/
 ```
 
+## 单 Tab 控制规则
+
+弱模型最容易失败的点之一，是每次铺货都 `open` / `newPage` 打开新标签页，导致登录态、当前表单、复制日志分散在多个 tab 里。必须按下面规则执行：
+
+1. 先从浏览器目标列表里找已有业务 tab，优先级为：
+   - URL 含 `item.jnesoft.com/ali_view/ali_multiStore`
+   - URL 含 `item.jnesoft.com/ali_view/ali_batchLog`
+   - URL 含 `item.jnesoft.com`
+2. 找到后复用这个 tab，通过 `Page.navigate` 或当前 browser tab 导航，不要创建新 tab。
+3. 只有完全找不到任何可用 page target 时，才允许使用当前空白 tab 打开 `https://item.jnesoft.com/`。
+4. 连续多批铺货时：
+   - 如果当前在 `ali_batchLog`，执行 `history.back()` 回 `ali_multiStore`
+   - 不要重新打开首页
+   - 不要重新 hover 菜单
+   - 不要新开 tab
+5. 若工具不可避免创建了新 tab，后续所有动作必须切回同一个业务 tab；不要在多个 tab 间交替操作。
+
 ## 给弱模型的硬性执行规则
 
 这个 skill 的页面定位不要依赖“看起来像按钮”的视觉判断。默认按下面规则执行：
@@ -234,6 +253,7 @@ https://item.jnesoft.com/
 3. **不要重复点击 `开始批量复制`**。它是最终提交动作，只允许点一次。
 4. **不要用 PowerShell 管道传中文**。中文标题必须通过 UTF-8 安全通道写入页面上下文。
 5. **每一步都读页面文本确认**。没确认到目标文本，就不要进入下一步。
+6. **不要新开业务 tab**。复用当前 `item.jnesoft.com` tab，连续批次从日志页 `history.back()` 回表单。
 
 ### 主入口 URL（优先使用）
 
@@ -500,71 +520,97 @@ async function waitForTarget(CDP, predicate, timeoutMs = 30000) {
   }
   throw new Error('等待目标页面超时');
 }
+
+async function getBusinessTarget(CDP) {
+  const targets = await CDP.List({ host: '127.0.0.1', port: 9222 });
+  return targets.find(t => t.type === 'page' && t.url.includes('item.jnesoft.com/ali_view/ali_multiStore'))
+    || targets.find(t => t.type === 'page' && t.url.includes('item.jnesoft.com/ali_view/ali_batchLog'))
+    || targets.find(t => t.type === 'page' && t.url.includes('item.jnesoft.com'))
+    || targets.find(t => t.type === 'page' && (t.url === 'about:blank' || t.url.startsWith('chrome://newtab')))
+    || targets.find(t => t.type === 'page');
+}
 ```
 
-### 1. 打开主入口并进入多店复制
+### 1. 复用业务 tab 并进入多店复制
 
 ```javascript
-let homeTarget = (await CDP.List({ host: '127.0.0.1', port: 9222 }))
-  .find(t => t.type === 'page' && t.url.includes('item.jnesoft.com'));
-homeTarget ||= (await CDP.List({ host: '127.0.0.1', port: 9222 }))
-  .find(t => t.type === 'page');
+let homeTarget = await getBusinessTarget(CDP);
 if (!homeTarget) throw new Error('未找到可用 Chrome 页面');
 
 const homeClient = await CDP({ target: homeTarget, host: '127.0.0.1', port: 9222 });
 const { Page: HomePage, Runtime: HomeRuntime } = homeClient;
 await HomePage.enable();
 await HomeRuntime.enable();
-await Promise.all([
-  HomePage.loadEventFired(),
-  HomePage.navigate({ url: 'https://item.jnesoft.com/' })
-]);
 
-await waitForTarget(CDP, t =>
-  t.type === 'page' &&
-  t.url.includes('item.jnesoft.com')
-);
-
-await HomeRuntime.evaluate({
+const current = await HomeRuntime.evaluate({
   returnByValue: true,
-  awaitPromise: true,
-  expression: `(() => {
-    const visible = el => {
-      const r = el.getBoundingClientRect();
-      return r.width > 0 && r.height > 0;
-    };
-    const hasLine = (el, text) => (el.innerText || '')
-      .split(/\\s+/)
-      .some(line => line.trim() === text);
-    const menu = Array.from(document.querySelectorAll('*'))
-      .find(el => visible(el) && hasLine(el, '复制上货'));
-    if (!menu) return JSON.stringify({ ok: false, reason: 'menu not found' });
-    menu.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, view: window }));
-    menu.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, view: window }));
-    return JSON.stringify({ ok: true });
-  })()`
+  expression: `location.href`
 });
+const currentUrl = current.result.value || '';
 
-await sleep(800);
+if (currentUrl.includes('item.jnesoft.com/ali_view/ali_batchLog')) {
+  await HomeRuntime.evaluate({ expression: 'history.back()', returnByValue: true });
+  await waitForTarget(CDP, t =>
+    (t.type === 'page' || t.type === 'iframe') &&
+    t.url.includes('item.jnesoft.com/ali_view/ali_multiStore')
+  );
+} else if (!currentUrl.includes('item.jnesoft.com')) {
+  await Promise.all([
+    HomePage.loadEventFired(),
+    HomePage.navigate({ url: 'https://item.jnesoft.com/' })
+  ]);
+  await waitForTarget(CDP, t =>
+    t.type === 'page' &&
+    t.url.includes('item.jnesoft.com')
+  );
+}
 
-await HomeRuntime.evaluate({
+const afterNavigation = await HomeRuntime.evaluate({
   returnByValue: true,
-  awaitPromise: true,
-  expression: `(() => {
-    const visible = el => {
-      const r = el.getBoundingClientRect();
-      return r.width > 0 && r.height > 0;
-    };
-    const hasLine = (el, text) => (el.innerText || '')
-      .split(/\\s+/)
-      .some(line => line.trim() === text);
-    const entry = Array.from(document.querySelectorAll('a,button,li,span,div'))
-      .find(el => visible(el) && hasLine(el, '多店复制'));
-    if (!entry) return JSON.stringify({ ok: false, reason: 'entry not found' });
-    entry.click();
-    return JSON.stringify({ ok: true });
-  })()`
+  expression: `location.href`
 });
+if (!String(afterNavigation.result.value || '').includes('item.jnesoft.com/ali_view/ali_multiStore')) {
+  await HomeRuntime.evaluate({
+    returnByValue: true,
+    awaitPromise: true,
+    expression: `(() => {
+      const visible = el => {
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      };
+      const hasLine = (el, text) => (el.innerText || '')
+        .split(/\\s+/)
+        .some(line => line.trim() === text);
+      const menu = Array.from(document.querySelectorAll('*'))
+        .find(el => visible(el) && hasLine(el, '复制上货'));
+      if (!menu) return JSON.stringify({ ok: false, reason: 'menu not found' });
+      menu.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, view: window }));
+      menu.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, view: window }));
+      return JSON.stringify({ ok: true });
+    })()`
+  });
+
+  await sleep(800);
+
+  await HomeRuntime.evaluate({
+    returnByValue: true,
+    awaitPromise: true,
+    expression: `(() => {
+      const visible = el => {
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      };
+      const hasLine = (el, text) => (el.innerText || '')
+        .split(/\\s+/)
+        .some(line => line.trim() === text);
+      const entry = Array.from(document.querySelectorAll('a,button,li,span,div'))
+        .find(el => visible(el) && hasLine(el, '多店复制'));
+      if (!entry) return JSON.stringify({ ok: false, reason: 'entry not found' });
+      entry.click();
+      return JSON.stringify({ ok: true });
+    })()`
+  });
+}
 ```
 
 ### 2. 找到多店复制 page / iframe
@@ -696,16 +742,18 @@ await Runtime.evaluate({
 ```javascript
 await sleep(3000);
 
-await Runtime.evaluate({
+const recordClickRaw = await Runtime.evaluate({
   returnByValue: true,
   expression: `(() => {
     const btn = Array.from(document.querySelectorAll('button'))
       .find(b => (b.innerText || '').trim() === '查看复制记录');
-    if (!btn) return 'record-button-not-found';
+    if (!btn) return JSON.stringify({ ok: false, reason: 'record-button-not-found' });
     btn.click();
-    return 'record-clicked';
+    return JSON.stringify({ ok: true });
   })()`
 });
+const recordClick = JSON.parse(recordClickRaw.result.value);
+if (!recordClick.ok) throw new Error('未能点击查看复制记录：' + recordClick.reason);
 ```
 
 点击 `查看复制记录` 后重新查找日志页面：
