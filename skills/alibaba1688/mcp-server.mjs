@@ -11,7 +11,7 @@ const require = createRequire(import.meta.url);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // 加载环境变量
-require('dotenv').config({ path: path.resolve(__dirname, '..', '..', '.env') });
+require('../../core/env').loadEnv({ projectRoot: path.resolve(__dirname, '..', '..') });
 
 // 导入 skill 模块
 const { searchAll } = require('./src/search-1688');

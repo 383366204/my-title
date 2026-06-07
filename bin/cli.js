@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-require('dotenv').config();
+require('../core/env').loadEnv();
 const { Command } = require('commander');
 const { batchRun, generateTitlePipeline } = require('../skills/title-gen');
 const { searchAll } = require('../skills/alibaba1688');
