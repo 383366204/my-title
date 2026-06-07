@@ -759,7 +759,7 @@ async function distributeProducts(options = {}) {
           ? 'report_not_confirmed'
           : 'report_confirmed',
     nextAction: options.dryRun
-      ? 'Review this dry-run output. If item count and batches are correct, rerun without --dry-run.'
+      ? 'Review this dry-run output. If item count and batches are correct, rerun the same command with --submit.'
       : 'Report copy record status to the user. If status is partial_confirmed or not_confirmed, do not retry automatically.'
   };
 }
@@ -797,10 +797,10 @@ async function checkDistributionReadiness(options = {}) {
       ...(!browser.ok ? ['browser_cdp_unavailable'] : []),
       ...(duplicates.length > 0 ? ['recent_duplicate_batch'] : [])
     ],
-    allowedCommands: ok ? ['rerun_without_check_or_dry_run'] : [],
+    allowedCommands: ok ? ['rerun_with_submit'] : [],
     nextActionCode: ok ? 'submit_ready' : 'fix_blockers',
     nextAction: ok
-      ? 'Run the same command without --check and without --dry-run to submit.'
+      ? 'Review this readiness result. If it is correct, rerun the same command with --submit to submit.'
       : 'Fix blockers before submitting. Do not click Start Batch Copy manually.'
   };
 }

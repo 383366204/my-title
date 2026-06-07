@@ -616,7 +616,7 @@ server.tool(
   [
     '调用远端淘宝 OPC/OPT 图片服务 MCP 工具。',
     '调用前请先用 taobao_opc_list_tools 查看目标工具 inputSchema，并严格按 schema 传 arguments。',
-    '例如 query_item_more_info 的 arguments 可为 {"itemId":123456,"fields":"num_iid,title,picUrl"}。',
+    '例如 query_item_more_info 的 arguments 可为 {"params":{"itemId":"1026014382497","fields":"num_iid,title,pic_url,item_img,sku"}}。',
     '如果远端返回 NEED_AUTH 或授权链接，请把链接交给用户自行授权。'
   ].join('\n'),
   {

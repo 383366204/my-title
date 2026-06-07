@@ -14,6 +14,7 @@ const {
   clusterBySignature,
   diversifyCandidates
 } = require('..');
+const { extractSearchPopularityFromSycmJson } = require('../src/sycm-precheck');
 
 function tempDataDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'keyword-mining-'));
@@ -144,6 +145,23 @@ describe('keyword-mining', () => {
     assert.ok(result.candidates.length > 0);
     assert.ok(result.candidates[0].localScore >= result.candidates[result.candidates.length - 1].localScore);
     assert.strictEqual(fs.existsSync(path.join(dataDir, 'candidates.jsonl')), false);
+  });
+
+  test('mineKeywords default seed pool produces candidates', async () => {
+    const result = await mineKeywords({ count: 5, persist: false });
+
+    assert.strictEqual(result.ok, true);
+    assert.ok(result.stats.expanded > 0);
+    assert.ok(result.candidates.length > 0);
+  });
+
+  test('sycm precheck reads CLI data payload shape', () => {
+    const popularity = extractSearchPopularityFromSycmJson({
+      ok: true,
+      data: [{ keyword: '弹力带', searchPopularity: 128 }]
+    });
+
+    assert.strictEqual(popularity, 128);
   });
 
   test('mineKeywords applies diversity limits and next commands', async () => {

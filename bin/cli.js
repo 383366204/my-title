@@ -975,6 +975,7 @@ program
   .option('--state-file <path>', 'JSONL file used for duplicate-submit protection')
   .option('--check', 'Check input, duplicate state, and Chrome CDP without submitting')
   .option('--dry-run', 'Parse and validate input without touching the browser')
+  .option('--submit', 'Actually submit batches in the browser; without this flag the command only checks readiness')
   .option('--force', 'Allow submitting a batch that was recently submitted')
   .option('--json', 'JSON output')
   .action(async function(options, command) {
@@ -997,7 +998,9 @@ program
         dryRun: !!options.dryRun,
         force: !!options.force
       };
-      const result = options.check
+      const result = options.dryRun
+        ? await distributeProducts(payload)
+        : (options.check || !options.submit)
         ? await checkDistributionReadiness(payload)
         : await distributeProducts(payload);
       if (jsonMode) {

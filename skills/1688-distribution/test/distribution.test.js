@@ -107,6 +107,7 @@ describe('1688 distribution input handling', () => {
     assert.equal(result.total, 1);
     assert.equal(result.batches[0].dryRun, true);
     assert.equal(result.nextActionCode, 'review_dry_run');
+    assert.ok(result.nextAction.includes('--submit'));
   });
 
   it('requires all offer ids to confirm copy records', async () => {
@@ -144,6 +145,8 @@ describe('1688 distribution input handling', () => {
     assert.equal(result.ok, true);
     assert.equal(result.status, 'ready');
     assert.deepEqual(result.blockers, []);
+    assert.deepEqual(result.allowedCommands, ['rerun_with_submit']);
+    assert.ok(result.nextAction.includes('--submit'));
   });
 
   it('blocks readiness on recent duplicates', async () => {

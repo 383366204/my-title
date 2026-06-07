@@ -59,12 +59,12 @@ async function precheckCandidates(candidates, { minSearchPopularity = 50, timeou
         }
         try {
           const data = JSON.parse(stdout.trim());
-          // 取 items[0].searchPopularity
-          if (!data.items || !data.items.length || data.items[0].searchPopularity == null) {
+          const searchPopularity = extractSearchPopularityFromSycmJson(data);
+          if (searchPopularity == null) {
             resolve(null); // 无数据
             return;
           }
-          resolve(Number(data.items[0].searchPopularity));
+          resolve(searchPopularity);
         } catch (e) {
           resolve(null); // JSON 解析失败视为无数据
         }
@@ -81,4 +81,15 @@ async function precheckCandidates(candidates, { minSearchPopularity = 50, timeou
   return { passed, filtered, stats };
 }
 
-module.exports = { precheckCandidates };
+function extractSearchPopularityFromSycmJson(payload) {
+  const rows = Array.isArray(payload && payload.items)
+    ? payload.items
+    : Array.isArray(payload && payload.data)
+      ? payload.data
+      : [];
+  if (!rows.length || rows[0].searchPopularity == null) return null;
+  const value = Number(rows[0].searchPopularity);
+  return Number.isFinite(value) ? value : null;
+}
+
+module.exports = { precheckCandidates, extractSearchPopularityFromSycmJson };
