@@ -13,6 +13,71 @@ metadata:
 
 通过浏览器操作 `https://item.jnesoft.com/` 的 **复制上货 → 多店复制** 功能，实现批量商品铺货到多个淘宝店铺。1688 工作台入口仅作为兜底，不再作为默认路线。
 
+## 优先执行方式
+
+弱模型不要自由操作页面，优先调用项目 CLI：
+
+完整短流程见 `AGENT_RUNBOOK.md`。执行顺序固定为：
+
+```text
+sync-hermes-skills -> distribute --dry-run -> distribute --check -> distribute
+```
+
+```bash
+node bin/cli.js distribute --input-file data/pipeline/runs/<runId>/distribution-batch.txt --json
+```
+
+调试或首次接入时先 dry-run：
+
+```bash
+node bin/cli.js distribute --input-file data/pipeline/runs/<runId>/distribution-batch.txt --dry-run --json
+```
+
+提交前检查浏览器和重复提交风险：
+
+```bash
+node bin/cli.js distribute --input-file data/pipeline/runs/<runId>/distribution-batch.txt --check --json
+```
+
+如果 Hermes 通过 symlink 引用本 skill，先同步成真实文件，避免 `outside the trusted skills directory`：
+
+```bash
+node bin/cli.js sync-hermes-skills --apply --json
+```
+
+CLI 会固定执行：复用已有 `item.jnesoft.com` tab → 进入 `多店复制` → 填入商品 → 选择 `随机平均分配` → 全选店铺 → 只点击一次 `开始批量复制` → 点击 `查看复制记录`。执行器内置 `batchHash` 防重复提交；弱模型不要重复点击提交按钮。
+
+复制记录确认必须是全量确认：只有本批所有 offerId 都出现在复制记录中才算 `confirmed`。只出现部分商品时返回 `partial_confirmed`，一个都没有时返回 `not_confirmed`；这两种状态都必须停止并报告，不允许自动重试。
+
+## 铺货前强制确认
+
+`1688-distribution` 是最终提交动作，不允许 agent 自行从选品结果直接执行铺货。完整流程必须是：
+
+```text
+选品 → 版权/IP 预排查 → 展示待铺货清单 → 用户明确确认 → distribute --dry-run → distribute --check → distribute
+```
+
+即使用户之前说过“前 N 个进行铺货”，也必须先展示具体清单并等待用户明确回复“确认”或等价指令。没有确认时，只能生成或更新铺货清单文件，不得执行最终 `distribute --json`。
+
+## 版权/IP 预排查
+
+铺货前必须对商品标题和主图做版权/IP 风险预排查。排查结果要先展示给用户，只把“安全可铺”的商品写入铺货文件。
+
+固定参考：
+
+- `references/ip-copyright-risk-db.md`：已知风险品牌/IP 库。
+- `references/missing-offerids-false-positive-bug.md`：复制记录 missingOfferIds 误报排查记录。
+
+排查规则：
+
+- 卡通 IP 形象、注册品牌名、海外注册品牌默认排除或要求人工确认。
+- 通用描述词、无品牌白牌/OEM、材质+品类组合通常可进入铺货候选。
+- 对有嫌疑的商品，用 1688 详情页或主图确认，不要只凭标题猜测。
+
+## 批次大小建议
+
+基于实测，日常推荐每批不超过 50 个商品；100 个以上必须拆批。超大批量可能触发调用端终端超时，即使 CDP 本身已经放宽到 120 秒。
+
 ## 弱模型执行契约（必须遵守）
 
 这个 skill 面向不擅长页面推理的 agent。执行时必须把它当成状态机，不要“看起来差不多就点”：
@@ -351,11 +416,12 @@ function clickExact(text, selectors = 'button,a,li,span,div,label') {
 铺货前先把用户输入规范化，不要边填边解析：
 
 1. 按行拆分，去掉空行和首尾空格。
-2. 每行必须是 `https://detail.1688.com/offer/<id>.html` 或 `https://detail.1688.com/offer/<id>.html$$标题`。
+2. 每行必须是 `https://detail.1688.com/offer/<id>.html`、`URL<TAB>标题`、`URL<TAB>标题<TAB>类目`、`URL || 标题`、`URL || 标题 || 类目`、`URL --title 标题 --category 类目`、`URL$$标题`，或 `URL$$标题$$类目`。
 3. 提取每行的商品 ID，作为后续日志搜索依据。
 4. 如果一批超过 20 条，自动拆成多批，每批最多 20 条，按原顺序连续执行。
 5. `expectedKeyword` 从第一条标题里取稳定中文词；没有标题时取用户给的品类词。
-6. 填入页面的数据必须仍保持 `URL$$标题` 的原始格式，每条一行。
+6. 如果需要指定类目，优先使用生意参谋查词结果里的 `categoryAnalysis.recommendation.recommended.category`。
+7. CLI 会把输入统一规范化成页面需要的 `URL$$标题` 或 `URL$$标题$$类目` 格式，每条一行。
 
 执行前记录：
 
@@ -424,6 +490,7 @@ title/body contains: 淘宝张飞搬家-多店复制 / 商品分配方式 / 随�
 https://detail.1688.com/offer/xxx.html
 https://detail.1688.com/offer/yyy.html
 https://detail.1688.com/offer/zzz.html
+https://detail.1688.com/offer/zzz.html$$铺货标题$$生意参谋推荐类目
 ```
 
 也支持自定义标题格式（推荐）：

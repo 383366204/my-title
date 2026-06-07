@@ -11,7 +11,12 @@ const {
   flowExport,
   readJsonl,
   scoreSycmRows,
-  fetchSycmWithFallback
+  fetchSycmWithFallback,
+  validateGeneratedRow,
+  categoryAssessment,
+  scoreKeywordOpportunity,
+  scoreProductOpportunity,
+  summarizeOpportunities
 } = require('..');
 
 function tempDataDir() {
@@ -52,6 +57,39 @@ describe('pipeline-flow', () => {
     assert.strictEqual(result.passed, true);
     assert.strictEqual(result.confidence, 'medium');
     assert.strictEqual(result.usage, 'title_optional');
+  });
+
+  test('scoreKeywordOpportunity marks verified blue words as searchable opportunities', () => {
+    const result = scoreKeywordOpportunity({
+      keyword: '玛瑙戒指女',
+      localScore: 82,
+      sycmScore: {
+        passed: true,
+        score: 86,
+        mode: 'blue',
+        confidence: 'high',
+        usage: 'title_core'
+      }
+    });
+
+    assert.ok(result.score >= 80);
+    assert.strictEqual(result.decision, 'continue');
+    assert.strictEqual(result.nextAction, 'search_1688');
+  });
+
+  test('scoreProductOpportunity prefers valid 1688 URLs with relevant title and sales', () => {
+    const result = scoreProductOpportunity({
+      url: 'https://detail.1688.com/offer/123.html',
+      title: '玛瑙戒指女小众高级感开口可调节轻奢饰品',
+      price: '3.8',
+      sales30days: '200',
+      imageUrl: 'https://img.example.com/a.jpg',
+      shopName: 'test shop'
+    }, { keyword: '玛瑙戒指女', verifyMode: 'blue' });
+
+    assert.ok(result.score >= 78);
+    assert.strictEqual(result.decision, 'continue');
+    assert.strictEqual(result.level, 'strong_recommend');
   });
 
   test('fetchSycmWithFallback switches to hot search when blue rows are insufficient', async () => {
@@ -104,14 +142,19 @@ describe('pipeline-flow', () => {
           clickRate: 50,
           conversionRate: '2% ~ 5%'
         }
-      ]
+      ],
+      categoryAnalysis: {
+        recommendation: {
+          recommended: { category: '宠物用品 > 狗狗玩具', score: 80 }
+        }
+      }
     });
     const generator = async keyword => ({
       ok: true,
       products: [
         {
           '产品链接': 'https://detail.1688.com/offer/123.html',
-          '铺货标题': keyword + '测试标题足够长用于铺货'
+          '铺货标题': keyword + '宠物用品狗狗互动耐咬训练解闷磨牙发声弹力球室内户外陪伴好物'
         }
       ]
     });
@@ -136,8 +179,13 @@ describe('pipeline-flow', () => {
     assert.ok(fs.existsSync(result.files.generatedProducts));
     assert.ok(fs.existsSync(result.files.distributionBatch));
     assert.ok(fs.existsSync(result.files.distributionReview));
-    assert.ok(fs.readFileSync(result.files.distributionBatch, 'utf8').includes('$$'));
+    assert.ok(fs.readFileSync(result.files.distributionBatch, 'utf8').includes('$$宠物用品 > 狗狗玩具'));
     assert.ok(fs.readFileSync(result.files.distributionReview, 'utf8').includes('Verify Mode'));
+    assert.ok(fs.readFileSync(result.files.distributionReview, 'utf8').includes('Product Opportunity'));
+    const pool = summarizeOpportunities({ dataDir: path.join(dataDir, 'opportunities'), limit: 5 });
+    assert.ok(pool.counts.keywords >= 1);
+    assert.ok(pool.counts.products >= 1);
+    assert.ok(fs.readFileSync(result.files.distributionReview, 'utf8').includes('Category: 宠物用品 > 狗狗玩具'));
   });
 
   test('flowExport review warns for hot trend reference rows', async () => {
@@ -149,7 +197,7 @@ describe('pipeline-flow', () => {
       status: 'generated',
       keyword: '硅胶儿童玩具',
       url: 'https://detail.1688.com/offer/789.html',
-      title: '硅胶儿童玩具测试标题',
+      title: '硅胶儿童玩具宝宝洗澡沙滩戏水益智互动耐摔安全无味室内户外陪伴好物',
       verifyMode: 'hot',
       confidence: 'trend',
       usage: 'trend_reference',
@@ -162,6 +210,64 @@ describe('pipeline-flow', () => {
 
     assert.ok(review.includes('Risk:'));
     assert.ok(review.includes('不是严格蓝海词'));
+  });
+
+  test('flowExport blocks short titles and category conflicts before distribution', async () => {
+    const dataDir = tempDataDir();
+    const mined = await flowMine({ dataDir, limit: 1 });
+    const runDir = path.join(dataDir, 'runs', mined.runId);
+    const generatedFile = path.join(runDir, 'generated-products.jsonl');
+    fs.writeFileSync(generatedFile, [
+      JSON.stringify({
+        status: 'generated',
+        keyword: '宠物玩具',
+        url: 'https://detail.1688.com/offer/100.html',
+        title: '宠物玩具短标题',
+        recommendedCategory: '宠物用品 > 狗狗玩具',
+        product: { categoryListName: '宠物用品 > 狗狗玩具' },
+        verifyMode: 'blue'
+      }),
+      JSON.stringify({
+        status: 'generated',
+        keyword: '宠物玩具',
+        url: 'https://detail.1688.com/offer/101.html',
+        title: '宠物玩具狗狗互动耐咬训练解闷磨牙发声弹力球室内户外陪伴用品好物',
+        recommendedCategory: '宠物用品 > 狗狗玩具',
+        product: { categoryListName: '服饰配件 > 戒指' },
+        verifyMode: 'blue'
+      })
+    ].join('\n') + '\n', 'utf8');
+
+    const exported = await flowExport({ dataDir, runId: mined.runId, limit: 2 });
+    const batch = fs.readFileSync(exported.file, 'utf8');
+    const review = fs.readFileSync(exported.reviewFile, 'utf8');
+
+    assert.equal(exported.count, 0);
+    assert.equal(exported.rejected, 2);
+    assert.equal(exported.mustReview, true);
+    assert.equal(batch, '');
+    assert.ok(review.includes('title_too_short'));
+    assert.ok(review.includes('category_conflict'));
+  });
+
+  test('validateGeneratedRow reports category confidence', () => {
+    const ok = validateGeneratedRow({
+      keyword: '宠物玩具',
+      url: 'https://detail.1688.com/offer/123.html',
+      title: '宠物玩具狗狗互动耐咬训练解闷磨牙发声弹力球室内户外陪伴用品好物',
+      recommendedCategory: '宠物用品 > 狗狗玩具',
+      product: { categoryListName: '宠物用品 > 狗狗玩具' }
+    });
+    const conflict = categoryAssessment({
+      title: '宠物玩具狗狗互动耐咬训练解闷磨牙发声弹力球室内户外陪伴用品好物',
+      keyword: '宠物玩具',
+      recommendedCategory: '宠物用品 > 狗狗玩具',
+      product: { categoryListName: '服饰配件 > 戒指' }
+    });
+
+    assert.equal(ok.ok, true);
+    assert.equal(ok.categoryConfidence, 'high');
+    assert.equal(conflict.confidence, 'low');
   });
 
   test('flowDaily stops when SYCM verifies no keywords', async () => {
@@ -218,7 +324,7 @@ describe('pipeline-flow', () => {
       limit: 1,
       generator: async keyword => ({
         ok: true,
-        products: [{ '产品链接': 'https://detail.1688.com/offer/456.html', '铺货标题': keyword + '恢复测试标题' }]
+        products: [{ '产品链接': 'https://detail.1688.com/offer/456.html', '铺货标题': keyword + '恢复测试标题足够长用于铺货狗狗互动耐咬训练解闷磨牙发声弹力球室内陪伴' }]
       })
     });
     const exported = await flowExport({ dataDir, limit: 1 });

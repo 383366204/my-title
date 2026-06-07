@@ -116,10 +116,11 @@ function listSeeds({ dataDir = DEFAULT_DATA_DIR, includePaused = false } = {}) {
  * @param {number} [options.priority=5] 基础优先级
  * @param {string} [options.source=manual] 来源
  * @param {string} [options.reason] 原因
+ * @param {string} [options.type=expand] 种子类型: expand(参与扩词挖掘) / direct(直接使用不挖掘)
  * @param {string} [options.dataDir] 数据目录
  * @returns {object} 新增或更新后的种子
  */
-function addSeed(keyword, { category = '', priority = 5, source = 'manual', reason = '', dataDir = DEFAULT_DATA_DIR } = {}) {
+function addSeed(keyword, { category = '', priority = 5, source = 'manual', reason = '', type = 'expand', dataDir = DEFAULT_DATA_DIR } = {}) {
   const normalized = normalizeKeyword(keyword);
   if (!normalized) throw new Error('种子词不能为空');
   const banned = checkBannedWords(normalized);
@@ -133,6 +134,7 @@ function addSeed(keyword, { category = '', priority = 5, source = 'manual', reas
     existing.source = existing.source || source;
     existing.status = existing.status || 'active';
     existing.reason = reason || existing.reason || '';
+    existing.type = type || existing.type || 'expand';
     recordSeedEvent({ type: 'update', keyword: normalized, source, reason }, dataDir);
     saveSeeds(seeds, dataDir);
     return existing;
@@ -143,6 +145,7 @@ function addSeed(keyword, { category = '', priority = 5, source = 'manual', reas
     category,
     priority: Number(priority || 5),
     source,
+    type,
     status: 'active',
     successCount: 0,
     failCount: 0,

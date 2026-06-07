@@ -455,6 +455,141 @@ program
   });
 
 program
+  .command('search-1688-web-health')
+  .description('Check Chrome CDP and current 1688 web-search page readiness')
+  .option('--port <number>', 'Chrome remote debugging port', process.env.BROWSER_CDP_PORT || process.env.CHROME_DEBUG_PORT || '9222')
+  .option('--json', 'Output JSON only')
+  .action(async function(options, command) {
+    const mainOpts = command && command.parent ? command.parent.opts() : {};
+    const jsonMode = !!options.json || !!mainOpts.json;
+    try {
+      const { checkWeb1688Status } = require('../skills/alibaba1688');
+      const result = await checkWeb1688Status({
+        port: parseInt(options.port, 10) || 9222
+      });
+      if (jsonMode) {
+        process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+        return;
+      }
+      console.log('\n1688 web health');
+      console.log('='.repeat(50));
+      console.log('ok: ' + result.ok);
+      console.log('cdp: ' + (result.cdp && result.cdp.ok ? 'ok' : 'blocked') + ' port=' + (result.cdp && result.cdp.port || ''));
+      if (result.page) {
+        console.log('page: ' + result.page.url);
+        console.log('cards: ' + result.page.productCardCount);
+        console.log('login: ' + result.page.hasLoginText + ' captcha: ' + result.page.hasCaptchaText);
+      }
+      if (result.diagnostics && result.diagnostics.warnings && result.diagnostics.warnings.length) {
+        console.log('warnings: ' + result.diagnostics.warnings.join(', '));
+      }
+      if (result.message) console.log(result.message);
+    } catch (error) {
+      if (jsonMode) process.stdout.write(JSON.stringify({ ok: false, error: error.message }, null, 2) + '\n');
+      else console.error('\nError:', error.message);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('search-1688-web <keyword>')
+  .description('Search 1688 web page through an existing Chrome CDP session')
+  .option('--port <number>', 'Chrome remote debugging port', process.env.BROWSER_CDP_PORT || process.env.CHROME_DEBUG_PORT || '9222')
+  .option('--max-products <number>', 'Maximum products to return', '20')
+  .option('--max-pages <number>', 'Maximum 1688 search pages to collect when max-products is large')
+  .option('--max-resolve-links <number>', 'Maximum redirect links to resolve', '8')
+  .option('--no-scroll-load', 'Disable scroll-based lazy loading before extraction')
+  .option('--scroll-steps <number>', 'Maximum scroll steps for lazy-loaded 1688 cards', '8')
+  .option('--min-price <number>', 'Minimum product price')
+  .option('--max-price <number>', 'Maximum product price')
+  .option('--min-sales30d <number>', 'Minimum 30-day sales')
+  .option('--sort <type>', 'Page sort: sales or price')
+  .option('--min-order-quantity <number>', 'Minimum order quantity page filter')
+  .option('--max-order-quantity <number>', 'Maximum order quantity page filter')
+  .option('--min-shop-products <number>', 'Minimum shop product count page filter')
+  .option('--page-feature <words>', '1688 page feature filters to click, comma separated, such as one-piece dropship or 48H delivery')
+  .option('--include <words>', 'Required title keywords, comma separated')
+  .option('--exclude <words>', 'Excluded title keywords, comma separated')
+  .option('--json', 'Output JSON only')
+  .action(async function(keyword, options, command) {
+    const mainOpts = command && command.parent ? command.parent.opts() : {};
+    const jsonMode = !!options.json || !!mainOpts.json;
+    const origLog = console.log;
+    const origWarn = console.warn;
+    const origError = console.error;
+    if (jsonMode) {
+      console.log = () => {};
+      console.warn = () => {};
+      console.error = () => {};
+    }
+    try {
+      const { searchWeb1688 } = require('../skills/alibaba1688');
+      const result = await searchWeb1688({
+        keyword,
+        port: parseInt(options.port, 10) || 9222,
+        maxProducts: parseInt(options.maxProducts, 10) || 20,
+        maxPages: options.maxPages === undefined ? undefined : parseInt(options.maxPages, 10),
+        maxResolveLinks: parseInt(options.maxResolveLinks, 10) || 8,
+        scrollLoad: options.scrollLoad !== false,
+        scrollSteps: parseInt(options.scrollSteps, 10) || 8,
+        minPrice: options.minPrice === undefined ? undefined : Number(options.minPrice),
+        maxPrice: options.maxPrice === undefined ? undefined : Number(options.maxPrice),
+        minSales30d: options.minSales30d === undefined ? undefined : Number(options.minSales30d),
+        pageSort: options.sort,
+        minOrderQuantity: options.minOrderQuantity === undefined ? undefined : Number(options.minOrderQuantity),
+        maxOrderQuantity: options.maxOrderQuantity === undefined ? undefined : Number(options.maxOrderQuantity),
+        minShopProducts: options.minShopProducts === undefined ? undefined : Number(options.minShopProducts),
+        pageFeatureKeywords: options.pageFeature ? options.pageFeature.split(',').map(s => s.trim()).filter(Boolean) : [],
+        includeKeywords: options.include ? options.include.split(',').map(s => s.trim()).filter(Boolean) : [],
+        excludeKeywords: options.exclude ? options.exclude.split(',').map(s => s.trim()).filter(Boolean) : []
+      });
+
+      if (jsonMode) {
+        console.log = origLog;
+        console.warn = origWarn;
+        console.error = origError;
+        process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+        return;
+      }
+
+      console.log('\n1688 web search: ' + keyword);
+      console.log('='.repeat(50));
+      console.log('page: ' + (result.meta && result.meta.pageUrl || ''));
+      console.log('raw cards: ' + (result.meta && result.meta.rawCards || 0));
+      if (result.meta && result.meta.priceBand && result.meta.priceBand.display) {
+        console.log('price band: ' + result.meta.priceBand.display);
+      }
+      if (result.meta && result.meta.pageFiltersApplied && result.meta.pageFiltersApplied.applied) {
+        console.log('page filters: ' + result.meta.pageFiltersApplied.actions.join(', '));
+      }
+      if (result.meta && result.meta.scrollLoad && result.meta.scrollLoad.enabled) {
+        console.log('scroll load: ' + result.meta.scrollLoad.finalCount + ' cards, ' + result.meta.scrollLoad.steps + ' steps, ' + result.meta.scrollLoad.reason);
+      }
+      if (result.meta && result.meta.diagnostics) {
+        const diag = result.meta.diagnostics;
+        console.log('diagnostics: extracted=' + diag.extractedCards + ' final=' + diag.finalProducts + ' validOfferIds=' + diag.validOfferIds);
+        if (diag.warnings && diag.warnings.length) console.log('warnings: ' + diag.warnings.join(', '));
+      }
+      console.log('products: ' + result.products.length);
+      result.products.forEach((product, index) => {
+        console.log((index + 1) + '. ' + (product.title || product.subject || ''));
+        console.log('   ' + (product.url || product.redirectUrl || ''));
+        console.log('   price=' + (product.price || '') + ' priceBand=' + (product.priceBand && product.priceBand.display || '') + ' sales30d=' + (product.sales30days || 0) + ' shop=' + (product.shopName || ''));
+      });
+    } catch (error) {
+      if (jsonMode) {
+        console.log = origLog;
+        console.warn = origWarn;
+        console.error = origError;
+        process.stdout.write(JSON.stringify({ ok: false, error: error.message }) + '\n');
+      } else {
+        console.error('\nError:', error.message);
+      }
+      process.exit(1);
+    }
+  });
+
+program
   .command('seed')
   .description('管理每日蓝海选词种子池')
   .command('list')
@@ -563,22 +698,32 @@ program
   .option('--output-max-per-seed <number>', '输出结果中每个种子的最大候选数量', '5')
   .option('--output-max-per-category <number>', '输出结果中每个类目的最大候选数量', '20')
   .option('--output-max-per-pattern <number>', '输出结果中每种扩词模式的最大候选数量', '20')
+  .option('--output-max-per-product-core <number>', '输出结果中每个商品核心词的最大候选数量', '3')
   .option('--no-persist', '不写入 data/keyword-mining/candidates.jsonl')
+  .option('--sycm-precheck', '启用SYCM预检过滤（查询搜索人气，低于阈值的词直接丢弃）')
+  .option('--min-popularity <number>', 'SYCM搜索人气最低阈值', '50')
+  .option('--mode <mode>', '本地筛选强度: strict / balanced / explore', 'balanced')
+  .option('--include-direct-seeds', '把 direct 类型种子也混入候选词输出（默认只单独提示，不参与挖词排序）')
   .option('--json', '纯 JSON 输出模式')
-  .action(function(options, command) {
+  .action(async function(options, command) {
     const mainOpts = command.parent ? command.parent.opts() : {};
     const jsonMode = !!options.json || !!mainOpts.json;
     try {
       const { mineKeywords } = require('../skills/keyword-mining');
       const outputLimit = parseInt(options.limit || options.count, 10) || 50;
-      const result = mineKeywords({
+      const result = await mineKeywords({
         count: outputLimit,
         maxSeeds: parseInt(options.maxSeeds, 10) || 20,
         maxPerSeed: parseInt(options.maxPerSeed, 10) || 30,
         outputMaxPerSeed: parseInt(options.outputMaxPerSeed, 10) || 5,
         outputMaxPerCategory: parseInt(options.outputMaxPerCategory, 10) || 20,
         outputMaxPerPattern: parseInt(options.outputMaxPerPattern, 10) || 20,
-        persist: options.persist !== false
+        outputMaxPerProductCore: parseInt(options.outputMaxPerProductCore, 10) || 3,
+        persist: options.persist !== false,
+        sycmPrecheck: !!options.sycmPrecheck,
+        minSearchPopularity: parseInt(options.minPopularity, 10) || 50,
+        includeDirect: !!options.includeDirectSeeds,
+        mode: options.mode || 'balanced'
       });
       if (jsonMode) {
         writeAsciiJson(result);
@@ -586,13 +731,21 @@ program
       }
       console.log('\n🔎 今日候选蓝海词');
       console.log(`日期: ${result.date} | 使用种子: ${result.seedsUsed} | 候选: ${result.candidates.length}`);
+      if (result.stats) {
+        console.log(`扩词: ${result.stats.expanded} | 聚类: ${result.stats.clustered} | 去重: ${result.stats.duplicatesRemoved} | 阈值: ${result.stats.threshold} | 高/中/低: ${result.stats.high}/${result.stats.mid}/${result.stats.low}`);
+      }
+      if (result.directKeywords && result.directKeywords.length) {
+        console.log(`Direct种子: ${result.directKeywords.length} 个（已足够具体，建议直接选品或先 hot/blue 双验证）`);
+      }
       console.log('='.repeat(90));
       result.candidates.forEach((item, idx) => {
-        console.log(`${idx + 1}. ${item.keyword} | 分数 ${item.localScore} | seed=${item.seed} | ${item.nextAction}`);
+        console.log(`${idx + 1}. ${item.keyword} | ${item.tier} | 分数 ${item.localScore} | core=${item.coreProduct || '-'} | seed=${item.seed} | ${item.pattern} | ${item.nextAction}`);
         console.log(`   ${item.reason}`);
-        if (item.nextCommands && item.nextCommands.sycm) console.log(`   生意参谋: ${item.nextCommands.sycm}`);
+        if (item.clusterSize > 1) console.log(`   同方向合并: ${item.clusterSize} 个，代表词: ${item.cluster.slice(0, 5).join(' / ')}`);
+        if (item.nextCommands && item.nextCommands.hotCheck) console.log(`   热搜验证: ${item.nextCommands.hotCheck}`);
+        if (item.nextCommands && item.nextCommands.blueExplore) console.log(`   蓝海深挖: ${item.nextCommands.blueExplore}`);
       });
-      console.log('\n下一步：挑选 10-20 个词去生意参谋验证。');
+      console.log('\n下一步：先用 hot 确认有人搜，再用 blue 从入口词深挖高 DSR 蓝海关联词。');
       console.log();
     } catch (error) {
       if (jsonMode) writeAsciiJson({ ok: false, error: error.message });
@@ -773,6 +926,148 @@ flowCommand
     } catch (error) {
       if (jsonMode) writeAsciiJson({ ok: false, error: error.message });
       else console.error('\n❌ 错误:', error.message);
+      process.exit(1);
+    }
+  });
+
+flowCommand
+  .command('opportunities')
+  .description('Inspect accumulated keyword/product opportunity pool')
+  .option('--limit <number>', 'Max rows per section', '10')
+  .option('--data-dir <path>', 'Pipeline data dir', 'data/pipeline')
+  .option('--json', 'JSON output')
+  .action(async function(options, command) {
+    const mainOpts = command.parent && command.parent.parent ? command.parent.parent.opts() : {};
+    const jsonMode = !!options.json || !!mainOpts.json;
+    try {
+      const path = require('path');
+      const { summarizeOpportunities } = require('../skills/pipeline-flow');
+      const dataDir = path.join(options.dataDir || 'data/pipeline', 'opportunities');
+      const result = summarizeOpportunities({ dataDir, limit: parseInt(options.limit, 10) || 10 });
+      if (jsonMode) {
+        writeAsciiJson(result);
+        return;
+      }
+      console.log(`Opportunity pool: ${result.dir}`);
+      console.log(`Keywords: ${result.counts.keywords} | Products: ${result.counts.products} | Rejected: ${result.counts.rejected}`);
+      console.log('\nTop Keywords');
+      result.topKeywords.forEach((item, index) => {
+        console.log(`${index + 1}. ${item.keyword} | score=${item.opportunityScore || 0} | ${item.decision || '-'} | ${item.nextAction || '-'}`);
+      });
+      console.log('\nTop Products');
+      result.topProducts.forEach((item, index) => {
+        console.log(`${index + 1}. ${item.keyword} | score=${item.opportunityScore || 0} | ${item.level || '-'} | ${item.url || '-'}`);
+      });
+    } catch (error) {
+      if (jsonMode) writeAsciiJson({ ok: false, error: error.message });
+      else console.error('\nError:', error.message);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('distribute')
+  .description('Run 1688 multi-store distribution through an existing Chrome CDP session')
+  .option('--input <text>', 'Distribution lines: URL, URL<TAB>title, URL<TAB>title<TAB>category, URL||title, URL||title||category, or URL$$title$$category')
+  .option('--input-file <path>', 'Read distribution lines from a UTF-8 file')
+  .option('--batch-size <number>', 'Products per submit batch', '20')
+  .option('--port <number>', 'Chrome remote debugging port', process.env.BROWSER_CDP_PORT || process.env.CHROME_DEBUG_PORT || '9222')
+  .option('--state-file <path>', 'JSONL file used for duplicate-submit protection')
+  .option('--check', 'Check input, duplicate state, and Chrome CDP without submitting')
+  .option('--dry-run', 'Parse and validate input without touching the browser')
+  .option('--force', 'Allow submitting a batch that was recently submitted')
+  .option('--json', 'JSON output')
+  .action(async function(options, command) {
+    const commandObj = command || (options && typeof options.opts === 'function' ? options : null);
+    options = options && typeof options.opts === 'function' ? options.opts() : options;
+    const mainOpts = commandObj && commandObj.parent ? commandObj.parent.opts() : {};
+    const jsonMode = !!options.json || !!mainOpts.json;
+    try {
+      const { checkDistributionReadiness, distributeProducts } = require('../skills/1688-distribution');
+      const inputText = options.input || mainOpts.input;
+      if (!inputText && !options.inputFile) {
+        throw new Error('Provide --input or --input-file');
+      }
+      const payload = {
+        input: inputText,
+        inputFile: options.inputFile,
+        batchSize: parseInt(options.batchSize, 10) || 20,
+        port: parseInt(options.port, 10) || 9222,
+        stateFile: options.stateFile,
+        dryRun: !!options.dryRun,
+        force: !!options.force
+      };
+      const result = options.check
+        ? await checkDistributionReadiness(payload)
+        : await distributeProducts(payload);
+      if (jsonMode) {
+        writeAsciiJson(result);
+        return;
+      }
+      console.log('Distribution result:');
+      console.log(`  total: ${result.total}`);
+      if (result.status) console.log(`  status: ${result.status}`);
+      if (result.blockers && result.blockers.length) console.log(`  blockers: ${result.blockers.join(', ')}`);
+      if (result.browser) console.log(`  browser: ${result.browser.ok ? 'ok' : 'blocked'} (${result.browser.message || ''})`);
+      result.batches.forEach(batch => {
+        const status = batch.duplicate ? 'duplicate' : (batch.skipped ? `skipped:${batch.reason}` : (batch.ok ? 'ok' : 'ready'));
+        console.log(`  batch ${batch.batchIndex}: ${status}, count=${batch.count || 0}, hash=${batch.batchHash}`);
+        if (batch.logUrl) console.log(`    log: ${batch.logUrl}`);
+      });
+      if (result.nextAction) console.log(`Next: ${result.nextAction}`);
+    } catch (error) {
+      if (jsonMode) writeAsciiJson({ ok: false, error: error.message });
+      else console.error('\nError:', error.message);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('sync-hermes-skills')
+  .description('Copy project skills into Hermes trusted skill directory as real files')
+  .option('--target <dir>', 'Hermes ecommerce skills directory')
+  .option('--mode <copy|wrapper>', 'Sync mode: copy copies full skill; wrapper writes a small live-project wrapper', 'copy')
+  .option('--project-root <path>', 'Project root path written into wrapper mode')
+  .option('--skill <name>', 'Skill name to sync; can be repeated', (value, previous) => {
+    previous.push(value);
+    return previous;
+  }, [])
+  .option('--apply', 'Actually replace the target; default is dry-run')
+  .option('--json', 'JSON output')
+  .action(async function(options, command) {
+    const commandObj = command || (options && typeof options.opts === 'function' ? options : null);
+    options = options && typeof options.opts === 'function' ? options.opts() : options;
+    const mainOpts = commandObj && commandObj.parent ? commandObj.parent.opts() : {};
+    const jsonMode = !!options.json || !!mainOpts.json;
+    try {
+      const { syncSkill, defaultHermesSkillsDir } = require('../scripts/sync-hermes-skills');
+      const targetRoot = options.target || defaultHermesSkillsDir();
+      const skills = options.skill.length > 0 ? options.skill : ['1688-distribution', 'keyword-mining', 'pipeline-flow'];
+      const results = skills.map(skillName => syncSkill(skillName, {
+        targetRoot,
+        dryRun: !options.apply,
+        mode: options.mode || 'copy',
+        projectRoot: options.projectRoot
+      }));
+      const payload = {
+        ok: true,
+        dryRun: !options.apply,
+        targetRoot,
+        results
+      };
+      if (jsonMode) {
+        writeAsciiJson(payload);
+        return;
+      }
+      console.log(`${payload.dryRun ? 'Dry run' : 'Synced'} Hermes skills (${options.mode || 'copy'}):`);
+      payload.results.forEach(row => {
+        console.log(`  ${row.skillName}: ${row.action}${row.wasSymlink ? ' (replacing symlink)' : ''}`);
+        console.log(`    ${row.source}`);
+        console.log(`    -> ${row.target}`);
+      });
+    } catch (error) {
+      if (jsonMode) writeAsciiJson({ ok: false, error: error.message });
+      else console.error('\nError:', error.message);
       process.exit(1);
     }
   });
@@ -960,6 +1255,94 @@ program
         process.stdout.write(JSON.stringify({ ok: false, error: error.message }) + '\n');
       } else {
         console.error('\n❌ 错误:', error.message);
+      }
+      process.exit(1);
+    }
+  });
+
+program
+  .command('reverse-mine <keyword>')
+  .description('从已验证关键词反向挖掘 sycm 关联词作为新种子')
+  .option('--top-n <number>', '取 topN 条关联词', '10')
+  .option('--min-popularity <number>', '最低搜索人气过滤', '100')
+  .option('--no-auto-add', '不自动添加种子到种子池')
+  .option('--max-new-seeds <number>', '最多自动添加的新种子数', '3')
+  .option('--json', '纯 JSON 输出模式')
+  .action(async function(keyword, options, command) {
+    const mainOpts = command && command.parent ? command.parent.opts() : {};
+    const jsonMode = !!options.json || !!mainOpts.json;
+    const origLog = console.log;
+    const origWarn = console.warn;
+    const origError = console.error;
+    if (jsonMode) {
+      console.log = () => {};
+      console.warn = () => {};
+      console.error = () => {};
+    }
+    try {
+      const { reverseMine } = require('../skills/keyword-mining');
+      const result = await reverseMine(keyword, {
+        topN: parseInt(options.topN, 10) || 10,
+        minSearchPopularity: parseInt(options.minPopularity, 10) || 100,
+        autoAddSeeds: options.autoAdd !== false,
+        maxNewSeeds: parseInt(options.maxNewSeeds, 10) || 3
+      });
+
+      if (jsonMode) {
+        console.log = origLog;
+        console.warn = origWarn;
+        console.error = origError;
+        writeAsciiJson(result);
+        return;
+      }
+
+      // 人类可读输出
+      console.log('\n' + '='.repeat(80));
+      console.log('\u{1f50d} 反向挖掘结果 \u2014 来源词: ' + result.sourceKeyword + ' | sycm共 ' + (result.totalCount || '-') + ' 条');
+      console.log('-'.repeat(80));
+
+      if (!result.ok) {
+        console.error('\u274c ' + (result.error || '未知错误'));
+        process.exit(1);
+        return;
+      }
+
+      if (result.relatedWords.length === 0) {
+        console.log('未找到符合条件的关联词（搜索人气 >= ' + (options.minPopularity || 100) + '）');
+        console.log();
+        return;
+      }
+
+      result.relatedWords.forEach((item, idx) => {
+        const tag = item.promising ? '\u{1f3af}' : '  ';
+        const seedTag = item.addedAsSeed ? ' \u{1f33f}\u5df2\u52a0\u79cd\u5b50' : '';
+        console.log(
+          String(idx + 1).padStart(2) + '. ' + tag + ' ' +
+          (item.keyword || '?').padEnd(20) +
+          ' | \u641c\u7d22\u4eba\u6c14:' + String(item.searchPopularity).padStart(8) +
+          ' | \u9700\u6c42\u4f9b\u7ed9\u6bd4:' + String(item.demandSupplyRatio).padStart(6) +
+          ' | \u8f6c\u5316\u7387:' + ((item.conversionRate * 100).toFixed(1) + '%').padStart(8) +
+          ' | \u5206\u6570:' + String(item.score).padStart(3) +
+          seedTag
+        );
+        console.log('     ' + item.reason + ' \u2192 ' + item.nextAction);
+      });
+
+      console.log('-'.repeat(80));
+      console.log(
+        '\u603b\u8ba1: ' + result.relatedWords.length + ' \u6761\u5173\u8054\u8bcd | ' +
+        '\u63a8\u8350(promising\u226565): ' + result.relatedWords.filter(w => w.promising).length + ' \u6761 | ' +
+        '\u65b0\u589e\u79cd\u5b50: ' + result.newSeedsAdded + ' \u4e2a'
+      );
+      console.log();
+    } catch (error) {
+      if (jsonMode) {
+        console.log = origLog;
+        console.warn = origWarn;
+        console.error = origError;
+        process.stdout.write(JSON.stringify({ ok: false, error: error.message }, null, 2) + '\n');
+      } else {
+        console.error('\n\u274c \u9519\u8bef:', error.message);
       }
       process.exit(1);
     }

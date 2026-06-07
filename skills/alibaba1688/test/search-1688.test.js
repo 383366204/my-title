@@ -192,14 +192,14 @@ test('searchAll returns products with score >= 40 from local scoring', async () 
   assert.strictEqual(scored[0].score, 70, 'Product 1 should score 70');
   assert.strictEqual(scored[0].passed, true, 'Product 1 should pass');
   assert.strictEqual(scored[1].score, 55, 'Product 2 should score 55');
-  assert.strictEqual(scored[1].passed, true, 'Product 2 should pass');
+  assert.strictEqual(scored[1].passed, false, 'Product 2 should fail without all rigid modifiers');
   assert.strictEqual(scored[2].score, 0, 'Product 3 should score 0');
   assert.strictEqual(scored[2].passed, false, 'Product 3 should fail');
   assert.strictEqual(scored[3].score, 45, 'Product 4 should score 45');
-  assert.strictEqual(scored[3].passed, true, 'Product 4 should pass');
+  assert.strictEqual(scored[3].passed, false, 'Product 4 should fail without all rigid modifiers');
 
   const passed = scored.filter(s => s.passed);
-  assert.ok(passed.length >= 2, 'Should have at least 2 passed products');
+  assert.strictEqual(passed.length, 1, 'Only products matching all rigid modifiers should pass');
 });
 
 test('GLM timeout falls back to filterRelevantProducts', async () => {

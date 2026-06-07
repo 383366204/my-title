@@ -4,6 +4,9 @@ const { mineKeywords } = require('../keyword-mining');
 const { generateTitlePipeline } = require('../title-gen');
 const { searchAll } = require('../alibaba1688');
 const { extractSycmData, DEFAULT_FILTER_CONDITIONS } = require('../sycm-research');
+const { checkBannedWords } = require('../../core/banned-words');
+const { scoreKeywordOpportunity, scoreProductOpportunity } = require('./src/opportunity-scoring');
+const { appendOpportunity, summarizeOpportunities } = require('./src/opportunity-store');
 
 const DEFAULT_FLOW_DIR = path.join(process.cwd(), 'data', 'pipeline');
 const DEFAULT_RELAXED_FILTER_CONDITIONS = {
@@ -20,6 +23,19 @@ const DEFAULT_HOT_FILTER_CONDITIONS = {
   buyerCount: 0,
   referencePrice: 0
 };
+const DEFAULT_MIN_TITLE_LENGTH = 30;
+const DEFAULT_HOT_EXPORT_LIMIT = 2;
+const DEFAULT_FALLBACK_CANDIDATES = [
+  { keyword: '玛瑙戒指女', category: 'accessories', coreProduct: '戒指', signature: '戒指|玛瑙|女' },
+  { keyword: '宠物磨牙玩具', category: 'pet', coreProduct: '玩具', signature: '宠物|磨牙|玩具' },
+  { keyword: '端午五彩手绳', category: 'holiday', coreProduct: '手绳', signature: '端午|五彩|手绳' },
+  { keyword: '桌面收纳盒', category: 'home', coreProduct: '收纳盒', signature: '桌面|收纳盒' },
+  { keyword: '便携猫包', category: 'pet', coreProduct: '猫包', signature: '便携|猫包' }
+];
+const GENERIC_CATEGORY_TOKENS = new Set([
+  '女', '男', '儿童', '宝宝', '新款', '爆款', '礼物', '用品', '商品',
+  '饰品', '配饰', '玩具', '家居', '日用', '百货', '其他', '通用'
+]);
 
 function pad(num) {
   return String(num).padStart(2, '0');
@@ -45,6 +61,10 @@ function stringifyAsciiJson(value, spaces = 0) {
 
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
+}
+
+function resolveOpportunityDir(options = {}) {
+  return options.opportunityDir || path.join(options.dataDir || DEFAULT_FLOW_DIR, 'opportunities');
 }
 
 function writeJson(file, value) {
@@ -156,6 +176,31 @@ function parseMetricNumber(value) {
   if (!matches) return 0;
   const nums = matches.map(Number).filter(Number.isFinite);
   return nums.length ? Math.max(...nums) : 0;
+}
+
+function chineseTokens(value) {
+  return String(value || '')
+    .split(/[>\s,，/／、|｜;；:：\-—_]+/)
+    .flatMap(part => {
+      const text = part.trim();
+      if (!text) return [];
+      const matches = text.match(/[\u4e00-\u9fa5]{2,}/g) || [];
+      return matches.flatMap(token => {
+        const chunks = [token];
+        for (let i = 0; i < token.length - 1; i += 1) {
+          chunks.push(token.slice(i, i + 2));
+        }
+        return chunks;
+      });
+    })
+    .map(token => token.trim())
+    .filter(token => token.length >= 2 && !GENERIC_CATEGORY_TOKENS.has(token));
+}
+
+function hasTokenOverlap(a, b) {
+  const left = new Set(chineseTokens(a));
+  if (left.size === 0) return false;
+  return chineseTokens(b).some(token => left.has(token));
 }
 
 function scoreSycmRows(rows, { mode = 'blue' } = {}) {
@@ -301,6 +346,108 @@ function productTitle(product) {
   return product && (product['铺货标题'] || product.title || product.generatedTitle || product.name || '');
 }
 
+function sycmRecommendedCategory(sycmResult) {
+  const categoryAnalysis = sycmResult && sycmResult.categoryAnalysis;
+  const recommended = categoryAnalysis && categoryAnalysis.recommendation && categoryAnalysis.recommendation.recommended;
+  return recommended && recommended.category ? String(recommended.category).trim() : '';
+}
+
+function productCategory(product, row = {}) {
+  const direct = product && (
+    product['铺货类目'] ||
+    product['推荐类目'] ||
+    product['类目'] ||
+    product.category ||
+    product.categoryListName ||
+    product.categoryName
+  );
+  return String(row.recommendedCategory || direct || '').trim();
+}
+
+function categoryAssessment(row) {
+  const recommendedCategory = String(row.recommendedCategory || '').trim();
+  const directCategory = productCategory(row.product, { recommendedCategory: '' });
+  if (recommendedCategory && directCategory) {
+    const matched = hasTokenOverlap(recommendedCategory, directCategory);
+    return {
+      confidence: matched ? 'high' : 'low',
+      recommendedCategory,
+      productCategory: directCategory,
+      reason: matched ? '生意参谋类目与商品类目有交集' : '生意参谋类目与商品类目疑似冲突'
+    };
+  }
+  if (recommendedCategory) {
+    return {
+      confidence: 'medium',
+      recommendedCategory,
+      productCategory: '',
+      reason: '仅有生意参谋推荐类目，商品类目缺失'
+    };
+  }
+  if (directCategory) {
+    return {
+      confidence: 'medium',
+      recommendedCategory: '',
+      productCategory: directCategory,
+      reason: '仅有商品类目，生意参谋推荐类目缺失'
+    };
+  }
+  return {
+    confidence: 'unknown',
+    recommendedCategory: '',
+    productCategory: '',
+    reason: '未获得类目数据'
+  };
+}
+
+function parseOfferId(url) {
+  const match = String(url || '').match(/detail\.1688\.com\/offer\/(\d+)\.html/);
+  return match ? match[1] : '';
+}
+
+function validateGeneratedRow(row, context = {}) {
+  const reasons = [];
+  const title = String(row.title || '').trim();
+  const url = String(row.url || '').trim();
+  const minTitleLength = Number(context.minTitleLength || DEFAULT_MIN_TITLE_LENGTH);
+  const category = categoryAssessment(row);
+
+  if (!url) reasons.push('missing_url');
+  if (url && !parseOfferId(url)) reasons.push('invalid_1688_url');
+  if (!title) reasons.push('missing_title');
+  if (title && title.length < minTitleLength) reasons.push(`title_too_short:${title.length}<${minTitleLength}`);
+  if (row.keyword && title && !title.includes(row.keyword)) reasons.push('title_missing_keyword');
+
+  const banned = checkBannedWords(title);
+  if (!banned.valid) reasons.push(`banned_words:${banned.words.join(',')}`);
+  if (category.confidence === 'low') reasons.push('category_conflict');
+  if (context.seenUrls && context.seenUrls.has(url)) reasons.push('duplicate_url');
+  if (context.seenTitles && context.seenTitles.has(title)) reasons.push('duplicate_title');
+  if (row.verifyMode === 'hot' && Number(context.hotUsed || 0) >= Number(context.hotExportLimit || DEFAULT_HOT_EXPORT_LIMIT)) {
+    reasons.push('hot_export_limit');
+  }
+  if (row.keywordOpportunity && row.keywordOpportunity.decision && row.keywordOpportunity.decision !== 'continue') {
+    reasons.push(`keyword_opportunity_${row.keywordOpportunity.decision}`);
+  }
+  if (row.productOpportunity && row.productOpportunity.decision && row.productOpportunity.decision !== 'continue') {
+    reasons.push(`product_opportunity_${row.productOpportunity.level || row.productOpportunity.decision}`);
+  }
+
+  return {
+    ok: reasons.length === 0,
+    reasons,
+    categoryConfidence: category.confidence,
+    categoryReason: category.reason,
+    recommendedCategory: category.recommendedCategory,
+    productCategory: category.productCategory
+  };
+}
+
+function distributionLine(row) {
+  const category = productCategory(row.product, row);
+  return category ? `${row.url}$$${row.title}$$${category}` : `${row.url}$$${row.title}`;
+}
+
 function reviewLabel(row) {
   const usage = row.usage || (row.sycmScore && row.sycmScore.usage) || '';
   if (usage === 'title_core') return '严格蓝海，可作为标题核心词';
@@ -314,16 +461,35 @@ function writeDistributionReview(file, rows) {
     '# Distribution Review',
     '',
     '人工铺货前请先检查本报告。热搜趋势词不是严格蓝海词，不要当作高置信蓝海使用。',
+    '',
+    '## Summary',
+    '',
+    `- Ready: ${rows.filter(row => row.exportStatus === 'ready').length}`,
+    `- Rejected: ${rows.filter(row => row.exportStatus === 'rejected_before_distribution').length}`,
     ''
   ];
   rows.forEach((row, index) => {
     lines.push(`## ${index + 1}. ${row.keyword}`);
     lines.push('');
+    lines.push(`- Export Status: ${row.exportStatus || 'ready'}`);
+    if (row.exportReasons && row.exportReasons.length) lines.push(`- Blockers: ${row.exportReasons.join(', ')}`);
     lines.push(`- URL: ${row.url}`);
     lines.push(`- Title: ${row.title}`);
+    lines.push(`- Category: ${productCategory(row.product, row) || '-'}`);
+    lines.push(`- Category Confidence: ${row.categoryConfidence || '-'}`);
+    if (row.categoryReason) lines.push(`- Category Reason: ${row.categoryReason}`);
     lines.push(`- Verify Mode: ${row.verifyMode || (row.sycmScore && row.sycmScore.mode) || '-'}`);
     lines.push(`- Confidence: ${row.confidence || (row.sycmScore && row.sycmScore.confidence) || '-'}`);
     lines.push(`- Usage: ${row.usage || (row.sycmScore && row.sycmScore.usage) || '-'}`);
+    if (row.keywordOpportunity) {
+      lines.push(`- Keyword Opportunity: ${row.keywordOpportunity.score} / ${row.keywordOpportunity.decision} / ${row.keywordOpportunity.nextAction}`);
+    }
+    if (row.productOpportunity) {
+      lines.push(`- Product Opportunity: ${row.productOpportunity.score} / ${row.productOpportunity.level} / ${row.productOpportunity.nextAction}`);
+      if (row.productOpportunity.riskFlags && row.productOpportunity.riskFlags.length) {
+        lines.push(`- Product Risk Flags: ${row.productOpportunity.riskFlags.join(', ')}`);
+      }
+    }
     lines.push(`- Decision: ${reviewLabel(row)}`);
     if ((row.usage || (row.sycmScore && row.sycmScore.usage)) === 'trend_reference') {
       lines.push('- Risk: 该词不是严格蓝海词，只能证明有热搜趋势，铺货前必须人工确认。');
@@ -345,6 +511,33 @@ function buildFlowCommand(step, runId, options = {}) {
   return '';
 }
 
+function fallbackCandidates(limit = 10) {
+  const date = new Date().toISOString().slice(0, 10);
+  return DEFAULT_FALLBACK_CANDIDATES.slice(0, Number(limit || 10)).map(item => ({
+    date,
+    keyword: item.keyword,
+    seed: 'pipeline-fallback',
+    category: item.category,
+    pattern: 'fallback-concrete',
+    localScore: 70,
+    tier: 'mid',
+    reason: 'fallback concrete product keyword; must pass SYCM before product search',
+    nextAction: 'sycm_verify',
+    flags: ['fallback_candidate'],
+    coreProduct: item.coreProduct,
+    signature: item.signature,
+    productSignature: item.coreProduct,
+    rigid: [],
+    optional: [],
+    nextCommands: {
+      sycm: `node bin/cli.js sycm "${item.keyword}" --mode hot --json`,
+      hotCheck: `node bin/cli.js sycm "${item.keyword}" --mode hot --json`,
+      blueExplore: `node bin/cli.js sycm "${item.keyword}" --mode blue --json`,
+      titleGenerate: `node bin/cli.js "${item.keyword}" --json`
+    }
+  }));
+}
+
 /**
  * Mine candidates and write them into a flow run.
  * @param {object} options Flow options.
@@ -352,15 +545,24 @@ function buildFlowCommand(step, runId, options = {}) {
  */
 async function flowMine(options = {}) {
   const { runDir, run } = initRun(options);
-  const result = mineKeywords({
+  const result = await mineKeywords({
     count: options.limit || options.mine || 50,
     maxSeeds: options.maxSeeds || 20,
     maxPerSeed: options.maxPerSeed || 30,
     outputMaxPerSeed: options.outputMaxPerSeed || 5,
     outputMaxPerCategory: options.outputMaxPerCategory || 20,
     outputMaxPerPattern: options.outputMaxPerPattern || 20,
+    outputMaxPerProductCore: options.outputMaxPerProductCore || 3,
     persist: false
   });
+  if ((!result.candidates || result.candidates.length === 0) && options.fallbackCandidates !== false) {
+    result.candidates = fallbackCandidates(options.limit || options.mine || 10);
+    result.stats = {
+      ...(result.stats || {}),
+      fallbackUsed: true,
+      fallbackReason: 'keyword_mining_empty'
+    };
+  }
   fs.writeFileSync(run.files.candidates, '', 'utf8');
   appendJsonl(run.files.candidates, result.candidates);
   run.status = 'mined';
@@ -372,6 +574,8 @@ async function flowMine(options = {}) {
     status: run.status,
     candidates: result.candidates,
     runDir,
+    blockers: [],
+    allowedCommands: [buildFlowCommand('verify', run.runId, { limit: options.verify || 20 })],
     nextCommand: buildFlowCommand('verify', run.runId, { limit: options.verify || 20 })
   };
 }
@@ -411,9 +615,15 @@ async function flowVerify(options = {}) {
         usage: sycmScore.usage,
         fallbackUsed: sycmAttempt.fallbackUsed,
         fallbackReason: sycmAttempt.fallbackReason || '',
+        recommendedCategory: sycmRecommendedCategory(sycmAttempt.result),
         sycmData: data,
         checkedAt: new Date().toISOString()
       };
+      const keywordOpportunity = scoreKeywordOpportunity(row);
+      row.keywordOpportunity = keywordOpportunity;
+      row.opportunityScore = keywordOpportunity.score;
+      row.decision = keywordOpportunity.decision;
+      row.nextAction = keywordOpportunity.nextAction;
       sycmResults.push({
         keyword: candidate.keyword,
         ok: true,
@@ -441,6 +651,31 @@ async function flowVerify(options = {}) {
 
   appendJsonl(run.files.sycmResults, sycmResults);
   appendJsonl(run.files.verifiedKeywords, verified);
+  appendOpportunity('keywords', verified.map(row => ({
+    runId: run.runId,
+    keyword: row.keyword,
+    signature: row.signature,
+    coreProduct: row.coreProduct,
+    status: row.status,
+    opportunityScore: row.opportunityScore,
+    decision: row.decision,
+    nextAction: row.nextAction,
+    verifyMode: row.verifyMode,
+    confidence: row.confidence,
+    usage: row.usage,
+    fallbackUsed: row.fallbackUsed,
+    sycmScore: row.sycmScore
+  })), { runId: run.runId, dataDir: resolveOpportunityDir(options) });
+  appendOpportunity('rejected', rejected.map(row => ({
+    runId: run.runId,
+    keyword: row.keyword,
+    signature: row.signature,
+    status: row.status,
+    opportunityScore: row.opportunityScore || 0,
+    decision: row.decision || 'reject',
+    nextAction: row.nextAction || 'stop',
+    reason: row.error || (row.sycmScore && row.sycmScore.reason) || ''
+  })), { runId: run.runId, dataDir: resolveOpportunityDir(options) });
   run.status = verified.length > 0 ? 'verified' : 'verified_empty';
   run.counts.sycmVerified = verified.length;
   run.counts.sycmRejected = rejected.length;
@@ -452,6 +687,10 @@ async function flowVerify(options = {}) {
     verified,
     rejected,
     runDir,
+    blockers: verified.length > 0 ? [] : ['no_verified_keywords'],
+    allowedCommands: [verified.length > 0
+      ? buildFlowCommand('generate', run.runId, { limit: options.generate || 10 })
+      : buildFlowCommand('inspect', run.runId)],
     nextCommand: verified.length > 0
       ? buildFlowCommand('generate', run.runId, { limit: options.generate || 10 })
       : buildFlowCommand('inspect', run.runId)
@@ -485,11 +724,13 @@ async function flowGenerate(options = {}) {
       });
       const products = Array.isArray(result.products) ? result.products : [];
       for (const product of products.slice(0, Number(options.productsPerKeyword || 3))) {
-        generatedRows.push({
+        const row = {
           status: 'generated',
           keyword: item.keyword,
+          keywordOpportunity: item.keywordOpportunity,
           sycmScore: item.sycmScore,
           sycmData: item.sycmData || [],
+          recommendedCategory: item.recommendedCategory || '',
           verifyMode: item.verifyMode || '',
           confidence: item.confidence || '',
           usage: item.usage || '',
@@ -499,7 +740,19 @@ async function flowGenerate(options = {}) {
           url: productUrl(product),
           title: productTitle(product),
           generatedAt: new Date().toISOString()
+        };
+        const productOpportunity = scoreProductOpportunity(product, {
+          keyword: item.keyword,
+          verifyMode: item.verifyMode,
+          confidence: item.confidence,
+          usage: item.usage,
+          sycmScore: item.sycmScore
         });
+        row.productOpportunity = productOpportunity;
+        row.opportunityScore = productOpportunity.score;
+        row.decision = productOpportunity.decision;
+        row.nextAction = productOpportunity.nextAction;
+        generatedRows.push(row);
       }
     } catch (error) {
       generatedRows.push({
@@ -512,6 +765,21 @@ async function flowGenerate(options = {}) {
   }
 
   appendJsonl(run.files.generatedProducts, generatedRows);
+  appendOpportunity('products', generatedRows
+    .filter(row => row.status === 'generated')
+    .map(row => ({
+      runId: run.runId,
+      keyword: row.keyword,
+      url: row.url,
+      title: row.title,
+      recommendedCategory: row.recommendedCategory,
+      opportunityScore: row.opportunityScore,
+      decision: row.decision,
+      nextAction: row.nextAction,
+      level: row.productOpportunity && row.productOpportunity.level,
+      productOpportunity: row.productOpportunity,
+      keywordOpportunity: row.keywordOpportunity
+    })), { runId: run.runId, dataDir: resolveOpportunityDir(options) });
   run.status = generatedRows.some(row => row.status === 'generated') ? 'generated' : 'generate_failed';
   run.counts.generatedProducts = generatedRows.filter(row => row.status === 'generated').length;
   writeRun(runDir, run);
@@ -521,6 +789,10 @@ async function flowGenerate(options = {}) {
     status: run.status,
     generated: generatedRows,
     runDir,
+    blockers: run.counts.generatedProducts > 0 ? [] : ['no_generated_products'],
+    allowedCommands: [run.counts.generatedProducts > 0
+      ? buildFlowCommand('export', run.runId, { limit: options.export || 20 })
+      : buildFlowCommand('inspect', run.runId)],
     nextCommand: run.counts.generatedProducts > 0
       ? buildFlowCommand('export', run.runId, { limit: options.export || 20 })
       : buildFlowCommand('inspect', run.runId)
@@ -538,21 +810,74 @@ async function flowExport(options = {}) {
     .filter(row => row.status === 'generated' && row.url && row.title);
   const limit = Number(options.limit || options.export || rows.length || 0);
   const selected = rows.slice(0, limit);
-  const lines = selected.map(row => `${row.url}$$${row.title}`);
+  const seenUrls = new Set();
+  const seenTitles = new Set();
+  const hotExportLimit = Number(options.hotExportLimit || DEFAULT_HOT_EXPORT_LIMIT);
+  let hotUsed = 0;
+  const reviewed = selected.map(row => {
+    const validation = validateGeneratedRow(row, {
+      minTitleLength: options.minTitleLength || DEFAULT_MIN_TITLE_LENGTH,
+      hotExportLimit,
+      hotUsed,
+      seenUrls,
+      seenTitles
+    });
+    const exportRow = {
+      ...row,
+      exportStatus: validation.ok ? 'ready' : 'rejected_before_distribution',
+      exportReasons: validation.reasons,
+      categoryConfidence: validation.categoryConfidence,
+      categoryReason: validation.categoryReason,
+      recommendedCategory: row.recommendedCategory || validation.recommendedCategory,
+      productCategory: validation.productCategory
+    };
+    if (validation.ok) {
+      seenUrls.add(row.url);
+      seenTitles.add(row.title);
+      if (row.verifyMode === 'hot') hotUsed += 1;
+    }
+    return exportRow;
+  });
+  const readyRows = reviewed.filter(row => row.exportStatus === 'ready');
+  const rejectedRows = reviewed.filter(row => row.exportStatus !== 'ready');
+  appendOpportunity('rejected', rejectedRows.map(row => ({
+    runId: run.runId,
+    keyword: row.keyword,
+    url: row.url,
+    title: row.title,
+    status: row.exportStatus,
+    opportunityScore: row.opportunityScore || 0,
+    decision: row.decision || 'reject',
+    nextAction: 'manual_review',
+    reason: (row.exportReasons || []).join(',')
+  })), { runId: run.runId, dataDir: resolveOpportunityDir(options) });
+  const lines = readyRows.map(row => distributionLine(row));
   fs.writeFileSync(run.files.distributionBatch, lines.join('\n') + (lines.length ? '\n' : ''), 'utf8');
-  writeDistributionReview(run.files.distributionReview, selected);
-  run.status = lines.length > 0 ? 'ready_to_distribute' : 'export_empty';
+  writeDistributionReview(run.files.distributionReview, reviewed);
+  run.status = lines.length > 0
+    ? (rejectedRows.length > 0 ? 'needs_review' : 'ready_to_distribute')
+    : 'export_empty';
   run.counts.readyToDistribute = lines.length;
+  run.counts.rejectedBeforeDistribution = rejectedRows.length;
   writeRun(runDir, run);
   return {
     ok: true,
     runId: run.runId,
     status: run.status,
     count: lines.length,
+    rejected: rejectedRows.length,
+    canSubmit: lines.length > 0 && rejectedRows.length === 0,
+    mustReview: rejectedRows.length > 0,
+    blockers: rejectedRows.length > 0 ? ['review_rejected_rows'] : [],
     file: run.files.distributionBatch,
     reviewFile: run.files.distributionReview,
     runDir,
-    nextCommand: lines.length > 0 ? '人工检查 distribution-batch.txt 后再调用 1688-distribution' : buildFlowCommand('inspect', run.runId)
+    allowedCommands: lines.length > 0
+      ? [`node bin/cli.js distribute --input-file "${run.files.distributionBatch}" --dry-run --json`]
+      : [buildFlowCommand('inspect', run.runId)],
+    nextCommand: lines.length > 0
+      ? `人工检查 distribution-batch.txt 后调用 1688-distribution: node bin/cli.js distribute --input-file "${run.files.distributionBatch}" --dry-run --json`
+      : buildFlowCommand('inspect', run.runId)
   };
 }
 
@@ -573,6 +898,8 @@ async function flowDaily(options = {}) {
       counts: run.counts,
       status: run.status,
       files: run.files,
+      blockers: ['no_verified_keywords'],
+      allowedCommands: [verify.nextCommand],
       nextCommand: verify.nextCommand,
       steps: {
         mined: mine.candidates.length,
@@ -595,6 +922,8 @@ async function flowDaily(options = {}) {
       counts: run.counts,
       status: run.status,
       files: run.files,
+      blockers: ['no_generated_products'],
+      allowedCommands: [generate.nextCommand],
       nextCommand: generate.nextCommand,
       steps: {
         mined: mine.candidates.length,
@@ -615,6 +944,10 @@ async function flowDaily(options = {}) {
     counts: run.counts,
     status: run.status,
     files: run.files,
+    canSubmit: exported.canSubmit,
+    mustReview: exported.mustReview,
+    blockers: exported.blockers,
+    allowedCommands: exported.allowedCommands,
     nextCommand: exported.nextCommand,
     steps: {
       mined: mine.candidates.length,
@@ -637,5 +970,10 @@ module.exports = {
   flowVerify,
   flowGenerate,
   flowExport,
-  flowDaily
+  flowDaily,
+  validateGeneratedRow,
+  categoryAssessment,
+  scoreKeywordOpportunity,
+  scoreProductOpportunity,
+  summarizeOpportunities
 };

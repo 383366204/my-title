@@ -23,9 +23,10 @@ node bin/cli.js flow daily --mine 50 --verify 20 --generate 10 --export 20 --jso
 Read the JSON result:
 
 - If `ok` is `true` and `status` is `ready_to_distribute`, open the file in `files.distributionBatch`.
+- If `status` is `needs_review`, stop before distribution. Read `files.distributionReview` and report rejected rows.
 - If `status` is `verified_empty`, stop. Report that SYCM did not verify any candidates.
 - If `status` is `generate_failed`, stop. Report the run id and inspect `generated-products.jsonl`.
-- Always show `runId`, `status`, `counts`, and `nextCommand` to the user.
+- Always show `runId`, `status`, `counts`, `blockers`, and `nextCommand` to the user.
 
 ## Step-by-step Mode
 
@@ -81,6 +82,9 @@ Success condition:
 - JSON `ok` is `true`
 - `count` is greater than 0
 - `file` points to `distribution-batch.txt`
+- `mustReview` is `false`
+
+If `mustReview` is `true` or `status` is `needs_review`, stop. Do not distribute until a human reads `reviewFile`.
 
 ## Files
 
@@ -100,6 +104,39 @@ Important files:
 - `distribution-batch.txt`: input for distribution
 - `distribution-review.md`: human review report; read this before distribution
 
+The opportunity pool is accumulated here:
+
+```text
+data/pipeline/opportunities/
+  keywords.jsonl
+  products.jsonl
+  rejected.jsonl
+```
+
+To inspect the best accumulated opportunities:
+
+```bash
+node bin/cli.js flow opportunities --json
+```
+
+## Opportunity Fields
+
+Read these fields literally. Do not reinterpret them.
+
+- `opportunityScore`: 0-100 score. Higher is better.
+- `decision`: `continue`, `observe`, `review`, or `reject`.
+- `nextAction`: the next safe action, such as `search_1688`, `generate_title`, `manual_review`, or `stop`.
+- `keywordOpportunity`: why a keyword should continue after SYCM.
+- `productOpportunity`: why a product should continue after 1688/title generation.
+
+Rules:
+
+- If `decision` is `continue`, follow `nextAction`.
+- If `decision` is `observe` or `review`, stop and report the row to the user.
+- If `decision` is `reject`, do not distribute that row.
+- If export writes `product_opportunity_*` in `exportReasons`, stop and read `distribution-review.md`.
+- When keyword mining returns no candidates, the flow may use fallback concrete candidates. These still must pass SYCM before product search.
+
 ## Status Meanings
 
 - `mined`: candidates are ready; run verify next.
@@ -108,6 +145,7 @@ Important files:
 - `generated`: product/title generation produced rows; run export next.
 - `generate_failed`: generation produced no usable rows; stop.
 - `ready_to_distribute`: batch file exists; ask human to review before distribution.
+- `needs_review`: batch file may exist, but some generated rows were blocked by export quality gates; stop and read `distribution-review.md`.
 - `export_empty`: no rows were exported; stop.
 
 ## Never Do These
@@ -116,6 +154,8 @@ Important files:
 - Do not distribute automatically after `flow daily`.
 - Do not edit `data/pipeline/runs/*` manually.
 - Do not ignore a non-ready status.
+- Do not distribute when `mustReview` is `true`.
+- Do not invent the next step; use `allowedCommands[0]` or `nextCommand`.
 - Do not use a keyword in title generation if SYCM rejected it.
 
 ## How To Report Back
@@ -126,6 +166,7 @@ Use this exact shape:
 Run: <runId>
 Status: <status>
 Counts: candidates=<n>, verified=<n>, generated=<n>, readyToDistribute=<n>
+Blockers: <blockers or none>
 Batch: <distribution-batch.txt path or empty>
 Next: <nextCommand>
 ```

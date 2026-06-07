@@ -3,7 +3,17 @@ const assert = require('node:assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { addSeed, listSeeds, mineKeywords, scoreKeyword, expandSeed, rejectCandidate } = require('..');
+const {
+  addSeed,
+  listSeeds,
+  mineKeywords,
+  scoreKeyword,
+  expandSeed,
+  rejectCandidate,
+  keywordSignature,
+  clusterBySignature,
+  diversifyCandidates
+} = require('..');
 
 function tempDataDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'keyword-mining-'));
@@ -22,7 +32,7 @@ describe('keyword-mining', () => {
   });
 
   test('expandSeed creates specific candidates', () => {
-    const candidates = expandSeed({ keyword: '戒指', category: '饰品' }, { maxPerSeed: 20 });
+    const candidates = expandSeed({ keyword: '戒指', category: '饰品' }, { maxPerSeed: 30 });
     const words = candidates.map(item => item.keyword);
 
     assert.ok(words.includes('玛瑙戒指'));
@@ -31,7 +41,7 @@ describe('keyword-mining', () => {
   });
 
   test('expandSeed uses category rules for pet products', () => {
-    const candidates = expandSeed({ keyword: '宠物玩具', category: '宠物' }, { maxPerSeed: 40 });
+    const candidates = expandSeed({ keyword: '宠物玩具', category: '宠物' }, { maxPerSeed: 60 });
     const words = candidates.map(item => item.keyword);
 
     assert.ok(words.includes('狗狗宠物玩具'));
@@ -59,36 +69,117 @@ describe('keyword-mining', () => {
 
     assert.ok(scored.localScore >= 65);
     assert.strictEqual(scored.nextAction, 'sycm_verify');
+    assert.strictEqual(scored.tier, 'high');
     assert.ok(scored.reason.includes('材质+商品词+人群组合'));
+    assert.strictEqual(scored.coreProduct, '戒指');
+    assert.ok(scored.signature.includes('戒指'));
+    assert.ok(scored.signature.includes('玛瑙'));
   });
 
-  test('mineKeywords returns ranked candidates without persisting when disabled', () => {
+  test('keywordSignature groups reordered modifiers into the same direction', () => {
+    const a = keywordSignature('夏季防晒冰袖女');
+    const b = keywordSignature('防晒冰袖女夏季');
+
+    assert.strictEqual(a.coreProduct, '冰袖');
+    assert.strictEqual(a.signature, b.signature);
+  });
+
+  test('clusterBySignature keeps the best keyword and records alternatives', () => {
+    const items = ['夏季防晒冰袖女', '防晒冰袖女夏季', '珍珠发夹女'].map((word, index) => {
+      const scored = scoreKeyword(word);
+      return {
+        keyword: word,
+        localScore: scored.localScore + index,
+        signature: scored.signature,
+        coreProduct: scored.coreProduct
+      };
+    });
+
+    const clustered = clusterBySignature(items);
+    const iceSleeve = clustered.find(item => item.coreProduct === '冰袖');
+
+    assert.strictEqual(clustered.length, 2);
+    assert.ok(iceSleeve.cluster.includes('夏季防晒冰袖女'));
+    assert.ok(iceSleeve.cluster.includes('防晒冰袖女夏季'));
+    assert.strictEqual(iceSleeve.clusterSize, 2);
+  });
+
+  test('diversifyCandidates limits repeated core products', () => {
+    const items = ['玛瑙戒指女', '纯银戒指女', '朱砂戒指女', '珍珠发夹女'].map(word => {
+      const scored = scoreKeyword(word);
+      return {
+        keyword: word,
+        localScore: scored.localScore,
+        signature: scored.signature,
+        coreProduct: scored.coreProduct,
+        seed: scored.coreProduct,
+        category: '',
+        pattern: 'test'
+      };
+    });
+
+    const selected = diversifyCandidates(items, {
+      count: 10,
+      maxPerSeed: 10,
+      maxPerCategory: 10,
+      maxPerPattern: 10,
+      maxPerProductCore: 2
+    });
+
+    assert.strictEqual(selected.filter(item => item.coreProduct === '戒指').length, 2);
+    assert.ok(selected.some(item => item.coreProduct === '发夹'));
+  });
+
+  test('mineKeywords returns ranked candidates without persisting when disabled', async () => {
     const dataDir = tempDataDir();
     addSeed('戒指', { category: '饰品', priority: 10, dataDir });
     addSeed('宠物玩具', { category: '宠物', priority: 9, dataDir });
 
-    const result = mineKeywords({ dataDir, count: 10, persist: false });
+    const result = await mineKeywords({ dataDir, count: 10, persist: false });
 
     assert.strictEqual(result.ok, true);
     assert.strictEqual(result.seedsUsed, 2);
+    assert.ok(result.stats.expanded > 0);
+    assert.ok(result.stats.duplicatesRemoved >= 0);
     assert.ok(result.candidates.length > 0);
     assert.ok(result.candidates[0].localScore >= result.candidates[result.candidates.length - 1].localScore);
     assert.strictEqual(fs.existsSync(path.join(dataDir, 'candidates.jsonl')), false);
   });
 
-  test('mineKeywords applies diversity limits and next commands', () => {
+  test('mineKeywords applies diversity limits and next commands', async () => {
     const dataDir = tempDataDir();
     addSeed('戒指', { category: '饰品', priority: 10, dataDir });
     addSeed('宠物玩具', { category: '宠物', priority: 9, dataDir });
 
-    const result = mineKeywords({ dataDir, count: 12, outputMaxPerSeed: 2, persist: false });
+    const result = await mineKeywords({ dataDir, count: 12, outputMaxPerSeed: 2, persist: false });
     const bySeed = new Map();
     for (const item of result.candidates) {
       bySeed.set(item.seed, (bySeed.get(item.seed) || 0) + 1);
-      assert.ok(item.nextCommands.sycm.includes('node bin/cli.js sycm'));
+      assert.ok(item.nextCommands.hotCheck.includes('--mode hot'));
+      assert.ok(item.nextCommands.blueExplore.includes('--mode blue'));
+      assert.ok(['high', 'mid', 'low'].includes(item.tier));
     }
 
     assert.ok(result.candidates.length > 0);
     assert.ok([...bySeed.values()].every(count => count <= 2));
+  });
+
+  test('mineKeywords separates direct seeds by default', async () => {
+    const dataDir = tempDataDir();
+    addSeed('水枪玩具', { category: '玩具', priority: 10, type: 'direct', dataDir });
+
+    const result = await mineKeywords({ dataDir, count: 5, persist: false });
+
+    assert.ok(result.directKeywords.some(item => item.keyword === '水枪玩具' && item.pattern === 'direct-seed'));
+    assert.ok(!result.candidates.some(item => item.keyword === '水枪玩具' && item.pattern === 'direct-seed'));
+  });
+
+  test('mineKeywords can optionally include direct seeds as candidates', async () => {
+    const dataDir = tempDataDir();
+    addSeed('水枪玩具', { category: '玩具', priority: 10, type: 'direct', dataDir });
+
+    const result = await mineKeywords({ dataDir, count: 5, persist: false, includeDirect: true });
+
+    assert.ok(result.candidates.some(item => item.keyword === '水枪玩具' && item.pattern === 'direct-seed'));
   });
 });

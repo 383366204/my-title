@@ -19,8 +19,17 @@ const { searchAll } = require('../skills/alibaba1688');
 const { getRateLimiter, RateLimitError } = require('../skills/alibaba1688/src/rate-limiter');
 const taobaoOpc = require('../skills/taobao-opc');
 
-const searchProductsAdapter = ({ coreWord, blueOceanWord, modifiers, semanticGroups }) =>
-  searchAll(coreWord, blueOceanWord, modifiers, semanticGroups);
+const searchProductsAdapter = ({ coreWord, blueOceanWord, modifiers, semanticGroups, searchMode, webFilters, port, maxProducts, maxPages, maxResolveLinks, scrollLoad, scrollSteps }) =>
+  searchAll(coreWord, blueOceanWord, modifiers, semanticGroups, {
+    mode: searchMode || 'api',
+    port,
+    maxProducts,
+    maxPages,
+    maxResolveLinks,
+    scrollLoad,
+    scrollSteps,
+    webFilters
+  });
 
 async function fetchSycmKeywordDataAdapter({ keyword }) {
   const { extractSycmData, DEFAULT_FILTER_CONDITIONS } = require('../skills/sycm-research');
@@ -640,6 +649,7 @@ server.tool(
     }
   }
 );
+
 server.tool(
   'generate_title',
   [
