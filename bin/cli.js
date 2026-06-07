@@ -703,6 +703,8 @@ program
   .option('--sycm-precheck', '启用SYCM预检过滤（查询搜索人气，低于阈值的词直接丢弃）')
   .option('--min-popularity <number>', 'SYCM搜索人气最低阈值', '50')
   .option('--mode <mode>', '本地筛选强度: strict / balanced / explore', 'balanced')
+  .option('--source <source>', '挖词来源: local / ai / hybrid', 'local')
+  .option('--ai-candidates <number>', 'AI 生成候选词数量（仅 --source ai/hybrid 生效）', '80')
   .option('--include-direct-seeds', '把 direct 类型种子也混入候选词输出（默认只单独提示，不参与挖词排序）')
   .option('--json', '纯 JSON 输出模式')
   .action(async function(options, command) {
@@ -723,7 +725,9 @@ program
         sycmPrecheck: !!options.sycmPrecheck,
         minSearchPopularity: parseInt(options.minPopularity, 10) || 50,
         includeDirect: !!options.includeDirectSeeds,
-        mode: options.mode || 'balanced'
+        mode: options.mode || 'balanced',
+        source: options.source || 'local',
+        aiCandidates: parseInt(options.aiCandidates, 10) || 80
       });
       if (jsonMode) {
         writeAsciiJson(result);
@@ -733,6 +737,10 @@ program
       console.log(`日期: ${result.date} | 使用种子: ${result.seedsUsed} | 候选: ${result.candidates.length}`);
       if (result.stats) {
         console.log(`扩词: ${result.stats.expanded} | 聚类: ${result.stats.clustered} | 去重: ${result.stats.duplicatesRemoved} | 阈值: ${result.stats.threshold} | 高/中/低: ${result.stats.high}/${result.stats.mid}/${result.stats.low}`);
+        if (result.stats.source) {
+          const aiInfo = result.stats.ai ? ` | AI: ${result.stats.ai.provider || '-'} ${result.stats.ai.model || ''} 生成 ${result.stats.ai.generated || 0}` : '';
+          console.log(`来源: ${result.stats.source}${aiInfo}`);
+        }
       }
       if (result.directKeywords && result.directKeywords.length) {
         console.log(`Direct种子: ${result.directKeywords.length} 个（已足够具体，建议直接选品或先 hot/blue 双验证）`);

@@ -12,7 +12,8 @@ const {
   rejectCandidate,
   keywordSignature,
   clusterBySignature,
-  diversifyCandidates
+  diversifyCandidates,
+  normalizeAIResponse
 } = require('..');
 const { extractSearchPopularityFromSycmJson } = require('../src/sycm-precheck');
 
@@ -199,5 +200,105 @@ describe('keyword-mining', () => {
     const result = await mineKeywords({ dataDir, count: 5, persist: false, includeDirect: true });
 
     assert.ok(result.candidates.some(item => item.keyword === '水枪玩具' && item.pattern === 'direct-seed'));
+  });
+
+  test('normalizeAIResponse filters invalid AI candidates', () => {
+    const candidates = normalizeAIResponse({
+      candidates: [
+        { keyword: '便携弹力带', seed: '弹力带', category: '运动健身', confidence: 85, reason: '具体商品' },
+        { keyword: '便携弹力带', seed: '弹力带', confidence: 80 },
+        { keyword: '', confidence: 90 }
+      ]
+    }, 10);
+
+    assert.strictEqual(candidates.length, 1);
+    assert.strictEqual(candidates[0].keyword, '便携弹力带');
+    assert.strictEqual(candidates[0].source, 'ai');
+    assert.strictEqual(candidates[0].aiConfidence, 85);
+  });
+
+  test('mineKeywords supports AI-only source with injected client', async () => {
+    const dataDir = tempDataDir();
+    addSeed('弹力带', { category: '运动健身', priority: 10, dataDir });
+
+    const result = await mineKeywords({
+      dataDir,
+      source: 'ai',
+      aiCandidates: 5,
+      count: 5,
+      persist: false,
+      llmClient: {
+        provider: 'mock-ai',
+        model: 'mock-model',
+        async generateKeywordCandidates() {
+          return {
+            candidates: [
+              { keyword: '便携弹力带', seed: '弹力带', category: '运动健身', confidence: 86, reason: '适合居家训练' },
+              { keyword: '收纳弹力带', seed: '弹力带', category: '运动健身', confidence: 74, reason: '功能明确' }
+            ]
+          };
+        }
+      }
+    });
+
+    assert.strictEqual(result.stats.source, 'ai');
+    assert.strictEqual(result.stats.ai.provider, 'mock-ai');
+    assert.strictEqual(result.stats.ai.generated, 2);
+    assert.ok(result.candidates.every(item => item.source === 'ai'));
+    assert.ok(result.candidates.some(item => item.keyword === '便携弹力带'));
+  });
+
+  test('mineKeywords supports hybrid source', async () => {
+    const dataDir = tempDataDir();
+    addSeed('弹力带', { category: '运动健身', priority: 10, dataDir });
+
+    const result = await mineKeywords({
+      dataDir,
+      source: 'hybrid',
+      aiCandidates: 3,
+      count: 10,
+      persist: false,
+      llmClient: {
+        provider: 'mock-ai',
+        model: 'mock-model',
+        async generateKeywordCandidates() {
+          return {
+            candidates: [
+              { keyword: '便携弹力带', seed: '弹力带', category: '运动健身', confidence: 88, reason: '场景明确' }
+            ]
+          };
+        }
+      }
+    });
+
+    assert.strictEqual(result.stats.source, 'hybrid');
+    assert.ok(result.stats.expanded > result.stats.ai.generated);
+    assert.ok(result.candidates.some(item => item.source === 'ai'));
+    assert.ok(result.candidates.some(item => item.source === 'local'));
+  });
+
+  test('mineKeywords falls back to local candidates when hybrid AI fails', async () => {
+    const dataDir = tempDataDir();
+    addSeed('弹力带', { category: '运动健身', priority: 10, dataDir });
+
+    const result = await mineKeywords({
+      dataDir,
+      source: 'hybrid',
+      count: 5,
+      persist: false,
+      llmClient: {
+        provider: 'mock-ai',
+        model: 'mock-model',
+        async generateKeywordCandidates() {
+          throw new Error('temporary AI failure');
+        }
+      }
+    });
+
+    assert.strictEqual(result.stats.source, 'hybrid');
+    assert.strictEqual(result.stats.ai.generated, 0);
+    assert.match(result.stats.ai.error, /temporary AI failure/);
+    assert.ok(result.candidates.length > 0);
+    assert.ok(result.candidates.every(item => item.source === 'local'));
   });
 });

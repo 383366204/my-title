@@ -4,6 +4,7 @@ const { DEFAULT_DATA_DIR, listSeeds } = require('./seed-store');
 const { expandSeeds } = require('./expand-keywords');
 const { scoreKeyword } = require('./score-keyword');
 const { precheckCandidates } = require('./sycm-precheck');
+const { generateAIKeywordCandidates } = require('./ai-mine-keywords');
 
 const CANDIDATES_FILE = 'candidates.jsonl';
 
@@ -107,8 +108,15 @@ function thresholdForMode(mode) {
   return 55;
 }
 
-function buildStats({ seeds, expanded, scored, clustered, threshold }) {
+function normalizeSource(source) {
+  const value = String(source || 'local').trim().toLowerCase();
+  if (['local', 'ai', 'hybrid'].includes(value)) return value;
+  throw new Error(`Unsupported keyword mining source: ${source}`);
+}
+
+function buildStats({ seeds, expanded, scored, clustered, threshold, source, aiMeta = null }) {
   return {
+    source,
     seeds: seeds.length,
     expanded: expanded.length,
     scored: scored.length,
@@ -118,7 +126,8 @@ function buildStats({ seeds, expanded, scored, clustered, threshold }) {
     high: scored.filter(item => item.tier === 'high').length,
     mid: scored.filter(item => item.tier === 'mid').length,
     low: scored.filter(item => item.tier === 'low').length,
-    rejected: scored.filter(item => item.nextAction === 'reject').length
+    rejected: scored.filter(item => item.nextAction === 'reject').length,
+    ai: aiMeta
   };
 }
 
@@ -167,33 +176,79 @@ function buildDirectKeywords(seeds, limit = 20) {
  * @param {string} [options.mode=balanced] strict/balanced/explore threshold mode.
  * @returns {Promise<{ok:boolean,date:string,seedsUsed:number,directKeywords:Array<object>,candidates:Array<object>,stats:object,precheckStats?:object}>}
  */
-async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds = 20, maxPerSeed = 30, outputMaxPerSeed = 5, outputMaxPerCategory = 20, outputMaxPerPattern = 20, outputMaxPerProductCore = 3, persist = true, sycmPrecheck = false, minSearchPopularity = 50, includeDirect = false, mode = 'balanced' } = {}) {
+async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds = 20, maxPerSeed = 30, outputMaxPerSeed = 5, outputMaxPerCategory = 20, outputMaxPerPattern = 20, outputMaxPerProductCore = 3, persist = true, sycmPrecheck = false, minSearchPopularity = 50, includeDirect = false, mode = 'balanced', source = 'local', aiCandidates = 80, llmClient = null } = {}) {
+  const effectiveSource = normalizeSource(source);
   const seeds = listSeeds({ dataDir }).slice(0, maxSeeds);
   const expandableSeeds = seeds.filter(seed => seed.type !== 'direct');
+  const date = new Date().toISOString().slice(0, 10);
+  let aiMeta = null;
+  let aiExpanded = [];
+  if (effectiveSource === 'ai' || effectiveSource === 'hybrid') {
+    try {
+      const aiResult = await generateAIKeywordCandidates({
+        seeds,
+        maxCandidates: Number(aiCandidates || 80),
+        llmClient,
+        date
+      });
+      aiExpanded = aiResult.candidates;
+      aiMeta = {
+        ...(aiResult.meta || {}),
+        generated: aiExpanded.length
+      };
+    } catch (error) {
+      if (effectiveSource === 'ai') throw error;
+      aiMeta = {
+        provider: llmClient && llmClient.provider ? llmClient.provider : 'llm',
+        model: llmClient && llmClient.model ? llmClient.model : '',
+        requested: Number(aiCandidates || 80),
+        generated: 0,
+        error: error.message
+      };
+    }
+  }
+  const localExpanded = effectiveSource === 'local' || effectiveSource === 'hybrid'
+    ? expandSeeds(expandableSeeds, { maxPerSeed })
+    : [];
   const expanded = [
     ...(includeDirect ? directSeedCandidates(seeds) : []),
-    ...expandSeeds(expandableSeeds, { maxPerSeed })
+    ...aiExpanded,
+    ...localExpanded
   ];
-  const date = new Date().toISOString().slice(0, 10);
 
   const scored = expanded.map(item => {
     const scoredItem = scoreKeyword(item);
+    const aiBoost = item.source === 'ai'
+      ? Math.max(-4, Math.min(8, Math.round((Number(item.aiConfidence || 60) - 60) / 5)))
+      : 0;
+    const localScore = scoredItem.nextAction === 'reject'
+      ? scoredItem.localScore
+      : Math.max(0, Math.min(100, scoredItem.localScore + aiBoost));
+    const nextAction = scoredItem.nextAction === 'reject'
+      ? 'reject'
+      : localScore >= 62 ? 'sycm_verify' : 'observe';
     return {
       date,
       keyword: scoredItem.keyword,
       seed: item.seed,
       category: item.category || '',
       pattern: item.pattern,
-      localScore: scoredItem.localScore,
-      tier: scoredItem.tier,
+      source: item.source || 'local',
+      localScore,
+      tier: scoredItem.nextAction === 'reject' ? 'reject' : localScore >= 78 ? 'high' : localScore >= 62 ? 'mid' : 'low',
       reason: scoredItem.reason,
-      nextAction: scoredItem.nextAction,
+      nextAction,
       flags: scoredItem.flags,
       coreProduct: scoredItem.coreProduct,
       signature: scoredItem.signature,
       productSignature: scoredItem.productSignature,
       rigid: scoredItem.rigid,
       optional: scoredItem.optional,
+      aiConfidence: item.aiConfidence,
+      aiReason: item.aiReason,
+      aiRisk: item.aiRisk,
+      intent: item.intent,
+      targetCrowd: item.targetCrowd,
       nextCommands: buildNextCommands(scoredItem.keyword)
     };
   });
@@ -229,11 +284,11 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
     date,
     seedsUsed: seeds.length,
     directKeywords: buildDirectKeywords(seeds),
-    stats: buildStats({ seeds, expanded, scored, clustered, threshold }),
+    stats: buildStats({ seeds, expanded, scored, clustered, threshold, source: effectiveSource, aiMeta }),
     candidates
   };
   if (precheckStats) result.precheckStats = precheckStats;
   return result;
 }
 
-module.exports = { mineKeywords, thresholdForMode, diversifyCandidates, clusterBySignature };
+module.exports = { mineKeywords, thresholdForMode, diversifyCandidates, clusterBySignature, normalizeSource };
