@@ -91,9 +91,14 @@ async function searchApiProducts(queries) {
     throw new Error('环境变量 ALI_1688_AK 未设置');
   }
   const client = new Alibaba1688Client(ak);
-  const searchResults = await Promise.all(
-    queries.map(query => client.searchOffers(query))
-  );
+  const searchResults = [];
+  const intervalMs = parseInt(process.env.API_SEARCH_QUERY_INTERVAL_MS, 10) || 1500;
+  for (let index = 0; index < queries.length; index += 1) {
+    if (index > 0 && intervalMs > 0) {
+      await new Promise(resolve => setTimeout(resolve, intervalMs));
+    }
+    searchResults.push(await client.searchOffers(queries[index]));
+  }
   return mergeProducts(searchResults);
 }
 

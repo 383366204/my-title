@@ -48,6 +48,9 @@ function patternAdjustment(pattern) {
 function scoreKeyword(candidate) {
   const keyword = normalizeKeyword(typeof candidate === 'string' ? candidate : candidate.keyword);
   const pattern = typeof candidate === 'object' ? candidate.pattern : '';
+  const extraProductWords = typeof candidate === 'object'
+    ? [candidate.seed, candidate.coreProduct, candidate.productSignature].filter(Boolean)
+    : [];
   const flags = [];
   let score = 30;
 
@@ -79,6 +82,8 @@ function scoreKeyword(candidate) {
     };
   }
 
+  const sig = keywordSignature(keyword, { extraProductWords });
+
   if (keyword.length >= 3 && keyword.length <= 9) score += 16;
   else if (keyword.length > 9 && keyword.length <= 14) {
     score += 8;
@@ -91,7 +96,7 @@ function scoreKeyword(candidate) {
     flags.push('偏短');
   }
 
-  if (includesAny(keyword, PRODUCT_WORDS)) {
+  if (sig.coreProduct || includesAny(keyword, PRODUCT_WORDS)) {
     score += 22;
     flags.push('商品形态明确');
   } else {
@@ -117,7 +122,6 @@ function scoreKeyword(candidate) {
 
   const localScore = Math.max(0, Math.min(100, score));
   const tier = classifyKeyword(localScore);
-  const sig = keywordSignature(keyword);
   return {
     keyword,
     localScore,

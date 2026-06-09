@@ -14,7 +14,8 @@ const { mineKeywords, clusterBySignature, diversifyCandidates } = require('./src
 const { rejectCandidate } = require('./src/reject-combinations');
 const { reverseMine } = require('./src/reverse-mine');
 const { keywordSignature } = require('./src/keyword-signature');
-const { generateAIKeywordCandidates, normalizeAIResponse } = require('./src/ai-mine-keywords');
+const { generateAIKeywordCandidates, normalizeAIResponse, parseAIJson } = require('./src/ai-mine-keywords');
+const { normalizeSynonyms, configuredProductWords } = require('./src/config-loader');
 
 module.exports = {
   DEFAULT_DATA_DIR,
@@ -33,6 +34,9 @@ module.exports = {
   diversifyCandidates,
   generateAIKeywordCandidates,
   normalizeAIResponse,
+  parseAIJson,
+  normalizeSynonyms,
+  configuredProductWords,
   keywordSignature,
   rejectCandidate,
   reverseMine

@@ -23,6 +23,36 @@ function writeAsciiJson(value) {
   process.stdout.write(stringifyAsciiJson(value, 2) + '\n');
 }
 
+function serializeCliError(error) {
+  const payload = {
+    ok: false,
+    error: error && error.message ? error.message : String(error)
+  };
+  if (error && error.name) payload.name = error.name;
+  if (error && error.code) payload.code = error.code;
+  if (error && error.source) payload.source = error.source;
+  if (error && error.cooldownRemainingMs) payload.cooldownRemainingMs = error.cooldownRemainingMs;
+  if (error && error.retryWith) payload.retryWith = error.retryWith;
+  if (error && error.name === 'RateLimitError' && !payload.source) {
+    payload.code = payload.code || '1688_rate_limited';
+    payload.source = '1688';
+  }
+  if (payload.error && payload.error.includes('标题生成超时')) {
+    payload.code = payload.code || 'title_generation_timeout';
+    payload.source = payload.source || 'title-gen';
+  }
+  if (payload.code === 'title_generation_timeout') {
+    payload.nextActionCode = 'retry_smaller_title_count';
+    payload.nextAction = 'Retry once with --count 3 and do not run multiple title-generation commands in parallel.';
+    payload.retryWith = payload.retryWith || { count: 3, runTimeoutMs: 180000 };
+  }
+  return payload;
+}
+
+function resolveRunTimeoutMs(options) {
+  return parseInt((options && options.runTimeoutMs) || process.env.TITLE_GEN_RUN_TIMEOUT_MS || process.env.RUN_TIMEOUT || '120000', 10) || 120000;
+}
+
 async function fetchSycmKeywordDataAdapter({ keyword }) {
   const { extractSycmData, DEFAULT_FILTER_CONDITIONS } = require('../skills/sycm-research');
   const result = await extractSycmData(keyword, {
@@ -56,6 +86,7 @@ program
   .option('--input <text>', '策略输入（人群/场景/痛点/行业描述，season策略可省略）')
   .option('--max-candidates <number>', 'GLM最大候选词数量', '5')
   .option('--sycm-verify', '启用生意参谋 SYCM 验证（默认关闭）')
+  .option('--run-timeout-ms <number>', '标题生成总超时毫秒数，默认 120000；弱模型可用 180000')
   .action(async (keywords, options) => {
     const jsonMode = !!options.json;
     const origLog = console.log;
@@ -74,6 +105,7 @@ program
 
         const result = await batchRun(kwList, {
           maxLength: parseInt(options.length) || 60,
+          runTimeoutMs: resolveRunTimeoutMs(options),
           silent: jsonMode,
           sycmAuto: options.sycmAuto,
           searchProducts: searchProductsAdapter,
@@ -218,6 +250,7 @@ program
           peerTitles: [],
           silent: jsonMode,
           limit: 0,
+          runTimeoutMs: resolveRunTimeoutMs(options),
           research: true,
           sycmAuto: options.sycmAuto
         });
@@ -283,6 +316,7 @@ program
         peerTitles,
         silent: jsonMode,
         limit: parseInt(options.count),
+        runTimeoutMs: resolveRunTimeoutMs(options),
         sycmData,
         sycmAuto: options.sycmAuto,
         searchProducts: searchProductsAdapter,
@@ -348,7 +382,7 @@ program
         console.log = origLog;
         console.warn = origWarn;
         console.error = origError;
-        process.stdout.write(JSON.stringify({ ok: false, error: error.message }) + '\n');
+        process.stdout.write(JSON.stringify(serializeCliError(error)) + '\n');
       } else {
         console.error('\n❌ 错误:', error.message);
       }
@@ -705,6 +739,7 @@ program
   .option('--mode <mode>', '本地筛选强度: strict / balanced / explore', 'balanced')
   .option('--source <source>', '挖词来源: local / ai / hybrid', 'local')
   .option('--ai-candidates <number>', 'AI 生成候选词数量（仅 --source ai/hybrid 生效）', '80')
+  .option('--ai-batch-size <number>', 'AI 每批生成候选词数量，降低 JSON 截断风险', '20')
   .option('--include-direct-seeds', '把 direct 类型种子也混入候选词输出（默认只单独提示，不参与挖词排序）')
   .option('--json', '纯 JSON 输出模式')
   .action(async function(options, command) {
@@ -727,7 +762,8 @@ program
         includeDirect: !!options.includeDirectSeeds,
         mode: options.mode || 'balanced',
         source: options.source || 'local',
-        aiCandidates: parseInt(options.aiCandidates, 10) || 80
+        aiCandidates: parseInt(options.aiCandidates, 10) || 80,
+        aiBatchSize: parseInt(options.aiBatchSize, 10) || 20
       });
       if (jsonMode) {
         writeAsciiJson(result);
@@ -1089,6 +1125,8 @@ program
   .option('--json', '纯 JSON 输出模式')
   .option('--port <number>', 'Chrome 调试端口', '9222')
   .option('--pages <number>', '最大提取页数（默认1）', '1')
+  .option('--maxPages <number>', '兼容旧参数：等同于 --pages')
+  .option('--max-pages <number>', '兼容旧参数：等同于 --pages')
   .option('--mode <hot|blue>', '查询模式，hot=相关热搜词，blue=相关蓝海词', 'blue')
   .option('--filter <conditions>', '过滤条件，格式: demandSupplyRatio=1,searchPopularity=1000')
   .option('--no-default-filters', '禁用默认过滤条件')
@@ -1104,7 +1142,7 @@ program
     const mainOpts = command && command.parent ? command.parent.opts() : {};
     const jsonMode = !!options.json || !!mainOpts.json;
     const port = parseInt(options.port) || 9222;
-    const maxPages = parseInt(options.pages) || 1;
+    const maxPages = parseInt(options.maxPages || options.pages) || 1;
     const mode = options.mode || 'blue';
     
     const { isChromeDevToolsAvailable, autoLaunchChrome, extractSycmData, DEFAULT_FILTER_CONDITIONS, VALID_COMPARE_TYPES, VALID_PERIODS, DEFAULT_PAGE_FILTERS } = require('../skills/sycm-research');
@@ -1245,6 +1283,24 @@ program
       }
 
     } catch (error) {
+      if (error && error.status && error.status !== 'login_required') {
+        const payload = error.details || {
+          ok: false,
+          status: error.status,
+          message: error.message,
+          loginUrl: error.loginUrl,
+          profileDir: error.profileDir
+        };
+        if (jsonMode) {
+          process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
+        } else {
+          console.error('\n[SYCM] ' + payload.message);
+          if (payload.action) console.error('Action: ' + payload.action);
+          console.error('URL: ' + (payload.currentUrl || payload.loginUrl || 'https://sycm.taobao.com/'));
+          console.error('Profile: ' + payload.profileDir);
+        }
+        process.exit(1);
+      }
       if (error && error.status === 'login_required') {
         const payload = error.details || {
           ok: false,

@@ -176,7 +176,7 @@ function buildDirectKeywords(seeds, limit = 20) {
  * @param {string} [options.mode=balanced] strict/balanced/explore threshold mode.
  * @returns {Promise<{ok:boolean,date:string,seedsUsed:number,directKeywords:Array<object>,candidates:Array<object>,stats:object,precheckStats?:object}>}
  */
-async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds = 20, maxPerSeed = 30, outputMaxPerSeed = 5, outputMaxPerCategory = 20, outputMaxPerPattern = 20, outputMaxPerProductCore = 3, persist = true, sycmPrecheck = false, minSearchPopularity = 50, includeDirect = false, mode = 'balanced', source = 'local', aiCandidates = 80, llmClient = null } = {}) {
+async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds = 20, maxPerSeed = 30, outputMaxPerSeed = 5, outputMaxPerCategory = 20, outputMaxPerPattern = 20, outputMaxPerProductCore = 3, persist = true, sycmPrecheck = false, minSearchPopularity = 50, includeDirect = false, mode = 'balanced', source = 'local', aiCandidates = 80, aiBatchSize = 20, llmClient = null } = {}) {
   const effectiveSource = normalizeSource(source);
   const seeds = listSeeds({ dataDir }).slice(0, maxSeeds);
   const expandableSeeds = seeds.filter(seed => seed.type !== 'direct');
@@ -188,6 +188,7 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
       const aiResult = await generateAIKeywordCandidates({
         seeds,
         maxCandidates: Number(aiCandidates || 80),
+        batchSize: Number(aiBatchSize || 20),
         llmClient,
         date
       });
@@ -219,7 +220,7 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
   const scored = expanded.map(item => {
     const scoredItem = scoreKeyword(item);
     const aiBoost = item.source === 'ai'
-      ? Math.max(-4, Math.min(8, Math.round((Number(item.aiConfidence || 60) - 60) / 5)))
+      ? Math.max(-4, Math.min(3, Math.round((Number(item.aiConfidence || 60) - 60) / 12)))
       : 0;
     const localScore = scoredItem.nextAction === 'reject'
       ? scoredItem.localScore
@@ -276,6 +277,18 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
     maxPerPattern: outputMaxPerPattern,
     maxPerProductCore: outputMaxPerProductCore
   });
+
+  if (effectiveSource === 'hybrid' && !candidates.some(item => item.source === 'ai')) {
+    const bestAi = prechecked.find(item => item.source === 'ai')
+      || scored
+        .filter(item => item.source === 'ai' && item.nextAction !== 'reject')
+        .sort((a, b) => b.localScore - a.localScore)[0];
+    if (bestAi) {
+      if (candidates.length >= Number(count || 50)) candidates[candidates.length - 1] = bestAi;
+      else candidates.push(bestAi);
+      candidates.sort((a, b) => b.localScore - a.localScore || String(a.keyword).localeCompare(String(b.keyword), 'zh-CN'));
+    }
+  }
 
   if (persist && candidates.length > 0) writeCandidates(candidates, dataDir);
 

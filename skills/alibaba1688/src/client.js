@@ -134,6 +134,14 @@ class Alibaba1688Client {
     const rateLimiter = getRateLimiter();
     const acquireResult = await rateLimiter.acquire();
     if (!acquireResult.allowed) {
+      const waitSeconds = Math.ceil(acquireResult.waitMs / 1000);
+      const message = acquireResult.cooldown
+        ? `1688 API cooling down, retry after ${waitSeconds} seconds`
+        : `1688 API rate limited, estimated wait ${waitSeconds} seconds`;
+      const error = new RateLimitError(message, acquireResult.waitMs);
+      error.code = '1688_rate_limited';
+      error.source = '1688';
+      throw error;
       if (acquireResult.cooldown) {
         throw new RateLimitError(
           `1688 API 冷却中，剩余 ${Math.ceil(acquireResult.waitMs / 1000)} 秒`,
@@ -168,6 +176,9 @@ class Alibaba1688Client {
         lastError = err;
         if (err.response && err.response.status === 429) {
           rateLimiter.report429();
+          err.code = '1688_rate_limited';
+          err.source = '1688';
+          err.cooldownRemainingMs = rateLimiter.getStatus().cooldownRemainingMs;
         }
         const isRetryable =
           (err.response && (err.response.status === 429 || err.response.status === 503)) ||

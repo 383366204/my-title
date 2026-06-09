@@ -1,9 +1,12 @@
 const axios = require('axios');
+const { jsonrepair } = require('jsonrepair');
 const { parseJsonFromLLM, retry } = require('../../../core/llm-utils');
 const { createLLMClient } = require('../../../core/llm');
 const { normalizeKeyword } = require('./seed-store');
 const { rejectCandidate } = require('./reject-combinations');
 const { checkBannedWords } = require('../../../core/banned-words');
+
+const DEFAULT_BATCH_SIZE = 20;
 
 function compactSeeds(seeds, maxSeeds) {
   return (seeds || []).slice(0, maxSeeds).map(seed => ({
@@ -19,31 +22,32 @@ function compactSeeds(seeds, maxSeeds) {
 
 function buildPrompt({ seeds, count, date }) {
   return [
-    '你是淘宝蓝海选品方向研究员。请基于给定种子词池，生成适合淘宝/1688铺货验证的候选关键词。',
+    'You are an ecommerce keyword research assistant for Taobao/1688 product mining.',
+    'Return strict JSON only. Do not return markdown.',
     '',
-    '目标:',
-    '- 生成具体商品关键词，不要只给人群词、场景词或泛需求词。',
-    '- 优先选择有明确商品形态、明确人群、明确场景、明确功能的长尾词。',
-    '- 避免品牌词、IP词、医疗功效词、绝对化宣传词、侵权风险词、过宽泛词。',
-    '- 不要输出标题，只输出可用于后续生意参谋验证和1688搜货的关键词。',
+    'Rules:',
+    '- Generate concrete product long-tail keywords, not broad crowd/scene words.',
+    '- Avoid brand, IP, medical, exaggerated, illegal, or risky claims.',
+    '- Keywords will be verified by SYCM and searched on 1688 later.',
+    '- Keep each keyword concise and searchable.',
     '',
-    `日期: ${date}`,
-    `需要候选数: ${count}`,
-    '种子词池:',
+    `Date: ${date}`,
+    `Candidate count: ${count}`,
+    'Seed pool:',
     JSON.stringify(compactSeeds(seeds, 40), null, 2),
     '',
-    '请返回严格 JSON，不要解释:',
+    'Return this JSON shape:',
     JSON.stringify({
       candidates: [
         {
-          keyword: '具体商品长尾词',
-          category: '类目',
-          seed: '来源种子词',
-          intent: '搜索意图',
-          targetCrowd: '目标人群',
-          reason: '推荐理由',
-          risk: '主要风险',
-          confidence: 80
+          keyword: 'specific product keyword',
+          category: 'category',
+          seed: 'source seed',
+          intent: 'search intent',
+          targetCrowd: 'target crowd',
+          reason: 'why it may be useful',
+          risk: 'main risk',
+          confidence: 70
         }
       ]
     }, null, 2)
@@ -79,6 +83,8 @@ function normalizeAIItem(item, index) {
 function normalizeAIResponse(value, maxCandidates) {
   const rows = Array.isArray(value)
     ? value
+    : value && value.keyword
+      ? [value]
     : Array.isArray(value && value.candidates)
       ? value.candidates
       : [];
@@ -93,6 +99,43 @@ function normalizeAIResponse(value, maxCandidates) {
     if (output.length >= maxCandidates) break;
   }
   return output;
+}
+
+function salvageCandidateObjects(text) {
+  const output = [];
+  const source = String(text || '');
+  const objectPattern = /\{[^{}]*"keyword"\s*:\s*"[^"]+"[^{}]*\}/g;
+  for (const match of source.matchAll(objectPattern)) {
+    try {
+      output.push(JSON.parse(match[0]));
+    } catch (_) {
+      try {
+        output.push(JSON.parse(jsonrepair(match[0])));
+      } catch (_) {
+        // Keep rescuing later objects.
+      }
+    }
+  }
+  return { candidates: output };
+}
+
+function parseAIJson(text) {
+  try {
+    const parsed = parseJsonFromLLM(String(text || ''));
+    if (parsed && parsed.keyword) {
+      const salvaged = salvageCandidateObjects(text);
+      return { candidates: [parsed, ...salvaged.candidates.slice(1)] };
+    }
+    return parsed;
+  } catch (primaryError) {
+    try {
+      return JSON.parse(jsonrepair(String(text || '')));
+    } catch (_) {
+      const salvaged = salvageCandidateObjects(text);
+      if (salvaged.candidates.length > 0) return salvaged;
+      throw primaryError;
+    }
+  }
 }
 
 async function callChatCompletions(client, messages) {
@@ -122,7 +165,31 @@ async function callChatCompletions(client, messages) {
     && response.data.choices[0].message
     && response.data.choices[0].message.content;
   if (!content) throw new Error('Invalid LLM response: missing message content');
-  return parseJsonFromLLM(String(content));
+  return parseAIJson(String(content));
+}
+
+function buildBatches(total, batchSize) {
+  const size = Math.max(1, Number(batchSize || DEFAULT_BATCH_SIZE));
+  const batches = [];
+  let remaining = Math.max(1, Number(total || 0));
+  while (remaining > 0) {
+    const count = Math.min(size, remaining);
+    batches.push(count);
+    remaining -= count;
+  }
+  return batches;
+}
+
+async function generateOneBatch({ client, seeds, count, date, batchIndex }) {
+  const messages = [
+    { role: 'system', content: 'You are an ecommerce product keyword researcher. Output strict JSON only.' },
+    { role: 'user', content: buildPrompt({ seeds, count, date }) }
+  ];
+
+  if (client && typeof client.generateKeywordCandidates === 'function') {
+    return client.generateKeywordCandidates({ seeds, maxCandidates: count, date, messages, batchIndex });
+  }
+  return callChatCompletions(client, messages);
 }
 
 /**
@@ -132,34 +199,56 @@ async function callChatCompletions(client, messages) {
  * @param {number} [options.maxCandidates=80] Max generated candidates.
  * @param {object} [options.llmClient] Optional injected LLM client.
  * @param {string} [options.date] ISO date.
+ * @param {number} [options.batchSize=20] Max candidates requested per LLM call.
  * @returns {Promise<{candidates:Array<object>, meta:object}>}
  */
-async function generateAIKeywordCandidates({ seeds, maxCandidates = 80, llmClient = null, date = new Date().toISOString().slice(0, 10) } = {}) {
+async function generateAIKeywordCandidates({
+  seeds,
+  maxCandidates = 80,
+  llmClient = null,
+  date = new Date().toISOString().slice(0, 10),
+  batchSize = DEFAULT_BATCH_SIZE
+} = {}) {
   const client = llmClient || createLLMClient();
-  const messages = [
-    { role: 'system', content: '你是电商选品关键词研究员，只输出严格 JSON。' },
-    { role: 'user', content: buildPrompt({ seeds, count: maxCandidates, date }) }
-  ];
+  const batches = buildBatches(maxCandidates, batchSize);
+  const values = [];
+  const failedBatches = [];
 
-  if (client && typeof client.generateKeywordCandidates === 'function') {
-    const value = await client.generateKeywordCandidates({ seeds, maxCandidates, date, messages });
-    return {
-      candidates: normalizeAIResponse(value, maxCandidates),
-      meta: {
-        provider: client.provider || 'mock',
-        model: client.model || '',
-        requested: maxCandidates
-      }
-    };
+  for (let index = 0; index < batches.length; index += 1) {
+    try {
+      values.push(await generateOneBatch({
+        client,
+        seeds,
+        count: batches[index],
+        date,
+        batchIndex: index + 1
+      }));
+    } catch (error) {
+      failedBatches.push({ batch: index + 1, error: error.message });
+    }
   }
 
-  const parsed = await callChatCompletions(client, messages);
+  if (values.length === 0 && failedBatches.length > 0) {
+    throw new Error(`AI keyword generation failed for all batches: ${failedBatches.map(item => item.error).join('; ')}`);
+  }
+
+  const merged = {
+    candidates: values.flatMap(value => {
+      if (Array.isArray(value)) return value;
+      if (value && Array.isArray(value.candidates)) return value.candidates;
+      return [];
+    })
+  };
+
   return {
-    candidates: normalizeAIResponse(parsed, maxCandidates),
+    candidates: normalizeAIResponse(merged, maxCandidates),
     meta: {
       provider: client.provider || 'llm',
       model: client.model || '',
-      requested: maxCandidates
+      requested: maxCandidates,
+      batchSize,
+      batches: batches.length,
+      failedBatches
     }
   };
 }
@@ -167,5 +256,6 @@ async function generateAIKeywordCandidates({ seeds, maxCandidates = 80, llmClien
 module.exports = {
   buildPrompt,
   generateAIKeywordCandidates,
-  normalizeAIResponse
+  normalizeAIResponse,
+  parseAIJson
 };

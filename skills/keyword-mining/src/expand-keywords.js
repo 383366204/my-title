@@ -1,8 +1,9 @@
 const { normalizeKeyword } = require('./seed-store');
 const { getCategoryRule } = require('./category-rules');
 const { rejectCandidate } = require('./reject-combinations');
+const { mergeFacets } = require('./config-loader');
 
-const FACETS = {
+const DEFAULT_FACETS = {
   crowd: ['女', '男士', '儿童', '宝宝', '学生', '情侣', '宝妈', '上班族'],
   material: ['玛瑙', '朱砂', '纯银', '和田玉', '钛钢', '水晶', '珍珠', '陶瓷', '木质', '毛绒', '硅胶', '塑料', '不锈钢'],
   style: ['国风', '小众', '高级感', '复古', '简约', '可爱', 'ins风', '轻奢', '创意'],
@@ -12,6 +13,7 @@ const FACETS = {
   pain_point: ['新手', '懒人', '租房党', '学生党', '宝妈', '上班族'],
   trend_word: ['2026新款', '爆款', '网红同款', 'ins风', '高级感', '氛围感', '无痕', '解压']
 };
+const FACETS = mergeFacets(DEFAULT_FACETS);
 
 function hasAny(keyword, words) {
   return words.some(word => keyword.includes(word));
@@ -114,4 +116,4 @@ function expandSeeds(seeds, options = {}) {
   return uniqueByKeyword(all);
 }
 
-module.exports = { FACETS, expandSeed, expandSeeds };
+module.exports = { FACETS, DEFAULT_FACETS, expandSeed, expandSeeds };

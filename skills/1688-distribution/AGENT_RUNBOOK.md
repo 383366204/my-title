@@ -1,48 +1,47 @@
 # 1688 Distribution Agent Runbook
 
-This file is for weaker agents. Follow it literally. Do not operate the page by sight unless the CLI tells you to.
+This file is for weak agents. Follow it literally. Use the CLI first. Do not operate the page by sight unless the CLI reports that manual inspection is required.
 
 ## One Rule
 
-Use the CLI first. Do not manually click `开始批量复制` unless the CLI flow is unavailable.
+Distribution is a final submit action. Never submit before showing the exact product list to the user and receiving explicit confirmation.
 
-## Inputs
+## Input Format
 
-The input file must contain one product per line:
+Use one product per line:
 
 ```text
-https://detail.1688.com/offer/<id>.html<TAB>铺货标题
-https://detail.1688.com/offer/<id>.html<TAB>铺货标题<TAB>生意参谋推荐类目
+https://detail.1688.com/offer/<id>.html<TAB><title>
+https://detail.1688.com/offer/<id>.html<TAB><title><TAB><category>
 ```
 
-Plain URLs are accepted. Prefer `URL<TAB>标题<TAB>类目` in files when category is known. `URL$$标题` and `URL$$标题$$类目` are also accepted, but do not pass `$$` directly through bash because it expands to the shell process id.
+Accepted alternatives:
 
-If the category is needed, get it from SYCM keyword analysis:
-
-```bash
-node bin/cli.js sycm "<keyword>" --mode blue --json
+```text
+https://detail.1688.com/offer/<id>.html$$<title>
+https://detail.1688.com/offer/<id>.html$$<title>$$<category>
 ```
 
-Use `categoryAnalysis.recommendation.recommended.category`.
+Do not pass `$$` through bash unquoted because some shells expand it.
 
 ## Golden Path
 
-1. Sync Hermes skill files if Hermes is the caller:
+1. If Hermes is the caller, sync skills first:
 
 ```bash
 node bin/cli.js sync-hermes-skills --apply --json
 ```
 
-2. Before submitting, show the exact distribution list to the user and wait for explicit confirmation.
+2. Show the concrete distribution list to the user.
 
-Required pre-submit checklist:
+Required before submit:
 
-- Copyright/IP precheck is done. See `references/ip-copyright-risk-db.md`.
-- Risky brand/IP items are excluded or explicitly approved by the user.
-- The user has replied with `确认` or an equivalent clear instruction after seeing the concrete list.
+- Copyright/IP precheck is complete.
+- Risky brand/IP products are excluded or explicitly approved.
+- User has confirmed after seeing the list.
 - Batch size is reasonable. Prefer 50 or fewer items per batch.
 
-3. Validate the batch without touching the browser:
+3. Validate input without touching the browser:
 
 ```bash
 node bin/cli.js distribute --input-file "<distribution-batch.txt>" --dry-run --json
@@ -50,9 +49,9 @@ node bin/cli.js distribute --input-file "<distribution-batch.txt>" --dry-run --j
 
 Success condition:
 
-- JSON `ok` is `true`
-- `total` is greater than 0
-- every batch has `dryRun: true`
+- `ok` is `true`.
+- `total` is greater than 0.
+- Every batch has `dryRun: true`.
 
 4. Check browser readiness and duplicate-submit risk:
 
@@ -62,40 +61,82 @@ node bin/cli.js distribute --input-file "<distribution-batch.txt>" --check --jso
 
 Success condition:
 
-- JSON `ok` is `true`
-- `status` is `ready`
-- `browser.ok` is `true`
-- `blockers` is empty
+- `ok` is `true`.
+- `status` is `ready`.
+- `browser.ok` is `true`.
+- `blockers` is empty.
 
-5. Submit the batch:
+5. Submit only after user confirmation:
 
 ```bash
-node bin/cli.js distribute --input-file "<distribution-batch.txt>" --json
+node bin/cli.js distribute --input-file "<distribution-batch.txt>" --submit --json
 ```
 
 Success condition:
 
-- JSON `ok` is `true`
-- each submitted batch has `logUrl`
-- each submitted batch has `status: confirmed`
-- `confirmation.foundOfferIds` contains every submitted offer id
-- `confirmation.missingOfferIds` is empty
+- `ok` is `true`.
+- Each submitted batch has `logUrl`.
+- Each submitted batch has `status: confirmed`.
+- `confirmation.foundOfferIds` contains every submitted offer id.
+- `confirmation.missingOfferIds` is empty.
+- `confirmation.perOfferId` may show `batch` or `single`; both are acceptable confirmation sources.
 
-If JSON `ok` is `false` and a batch has `status: partial_confirmed` or `status: not_confirmed`, stop. Do not retry automatically. Report the missing offer ids and ask the user to inspect the copy log.
+## What The CLI Does
+
+The CLI handles the fragile browser steps:
+
+```text
+reuse existing item.jnesoft.com tab
+-> enter multi-store copy
+-> fill product lines
+-> choose random average distribution
+-> select all shops
+-> click the start-batch-copy button exactly once
+-> click the view-copy-record button
+-> confirm every offer id in the copy log
+-> if batch search misses ids, search the missing offer ids one by one inside the copy log
+```
+
+Weak agents should not reimplement this flow unless the CLI is unavailable.
 
 ## Stop Conditions
 
-Stop and report to the user if any of these happens:
+Stop and report if any of these happens:
 
 - `--dry-run` returns invalid item errors.
 - `--check` returns `browser_cdp_unavailable`.
 - `--check` returns `recent_duplicate_batch`.
-- The user has not confirmed the concrete distribution list.
+- The user has not confirmed the concrete list.
 - Copyright/IP precheck has not been done.
 - The page asks for login, SMS, password, QR code, or authorization.
-- The CLI reports `????` or lost Chinese text.
-- The CLI says it cannot click `查看复制记录`.
-- A batch returns `status: partial_confirmed` or `status: not_confirmed`.
+- The CLI reports garbled Chinese such as `????`.
+- The CLI cannot click or confirm the view-copy-record button.
+- A batch returns `partial_confirmed` or `not_confirmed`.
+- Any `confirmation.missingOfferIds` are present.
+
+Do not retry submit automatically after any stop condition.
+
+## Browser Rules
+
+- Use the existing logged-in Chrome/CDP session.
+- Use one business tab only.
+- Do not open `air.1688.com` for this flow.
+- Prefer `https://item.jnesoft.com/`.
+- If currently on the copy-log page, use the CLI or browser history to return to the multi-store form; do not open a new tab.
+
+## Category
+
+If category is known, include it as the third field. Get it from SYCM:
+
+```bash
+node bin/cli.js sycm "<keyword>" --mode blue --pages 1 --json
+```
+
+Read:
+
+```text
+categoryAnalysis.recommendation.recommended.category
+```
 
 ## Report Format
 
@@ -113,10 +154,9 @@ Next: <nextAction>
 
 ## Never Do These
 
-- Do not open `air.1688.com` for distribution.
-- Do not submit distribution before showing the concrete list and receiving explicit user confirmation.
-- Do not include known brand/IP risk items unless the user explicitly approves after seeing the risk.
-- Do not click any fuzzy `复制` entry. The target is `多店复制`.
-- Do not click `开始批量复制` twice.
-- Do not stop after clicking `开始批量复制`; always confirm `查看复制记录`.
-- Do not create a new business tab for each batch.
+- Do not submit before user confirmation.
+- Do not click fuzzy copy entries. The target is multi-store copy.
+- Do not click the start-batch-copy button twice.
+- Do not stop after submit without checking the copy record.
+- Do not create a new business tab per batch.
+- Do not include known brand/IP risk items unless approved by the user.

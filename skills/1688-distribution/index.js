@@ -8,6 +8,18 @@ const DEFAULT_MULTI_STORE_URL = 'https://item.jnesoft.com/ali_view/ali_multiStor
 const DEFAULT_BATCH_LOG_URL = 'https://item.jnesoft.com/ali_view/ali_batchLog';
 const DEFAULT_STATE_FILE = path.join(process.cwd(), 'data', 'distribution-runs.jsonl');
 const RECENT_SUBMIT_WINDOW_MS = 30 * 60 * 1000;
+const TXT_RANDOM_AVERAGE = '\u968f\u673a\u5e73\u5747\u5206\u914d';
+const TXT_SELECT_ALL = '\u5168\u9009';
+const TXT_START_BATCH_COPY = '\u5f00\u59cb\u6279\u91cf\u590d\u5236';
+const TXT_VIEW_COPY_RECORDS = '\u67e5\u770b\u590d\u5236\u8bb0\u5f55';
+const TXT_COPY_LOG = '\u590d\u5236\u65e5\u5fd7';
+const TXT_SEARCH = '\u641c\u7d22';
+const TXT_COMMA_OR_SPACE = '\u9017\u53f7\u6216\u7a7a\u683c';
+const RE_ALL_SHOPS_SELECTED = new RegExp('\\u5168\\u9009[\\uff1a:]\\u5df2\\u9009\\s*[1-9]\\d*\\s*\\u4e2a\\u5e97\\u94fa');
+const RE_COPYING = new RegExp('\\u590d\\u5236\\u4e2d', 'g');
+const RE_SUCCESS = new RegExp('\\u590d\\u5236\\u6210\\u529f', 'g');
+const RE_FAILED = new RegExp('\\u590d\\u5236\\u5931\\u8d25', 'g');
+const RE_SKIPPED = new RegExp('\\u8df3\\u8fc7\\u590d\\u5236', 'g');
 
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
@@ -218,6 +230,12 @@ async function inspectBrowser(port = DEFAULT_CDP_PORT) {
 function isLoginExpiredText(text) {
   return /登录信息已过期|重新登录|扫码登录|短信登录|密码登录|授权状态失败|获取授权状态失败|请登录/.test(String(text || ''));
 }
+
+function isLoginExpiredTextStable(text) {
+  return /\u767b\u5f55\u4fe1\u606f\u5df2\u8fc7\u671f|\u91cd\u65b0\u767b\u5f55|\u626b\u7801\u767b\u5f55|\u77ed\u4fe1\u767b\u5f55|\u5bc6\u7801\u767b\u5f55|\u6388\u6743\u72b6\u6001\u5931\u8d25|\u83b7\u53d6\u6388\u6743\u72b6\u6001\u5931\u8d25|\u8bf7\u767b\u5f55/.test(String(text || ''));
+}
+
+isLoginExpiredText = isLoginExpiredTextStable;
 
 async function waitForTarget(predicate, { port = DEFAULT_CDP_PORT, timeoutMs = 30000, intervalMs = 500 } = {}) {
   const started = Date.now();
@@ -502,6 +520,83 @@ async function selectRandomAverageAndAllShops(client) {
   return state;
 }
 
+async function readShopSelectionState(client) {
+  return client.evaluate(`
+    (() => {
+      const labels = Array.from(document.querySelectorAll('.shopItem label.el-checkbox'));
+      const boxes = labels
+        .map(label => label.querySelector('input[type="checkbox"]'))
+        .filter(Boolean);
+      const selected = boxes.filter(input => input.checked).length
+        || labels.filter(label => label.classList.contains('is-checked')).length;
+      const body = document.body ? document.body.innerText : '';
+      const textConfirmed = ${RE_ALL_SHOPS_SELECTED}.test(body);
+      return {
+        ok: textConfirmed || (boxes.length > 0 && selected === boxes.length),
+        selected,
+        total: boxes.length,
+        textConfirmed
+      };
+    })()
+  `);
+}
+
+async function selectRandomAverageAndAllShopsStable(client) {
+  await client.evaluate(pageHelpersExpression());
+  const random = await client.evaluate(`window.__ecom1688.clickExact(${jsString(TXT_RANDOM_AVERAGE)}, 'label,span,div,button')`);
+  if (!random || !random.ok) throw new Error(random && random.reason ? random.reason : 'Failed to select random average distribution');
+  await sleep(500);
+
+  let selection = await readShopSelectionState(client);
+  if (selection.ok) return selection;
+
+  let selectAll = await client.evaluate(`window.__ecom1688.clickExact(${jsString(TXT_SELECT_ALL)}, 'label,span,div,button')`);
+  if (!selectAll || !selectAll.ok) {
+    selectAll = await client.evaluate(`window.__ecom1688.clickContains(${jsString(TXT_SELECT_ALL)}, 'label,span,div,button')`);
+  }
+  if (!selectAll || !selectAll.ok) {
+    selectAll = await client.evaluate(`
+      (() => {
+        const labels = Array.from(document.querySelectorAll('.shopItem label.el-checkbox'));
+        if (labels.length === 0) return { ok: false, reason: 'shop checkbox labels not found' };
+        let clicked = 0;
+        for (const label of labels) {
+          const input = label.querySelector('input[type="checkbox"]');
+          const checked = input ? input.checked : label.classList.contains('is-checked');
+          if (checked) continue;
+          label.click();
+          clicked += 1;
+        }
+        return { ok: true, clicked, total: labels.length };
+      })()
+    `);
+  }
+  if (!selectAll || !selectAll.ok) throw new Error(selectAll && selectAll.reason ? selectAll.reason : 'Failed to select all shops');
+
+  await sleep(1200);
+  selection = await readShopSelectionState(client);
+  if (!selection.ok) {
+    await client.evaluate(`
+      (() => {
+        const labels = Array.from(document.querySelectorAll('.shopItem label.el-checkbox'));
+        for (const label of labels) {
+          const input = label.querySelector('input[type="checkbox"]');
+          const checked = input ? input.checked : label.classList.contains('is-checked');
+          if (checked) continue;
+          label.dispatchEvent(new MouseEvent('click', { bubbles: true, view: window }));
+        }
+        return true;
+      })()
+    `);
+    await sleep(1200);
+    selection = await readShopSelectionState(client);
+  }
+  if (!selection.ok) {
+    throw new Error(`All shops were not confirmed as selected (selected=${selection.selected || 0}, total=${selection.total || 0})`);
+  }
+  return selection;
+}
+
 function validateFilledText(readText, items) {
   const normalized = String(readText || '');
   if (normalized.includes('????')) throw new Error('Filled text contains ????; stop before submit');
@@ -528,6 +623,21 @@ async function preSubmitCheck(client, items) {
     throw new Error('Page reports non-compliant links; stop before submit');
   }
   if (!state.body.includes('开始批量复制')) {
+    throw new Error('Start batch copy button is not visible');
+  }
+  return state;
+}
+
+async function preSubmitCheckStable(client, items) {
+  const state = await client.evaluate('window.__ecom1688.readState()');
+  if (isLoginExpiredText(state.body)) {
+    throw new Error('Login expired or authorization failed before submit; user must log in again');
+  }
+  validateFilledText(state.body, items);
+  if (state.body.includes('\u4e0d\u5408\u89c4') && !state.body.includes('\u5176\u4e2d0\u6761\u4e0d\u5408\u89c4')) {
+    throw new Error('Page reports non-compliant links; stop before submit');
+  }
+  if (!state.body.includes(TXT_START_BATCH_COPY)) {
     throw new Error('Start batch copy button is not visible');
   }
   return state;
@@ -561,6 +671,63 @@ async function submitAndOpenLog(client) {
     throw new Error('Copy record page was not confirmed after submit');
   }
   return state;
+}
+
+async function submitAndOpenLogStable(client) {
+  await client.evaluate(pageHelpersExpression());
+  const submit = await client.evaluate(`window.__ecom1688.clickExact(${jsString(TXT_START_BATCH_COPY)}, 'button')`);
+  if (!submit || !submit.ok) throw new Error(submit && submit.reason ? submit.reason : 'Failed to click start batch copy');
+  await sleep(5000);
+  await client.evaluate(pageHelpersExpression());
+  let state = await client.evaluate('window.__ecom1688.readState()');
+  if (isLoginExpiredText(state.body)) {
+    throw new Error('Login expired or authorization failed after submit click; user must log in again before distribution can continue');
+  }
+  if (state.url.includes('ali_batchLog')) return state;
+  const logClick = await client.evaluate(`window.__ecom1688.clickExact(${jsString(TXT_VIEW_COPY_RECORDS)}, 'button,a,span,div')`);
+  if (!logClick || !logClick.ok) throw new Error(logClick && logClick.reason ? logClick.reason : 'Failed to click view copy records');
+  await sleep(3000);
+  await client.evaluate(pageHelpersExpression());
+  state = await client.evaluate('window.__ecom1688.readState()');
+  if (isLoginExpiredText(state.body)) {
+    throw new Error('Login expired or authorization failed while opening copy records');
+  }
+  if (!state.url.includes('ali_batchLog') && !state.body.includes(TXT_COPY_LOG)) {
+    await navigate(client, DEFAULT_BATCH_LOG_URL);
+    await client.evaluate(pageHelpersExpression());
+    state = await client.evaluate('window.__ecom1688.readState()');
+  }
+  if (!state.url.includes('ali_batchLog') && !state.body.includes(TXT_COPY_LOG)) {
+    throw new Error('Copy record page was not confirmed after submit');
+  }
+  return state;
+}
+
+function classifyCopyRecordText(offerIds, body, extra = {}) {
+  const text = String(body || '');
+  const foundOfferIds = offerIds.filter(id => text.includes(id));
+  const missingOfferIds = offerIds.filter(id => !text.includes(id));
+  const statusCounts = {
+    copying: (text.match(RE_COPYING) || []).length,
+    success: (text.match(RE_SUCCESS) || []).length,
+    failed: (text.match(RE_FAILED) || []).length,
+    skipped: (text.match(RE_SKIPPED) || []).length
+  };
+  const totalLine = text.split('\n').find(line => line.startsWith('\u5168\u90e8(')) || '';
+  const status = foundOfferIds.length === offerIds.length
+    ? 'confirmed'
+    : foundOfferIds.length > 0
+      ? 'partial_confirmed'
+      : 'not_confirmed';
+  return {
+    ok: status === 'confirmed',
+    status,
+    foundOfferIds,
+    missingOfferIds,
+    totalLine,
+    statusCounts,
+    ...extra
+  };
 }
 
 async function confirmCopyRecords(client, offerIds) {
@@ -657,6 +824,103 @@ async function confirmCopyRecords(client, offerIds) {
   return result;
 }
 
+async function confirmCopyRecordsStable(client, offerIds) {
+  await client.evaluate(pageHelpersExpression());
+  let state = await client.evaluate('window.__ecom1688.readState()');
+  if (!state.url.includes('ali_batchLog')) {
+    await navigate(client, DEFAULT_BATCH_LOG_URL);
+    await client.evaluate(pageHelpersExpression());
+  }
+
+  const pageResult = await client.evaluate(`
+    (async () => {
+      const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+      const offerIds = ${JSON.stringify(offerIds)};
+      const visible = el => {
+        if (!el) return false;
+        const r = el.getBoundingClientRect();
+        const s = getComputedStyle(el);
+        return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
+      };
+      const inputs = () => Array.from(document.querySelectorAll('input'));
+      const idInput = inputs().find(el => (el.placeholder || '').includes(${jsString(TXT_COMMA_OR_SPACE)}))
+        || inputs().find((el, index) => index >= 5 && !el.readOnly && !el.disabled);
+      if (!idInput) {
+        return { ok: false, status: 'not_confirmed', reason: 'copy log offer id input not found' };
+      }
+      const searchButton = Array.from(document.querySelectorAll('button'))
+        .find(button => visible(button) && (button.innerText || '').trim() === ${jsString(TXT_SEARCH)});
+      if (!searchButton) {
+        return { ok: false, status: 'not_confirmed', reason: 'copy log search button not found' };
+      }
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      const setSearchValue = value => {
+        idInput.focus();
+        setter.call(idInput, value);
+        idInput.dispatchEvent(new Event('input', { bubbles: true }));
+        idInput.dispatchEvent(new Event('change', { bubbles: true }));
+      };
+      const collectPages = async (maxPages = 8) => {
+        let allText = document.body ? document.body.innerText : '';
+        for (let pageTurn = 0; pageTurn < maxPages; pageTurn++) {
+          const before = document.body ? document.body.innerText : '';
+          const nextPageBtn = Array.from(document.querySelectorAll('a, button, span, div'))
+            .find(el => {
+              const text = (el.innerText || '').trim();
+              const disabled = el.classList.contains('disabled') || el.classList.contains('is-disabled') || el.getAttribute('aria-disabled') === 'true';
+              return visible(el) && !disabled && (text === '\\u4e0b\\u4e00\\u9875' || text === '>' || text === 'Next');
+            });
+          if (!nextPageBtn) break;
+          nextPageBtn.click();
+          await sleep(1000);
+          const after = document.body ? document.body.innerText : '';
+          if (after === before || allText.includes(after.slice(0, 120))) break;
+          allText += '\\n--- PAGE BREAK ---\\n' + after;
+        }
+        return allText;
+      };
+      const runSearch = async (query, waitMs) => {
+        setSearchValue(query);
+        searchButton.click();
+        await sleep(waitMs);
+        return collectPages(query.includes(',') ? 10 : 2);
+      };
+
+      let combinedText = await runSearch(offerIds.join(','), 2500);
+      let found = new Set(offerIds.filter(id => combinedText.includes(id)));
+      const perOfferId = {};
+      for (const id of found) perOfferId[id] = { source: 'batch' };
+
+      const missingAfterBatch = offerIds.filter(id => !found.has(id));
+      for (const id of missingAfterBatch) {
+        const singleText = await runSearch(id, 1800);
+        combinedText += '\\n--- SINGLE SEARCH ' + id + ' ---\\n' + singleText;
+        if (singleText.includes(id)) {
+          found.add(id);
+          perOfferId[id] = { source: 'single' };
+        }
+      }
+
+      return {
+        ok: found.size === offerIds.length,
+        text: combinedText,
+        perOfferId,
+        preview: combinedText.slice(0, 2000),
+        url: location.href
+      };
+    })()
+  `);
+
+  if (!pageResult || pageResult.reason) {
+    return pageResult || { ok: false, status: 'not_confirmed', reason: 'copy log confirmation failed' };
+  }
+  return classifyCopyRecordText(offerIds, pageResult.text, {
+    preview: pageResult.preview,
+    url: pageResult.url,
+    perOfferId: pageResult.perOfferId || {}
+  });
+}
+
 async function distributeProducts(options = {}) {
   const input = options.inputFile ? readTextFile(options.inputFile) : options.input;
   const items = parseItems(input);
@@ -700,10 +964,10 @@ async function distributeProducts(options = {}) {
       await ensureMultiStorePage(client, { port });
       const filled = await fillItems(client, normalizeItemsForInput(batchItems));
       validateFilledText(filled.text, batchItems);
-      await selectRandomAverageAndAllShops(client);
-      await preSubmitCheck(client, batchItems);
-      const logState = await submitAndOpenLog(client);
-      const confirmation = await confirmCopyRecords(client, batchItems.map(item => item.offerId));
+      await selectRandomAverageAndAllShopsStable(client);
+      await preSubmitCheckStable(client, batchItems);
+      const logState = await submitAndOpenLogStable(client);
+      const confirmation = await confirmCopyRecordsStable(client, batchItems.map(item => item.offerId));
       if (confirmation.status !== 'confirmed') {
         results.push({
           ok: false,
@@ -817,6 +1081,8 @@ module.exports = {
   findRecentDuplicate,
   inspectBrowser,
   confirmCopyRecords,
+  confirmCopyRecordsStable,
+  classifyCopyRecordText,
   checkDistributionReadiness,
   distributeProducts
 };

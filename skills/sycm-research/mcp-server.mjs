@@ -147,10 +147,10 @@ server.tool(
         _progress: progressLog
       }, null, 2) }] };
     } catch (err) {
-      if (err && err.status === 'login_required') {
+      if (err && err.status) {
         return { content: [{ type: 'text', text: JSON.stringify(err.details || {
           ok: false,
-          status: 'login_required',
+          status: err.status,
           message: err.message,
           loginUrl: err.loginUrl,
           profileDir: err.profileDir

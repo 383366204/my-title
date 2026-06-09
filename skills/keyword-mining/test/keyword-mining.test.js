@@ -13,7 +13,10 @@ const {
   keywordSignature,
   clusterBySignature,
   diversifyCandidates,
-  normalizeAIResponse
+  normalizeAIResponse,
+  generateAIKeywordCandidates,
+  parseAIJson,
+  normalizeSynonyms
 } = require('..');
 const { extractSearchPopularityFromSycmJson } = require('../src/sycm-precheck');
 
@@ -64,6 +67,12 @@ describe('keyword-mining', () => {
     assert.strictEqual(rejectCandidate('宝宝戒指').rejected, true);
     assert.strictEqual(rejectCandidate('玛瑙宠物玩具').rejected, true);
     assert.strictEqual(scoreKeyword('宝宝戒指').nextAction, 'reject');
+  });
+
+  test('facet reject rules normalize synonyms before blocking risky combinations', () => {
+    assert.strictEqual(rejectCandidate('小孩戒指').rejected, true);
+    assert.strictEqual(rejectCandidate('婴儿指环').rejected, true);
+    assert.strictEqual(normalizeSynonyms('礼物戒指').includes('送礼'), true);
   });
 
   test('scoreKeyword favors concrete product long-tail words', () => {
@@ -156,6 +165,14 @@ describe('keyword-mining', () => {
     assert.ok(result.candidates.length > 0);
   });
 
+  test('scoreKeyword treats new seeds as product words', () => {
+    const scored = scoreKeyword({ keyword: '便携瑜伽垫', seed: '瑜伽垫', pattern: 'style+seed' });
+
+    assert.strictEqual(scored.coreProduct, '瑜伽垫');
+    assert.ok(scored.localScore >= 50);
+    assert.notStrictEqual(scored.nextAction, 'reject');
+  });
+
   test('sycm precheck reads CLI data payload shape', () => {
     const popularity = extractSearchPopularityFromSycmJson({
       ok: true,
@@ -215,6 +232,40 @@ describe('keyword-mining', () => {
     assert.strictEqual(candidates[0].keyword, '便携弹力带');
     assert.strictEqual(candidates[0].source, 'ai');
     assert.strictEqual(candidates[0].aiConfidence, 85);
+  });
+
+  test('parseAIJson salvages candidate objects from truncated output', () => {
+    const parsed = parseAIJson('prefix {"candidates":[{"keyword":"便携瑜伽垫","confidence":80},{"keyword":"收纳瑜伽垫","confidence":70}');
+    const candidates = normalizeAIResponse(parsed, 10);
+
+    assert.ok(candidates.some(item => item.keyword === '便携瑜伽垫'));
+  });
+
+  test('generateAIKeywordCandidates splits large AI requests into batches and keeps partial success', async () => {
+    const calls = [];
+    const result = await generateAIKeywordCandidates({
+      seeds: [{ keyword: '瑜伽垫', category: '运动健身' }],
+      maxCandidates: 45,
+      batchSize: 20,
+      llmClient: {
+        provider: 'mock-ai',
+        model: 'mock-model',
+        async generateKeywordCandidates({ maxCandidates, batchIndex }) {
+          calls.push({ maxCandidates, batchIndex });
+          if (batchIndex === 2) throw new Error('batch failed');
+          return {
+            candidates: [
+              { keyword: `便携瑜伽垫${batchIndex}`, seed: '瑜伽垫', category: '运动健身', confidence: 80 }
+            ]
+          };
+        }
+      }
+    });
+
+    assert.deepStrictEqual(calls.map(call => call.maxCandidates), [20, 20, 5]);
+    assert.strictEqual(result.meta.batches, 3);
+    assert.strictEqual(result.meta.failedBatches.length, 1);
+    assert.strictEqual(result.candidates.length, 2);
   });
 
   test('mineKeywords supports AI-only source with injected client', async () => {

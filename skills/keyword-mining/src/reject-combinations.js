@@ -18,11 +18,33 @@ const REJECT_RULES = [
   { includes: ['猫咪', '狗咬胶'], reason: '宠物对象冲突' }
 ];
 
+const { configuredRejectFacetRules, normalizeSynonyms } = require('./config-loader');
+
+function includesAny(value, words) {
+  return (words || []).some(word => value.includes(normalizeSynonyms(word)));
+}
+
+function rejectByFacetRule(keyword) {
+  const normalized = normalizeSynonyms(keyword);
+  for (const rule of configuredRejectFacetRules()) {
+    if (rule.product && !includesAny(normalized, rule.product)) continue;
+    if (rule.crowd && !includesAny(normalized, rule.crowd)) continue;
+    if (rule.material && !includesAny(normalized, rule.material)) continue;
+    if (rule.scene && !includesAny(normalized, rule.scene)) continue;
+    if (rule.function && !includesAny(normalized, rule.function)) continue;
+    return { rejected: true, reason: rule.reason || 'facet_rule_rejected', ruleType: 'facet' };
+  }
+  return { rejected: false, reason: '' };
+}
+
 function rejectCandidate(keyword) {
   const value = String(keyword || '');
-  const hit = REJECT_RULES.find(rule => rule.includes.every(part => value.includes(part)));
+  const facetHit = rejectByFacetRule(value);
+  if (facetHit.rejected) return facetHit;
+  const normalized = normalizeSynonyms(value);
+  const hit = REJECT_RULES.find(rule => rule.includes.every(part => normalized.includes(normalizeSynonyms(part))));
   if (!hit) return { rejected: false, reason: '' };
-  return { rejected: true, reason: hit.reason };
+  return { rejected: true, reason: hit.reason, ruleType: 'legacy' };
 }
 
 module.exports = { REJECT_RULES, rejectCandidate };

@@ -607,41 +607,118 @@
     "category": "雨具防晒",
     "reason": "6月梅雨季刚需，折叠/全自动/晴雨两用长尾丰富",
     "priority": 10,
-    "status": "active"
+    "status": "paused"
   },
   {
     "keyword": "遮阳帽",
     "category": "雨具防晒",
     "reason": "夏季防晒刚需，渔夫帽/空顶/大檐款式多",
     "priority": 10,
-    "status": "active"
+    "status": "paused"
   },
   {
     "keyword": "防晒面罩",
     "category": "雨具防晒",
     "reason": "骑行/户外防晒爆款，冰丝/全脸/护颈角长尾",
     "priority": 10,
-    "status": "active"
+    "status": "paused"
   },
   {
     "keyword": "瑜伽垫",
     "category": "健身瑜伽",
     "reason": "夏季运动旺季，加厚/防滑/可折叠材质丰富",
     "priority": 10,
-    "status": "active"
+    "status": "paused"
   },
   {
     "keyword": "弹力带",
     "category": "健身瑜伽",
     "reason": "居家健身爆款，阻力等级/乳胶/环形组合多",
     "priority": 10,
-    "status": "active"
+    "status": "paused"
   },
   {
     "keyword": "泡沫轴",
     "category": "健身瑜伽",
     "reason": "肌肉放松刚需，齿纹/空心/迷你规格细分",
     "priority": 10,
-    "status": "active"
+    "status": "paused"
+  },
+  {
+    "keyword": "情侣装夏",
+    "category": "七夕情侣",
+    "priority": 10,
+    "source": "manual",
+    "type": "expand",
+    "status": "active",
+    "successCount": 0,
+    "failCount": 0,
+    "reason": "七夕旺季情侣穿搭需求"
+  },
+  {
+    "keyword": "DIY手工礼物",
+    "category": "七夕情侣",
+    "priority": 10,
+    "source": "manual",
+    "type": "expand",
+    "status": "active",
+    "successCount": 0,
+    "failCount": 0,
+    "reason": "七夕DIY手作礼物赛道"
+  },
+  {
+    "keyword": "情侣手机壳",
+    "category": "七夕情侣",
+    "priority": 10,
+    "source": "manual",
+    "type": "expand",
+    "status": "active",
+    "successCount": 0,
+    "failCount": 0,
+    "reason": "七夕情侣数码配件"
+  },
+  {
+    "keyword": "床帘蚊帐一体",
+    "category": "开学宿舍",
+    "priority": 10,
+    "source": "manual",
+    "type": "expand",
+    "status": "active",
+    "successCount": 0,
+    "failCount": 0,
+    "reason": "开学季宿舍刚需"
+  },
+  {
+    "keyword": "宿舍好物",
+    "category": "开学宿舍",
+    "priority": 10,
+    "source": "manual",
+    "type": "expand",
+    "status": "active",
+    "successCount": 0,
+    "failCount": 0,
+    "reason": "开学季宿舍生活用品"
+  },
+  {
+    "keyword": "中秋灯笼",
+    "category": "中秋",
+    "priority": 10,
+    "source": "manual",
+    "type": "expand",
+    "status": "active",
+    "successCount": 0,
+    "failCount": 0,
+    "reason": "中秋节日装饰"
+  },
+  {
+    "keyword": "月饼包装礼盒",
+    "category": "中秋",
+    "priority": 10,
+    "source": "manual",
+    "type": "expand",
+    "status": "active",
+    "successCount": 0,
+    "failCount": 0,
+    "reason": "中秋礼盒包装"
   }
 ]

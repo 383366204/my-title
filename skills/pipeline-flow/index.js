@@ -589,7 +589,11 @@ async function flowVerify(options = {}) {
   const { runDir, run } = getRun(options);
   const candidates = readJsonl(run.files.candidates);
   const limit = Number(options.limit || options.verify || candidates.length || 0);
-  const selected = candidates.slice(0, limit);
+  const executableCandidates = candidates.filter(function(item) {
+    var action = item && item.nextAction;
+    return !action || action === 'sycm_verify' || action === 'direct_product_search';
+  });
+  const selected = executableCandidates.slice(0, limit);
   const verified = [];
   const rejected = [];
   const sycmResults = [];
@@ -640,17 +644,31 @@ async function flowVerify(options = {}) {
     } catch (error) {
       const row = {
         ...candidate,
-        status: 'sycm_failed',
+        status: error && error.status ? error.status : 'sycm_failed',
         error: error && error.message ? error.message : String(error),
+        manualAction: error && error.details ? error.details : null,
         checkedAt: new Date().toISOString()
       };
       rejected.push(row);
-      sycmResults.push({ keyword: candidate.keyword, ok: false, error: row.error });
+      sycmResults.push({
+        keyword: candidate.keyword,
+        ok: false,
+        status: row.status,
+        error: row.error,
+        manualAction: row.manualAction
+      });
+      if (error && ['login_required', 'slider_required', 'sycm_feature_required'].includes(error.status)) {
+        break;
+      }
     }
   }
 
   appendJsonl(run.files.sycmResults, sycmResults);
   appendJsonl(run.files.verifiedKeywords, verified);
+  const manualStatuses = ['login_required', 'slider_required', 'sycm_feature_required'];
+  const hasManualAction = rejected.some(function(row) {
+    return manualStatuses.includes(row.status);
+  });
   appendOpportunity('keywords', verified.map(row => ({
     runId: run.runId,
     keyword: row.keyword,
@@ -676,10 +694,17 @@ async function flowVerify(options = {}) {
     nextAction: row.nextAction || 'stop',
     reason: row.error || (row.sycmScore && row.sycmScore.reason) || ''
   })), { runId: run.runId, dataDir: resolveOpportunityDir(options) });
-  run.status = verified.length > 0 ? 'verified' : 'verified_empty';
+  run.status = hasManualAction
+    ? (verified.length > 0 ? 'verified_partial_manual_required' : 'manual_action_required')
+    : (verified.length > 0 ? 'verified' : 'verified_empty');
   run.counts.sycmVerified = verified.length;
   run.counts.sycmRejected = rejected.length;
   writeRun(runDir, run);
+  const nextCommand = hasManualAction
+    ? buildFlowCommand('inspect', run.runId)
+    : (verified.length > 0
+      ? buildFlowCommand('generate', run.runId, { limit: options.generate || 10 })
+      : buildFlowCommand('inspect', run.runId));
   return {
     ok: true,
     runId: run.runId,
@@ -687,13 +712,11 @@ async function flowVerify(options = {}) {
     verified,
     rejected,
     runDir,
-    blockers: verified.length > 0 ? [] : ['no_verified_keywords'],
-    allowedCommands: [verified.length > 0
-      ? buildFlowCommand('generate', run.runId, { limit: options.generate || 10 })
-      : buildFlowCommand('inspect', run.runId)],
-    nextCommand: verified.length > 0
-      ? buildFlowCommand('generate', run.runId, { limit: options.generate || 10 })
-      : buildFlowCommand('inspect', run.runId)
+    blockers: hasManualAction
+      ? ['sycm_manual_action_required']
+      : (verified.length > 0 ? [] : ['no_verified_keywords']),
+    allowedCommands: [nextCommand],
+    nextCommand: nextCommand
   };
 }
 
@@ -889,7 +912,7 @@ async function flowExport(options = {}) {
 async function flowDaily(options = {}) {
   const mine = await flowMine({ ...options, limit: options.mine || options.limit || 50 });
   const verify = await flowVerify({ ...options, runId: mine.runId, limit: options.verify || 20 });
-  if (verify.verified.length === 0) {
+  if (verify.verified.length === 0 || verify.blockers.includes('sycm_manual_action_required')) {
     const { run } = getRun({ dataDir: options.dataDir, runId: mine.runId });
     return {
       ok: true,
@@ -898,7 +921,7 @@ async function flowDaily(options = {}) {
       counts: run.counts,
       status: run.status,
       files: run.files,
-      blockers: ['no_verified_keywords'],
+      blockers: verify.blockers.length ? verify.blockers : ['no_verified_keywords'],
       allowedCommands: [verify.nextCommand],
       nextCommand: verify.nextCommand,
       steps: {

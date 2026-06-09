@@ -10,7 +10,7 @@ const { parseSycmData } = require('./sycm-parser');
 const { selectSycmTitleKeywords } = require('./sycm-keyword-selector');
 
 const SCHEMA_VERSION = 4; // bump when output structure changes
-const RUN_TIMEOUT = parseInt(process.env.RUN_TIMEOUT) || 120000;
+const DEFAULT_RUN_TIMEOUT = parseInt(process.env.RUN_TIMEOUT || process.env.TITLE_GEN_RUN_TIMEOUT_MS, 10) || 120000;
 const MIN_TITLE_BYTES = parseInt(process.env.MIN_TITLE_BYTES, 10) || 60;
 
 function fillFallbackAdvice(item) {
@@ -483,7 +483,7 @@ async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles,
 }
 
 async function run(blueOceanWord, options = {}) {
-  const { maxLength = 60, peerTitles = [], silent = false, limit = 0, onBatch = null, research = false, sycmData, sycmAuto = false, sycmFetchError = '', useImageSearch = false, maxImageSearch = 0, minPrice = 0, maxPrice = 0, signal = null, onProductsFound = null, onProgress = null, skipFlag = null, products: externalProducts = [], coreWord: providedCoreWord = '', modifiers: providedModifiers = null, semanticGroups: providedSemanticGroups = null, productsHash: providedProductsHash = '' } = options;
+  const { maxLength = 60, peerTitles = [], silent = false, limit = 0, onBatch = null, research = false, sycmData, sycmAuto = false, sycmFetchError = '', useImageSearch = false, maxImageSearch = 0, minPrice = 0, maxPrice = 0, signal = null, onProductsFound = null, onProgress = null, skipFlag = null, products: externalProducts = [], coreWord: providedCoreWord = '', modifiers: providedModifiers = null, semanticGroups: providedSemanticGroups = null, productsHash: providedProductsHash = '', runTimeoutMs = DEFAULT_RUN_TIMEOUT } = options;
   
   const log = silent ? () => {} : console.log.bind(console);
   const warn = silent ? () => {} : console.warn.bind(console);
@@ -772,10 +772,18 @@ let finalSycmData = sycmData;
     };
 
   let _raceTimeoutId = null;
+  const effectiveRunTimeoutMs = Math.max(30000, parseInt(runTimeoutMs, 10) || DEFAULT_RUN_TIMEOUT);
   const timeoutPromise = new Promise((resolve, reject) => {
-    _raceTimeoutId = setTimeout(() => 
-      reject(new Error(`标题生成超时(${RUN_TIMEOUT/1000}s)，请简化关键词或减少数量`)), RUN_TIMEOUT
-    );
+    _raceTimeoutId = setTimeout(() => {
+      const err = new Error(`标题生成超时(${Math.round(effectiveRunTimeoutMs / 1000)}s)，请简化关键词或减少数量`);
+      err.code = 'title_generation_timeout';
+      err.source = 'title-gen';
+      err.retryWith = {
+        count: Math.min(3, Math.max(1, parseInt(limit, 10) || 3)),
+        runTimeoutMs: Math.max(effectiveRunTimeoutMs, 180000)
+      };
+      reject(err);
+    }, effectiveRunTimeoutMs);
     
     if (signal) {
       signal.addEventListener('abort', () => {

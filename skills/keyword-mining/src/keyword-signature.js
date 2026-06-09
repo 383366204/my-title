@@ -1,5 +1,6 @@
 const { normalizeKeyword } = require('./seed-store');
 const { FACETS } = require('./expand-keywords');
+const { configuredProductWords, normalizeSynonyms, mergeFacets } = require('./config-loader');
 
 const PRODUCT_WORDS = [
   '狗咬胶', '逗猫棒', '收纳盒', '置物架', '喜糖盒', '多肉盆栽', '肥皂盒',
@@ -17,18 +18,21 @@ function uniqueSorted(words) {
   return [...new Set(words.filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-CN'));
 }
 
-function findFacetWords(keyword, facetNames) {
+function findFacetWords(keyword, facetNames, options = {}) {
+  const facets = mergeFacets(FACETS, options);
   const words = [];
   for (const name of facetNames) {
-    for (const word of FACETS[name] || []) {
-      if (keyword.includes(word)) words.push(word);
+    for (const word of facets[name] || []) {
+      const normalized = normalizeSynonyms(word, options);
+      if (keyword.includes(normalized)) words.push(normalized);
     }
   }
   return uniqueSorted(words);
 }
 
-function findCoreProduct(keyword) {
-  return PRODUCT_WORDS.find(word => keyword.includes(word)) || '';
+function findCoreProduct(keyword, options = {}) {
+  const productWords = configuredProductWords(PRODUCT_WORDS, options);
+  return productWords.find(word => keyword.includes(word)) || '';
 }
 
 function residualTokens(keyword, knownWords) {
@@ -47,11 +51,11 @@ function residualTokens(keyword, knownWords) {
  * @param {string} keyword Candidate keyword.
  * @returns {{keyword:string,coreProduct:string,rigid:string[],optional:string[],residual:string[],signature:string,productSignature:string}}
  */
-function keywordSignature(keyword) {
-  const normalized = normalizeKeyword(keyword);
-  const coreProduct = findCoreProduct(normalized);
-  const rigid = findFacetWords(normalized, [...RIGID_FACETS]);
-  const optional = findFacetWords(normalized, [...OPTIONAL_FACETS]);
+function keywordSignature(keyword, options = {}) {
+  const normalized = normalizeSynonyms(normalizeKeyword(keyword), options);
+  const coreProduct = findCoreProduct(normalized, options);
+  const rigid = findFacetWords(normalized, [...RIGID_FACETS], options);
+  const optional = findFacetWords(normalized, [...OPTIONAL_FACETS], options);
   const residual = residualTokens(normalized, [coreProduct, ...rigid, ...optional]);
   const signatureParts = [
     coreProduct || normalized,
@@ -71,5 +75,6 @@ function keywordSignature(keyword) {
 
 module.exports = {
   PRODUCT_WORDS,
-  keywordSignature
+  keywordSignature,
+  findCoreProduct
 };

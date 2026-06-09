@@ -25,6 +25,7 @@ Read the JSON result:
 - If `ok` is `true` and `status` is `ready_to_distribute`, open the file in `files.distributionBatch`.
 - If `status` is `needs_review`, stop before distribution. Read `files.distributionReview` and report rejected rows.
 - If `status` is `verified_empty`, stop. Report that SYCM did not verify any candidates.
+- If `status` is `manual_action_required` or `verified_partial_manual_required`, stop. Report `blockers` and ask the user to finish the browser action.
 - If `status` is `generate_failed`, stop. Report the run id and inspect `generated-products.jsonl`.
 - Always show `runId`, `status`, `counts`, `blockers`, and `nextCommand` to the user.
 
@@ -58,6 +59,7 @@ Rules:
 - If `verifyMode` is `blue_relaxed`, treat it as medium-confidence blue-ocean data.
 - If `verifyMode` is `hot`, treat it as trend/hot data, not strict blue-ocean data.
 - If `verified` is 0, stop and report `verified_empty`.
+- If `blockers` contains `sycm_manual_action_required`, stop even when some keywords were verified. Do not run generate.
 - If `verified` is greater than 0, continue.
 
 3. Generate:
@@ -70,6 +72,13 @@ Success condition:
 
 - JSON `ok` is `true`
 - `generated` is greater than 0
+
+Rules:
+
+- `--limit` is the number of verified keywords to generate.
+- Use `--products-per-keyword` when you need fewer or more products per keyword.
+- Do not call `node bin/cli.js "<keyword>" --count 10` as a substitute for this step; `--count` means candidate title count.
+- Do not run multiple title-generation commands in parallel.
 
 4. Export:
 
@@ -142,6 +151,8 @@ Rules:
 - `mined`: candidates are ready; run verify next.
 - `verified`: SYCM has verified at least one keyword; run generate next.
 - `verified_empty`: no keyword passed SYCM; stop.
+- `manual_action_required`: SYCM needs login, slider completion, or feature opening before continuing; stop.
+- `verified_partial_manual_required`: some keywords passed, but a later SYCM query needs manual action; stop before generation.
 - `generated`: product/title generation produced rows; run export next.
 - `generate_failed`: generation produced no usable rows; stop.
 - `ready_to_distribute`: batch file exists; ask human to review before distribution.
@@ -155,6 +166,7 @@ Rules:
 - Do not edit `data/pipeline/runs/*` manually.
 - Do not ignore a non-ready status.
 - Do not distribute when `mustReview` is `true`.
+- Do not continue after `sycm_manual_action_required`.
 - Do not invent the next step; use `allowedCommands[0]` or `nextCommand`.
 - Do not use a keyword in title generation if SYCM rejected it.
 

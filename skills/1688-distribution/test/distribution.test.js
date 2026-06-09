@@ -13,6 +13,7 @@ const {
   findRecentDuplicate,
   checkDistributionReadiness,
   confirmCopyRecords,
+  classifyCopyRecordText,
   distributeProducts
 } = require('../index');
 const { syncSkill } = require('../../../scripts/sync-hermes-skills');
@@ -135,6 +136,18 @@ describe('1688 distribution input handling', () => {
     assert.equal(result.ok, false);
     assert.equal(result.status, 'partial_confirmed');
     assert.deepEqual(result.missingOfferIds, ['657358172481']);
+  });
+
+  it('classifies merged batch and single-offer copy-log text', () => {
+    const result = classifyCopyRecordText(
+      ['640322388000', '657358172481'],
+      '全部(2)\n640322388000 复制中\n--- SINGLE SEARCH 657358172481 ---\n657358172481 复制成功',
+      { perOfferId: { '640322388000': { source: 'batch' }, '657358172481': { source: 'single' } } }
+    );
+    assert.equal(result.ok, true);
+    assert.equal(result.status, 'confirmed');
+    assert.deepEqual(result.missingOfferIds, []);
+    assert.equal(result.perOfferId['657358172481'].source, 'single');
   });
 
   it('checks readiness without browser when requested', async () => {

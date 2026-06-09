@@ -130,6 +130,91 @@ describe('pipeline-flow', () => {
     assert.strictEqual(result.sycmScore.usage, 'title_optional');
   });
 
+  test('flowVerify stops on SYCM slider manual action', async () => {
+    const dataDir = tempDataDir();
+    const mined = await flowMine({ dataDir, limit: 2 });
+    let calls = 0;
+    const err = new Error('生意参谋查询触发淘宝滑块/安全验证，请在当前 Chrome 页面手动完成滑块后重试');
+    err.status = 'slider_required';
+    err.details = { ok: false, status: 'slider_required', action: 'manual slider required' };
+
+    const result = await flowVerify({
+      dataDir,
+      runId: mined.runId,
+      limit: 2,
+      sycmExtractor: async () => {
+        calls += 1;
+        throw err;
+      }
+    });
+
+    assert.strictEqual(calls, 1);
+    assert.strictEqual(result.verified.length, 0);
+    assert.strictEqual(result.rejected[0].status, 'slider_required');
+    assert.ok(result.blockers.includes('sycm_manual_action_required'));
+  });
+
+  test('flowVerify does not continue after partial SYCM manual action', async () => {
+    const dataDir = tempDataDir();
+    const mined = await flowMine({ dataDir, limit: 2 });
+    fs.writeFileSync(path.join(mined.runDir, 'candidates.jsonl'), [
+      JSON.stringify({ keyword: 'alpha ring', nextAction: 'sycm_verify' }),
+      JSON.stringify({ keyword: 'beta ring', nextAction: 'sycm_verify' })
+    ].join('\n') + '\n', 'utf8');
+    let calls = 0;
+
+    const result = await flowVerify({
+      dataDir,
+      runId: mined.runId,
+      limit: 2,
+      sycmExtractor: async keyword => {
+        calls += 1;
+        if (calls === 1) {
+          return {
+            keyword,
+            data: [{ keyword, demandSupplyRatio: 3, searchPopularity: 200, clickRate: 45 }]
+          };
+        }
+        const err = new Error('manual slider required');
+        err.status = 'slider_required';
+        err.details = { ok: false, status: 'slider_required', action: 'manual slider required' };
+        throw err;
+      }
+    });
+
+    assert.strictEqual(calls, 2);
+    assert.strictEqual(result.verified.length, 1);
+    assert.ok(result.blockers.includes('sycm_manual_action_required'));
+    assert.ok(!result.nextCommand.includes('flow generate'));
+    assert.strictEqual(result.status, 'verified_partial_manual_required');
+  });
+
+  test('flowVerify skips observe-only candidates', async () => {
+    const dataDir = tempDataDir();
+    const mined = await flowMine({ dataDir, limit: 2 });
+    fs.writeFileSync(path.join(mined.runDir, 'candidates.jsonl'), [
+      JSON.stringify({ keyword: 'observe candidate', nextAction: 'observe' }),
+      JSON.stringify({ keyword: 'verify candidate', nextAction: 'sycm_verify' })
+    ].join('\n') + '\n', 'utf8');
+    const queried = [];
+
+    const result = await flowVerify({
+      dataDir,
+      runId: mined.runId,
+      limit: 2,
+      sycmExtractor: async keyword => {
+        queried.push(keyword);
+        return {
+          keyword,
+          data: [{ keyword, demandSupplyRatio: 2.5, searchPopularity: 100, clickRate: 30 }]
+        };
+      }
+    });
+
+    assert.deepStrictEqual(queried, ['verify candidate']);
+    assert.strictEqual(result.verified.length, 1);
+  });
+
   test('flowDaily writes resumable run files and distribution batch', async () => {
     const dataDir = tempDataDir();
     const sycmExtractor = async keyword => ({
