@@ -1,7 +1,15 @@
 const axios = require('axios');
 const { removeBannedWords } = require('./banned-words');
 // 引入通用的 LLM 结果解析与重试封装
-const { parseJsonFromLLM, retry } = require('./llm-utils');
+const { parseJsonFromLLM, retry, validateLLMJson } = require('./llm-utils');
+const {
+  CategoryFiltersResponseSchema,
+  CoreModifiersResponseSchema,
+  GenerateTitlesResponseSchema,
+  PeerKeywordsResponseSchema,
+  RelevanceScoresResponseSchema,
+  SelectAndGenerateResponseSchema
+} = require('./llm-schemas');
 
 const PROMPT_VERSION = 4; // bump when GLM prompts change
 
@@ -50,6 +58,21 @@ class GLMClient {
     // 火山引擎 doubao-lite 响应更快，超时适当缩短
     this._timeout = this.apiBase.includes('volces.com') ? 30000 : 15000;
     this._longTimeout = this._timeout * 2;
+    this.provider = config.provider || 'glm';
+  }
+
+  /**
+   * Build a chat completions request body with provider-specific options.
+   *
+   * @param {object} payload Base request body fields
+   * @returns {object} Request body for /chat/completions
+   */
+  _buildChatPayload(payload) {
+    const body = { model: this.model, ...payload };
+    if (this.provider === 'minimax') {
+      body.reasoning_split = true;
+    }
+    return body;
   }
 
   /**
@@ -109,11 +132,7 @@ synonyms 每组最多10个，只列最常见的变体
 
     const response = await axios.post(
       `${this.apiBase}/chat/completions`,
-      {
-        model: this.model,
-        messages,
-        temperature: 0.1
-      },
+      this._buildChatPayload({ messages, temperature: 0.1 }),
       {
         headers: {
           'Authorization': `Bearer ${this.apiKey}`,
@@ -125,7 +144,11 @@ synonyms 每组最多10个，只列最常见的变体
 
     let content = response.data.choices[0].message.content.trim();
     // 移除可能的 markdown 代码块并解析 JSON
-    const result = parseJsonFromLLM(content);
+    const result = validateLLMJson(
+      parseJsonFromLLM(content),
+      CoreModifiersResponseSchema,
+      'core/modifiers response'
+    );
 
     // 验证格式
     if (!result.coreWord || !Array.isArray(result.modifiers)) {
@@ -212,11 +235,7 @@ synonyms 每组最多10个，只列最常见的变体
 
     const response = await axios.post(
       `${this.apiBase}/chat/completions`,
-      {
-        model: this.model,
-        messages,
-        temperature: 0.1
-      },
+      this._buildChatPayload({ messages, temperature: 0.1 }),
       {
         headers: {
           'Authorization': `Bearer ${this.apiKey}`,
@@ -227,7 +246,11 @@ synonyms 每组最多10个，只列最常见的变体
     );
 
     let content = response.data.choices[0].message.content.trim();
-    const result = parseJsonFromLLM(content);
+    const result = validateLLMJson(
+      parseJsonFromLLM(content),
+      PeerKeywordsResponseSchema,
+      'peer keyword response'
+    );
 
     // 验证格式
     if (!result.coreWord || !result.blueOceanWord || !Array.isArray(result.modifiers)) {
@@ -311,11 +334,7 @@ synonyms 每组最多10个，只列最常见的变体
 
     const response = await axios.post(
       `${this.apiBase}/chat/completions`,
-      {
-        model: this.model,
-        messages,
-        temperature: 0.1
-      },
+      this._buildChatPayload({ messages, temperature: 0.1 }),
       {
         headers: {
           'Authorization': `Bearer ${this.apiKey}`,
@@ -327,7 +346,11 @@ synonyms 每组最多10个，只列最常见的变体
 
     let content = response.data.choices[0].message.content.trim();
     // 移除可能的 markdown 代码块并解析 JSON
-    const result = parseJsonFromLLM(content);
+    const result = validateLLMJson(
+      parseJsonFromLLM(content),
+      RelevanceScoresResponseSchema,
+      'relevance score response'
+    );
 
     // 验证返回格式
     if (!Array.isArray(result)) {
@@ -360,7 +383,7 @@ synonyms 每组最多10个，只列最常见的变体
   重要规则：
   1. 每个标题必须以蓝海词"${blueOceanWord}"开头
   2. 标题应参考1688商品标题和淘宝同行标题中的高频词汇
-  3. 标题长度应尽量接近${Math.floor(maxLength / 2)}个汉字，必须达到26-30个汉字，不足时补充高频属性词场景词款式词适用人群词
+  3. 标题长度必须尽可能接近${Math.floor(maxLength / 2)}个汉字；当 maxLength=60 时目标是30个中文字即60字节，不要停在20多个字；不足时继续补充高频属性词场景词款式词适用人群词，直到接近上限
   4. 优先使用刚性修饰词（材质、颜色、规格、人群）
    5. 每个标题必须差异化：从不同角度（风格、场景、人群、卖点）切入，禁止生成相同或高度相似的标题
    6. 标题中不得包含品牌名称（如周大福、Nike、Adidas等），除非用户输入中明确包含该品牌词
@@ -381,11 +404,7 @@ synonyms 每组最多10个，只列最常见的变体
     const response = await retry(async () => {
       const res = await axios.post(
         `${this.apiBase}/chat/completions`,
-        {
-          model: this.model,
-          messages,
-          temperature: 0.2
-        },
+        this._buildChatPayload({ messages, temperature: 0.2 }),
         {
           headers: {
             'Authorization': `Bearer ${this.apiKey}`,
@@ -399,7 +418,11 @@ synonyms 每组最多10个，只列最常见的变体
 
     let content = response.data.choices[0].message.content.trim();
     // 使用通用解析器解析 LLM JSON 输出
-    const result = parseJsonFromLLM(content);
+    const result = validateLLMJson(
+      parseJsonFromLLM(content),
+      GenerateTitlesResponseSchema,
+      'title generation response'
+    );
 
     if (!Array.isArray(result.titles)) {
       // 兜底：若返回结构异常，尝试返回空数组以降级处理
@@ -476,7 +499,7 @@ ${sycmLines}
   标题生成必须遵守以下规则：
   ${COMMON_TITLE_RULES_TEXT}
   - 每个生成的标题必须以蓝海词"${blueOceanWord}"开头（硬性要求，不可省略）
-  - 每个标题必须达到26-30个汉字，尽量接近${Math.floor(maxLength / 2)}个汉字；不足时补充高频属性词场景词款式词适用人群词
+  - 每个标题必须尽可能接近${Math.floor(maxLength / 2)}个汉字；当 maxLength=60 时目标是30个中文字即60字节，不要停在20多个字；不足时继续补充高频属性词场景词款式词适用人群词，直到接近上限
   - 标题中不得包含品牌名称（如周大福、Nike、Adidas等），除非用户输入中明确包含该品牌词
   - 当前日期：${new Date().toLocaleDateString('zh-CN')}，避免使用过时的季节描述（如去年年份）
   - 同一语义族中的词在单个标题中只使用一个变体（如'纯银'和'S925银'不要同时出现）${Object.keys(semanticGroups).length > 0 ? `\n  已知语义族：${JSON.stringify(semanticGroups)}` : ''}
@@ -509,11 +532,7 @@ ${sycmLines}
     const response = await retry(async () => {
       return await axios.post(
         `${this.apiBase}/chat/completions`,
-        {
-          model: this.model,
-          messages,
-          temperature: 0.2
-        },
+        this._buildChatPayload({ messages, temperature: 0.2 }),
         {
           headers: {
             'Authorization': `Bearer ${this.apiKey}`,
@@ -526,7 +545,11 @@ ${sycmLines}
 
     let content = response.data.choices[0].message.content.trim();
     // 移除可能的 markdown 代码块并解析 JSON
-    const result = parseJsonFromLLM(content);
+    const result = validateLLMJson(
+      parseJsonFromLLM(content),
+      SelectAndGenerateResponseSchema,
+      'select-and-generate response'
+    );
 
     // 简单校验结构
     if (!result || !Array.isArray(result.selectedProducts) || !Array.isArray(result.titles)) {
@@ -574,11 +597,7 @@ ${sycmLines}
     const response = await retry(async () => {
       return await axios.post(
         `${this.apiBase}/chat/completions`,
-        {
-          model: this.model,
-          messages,
-          temperature: 0.3
-        },
+        this._buildChatPayload({ messages, temperature: 0.3 }),
         {
           headers: {
             'Authorization': `Bearer ${this.apiKey}`,
@@ -590,7 +609,11 @@ ${sycmLines}
     }, 1, 2000);
 
     let content = response.data.choices[0].message.content.trim();
-    const result = parseJsonFromLLM(content);
+    const result = validateLLMJson(
+      parseJsonFromLLM(content),
+      CategoryFiltersResponseSchema,
+      'category filters response'
+    );
 
     if (!result || !Array.isArray(result.targetCategories) || !Array.isArray(result.excludeCategories) || !Array.isArray(result.relatedMaterials)) {
       throw new Error('Invalid JSON response from generateCategoryFilters');

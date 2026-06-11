@@ -1,7 +1,8 @@
 const path = require('path');
 const fs = require('fs');
 const axios = require('axios');
-const { parseJsonFromLLM, retry } = require('../../../core/llm-utils');
+const { parseJsonFromLLM, retry, validateLLMJson } = require('../../../core/llm-utils');
+const { KeywordSuggestionResponseSchema } = require('../../../core/llm-schemas');
 
 // 策略定义
 const STRATEGIES = {
@@ -367,7 +368,11 @@ async function suggestKeywords(options) {
     }, 1, 2000);
 
     let content = response.data.choices[0].message.content.trim();
-    const result = parseJsonFromLLM(content);
+    const result = validateLLMJson(
+      parseJsonFromLLM(content),
+      KeywordSuggestionResponseSchema,
+      'keyword suggestion response'
+    );
 
     // 7. 提取关键词列表
     let keywords = Array.isArray(result.keywords) ? result.keywords : [];

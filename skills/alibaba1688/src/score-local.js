@@ -51,13 +51,20 @@ function scoreLocally(products, coreWord, blueOceanWord, modifiers, semanticGrou
     }
 
     // 30天销量>100: +15分
-    const last30DaysSales = (product.stats && product.stats.last30DaysSales) || 0;
+    const last30DaysSales = (product.stats && product.stats.last30DaysSales) ||
+      product.sales30days ||
+      product.sales30Days ||
+      product.last30DaysSales ||
+      0;
     if (last30DaysSales > 100) {
       score += 15;
     }
 
     // 好评率>95%: +5分
-    const goodRates = (product.stats && product.stats.goodRates) || 0;
+    const goodRates = (product.stats && product.stats.goodRates) ||
+      product.goodRates ||
+      product.goodRate ||
+      0;
     if (goodRates > 95) {
       score += 5;
     }

@@ -1,78 +1,101 @@
-const { execSync, execFileSync } = require('child_process');
-
-const { TAOBAO_NATIVE_PATH, isTaobaoNativeInstalled, toWindowsPath, ensureTaobaoDesktopReady } = require('./taobao-utils');
+const {
+  isTaobaoNativeInstalled,
+  runTaobaoNativeSync,
+  ensureTaobaoDesktopReady
+} = require('./taobao-utils');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 /**
- * 搜索淘宝同行标题
- * @param {string} keyword - 搜索关键词
- * @param {object} options - 配置选项
- * @param {string} [options.path] - CLI路径，默认自动检测
- * @param {number} [options.timeout] - 超时时间(毫秒)，默认30000
- * @param {number} [options.maxResults] - 最大结果数，默认10
- * @returns {Promise<string[]>} 同行标题数组
+ * Search Taobao peer titles through taobao-native.
+ *
+ * @param {string} keyword - Search keyword.
+ * @param {object} [options={}] - Search options.
+ * @param {number} [options.timeout=30000] - Command timeout in milliseconds.
+ * @param {number} [options.maxResults=10] - Max titles to return.
+ * @returns {Promise<string[]>} Peer product titles.
  */
 async function searchTaobaoTitles(keyword, options = {}) {
-  const cliPath = options.path || TAOBAO_NATIVE_PATH;
   const timeout = options.timeout || 30000;
 
-  // 检测是否安装
   if (!isTaobaoNativeInstalled()) {
     console.warn('[taobao] taobao-native CLI 未安装，请使用 --peer-titles 手动提供同行标题');
     return [];
   }
 
   try {
-    // 确保淘宝桌面版已启动并就绪（同进程只启动一次）
     const ready = await ensureTaobaoDesktopReady();
     if (!ready) {
-      console.warn('⚠️  淘宝桌面版启动失败');
+      console.warn('[taobao] 淘宝桌面版启动失败');
       return [];
     }
 
-    // 转换路径为 Windows 格式
-    const winPath = toWindowsPath(cliPath);
-    
-    console.error(`🔍 搜索关键词: ${keyword}`);
-    
-    // 调用 taobao-native 搜索商品
-    const args = JSON.stringify({ keyword, sourceApp: 'ecom-ai-tools' });
-    const result = execFileSync('/mnt/c/Windows/System32/cmd.exe', ['/c', winPath, 'search_products', '--args', args], {
+    console.error(`[taobao] 搜索关键词: ${keyword}`);
+
+    const reqFile = path.join(os.tmpdir(), `taobao-search-req-${Date.now()}.json`);
+    const outFile = path.join(os.tmpdir(), `taobao-search-out-${Date.now()}.json`);
+    fs.writeFileSync(reqFile, JSON.stringify({
+      tool: 'search_products',
+      arguments: { keyword, sourceApp: 'ecom-ai-tools' }
+    }), 'utf8');
+
+    const result = runTaobaoNativeSync(['--request', reqFile, '-o', outFile], {
       encoding: 'utf8',
-      timeout: timeout,
+      timeout,
       stdio: ['pipe', 'pipe', 'pipe']
     });
 
-    // 解析输出（第一行应该是 JSON）
-    const lines = result.trim().split('\n');
-    const jsonLine = lines.find(line => line.startsWith('{'));
-    
-    if (!jsonLine) {
-      console.warn('⚠️  未找到有效的 JSON 响应');
+    const output = fs.existsSync(outFile)
+      ? fs.readFileSync(outFile, 'utf8')
+      : String(result || '');
+
+    try { fs.unlinkSync(reqFile); } catch (_) {}
+    try { fs.unlinkSync(outFile); } catch (_) {}
+
+    const text = output.trim();
+    if (!text) {
+      console.warn('[taobao] 未找到有效的 JSON 响应');
       return [];
     }
 
-    const data = JSON.parse(jsonLine);
-
-    // 提取商品标题（从 result.products 数组）
-    if (data?.result?.products && Array.isArray(data.result.products)) {
-      const titles = data.result.products
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (_) {
+      const lines = text.split(/\r?\n/);
+      const jsonLine = lines.find(line => line.trim().startsWith('{'));
+      if (!jsonLine) {
+        console.warn('[taobao] 未找到有效的 JSON 响应');
+        return [];
+      }
+      data = JSON.parse(jsonLine);
+    }
+    const products = data?.result?.products;
+    if (Array.isArray(products)) {
+      const titles = products
         .slice(0, options.maxResults || 10)
         .map(p => p.title || '')
-        .filter(t => t.length > 0);
-      
-      console.error(`✅ 找到 ${titles.length} 个商品标题`);
+        .filter(Boolean);
+
+      console.error(`[taobao] 找到 ${titles.length} 个商品标题`);
       return titles;
     }
 
-    console.warn('⚠️  搜索结果格式异常，数据结构:', Object.keys(data || {}));
+    console.warn('[taobao] 搜索结果格式异常:', Object.keys(data || {}));
     return [];
   } catch (error) {
+    const detail = [
+      error && error.stdout ? String(error.stdout).trim() : '',
+      error && error.stderr ? String(error.stderr).trim() : ''
+    ].filter(Boolean).join(' ');
     if (error && error.message && error.message.includes('timeout')) {
       console.warn('[taobao] peer title search timed out: ' + error.message);
     } else {
       console.warn('[taobao] peer title search failed: ' + (error ? error.message : error));
+      if (detail) console.warn('[taobao] detail: ' + detail);
     }
-    console.warn('[taobao]   请使用 --peer-titles 手动提供同行标题');
+    console.warn('[taobao] 请使用 --peer-titles 手动提供同行标题');
     return [];
   }
 }

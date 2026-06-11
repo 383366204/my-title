@@ -2,6 +2,24 @@ const crypto = require('crypto');
 const axios = require('axios');
 const { getRateLimiter, RateLimitError } = require('./rate-limiter');
 
+function normalizePriceBand(price) {
+  const text = String(price ?? '').replace(/\s+/g, '');
+  const matches = text.match(/[0-9]+(?:\.[0-9]+)?/g) || [];
+  const prices = Array.from(new Set(matches.map(Number).filter(n => Number.isFinite(n) && n >= 0)));
+  if (prices.length === 0) {
+    return { minPrice: null, maxPrice: null, prices: [], display: '' };
+  }
+  const sorted = prices.sort((a, b) => a - b);
+  const minPrice = sorted[0];
+  const maxPrice = sorted[sorted.length - 1];
+  return {
+    minPrice,
+    maxPrice,
+    prices: sorted,
+    display: minPrice === maxPrice ? String(minPrice) : minPrice + '-' + maxPrice
+  };
+}
+
 class Alibaba1688Client {
   /**
    * @param {string} ak - 1688 Access Key (可能为 Base64 编码，或原始格式: 前32字符=Secret, 剩余=KeyID)
@@ -116,6 +134,14 @@ class Alibaba1688Client {
     const rateLimiter = getRateLimiter();
     const acquireResult = await rateLimiter.acquire();
     if (!acquireResult.allowed) {
+      const waitSeconds = Math.ceil(acquireResult.waitMs / 1000);
+      const message = acquireResult.cooldown
+        ? `1688 API cooling down, retry after ${waitSeconds} seconds`
+        : `1688 API rate limited, estimated wait ${waitSeconds} seconds`;
+      const error = new RateLimitError(message, acquireResult.waitMs);
+      error.code = '1688_rate_limited';
+      error.source = '1688';
+      throw error;
       if (acquireResult.cooldown) {
         throw new RateLimitError(
           `1688 API 冷却中，剩余 ${Math.ceil(acquireResult.waitMs / 1000)} 秒`,
@@ -150,6 +176,9 @@ class Alibaba1688Client {
         lastError = err;
         if (err.response && err.response.status === 429) {
           rateLimiter.report429();
+          err.code = '1688_rate_limited';
+          err.source = '1688';
+          err.cooldownRemainingMs = rateLimiter.getStatus().cooldownRemainingMs;
         }
         const isRetryable =
           (err.response && (err.response.status === 429 || err.response.status === 503)) ||
@@ -186,6 +215,7 @@ class Alibaba1688Client {
       const id = item.offerId != null ? String(item.offerId) : key;
       const title = item.title ?? '';
       const price = item.price ?? '';
+      const priceBand = normalizePriceBand(price);
       const urlField = item.image ?? '';
       const rawStats = item.stats ?? {};
 
@@ -202,6 +232,9 @@ class Alibaba1688Client {
         id,
         title,
         price,
+        priceBand,
+        priceMin: priceBand.minPrice,
+        priceMax: priceBand.maxPrice,
         url: urlField,
         stats: {
           last30DaysSales: parseNumber(rawStats.last30DaysSales),

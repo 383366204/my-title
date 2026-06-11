@@ -13,6 +13,16 @@ function getJieba() {
   return _jieba || null;
 }
 
+function safeJiebaCut(jieba, title) {
+  if (!jieba) return null;
+  try {
+    return jieba.cut(title);
+  } catch (e) {
+    _jieba = false;
+    return null;
+  }
+}
+
 /**
  * 计算位置权重
  * @param {number} offset - 字符偏移量
@@ -52,10 +62,10 @@ function analyzePeerTitles(peerTitles, sourceTitleOrArray) {
   const weightedCounts = new Map();
 
   for (const title of uniqueTitles) {
-    if (jieba) {
-      // JIEBA 模式：先分词，再做词内 n-gram（不跨词边界）
-      const words = jieba.cut(title);
+    const words = safeJiebaCut(jieba, title);
+    if (words) {
       let currentOffset = 0;
+      // JIEBA 模式：先分词，再做词内 n-gram（不跨词边界）
       for (const word of words) {
         const wordStart = title.indexOf(word, currentOffset);
         if (wordStart === -1) {

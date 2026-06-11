@@ -12,14 +12,24 @@ import { EventEmitter } from 'events';
 const require = createRequire(import.meta.url);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
+require('../core/env').loadEnv({ projectRoot: path.resolve(__dirname, '..') });
 
 const { generateTitlePipeline } = require('../skills/title-gen');
 const { searchAll } = require('../skills/alibaba1688');
 const { getRateLimiter, RateLimitError } = require('../skills/alibaba1688/src/rate-limiter');
+const taobaoOpc = require('../skills/taobao-opc');
 
-const searchProductsAdapter = ({ coreWord, blueOceanWord, modifiers, semanticGroups }) =>
-  searchAll(coreWord, blueOceanWord, modifiers, semanticGroups);
+const searchProductsAdapter = ({ coreWord, blueOceanWord, modifiers, semanticGroups, searchMode, webFilters, port, maxProducts, maxPages, maxResolveLinks, scrollLoad, scrollSteps }) =>
+  searchAll(coreWord, blueOceanWord, modifiers, semanticGroups, {
+    mode: searchMode || 'api',
+    port,
+    maxProducts,
+    maxPages,
+    maxResolveLinks,
+    scrollLoad,
+    scrollSteps,
+    webFilters
+  });
 
 async function fetchSycmKeywordDataAdapter({ keyword }) {
   const { extractSycmData, DEFAULT_FILTER_CONDITIONS } = require('../skills/sycm-research');
@@ -573,6 +583,72 @@ setInterval(() => {
     }
   }
 }, 5 * 60 * 1000);
+
+server.tool(
+  'taobao_opc_list_tools',
+  '列出远端淘宝 OPC/OPT 图片服务 MCP 网关暴露的工具。首次接入或调用新工具前先用它查看 inputSchema。',
+  {
+    timeout_ms: z.number().default(60000).describe('请求超时时间，毫秒，默认 60000'),
+  },
+  async ({ timeout_ms }) => {
+    try {
+      const tools = await taobaoOpc.listTools({ timeoutMs: timeout_ms });
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({ ok: true, tools }, null, 2)
+        }]
+      };
+    } catch (err) {
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({ ok: false, error: err.message }, null, 2)
+        }],
+        isError: true
+      };
+    }
+  }
+);
+
+server.tool(
+  'taobao_opc_call',
+  [
+    '调用远端淘宝 OPC/OPT 图片服务 MCP 工具。',
+    '调用前请先用 taobao_opc_list_tools 查看目标工具 inputSchema，并严格按 schema 传 arguments。',
+    '例如 query_item_more_info 的 arguments 可为 {"params":{"itemId":"1026014382497","fields":"num_iid,title,pic_url,item_img,sku"}}。',
+    '如果远端返回 NEED_AUTH 或授权链接，请把链接交给用户自行授权。'
+  ].join('\n'),
+  {
+    tool: z.string().describe('远端 MCP 工具名，例如 query_item_more_info'),
+    arguments: z.object({}).passthrough().default({}).describe('远端工具参数，必须符合远端 inputSchema'),
+    timeout_ms: z.number().default(60000).describe('请求超时时间，毫秒，默认 60000'),
+  },
+  async ({ tool, arguments: toolArguments, timeout_ms }) => {
+    try {
+      const result = await taobaoOpc.callTool(tool, toolArguments || {}, { timeoutMs: timeout_ms });
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            ok: !result.isError,
+            result,
+            normalizedContent: taobaoOpc.normalizeToolContent(result)
+          }, null, 2)
+        }],
+        isError: !!result.isError
+      };
+    } catch (err) {
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({ ok: false, error: err.message }, null, 2)
+        }],
+        isError: true
+      };
+    }
+  }
+);
 
 server.tool(
   'generate_title',

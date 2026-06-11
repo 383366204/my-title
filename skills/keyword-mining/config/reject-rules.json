@@ -1,0 +1,19 @@
+{
+  "facetRules": [
+    {
+      "product": ["\u6212\u6307", "\u8033\u73af", "\u8033\u9489", "\u9879\u94fe", "\u624b\u94fe"],
+      "crowd": ["\u5a74\u7ae5"],
+      "reason": "infant_jewelry_risk"
+    },
+    {
+      "product": ["\u5ba0\u7269\u73a9\u5177", "\u732b\u73a9\u5177", "\u72d7\u73a9\u5177", "\u72d7\u54ac\u80f6"],
+      "material": ["\u7eaf\u94f6", "\u739b\u7459", "\u6731\u7802", "\u548c\u7530\u7389"],
+      "reason": "pet_toy_material_mismatch"
+    },
+    {
+      "product": ["\u624b\u7ef3", "\u9999\u5305"],
+      "material": ["\u4e0d\u9508\u94a2", "\u949b\u94a2"],
+      "reason": "festival_accessory_material_mismatch"
+    }
+  ]
+}

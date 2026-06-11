@@ -67,6 +67,93 @@ function _createLoginRequiredError(options) {
   return err;
 }
 
+function _createManualActionError(status, message, options, extra) {
+  var err = new Error(message);
+  err.code = status === 'slider_required' ? 'SYCM_SLIDER_REQUIRED' : 'SYCM_MANUAL_ACTION_REQUIRED';
+  err.status = status;
+  err.loginUrl = 'https://sycm.taobao.com/';
+  err.profileDir = _getManualLoginProfileDir(options);
+  err.details = Object.assign({
+    ok: false,
+    status: status,
+    message: message,
+    action: status === 'slider_required'
+      ? '请在当前 Chrome 页面手动完成滑块/安全验证，完成后重新调用本工具。不要让 agent 尝试拖动滑块。'
+      : '请在当前 Chrome 页面手动完成提示操作，完成后重新调用本工具。',
+    loginUrl: err.loginUrl,
+    profileDir: err.profileDir
+  }, extra || {});
+  return err;
+}
+
+async function _detectSycmManualBlocker(cdp) {
+  var pageState = { status: 'ok', reason: '', url: '', title: '', text: '' };
+  try {
+    pageState = await cdp.evaluate(
+      "(function(){" +
+      "var text=(document.body&&document.body.innerText||document.body&&document.body.textContent||'').replace(/\\s+/g,' ').slice(0,3000);" +
+      "var url=location.href;var title=document.title||'';" +
+      "var hasSlider=/滑块|拖动滑块|安全验证|安全检测|人机验证|请按住滑块|验证一下/.test(text)||" +
+      "!!document.querySelector('.nc-container,#nc_1_n1z,#nc_1_wrapper,[class*=captcha],[class*=slider],[class*=verify],iframe[src*=punish],iframe[src*=captcha]');" +
+      "var hasBaxia=/punish|captcha|baxia|action=captcha/.test(url)||!!document.querySelector('iframe[name=baxia-dialog-content],iframe[src*=punish],iframe[src*=captcha]');" +
+      "var hasDataTable=!!document.querySelector('.ant-table-thead,.ant-table-tbody,.oui-table,.el-table__body-wrapper');" +
+      "var featureRequired=/一键领取|免费领取|立即领取|开通市场洞察|免费使用全部产品|市场洞察全新/.test(text)&&!hasDataTable;" +
+      "if(hasSlider||hasBaxia)return{status:'slider_required',reason:'detected captcha/slider',url:url,title:title,text:text};" +
+      "if(featureRequired)return{status:'sycm_feature_required',reason:'detected feature claim page',url:url,title:title,text:text};" +
+      "return{status:'ok',reason:'',url:url,title:title,text:text};" +
+      "})()",
+      8000
+    );
+  } catch (e) {
+    pageState = { status: 'ok', reason: '', url: '', title: '', text: '' };
+  }
+
+  if (pageState && pageState.status !== 'ok') return pageState;
+
+  try {
+    var tree = await cdp.sendCommand('Page.getFrameTree', {});
+    var found = null;
+    function walk(node) {
+      if (!node || !node.frame || found) return;
+      var name = node.frame.name || '';
+      var url = node.frame.url || '';
+      if (name === 'baxia-dialog-content' || url.includes('/punish') || url.includes('action=captcha') || url.includes('captcha')) {
+        found = { status: 'slider_required', reason: 'captcha iframe detected', url: url, title: '', text: '' };
+        return;
+      }
+      (node.childFrames || []).forEach(walk);
+    }
+    walk(tree.frameTree);
+    if (found) return found;
+  } catch (e2) {}
+
+  return { status: 'ok', reason: '', url: pageState.url || '', title: pageState.title || '', text: pageState.text || '' };
+}
+
+async function _throwIfManualBlocker(cdp, options, onProgress, context) {
+  var state = await _detectSycmManualBlocker(cdp);
+  if (!state || state.status === 'ok') return state;
+  if (state.status === 'slider_required') {
+    onProgress('[MANUAL] 检测到淘宝滑块/安全验证，请用户在当前 Chrome 中手动完成后重试');
+    throw _createManualActionError(
+      'slider_required',
+      '生意参谋查询触发淘宝滑块/安全验证，请在当前 Chrome 页面手动完成滑块后重试',
+      options,
+      { currentUrl: state.url, pageTitle: state.title, reason: state.reason, context: context || '' }
+    );
+  }
+  if (state.status === 'sycm_feature_required') {
+    onProgress('[MANUAL] 检测到生意参谋功能未领取/未开通，请用户在页面点击一键领取或完成开通后重试');
+    throw _createManualActionError(
+      'sycm_feature_required',
+      '生意参谋功能可能尚未领取或开通，请在当前 Chrome 中完成“一键领取/免费领取”后重试',
+      options,
+      { currentUrl: state.url, pageTitle: state.title, reason: state.reason, context: context || '' }
+    );
+  }
+  return state;
+}
+
 async function _hasLoginIframe(cdp) {
   try {
     var tree = await cdp.sendCommand('Page.getFrameTree', {});
@@ -507,6 +594,7 @@ async function extractSycmData(keyword, options) {
     cdp = await _createCdpClient(tab.webSocketDebuggerUrl);
     await cdp.sendCommand('Page.enable', {});
     var currentUrl = await cdp.evaluate("window.location.href", 5000);
+    await _throwIfManualBlocker(cdp, options, onProgress, 'after_initial_navigation');
 
     if (currentUrl.includes('login.taobao.com') ||
         currentUrl.includes('passport.taobao.com') ||
@@ -521,6 +609,7 @@ async function extractSycmData(keyword, options) {
     tab = await _connectToTab(port, 'search_analysis');
     cdp = await _createCdpClient(tab.webSocketDebuggerUrl);
     await cdp.sendCommand('Page.enable', {});
+    await _throwIfManualBlocker(cdp, options, onProgress, 'before_mode_switch');
 
     // 先切换到蓝海词模式（如果需要），再勾选指标
     if (mode === 'blue') {
@@ -556,6 +645,7 @@ async function extractSycmData(keyword, options) {
     var colReady = false;
     for (var i = 0; i < COLUMN_POLL_MAX; i++) {
       await new Promise(function(r) { setTimeout(r, COLUMN_POLL_INTERVAL); });
+      await _throwIfManualBlocker(cdp, options, onProgress, 'waiting_for_table_columns');
       var hCount = await cdp.evaluate(
         "document.querySelector('.ant-table-thead').querySelectorAll('th').length",
         5000
@@ -563,7 +653,10 @@ async function extractSycmData(keyword, options) {
       if (hCount >= 7) { colReady = true; break; }
     }
 
-    if (!colReady) onProgress('[WARN] Table columns may not be fully loaded');
+    if (!colReady) {
+      await _throwIfManualBlocker(cdp, options, onProgress, 'table_columns_not_ready');
+      onProgress('[WARN] Table columns may not be fully loaded');
+    }
 
     // 设置过滤条件（仅蓝海词模式）
     var filterApplied = false;
@@ -604,6 +697,7 @@ async function extractSycmData(keyword, options) {
 
     // 提取第 1 页（含关键词校验，防止 SPA 缓存返回旧数据）
     onProgress('[5/6] Extracting page 1/' + totalPages + '...');
+    await _throwIfManualBlocker(cdp, options, onProgress, 'before_extract_page_1');
     var result = await cdp.evaluate(_buildExtractScript(), 25000);
     var parsed = (typeof result === 'string') ? JSON.parse(result) : null;
     var allData = parsed ? parsed.d : [];
@@ -888,7 +982,7 @@ async function _clickLoginElement(cdp, selector, textHints) {
 async function _hasSlider(cdp) {
   try {
     var hasSlider = await cdp.evaluateInFrame('alibaba-login-box',
-      "(function(){var text=document.body?document.body.textContent:'';return /滑块|验证|安全检测/.test(text)||!!document.querySelector('.nc-lang-cnt,#nc_1_n1z,.nc-container')})()"
+      "(function(){var text=document.body?document.body.textContent:'';return /滑块|拖动滑块|验证|安全检测|人机验证/.test(text)||!!document.querySelector('.nc-lang-cnt,#nc_1_n1z,.nc-container,#nc_1_wrapper,[class*=captcha],[class*=slider],[class*=verify]')})()"
     );
     return !!hasSlider;
   } catch (e) {

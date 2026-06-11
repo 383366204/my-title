@@ -1,12 +1,14 @@
 const { test, afterEach } = require('node:test');
 const assert = require('assert');
 const Alibaba1688Client = require('../src/client');
+const { _resetInstance } = require('../src/rate-limiter');
 const mock = require('./helpers/mock-data');
 let axios = require('axios');
 
 const AK = 'a'.repeat(48);
 
 afterEach(() => {
+  _resetInstance();
 });
 
 test('Test 1: should return products with correct structure', async () => {
@@ -25,6 +27,14 @@ test('Test 1: should return products with correct structure', async () => {
   assert.ok(first, 'should contain product with id 808568029789');
   assert.strictEqual(first.title, 'Test Title A');
   assert.strictEqual(first.price, '3.00');
+  assert.deepStrictEqual(first.priceBand, {
+    minPrice: 3,
+    maxPrice: 3,
+    prices: [3],
+    display: '3'
+  });
+  assert.strictEqual(first.priceMin, 3);
+  assert.strictEqual(first.priceMax, 3);
   assert.strictEqual(first.url, 'https://example.com/img1.jpg');
   assert.ok(first.stats);
   assert.strictEqual(first.stats.last30DaysSales, 600);

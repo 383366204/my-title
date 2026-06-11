@@ -77,6 +77,7 @@ describe('LLM provider factory', () => {
     assert.equal(client.apiKey, 'minimax-test-key');
     assert.equal(client.apiBase, 'https://api.minimaxi.com/v1');
     assert.equal(client.model, 'MiniMax-test-model');
+    assert.equal(client._buildChatPayload({ messages: [], temperature: 0.1 }).reasoning_split, true);
   });
 
   it('supports a generic OpenAI-compatible provider', () => {

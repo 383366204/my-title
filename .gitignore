@@ -27,6 +27,13 @@ Thumbs.db
 *.log
 npm-debug.log*
 
+# Runtime data
+output/
+data/pipeline/
+data/distribution-runs.jsonl
+data/keyword-mining/candidates.jsonl
+data/keyword-mining/seed-events.jsonl
+
 # Sisyphus working files
 .sisyphus/
 

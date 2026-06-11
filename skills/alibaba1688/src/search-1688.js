@@ -1,20 +1,65 @@
 const Alibaba1688Client = require('./client');
 const { scoreLocally } = require('./score-local');
-
+const { searchWeb1688 } = require('./search-web-1688');
 
 /**
- * 根据刚性修饰词过滤产品
- * @param {Array<object>} products - 商品列表
- * @param {Array<{word: string, rigidity: 'rigid'|'optional'}>} modifiers - 修饰词列表
- * @param {Object} [semanticGroups={}] - 语义族映射 {修饰词: [同义词数组]}
- * @returns {Array<object>} 过滤后的商品列表
+ * Build progressive 1688 search queries from core word and rigid modifiers.
+ * @param {string} coreWord - Core product word.
+ * @param {string} blueOceanWord - Blue-ocean keyword.
+ * @param {Array<{word: string, rigidity: 'rigid'|'optional'}>} modifiers - Modifiers.
+ * @returns {string[]} Unique search queries.
+ */
+function buildSearchQueries(coreWord, blueOceanWord, modifiers = []) {
+  const rigidWords = modifiers
+    .filter(m => m && m.rigidity === 'rigid')
+    .map(m => m.word)
+    .filter(Boolean);
+  const dedupedRigids = rigidWords.filter(word => !coreWord.includes(word) && word !== coreWord);
+
+  const queries = [coreWord];
+  let currentQuery = coreWord;
+  for (let i = 0; i < dedupedRigids.length && queries.length < 4; i++) {
+    currentQuery = currentQuery + dedupedRigids[i];
+    queries.push(currentQuery);
+  }
+  if (blueOceanWord && !queries.includes(blueOceanWord) && queries.length < 4) {
+    queries.push(blueOceanWord);
+  }
+  return [...new Set(queries.filter(Boolean))];
+}
+
+/**
+ * Merge products by stable id/url.
+ * @param {Array<Array<object>>} productLists - Product arrays.
+ * @returns {Array<object>} Deduped products.
+ */
+function mergeProducts(productLists) {
+  const productMap = new Map();
+  for (const products of productLists) {
+    if (!Array.isArray(products)) continue;
+    for (const product of products) {
+      const id = product.id || product.offerId || product.productId || product.url || product.redirectUrl;
+      if (id && !productMap.has(id)) {
+        productMap.set(id, product);
+      }
+    }
+  }
+  return Array.from(productMap.values());
+}
+
+/**
+ * Filter products by rigid modifiers.
+ * @param {Array<object>} products - Product list.
+ * @param {Array<{word: string, rigidity: 'rigid'|'optional'}>} modifiers - Modifiers.
+ * @param {Object} [semanticGroups={}] - Synonym groups.
+ * @returns {Array<object>} Filtered product list.
  */
 function filterRelevantProducts(products, modifiers, semanticGroups = {}) {
-  const rigidModifiers = modifiers
-    .filter(m => m.rigidity === 'rigid')
-    .map(m => m.word.toLowerCase());
+  const rigidModifiers = (modifiers || [])
+    .filter(m => m && m.rigidity === 'rigid')
+    .map(m => String(m.word || '').toLowerCase())
+    .filter(Boolean);
 
-  // 如果没有刚性修饰词，保留所有商品
   if (rigidModifiers.length === 0) {
     return products;
   }
@@ -24,114 +69,138 @@ function filterRelevantProducts(products, modifiers, semanticGroups = {}) {
     const description = (product.description || '').toLowerCase();
     const combinedText = `${title} ${description}`;
 
-    // 必须匹配所有刚性修饰词（精确匹配优先，语义族匹配兜底）
     return rigidModifiers.every(word => {
-      // 1. 精确命中
       if (combinedText.includes(word)) return true;
-      // 2. 语义族命中：先按 word 查 key，再遍历所有组的 values 查找所属族
       let group = semanticGroups[word] || semanticGroups[word.toLowerCase()];
       if (!group) {
         for (const g of Object.values(semanticGroups)) {
-          if (g.some(s => s === word || s === word.toLowerCase())) {
+          if (Array.isArray(g) && g.some(s => s === word || s === word.toLowerCase())) {
             group = g;
             break;
           }
         }
       }
-      if (group && group.some(synonym => combinedText.includes(synonym.toLowerCase()))) return true;
-      return false;
+      return !!(group && group.some(synonym => combinedText.includes(String(synonym).toLowerCase())));
     });
   });
 }
 
-/**
- * 双重搜索：先用核心词搜索，再用蓝海词搜索，合并去重后本地评分过滤
- * @param {string} coreWord - 核心词（第一次搜索）
- * @param {string} blueOceanWord - 蓝海词（第二次搜索）
- * @param {Array<{word: string, rigidity: 'rigid'|'optional'}>} modifiers - 修饰词列表（用于降级过滤）
- * @param {Object} [semanticGroups={}] - 语义族映射 {修饰词: [同义词数组]}
- * @returns {Promise<Array<object>>} 过滤后的商品列表
- */
-async function searchAll(coreWord, blueOceanWord, modifiers = [], semanticGroups = {}) {
+async function searchApiProducts(queries) {
   const ak = process.env.ALI_1688_AK;
   if (!ak) {
     throw new Error('环境变量 ALI_1688_AK 未设置');
   }
-
-  // 创建 1688 客户端
   const client = new Alibaba1688Client(ak);
-
-  // 生成搜索查询列表（多查询组合）
-  const rigidWords = modifiers.filter(m => m.rigidity === 'rigid').map(m => m.word);
-  // 去重子串：避免核心词已包含的修饰词
-  const dedupedRigids = rigidWords.filter(word => !coreWord.includes(word) && word !== coreWord);
-  
-  const queries = [coreWord]; // 第1个：核心词本身
-  
-  // 渐进组合：coreWord + rigid[0], coreWord + rigid[0] + rigid[1], ...（最多4个）
-  let currentQuery = coreWord;
-  for (let i = 0; i < dedupedRigids.length && queries.length < 4; i++) {
-    currentQuery = currentQuery + dedupedRigids[i]; // rigid 后置！如 "衣服" + "猫咪" = "衣服猫咪"
-    queries.push(currentQuery);
+  const searchResults = [];
+  const intervalMs = parseInt(process.env.API_SEARCH_QUERY_INTERVAL_MS, 10) || 1500;
+  for (let index = 0; index < queries.length; index += 1) {
+    if (index > 0 && intervalMs > 0) {
+      await new Promise(resolve => setTimeout(resolve, intervalMs));
+    }
+    searchResults.push(await client.searchOffers(queries[index]));
   }
-  
-  // 如果 blueOceanWord 不在 queries 中且还有位置，追加
-  if (!queries.includes(blueOceanWord) && queries.length < 4) {
-    queries.push(blueOceanWord);
-  }
-  
-  // 对 queries 去重
-  const uniqueQueries = [...new Set(queries)];
+  return mergeProducts(searchResults);
+}
 
-  // 合并并去重（根据 product.id 或 id 字段）
-  const productMap = new Map();
-
-  // 并行搜索所有查询并合并结果
-  const searchResults = await Promise.all(
-    uniqueQueries.map(function(query) { return client.searchOffers(query); })
-  );
-  for (var ri = 0; ri < searchResults.length; ri++) {
-    var products = searchResults[ri];
-    if (Array.isArray(products)) {
-      for (var j = 0; j < products.length; j++) {
-        var product = products[j];
-        var id = product.id || product.offerId || product.productId;
-        if (id && !productMap.has(id)) {
-          productMap.set(id, product);
-        }
-      }
+async function searchWebProducts(queries, options = {}) {
+  const webQueries = Array.isArray(options.webQueries) && options.webQueries.length
+    ? options.webQueries
+    : queries.slice(0, Number(options.webQueryLimit || 1));
+  const results = [];
+  for (const query of webQueries) {
+    const result = await searchWeb1688(Object.assign({}, options.webFilters || {}, {
+      keyword: query,
+      port: options.port || options.webPort || options.cdpPort,
+      maxProducts: options.maxProducts || options.webMaxProducts,
+      maxPages: options.maxPages || options.webMaxPages,
+      maxResolveLinks: options.maxResolveLinks,
+      scrollLoad: options.scrollLoad,
+      scrollSteps: options.scrollSteps,
+      scrollWaitMs: options.scrollWaitMs,
+      scrollStableRounds: options.scrollStableRounds,
+      waitMs: options.waitMs,
+      resolveTimeoutMs: options.resolveTimeoutMs
+    }));
+    if (result && Array.isArray(result.products)) {
+      results.push(result.products);
     }
   }
+  return mergeProducts(results);
+}
 
-  const mergedProducts = Array.from(productMap.values());
-
-  // 如果没有商品，直接返回空数组
-  if (mergedProducts.length === 0) {
-    return [];
-  }
-
-  const rigidModifiers = modifiers
-    .filter(m => m.rigidity === 'rigid')
+function scoreOrFilterProducts(products, coreWord, blueOceanWord, modifiers, semanticGroups) {
+  const rigidModifiers = (modifiers || [])
+    .filter(m => m && m.rigidity === 'rigid')
     .map(m => m.word);
 
   try {
     const scoredResults = scoreLocally(
-      mergedProducts,
+      products,
       coreWord,
       blueOceanWord,
       rigidModifiers,
       semanticGroups
     );
 
-    const passedProducts = scoredResults
+    return scoredResults
       .filter(r => r.passed)
       .map(r => r.product);
-
-    return passedProducts;
   } catch (error) {
     console.warn('本地评分失败，降级到刚性修饰词过滤:', error.message);
-    return filterRelevantProducts(mergedProducts, modifiers, semanticGroups);
+    return filterRelevantProducts(products, modifiers, semanticGroups);
   }
 }
 
-module.exports = { searchAll };
+/**
+ * Search 1688 products and apply local relevance scoring.
+ * Default mode is API-only to keep existing title-generation behavior unchanged.
+ * @param {string} coreWord - Core product word.
+ * @param {string} blueOceanWord - Blue-ocean keyword.
+ * @param {Array<{word: string, rigidity: 'rigid'|'optional'}>} modifiers - Modifiers.
+ * @param {Object} [semanticGroups={}] - Synonym groups.
+ * @param {Object} [options={}] - Search options.
+ * @param {'api'|'web'|'hybrid'} [options.mode='api'] - Search mode.
+ * @returns {Promise<Array<object>>} Filtered products.
+ */
+async function searchAll(coreWord, blueOceanWord, modifiers = [], semanticGroups = {}, options = {}) {
+  const mode = options.mode || 'api';
+  const queries = buildSearchQueries(coreWord, blueOceanWord, modifiers);
+  const resultLists = [];
+
+  if (mode === 'api' || mode === 'hybrid') {
+    try {
+      resultLists.push(await searchApiProducts(queries));
+    } catch (error) {
+      if (mode === 'api') throw error;
+      console.warn('1688 API search failed, fallback to web search:', error.message);
+    }
+  }
+
+  if (mode === 'web' || mode === 'hybrid') {
+    resultLists.push(await searchWebProducts(queries, options));
+  }
+
+  const mergedProducts = mergeProducts(resultLists);
+  if (mergedProducts.length === 0) {
+    return [];
+  }
+  return scoreOrFilterProducts(mergedProducts, coreWord, blueOceanWord, modifiers, semanticGroups);
+}
+
+/**
+ * Backward-compatible direct filter helper.
+ * @param {Array<object>} products - Products to filter.
+ * @param {Array<{word: string, rigidity: 'rigid'|'optional'}>} modifiers - Modifiers.
+ * @returns {Array<object>} Filtered products.
+ */
+function searchAndFilter(products, modifiers) {
+  return filterRelevantProducts(products, modifiers || []);
+}
+
+module.exports = {
+  searchAll,
+  searchAndFilter,
+  filterRelevantProducts,
+  buildSearchQueries,
+  mergeProducts
+};

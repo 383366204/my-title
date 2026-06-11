@@ -124,6 +124,8 @@ async function batchRun(keywords, options = {}) {
         failed.push({
           keyword,
           error: err.message,
+          code: err.code || '1688_rate_limited',
+          source: err.source || '1688',
           cooldownRemainingMs: err.cooldownRemainingMs,
         });
         // 继续处理下一个关键词（限流器会在 Client 层阻止新的 1688 请求）
