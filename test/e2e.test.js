@@ -7,6 +7,11 @@ const PROJECT_ROOT = path.resolve(__dirname, '..');
 
 function resolveProjectModulePath(modulePath) {
   const normalized = modulePath.replace(/\\/g, '/');
+  const projectMarker = '/my-title/';
+  const projectIndex = normalized.indexOf(projectMarker);
+  if (projectIndex !== -1) {
+    return path.join(PROJECT_ROOT, normalized.slice(projectIndex + projectMarker.length));
+  }
   const mntMatch = normalized.match(/^\/mnt\/[a-z]\/(.+)$/i);
   if (mntMatch) return path.join(path.parse(PROJECT_ROOT).root, mntMatch[1]);
   return modulePath;
