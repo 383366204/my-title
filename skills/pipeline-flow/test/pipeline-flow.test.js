@@ -9,6 +9,7 @@ const {
   flowVerify,
   flowGenerate,
   flowExport,
+  flowKeyword,
   readJsonl,
   scoreSycmRows,
   fetchSycmWithFallback,
@@ -273,6 +274,137 @@ describe('pipeline-flow', () => {
     assert.ok(fs.readFileSync(result.files.distributionReview, 'utf8').includes('Category: 宠物用品 > 狗狗玩具'));
   });
 
+  test('flowKeyword preserves the user exact keyword through SYCM and generation', async () => {
+    const dataDir = tempDataDir();
+    const exactKeyword = '宝宝醒狮虎头鞋';
+    const sycmCalls = [];
+    const generatorCalls = [];
+
+    const result = await flowKeyword({
+      dataDir,
+      keyword: exactKeyword,
+      export: 1,
+      sycmExtractor: async keyword => {
+        sycmCalls.push(keyword);
+        return {
+          keyword,
+          data: [
+            {
+              keyword,
+              demandSupplyRatio: 2,
+              searchPopularity: 300,
+              clickRate: 45,
+              conversionRate: '5% ~ 7.5%'
+            }
+          ],
+          categoryAnalysis: {
+            recommendation: {
+              recommended: { category: '母婴用品 > 婴儿鞋', score: 80 }
+            }
+          }
+        };
+      },
+      generator: async keyword => {
+        generatorCalls.push(keyword);
+        return {
+          ok: true,
+          products: [
+            {
+              '产品链接': 'https://detail.1688.com/offer/1049095335543.html',
+              '铺货标题': exactKeyword + '周岁百天满月抓周刺绣软底防滑婴儿步前鞋中国风新年拍照道具',
+              '商品原价': '15.8',
+              '30天销量': 5500,
+              '主图链接': 'https://img.example.com/tiger-shoes.jpg',
+              shopName: '1688小店进货官方供应链',
+              categoryListName: '母婴用品 > 婴儿鞋'
+            }
+          ]
+        };
+      }
+    });
+
+    assert.strictEqual(result.exactKeyword, exactKeyword);
+    assert.deepStrictEqual(sycmCalls, [exactKeyword]);
+    assert.deepStrictEqual(generatorCalls, [exactKeyword]);
+    assert.strictEqual(result.steps.mined, 1);
+    assert.strictEqual(result.steps.verified, 1);
+    assert.strictEqual(result.steps.exported, 1);
+    assert.ok(fs.readFileSync(result.files.distributionBatch, 'utf8').includes('1049095335543'));
+    const candidates = readJsonl(path.join(result.runDir, 'candidates.jsonl'));
+    assert.strictEqual(candidates[0].keyword, exactKeyword);
+    assert.ok(candidates[0].flags.includes('user_exact_keyword'));
+  });
+
+  test('flowGenerate keeps a larger default candidate pool per keyword', async () => {
+    const dataDir = tempDataDir();
+    const mined = await flowMine({ dataDir, limit: 1 });
+    fs.writeFileSync(path.join(mined.runDir, 'verified-keywords.jsonl'), JSON.stringify({
+      keyword: '陶瓷摆件',
+      status: 'verified',
+      sycmScore: { passed: true, mode: 'blue', confidence: 'high', usage: 'title_core' },
+      verifyMode: 'blue',
+      confidence: 'high',
+      usage: 'title_core'
+    }) + '\n', 'utf8');
+
+    const products = Array.from({ length: 15 }, (_, index) => ({
+      '产品链接': `https://detail.1688.com/offer/${1000 + index}.html`,
+      '铺货标题': `陶瓷摆件家居装饰客厅桌面花器摆设现代简约创意商品${index}`,
+      '商品原价': '18.8',
+      '30天销量': 20,
+      '主图链接': 'https://img.example.com/a.jpg'
+    }));
+
+    const generated = await flowGenerate({
+      dataDir,
+      runId: mined.runId,
+      limit: 1,
+      generator: async () => ({ ok: true, products })
+    });
+
+    assert.strictEqual(generated.generated.filter(row => row.status === 'generated').length, 12);
+  });
+
+  test('flowExport separates recommended submit rows from manual review candidates', async () => {
+    const dataDir = tempDataDir();
+    const mined = await flowMine({ dataDir, limit: 1 });
+    const runDir = path.join(dataDir, 'runs', mined.runId);
+    const generatedFile = path.join(runDir, 'generated-products.jsonl');
+    fs.writeFileSync(generatedFile, [
+      JSON.stringify({
+        status: 'generated',
+        keyword: '陶瓷摆件',
+        url: 'https://detail.1688.com/offer/100.html',
+        title: '陶瓷摆件家居装饰客厅桌面花器摆设现代简约创意商品书房玄关酒柜装饰',
+        recommendedCategory: '家居饰品 > 摆件类 > 装饰摆件',
+        product: { categoryListName: '家居饰品 > 摆件类 > 装饰摆件' },
+        productOpportunity: { decision: 'continue', level: 'candidate', score: 72 }
+      }),
+      JSON.stringify({
+        status: 'generated',
+        keyword: '陶瓷摆件',
+        url: 'https://detail.1688.com/offer/101.html',
+        title: '陶瓷摆件桌面艺术花器小众异形家居客厅玄关装饰摆件书房酒柜装饰',
+        recommendedCategory: '家居饰品 > 摆件类 > 装饰摆件',
+        product: { categoryListName: '家居饰品 > 摆件类 > 装饰摆件' },
+        productOpportunity: { decision: 'review', level: 'manual_review', score: 58 }
+      })
+    ].join('\n') + '\n', 'utf8');
+
+    const exported = await flowExport({ dataDir, runId: mined.runId, limit: 2 });
+    const batch = fs.readFileSync(exported.file, 'utf8');
+    const review = fs.readFileSync(exported.reviewFile, 'utf8');
+
+    assert.strictEqual(exported.count, 1);
+    assert.strictEqual(exported.reviewCandidates, 1);
+    assert.strictEqual(exported.mustReview, true);
+    assert.ok(batch.includes('offer/100.html'));
+    assert.ok(!batch.includes('offer/101.html'));
+    assert.ok(review.includes('Recommended Submit'));
+    assert.ok(review.includes('Manual Review Candidates'));
+    assert.ok(review.includes('Review Candidates: 1'));
+  });
+
   test('flowExport review warns for hot trend reference rows', async () => {
     const dataDir = tempDataDir();
     const mined = await flowMine({ dataDir, limit: 1 });
@@ -333,6 +465,30 @@ describe('pipeline-flow', () => {
     assert.equal(batch, '');
     assert.ok(review.includes('title_too_short'));
     assert.ok(review.includes('category_conflict'));
+  });
+
+  test('flowExport blocks rows that have no SYCM or product category', async () => {
+    const dataDir = tempDataDir();
+    const mined = await flowMine({ dataDir, limit: 1 });
+    const runDir = path.join(dataDir, 'runs', mined.runId);
+    const generatedFile = path.join(runDir, 'generated-products.jsonl');
+    fs.writeFileSync(generatedFile, JSON.stringify({
+      status: 'generated',
+      keyword: '宝宝醒狮虎头鞋',
+      url: 'https://detail.1688.com/offer/1049095335543.html',
+      title: '宝宝醒狮虎头鞋周岁百天满月抓周刺绣软底防滑婴儿步前鞋中国风新年拍照道具',
+      verifyMode: 'blue',
+      product: {}
+    }) + '\n', 'utf8');
+
+    const exported = await flowExport({ dataDir, runId: mined.runId, limit: 1 });
+    const batch = fs.readFileSync(exported.file, 'utf8');
+    const review = fs.readFileSync(exported.reviewFile, 'utf8');
+
+    assert.equal(exported.count, 0);
+    assert.equal(exported.mustReview, true);
+    assert.equal(batch, '');
+    assert.ok(review.includes('missing_category'));
   });
 
   test('validateGeneratedRow reports category confidence', () => {

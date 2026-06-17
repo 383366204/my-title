@@ -63,11 +63,18 @@ description_zh: "通过淘宝桌面客户端完成购物相关操作。当用户
 
 ### macOS
 1. 调用 `open -a /Applications/淘宝桌面版.app` 尝试打开，若失败，提示可以帮用户下载安装，若成功，执行2～6
-2. 重新尝试执行 taobao-native。
-3. 若仍然失败，使用 `~/Library/Application\ Support/taobao/cli/taobao-runner` 进行命令调用（这是软链所指向的完整路径）
-4. 若仍然失败，尝试刷新环境变量，如 `source ~/.zshrc` 后继续执行
-5. 如果仍然失败，则提示用户：`需要重启当前Agent，以识别新添加的指令`
-6. 提示后立即停止任务，不再继续尝试其他操作
+2. 先执行 `command -v taobao-native`，如果存在则直接使用该 CLI。
+3. 如果 PATH 中没有，优先使用绝对路径 `~/Library/Application\ Support/taobao/cli/bin/taobao-native`；若仍失败，再尝试 `~/Library/Application\ Support/taobao/cli/taobao-runner`。
+4. 如果 Hermes/后台进程找不到命令，但上述绝对路径存在，可创建软链：`mkdir -p ~/.local/bin && ln -sf "$HOME/Library/Application Support/taobao/cli/bin/taobao-native" ~/.local/bin/taobao-native`，因为 Hermes gateway 默认包含 `~/.local/bin`。
+5. 若仍然失败，尝试刷新环境变量，如 `source ~/.zshrc` 后继续执行
+6. 如果仍然失败，则提示用户：`需要重启当前Agent，以识别新添加的指令`
+7. 提示后立即停止任务，不再继续尝试其他操作
+
+### Linux
+1. 先执行 `command -v taobao-native`，如果存在则直接使用该 CLI。
+2. 如果用户设置了 `TAOBAO_NATIVE_PATH`，使用该路径执行。
+3. 原生 Linux 不假设存在淘宝桌面版或 `/Applications/淘宝桌面版.app`；不要尝试 macOS `open -a` 或 Windows `/mnt/c/...` 路径。
+4. 如果仍不可用，说明当前 Linux 环境没有 taobao-native 兼容 CLI。此时停止淘宝桌面相关操作，并建议改用手动同行标题、网页/CDP 或其他可用数据源。
 
 ## 调用协议（强制执行）
 

@@ -8,6 +8,15 @@ const { formatResult } = require('../skills/title-gen/src/output-formatter');
 const { byteLen } = require('../skills/title-gen/src/title-utils');
 const fs = require('fs');
 const path = require('path');
+const http = require('http');
+const {
+  detectPlatform,
+  buildChromeLaunchPlan,
+  findTaobaoNativePath,
+  getHermesSkillsDir,
+  pathExists
+} = require('../core/platform');
+const { withAgentResponseFields } = require('../core/agent-response');
 
 const searchProductsAdapter = ({ coreWord, blueOceanWord, modifiers, semanticGroups }) =>
   searchAll(coreWord, blueOceanWord, modifiers, semanticGroups);
@@ -21,6 +30,28 @@ function stringifyAsciiJson(value, spaces = 2) {
 
 function writeAsciiJson(value) {
   process.stdout.write(stringifyAsciiJson(value, 2) + '\n');
+}
+
+function fetchJson(url, timeoutMs = 3000) {
+  return new Promise((resolve, reject) => {
+    const req = http.get(url, res => {
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', chunk => { body += chunk; });
+      res.on('end', () => {
+        try {
+          resolve(JSON.parse(body));
+        } catch (error) {
+          error.body = body;
+          reject(error);
+        }
+      });
+    });
+    req.setTimeout(timeoutMs, () => {
+      req.destroy(new Error(`Request timed out after ${timeoutMs}ms`));
+    });
+    req.on('error', reject);
+  });
 }
 
 function serializeCliError(error) {
@@ -623,36 +654,53 @@ program
     }
   });
 
-program
+function listSeedCommand(options, command) {
+  const commandObj = command || (options && typeof options.opts === 'function' ? options : null);
+  options = options && typeof options.opts === 'function' ? options.opts() : options;
+  const parentOpts = commandObj && commandObj.parent ? commandObj.parent.opts() : {};
+  const rootOpts = commandObj && commandObj.parent && commandObj.parent.parent ? commandObj.parent.parent.opts() : {};
+  const mainOpts = Object.assign({}, rootOpts, parentOpts);
+  options = options || {};
+  const jsonMode = !!options.json || !!mainOpts.json;
+  try {
+    const { listSeeds } = require('../skills/keyword-mining');
+    const seeds = listSeeds({
+      includePaused: !!(options.all || mainOpts.all),
+      dataDir: options.dataDir || mainOpts.dataDir
+    });
+    if (jsonMode) {
+      writeAsciiJson({ ok: true, seeds });
+      return;
+    }
+    console.log('\n🌱 当前种子池');
+    console.log('='.repeat(80));
+    seeds.forEach((seed, idx) => {
+      console.log(`${idx + 1}. ${seed.keyword} | ${seed.category || '-'} | priority=${seed.priority} | score=${seed.priorityScore} | ${seed.source || '-'}`);
+      if (seed.reason) console.log(`   ${seed.reason}`);
+    });
+    console.log();
+  } catch (error) {
+    if (jsonMode) process.stdout.write(JSON.stringify({ ok: false, error: error.message }, null, 2) + '\n');
+    else console.error('\n❌ 错误:', error.message);
+    process.exit(1);
+  }
+}
+
+const seedCommand = program
   .command('seed')
   .description('管理每日蓝海选词种子池')
+  .option('--json', '纯 JSON 输出模式')
+  .option('--all', '包含 paused 状态的种子')
+  .option('--data-dir <path>', '种子池数据目录（测试/调试用）')
+  .action(listSeedCommand);
+
+seedCommand
   .command('list')
   .description('查看当前种子池')
   .option('--json', '纯 JSON 输出模式')
   .option('--all', '包含 paused 状态的种子')
-  .action(function(options, command) {
-    const mainOpts = command.parent && command.parent.parent ? command.parent.parent.opts() : {};
-    const jsonMode = !!options.json || !!mainOpts.json;
-    try {
-      const { listSeeds } = require('../skills/keyword-mining');
-      const seeds = listSeeds({ includePaused: !!options.all });
-      if (jsonMode) {
-        writeAsciiJson({ ok: true, seeds });
-        return;
-      }
-      console.log('\n🌱 当前种子池');
-      console.log('='.repeat(80));
-      seeds.forEach((seed, idx) => {
-        console.log(`${idx + 1}. ${seed.keyword} | ${seed.category || '-'} | priority=${seed.priority} | score=${seed.priorityScore} | ${seed.source || '-'}`);
-        if (seed.reason) console.log(`   ${seed.reason}`);
-      });
-      console.log();
-    } catch (error) {
-      if (jsonMode) process.stdout.write(JSON.stringify({ ok: false, error: error.message }, null, 2) + '\n');
-      else console.error('\n❌ 错误:', error.message);
-      process.exit(1);
-    }
-  });
+  .option('--data-dir <path>', '种子池数据目录（测试/调试用）')
+  .action(listSeedCommand);
 
 program
   .command('seed-add <keyword>')
@@ -688,7 +736,7 @@ program
     }
   });
 
-program.commands.find(cmd => cmd.name() === 'seed')
+seedCommand
   .command('add <keyword>')
   .description('添加一个蓝海选词种子')
   .option('--category <category>', '种子类目', '')
@@ -798,6 +846,139 @@ program
     }
   });
 
+program
+  .command('doctor')
+  .description('检查跨平台运行环境：Node、Chrome CDP、Hermes skills、taobao-native 和关键环境变量')
+  .option('--port <number>', 'Chrome 调试端口', '9222')
+  .option('--deep', '额外检查 SYCM / 铺货授权状态；只读，不提交')
+  .option('--json', '纯 JSON 输出模式')
+  .action(async function(options, command) {
+    const mainOpts = command.parent ? command.parent.opts() : {};
+    const jsonMode = !!options.json || !!mainOpts.json;
+    const port = parseInt(options.port || process.env.BROWSER_CDP_PORT || process.env.CHROME_DEBUG_PORT || '9222', 10) || 9222;
+    const platform = detectPlatform();
+    const chromeLaunchPlan = buildChromeLaunchPlan({
+      osKind: platform.kind,
+      port,
+      profileName: '1688'
+    });
+    const taobaoNativePath = findTaobaoNativePath({ osKind: platform.kind });
+    const hermesSkillsDir = getHermesSkillsDir();
+    const checks = {
+      node: {
+        ok: true,
+        version: process.version
+      },
+      env: {
+        ok: Boolean(process.env.GLM_API_KEY || process.env.MINIMAX_API_KEY || process.env.DEEPSEEK_API_KEY),
+        keys: {
+          GLM_API_KEY: Boolean(process.env.GLM_API_KEY),
+          MINIMAX_API_KEY: Boolean(process.env.MINIMAX_API_KEY),
+          DEEPSEEK_API_KEY: Boolean(process.env.DEEPSEEK_API_KEY),
+          ALI_1688_AK: Boolean(process.env.ALI_1688_AK),
+          TAOBAO_OPC_URL: Boolean(process.env.TAOBAO_OPC_URL)
+        }
+      },
+      chromeCdp: {
+        ok: false,
+        port
+      },
+      chromeLaunchPlan,
+      taobaoNative: {
+        ok: taobaoNativePath === 'taobao-native' ? true : pathExists(taobaoNativePath),
+        path: taobaoNativePath
+      },
+      hermesSkills: {
+        ok: pathExists(hermesSkillsDir),
+        dir: hermesSkillsDir
+      }
+    };
+
+    try {
+      const version = await fetchJson(`http://127.0.0.1:${port}/json/version`, 1500);
+      checks.chromeCdp.ok = true;
+      checks.chromeCdp.browser = version.Browser || '';
+      checks.chromeCdp.webSocketDebuggerUrl = version.webSocketDebuggerUrl || '';
+    } catch (error) {
+      checks.chromeCdp.ok = false;
+      checks.chromeCdp.error = error.message;
+    }
+
+    const blockers = [];
+    if (!checks.env.ok) blockers.push('llm_key_missing');
+    if (!checks.chromeCdp.ok) blockers.push('browser_cdp_unavailable');
+    if (!checks.hermesSkills.ok) blockers.push('hermes_skills_missing');
+
+    if (options.deep) {
+      checks.sycm = {
+        ok: checks.chromeCdp.ok,
+        status: checks.chromeCdp.ok ? 'cdp_ready' : 'cdp_unavailable',
+        note: checks.chromeCdp.ok
+          ? 'Chrome CDP is reachable. Run `node bin/cli.js sycm "<keyword>" --json` for login/slider-specific validation.'
+          : 'Chrome CDP is unavailable, so SYCM login state cannot be checked.'
+      };
+      checks.distributionAuth = {
+        ok: false,
+        status: checks.chromeCdp.ok ? 'unknown' : 'cdp_unavailable',
+        note: checks.chromeCdp.ok
+          ? 'Distribution auth inspection was attempted without submitting.'
+          : 'Chrome CDP is unavailable, so jnesoft authorization state cannot be checked.'
+      };
+      if (checks.chromeCdp.ok) {
+        try {
+          const { inspectBrowser } = require('../skills/1688-distribution');
+          const browser = await inspectBrowser(port);
+          checks.distributionAuth = {
+            ok: browser.ok === true,
+            status: browser.ok ? 'ready' : (browser.loginExpired ? 'login_expired' : 'blocked'),
+            browser,
+            note: 'Read-only jnesoft browser inspection completed. No products were submitted.'
+          };
+          if (!checks.distributionAuth.ok) {
+            blockers.push(browser.loginExpired ? 'distribution_login_expired' : 'distribution_browser_not_ready');
+          }
+        } catch (error) {
+          checks.distributionAuth = {
+            ok: false,
+            status: 'inspection_failed',
+            error: error.message,
+            note: 'Read-only jnesoft browser inspection failed.'
+          };
+          blockers.push('distribution_auth_unknown');
+        }
+      }
+    }
+
+    const ok = blockers.length === 0;
+    const doctorNeedsLogin = blockers.some(blocker => /login|auth/i.test(blocker));
+    const payload = withAgentResponseFields({
+      ok,
+      status: ok ? 'ready' : 'blocked',
+      nextActionCode: ok ? 'doctor_ready' : (doctorNeedsLogin ? 'manual_action_required' : 'fix_doctor_blockers'),
+      requiresUserAction: !ok,
+      blockers,
+      mode: options.deep ? 'deep' : 'shallow',
+      platform,
+      checks,
+      allowedCommands: ok ? [] : ['node bin/cli.js doctor --json'],
+      nextCommand: ok ? '' : 'node bin/cli.js doctor --json',
+      userMessage: ok
+        ? '环境检查通过，可以继续运行选品和铺货流程。'
+        : (doctorNeedsLogin
+          ? '检测到登录或授权状态过期。请在浏览器完成重新登录/授权后重跑 doctor --deep；铺货 CLI 也会在可恢复页面尝试自动点击重新登录和授权。'
+          : '环境检查存在阻塞项。请优先修复 Chrome CDP、Hermes skills 或环境变量后重跑 doctor。')
+    });
+
+    if (jsonMode) {
+      writeAsciiJson(payload);
+      return;
+    }
+    console.log(`Doctor: ${payload.status}`);
+    console.log(`Platform: ${platform.kind}`);
+    console.log(`Blockers: ${blockers.length ? blockers.join(', ') : 'none'}`);
+    console.log(payload.userMessage);
+  });
+
 const flowCommand = program
   .command('flow')
   .description('每日蓝海选品流水线：选词 → 生意参谋校验 → 标题生成 → 导出铺货清单');
@@ -809,7 +990,7 @@ flowCommand
   .option('--verify <number>', '生意参谋校验数量', '20')
   .option('--generate <number>', '标题生成关键词数量', '10')
   .option('--export <number>', '导出铺货商品数量', '20')
-  .option('--products-per-keyword <number>', '每个关键词最多导出商品数', '3')
+  .option('--products-per-keyword <number>', '每个关键词最多导出商品数', '12')
   .option('--length <number>', '标题最大长度', '60')
   .option('--port <number>', 'Chrome 调试端口', '9222')
   .option('--pages <number>', '生意参谋最大提取页数', '1')
@@ -826,7 +1007,7 @@ flowCommand
         verify: parseInt(options.verify, 10) || 20,
         generate: parseInt(options.generate, 10) || 10,
         export: parseInt(options.export, 10) || 20,
-        productsPerKeyword: parseInt(options.productsPerKeyword, 10) || 3,
+        productsPerKeyword: parseInt(options.productsPerKeyword, 10) || 12,
         length: parseInt(options.length, 10) || 60,
         port: parseInt(options.port, 10) || 9222,
         pages: parseInt(options.pages, 10) || 1,
@@ -861,7 +1042,16 @@ flowCommand
       const { flowMine } = require('../skills/pipeline-flow');
       const result = await flowMine({ limit: parseInt(options.limit, 10) || 50 });
       if (jsonMode) {
-        writeAsciiJson({ ok: true, runId: result.runId, status: result.status, runDir: result.runDir, candidates: result.candidates.length, nextCommand: result.nextCommand });
+        writeAsciiJson(withAgentResponseFields({
+          ok: true,
+          runId: result.runId,
+          status: result.status,
+          runDir: result.runDir,
+          candidates: result.candidates.length,
+          blockers: result.blockers,
+          allowedCommands: result.allowedCommands,
+          nextCommand: result.nextCommand
+        }));
         return;
       }
       console.log(`✅ 已生成候选词: ${result.candidates.length}`);
@@ -898,7 +1088,16 @@ flowCommand
         fallbackHot: options.hotFallback !== false
       });
       if (jsonMode) {
-        writeAsciiJson({ ok: true, runId: result.runId, status: result.status, verified: result.verified.length, rejected: result.rejected.length, nextCommand: result.nextCommand });
+        writeAsciiJson(withAgentResponseFields({
+          ok: true,
+          runId: result.runId,
+          status: result.status,
+          verified: result.verified.length,
+          rejected: result.rejected.length,
+          blockers: result.blockers,
+          allowedCommands: result.allowedCommands,
+          nextCommand: result.nextCommand
+        }));
         return;
       }
       console.log(`✅ 生意参谋校验完成: 通过 ${result.verified.length}，拒绝 ${result.rejected.length}`);
@@ -916,7 +1115,7 @@ flowCommand
   .description('对验证通过词执行 1688 选品和标题生成')
   .option('--run <id>', '指定 runId，默认 latest')
   .option('--limit <number>', '生成关键词数量', '10')
-  .option('--products-per-keyword <number>', '每个关键词最多导出商品数', '3')
+  .option('--products-per-keyword <number>', '每个关键词最多导出商品数', '12')
   .option('--length <number>', '标题最大长度', '60')
   .option('--json', '纯 JSON 输出模式')
   .action(async function(options, command) {
@@ -927,12 +1126,20 @@ flowCommand
       const result = await flowGenerate({
         runId: options.run,
         limit: parseInt(options.limit, 10) || 10,
-        productsPerKeyword: parseInt(options.productsPerKeyword, 10) || 3,
+        productsPerKeyword: parseInt(options.productsPerKeyword, 10) || 12,
         length: parseInt(options.length, 10) || 60
       });
       const generated = result.generated.filter(row => row.status === 'generated').length;
       if (jsonMode) {
-        writeAsciiJson({ ok: true, runId: result.runId, status: result.status, generated, nextCommand: result.nextCommand });
+        writeAsciiJson(withAgentResponseFields({
+          ok: true,
+          runId: result.runId,
+          status: result.status,
+          generated,
+          blockers: result.blockers,
+          allowedCommands: result.allowedCommands,
+          nextCommand: result.nextCommand
+        }));
         return;
       }
       console.log(`✅ 标题生成完成: 商品 ${generated}`);
@@ -966,6 +1173,49 @@ flowCommand
       }
       console.log(`✅ 已导出铺货清单: ${result.count}`);
       console.log(result.file);
+      console.log(`Next: ${result.nextCommand}`);
+    } catch (error) {
+      if (jsonMode) writeAsciiJson({ ok: false, error: error.message });
+      else console.error('\n❌ 错误:', error.message);
+      process.exit(1);
+    }
+  });
+
+flowCommand
+  .command('keyword <keyword>')
+  .description('按用户给定的精确关键词执行选品流水线，不进行关键词改写')
+  .option('--export <number>', '导出商品数量', '20')
+  .option('--products-per-keyword <number>', '每个关键词最多导出商品数', '12')
+  .option('--length <number>', '标题最大长度', '60')
+  .option('--port <number>', 'Chrome 调试端口', '9222')
+  .option('--pages <number>', '生意参谋最大提取页数', '1')
+  .option('--min-blue-rows <number>', '蓝海词少于该数量时降级查热搜词', '1')
+  .option('--no-hot-fallback', '蓝海词不足时不降级查热搜词')
+  .option('--json', '纯 JSON 输出模式')
+  .action(async function(keyword, options, command) {
+    const mainOpts = command.parent && command.parent.parent ? command.parent.parent.opts() : {};
+    const jsonMode = !!options.json || !!mainOpts.json;
+    try {
+      const { flowKeyword } = require('../skills/pipeline-flow');
+      const result = await flowKeyword({
+        keyword,
+        export: parseInt(options.export, 10) || 20,
+        productsPerKeyword: parseInt(options.productsPerKeyword, 10) || 12,
+        length: parseInt(options.length, 10) || 60,
+        port: parseInt(options.port, 10) || 9222,
+        pages: parseInt(options.pages, 10) || 1,
+        minBlueRows: parseInt(options.minBlueRows, 10) || 1,
+        fallbackHot: options.hotFallback !== false
+      });
+      if (jsonMode) {
+        writeAsciiJson(result);
+        return;
+      }
+      console.log(`✅ 精确关键词流水线完成: ${result.exactKeyword}`);
+      console.log(`Run: ${result.runId}`);
+      console.log(`状态: ${result.status}`);
+      console.log(`铺货清单: ${result.files.distributionBatch}`);
+      console.log(`复核报告: ${result.files.distributionReview}`);
       console.log(`Next: ${result.nextCommand}`);
     } catch (error) {
       if (jsonMode) writeAsciiJson({ ok: false, error: error.message });
@@ -1010,6 +1260,133 @@ flowCommand
   });
 
 program
+  .command('title-gen-preflight')
+  .description('Check browser readiness before title-gen image search')
+  .option('--port <number>', 'Chrome remote debugging port', process.env.BROWSER_CDP_PORT || process.env.CHROME_DEBUG_PORT || '9222')
+  .option('--json', 'Output JSON only')
+  .action(async function(options, command) {
+    const mainOpts = command && command.parent ? command.parent.opts() : {};
+    const jsonMode = !!options.json || !!mainOpts.json;
+    const port = parseInt(options.port, 10) || 9222;
+    try {
+      const info = await fetchJson(`http://127.0.0.1:${port}/json/version`, 2000);
+      const result = withAgentResponseFields({
+        ok: true,
+        status: 'ready',
+        port,
+        cdp: {
+          ok: true,
+          browser: info.Browser || '',
+          protocolVersion: info['Protocol-Version'] || '',
+          webSocketDebuggerUrl: info.webSocketDebuggerUrl || ''
+        },
+        nextActionCode: 'title_gen_browser_ready',
+        nextAction: 'Run title generation with image search only after CDP is ready.',
+        allowedCommands: [],
+        userMessage: 'Chrome CDP is ready for title-gen browser features.'
+      });
+      if (jsonMode) {
+        writeAsciiJson(result);
+        return;
+      }
+      console.log(result.userMessage);
+    } catch (error) {
+      const result = withAgentResponseFields({
+        ok: false,
+        status: 'cdp_unavailable',
+        port,
+        blockers: ['browser_cdp_unavailable'],
+        cdp: {
+          ok: false,
+          error: error && error.message ? error.message : String(error)
+        },
+        nextActionCode: 'start_debug_chrome_manually',
+        nextAction: 'Start Chrome with remote debugging before title-gen image search.',
+        allowedCommands: ['node bin/cli.js title-gen-preflight --json'],
+        nextCommand: 'node bin/cli.js title-gen-preflight --json',
+        userMessage: 'Chrome CDP is unavailable. Start Chrome with remote debugging before image search.'
+      });
+      if (jsonMode) {
+        writeAsciiJson(result);
+        return;
+      }
+      console.error(result.userMessage);
+      process.exitCode = 1;
+    }
+  });
+
+program
+  .command('sycm-status')
+  .description('Check SYCM Chrome CDP readiness without running title generation')
+  .option('--port <number>', 'Chrome remote debugging port', process.env.SYCM_DEBUG_PORT || process.env.BROWSER_CDP_PORT || process.env.CHROME_DEBUG_PORT || '9222')
+  .option('--json', 'Output JSON only')
+  .action(async function(options, command) {
+    const mainOpts = command && command.parent ? command.parent.opts() : {};
+    const jsonMode = !!options.json || !!mainOpts.json;
+    const port = parseInt(options.port, 10) || 9222;
+    try {
+      const info = await fetchJson(`http://127.0.0.1:${port}/json/version`, 3000);
+      const result = withAgentResponseFields({
+        ok: true,
+        status: 'ready',
+        port,
+        cdp: {
+          ok: true,
+          browser: info.Browser || '',
+          protocolVersion: info['Protocol-Version'] || '',
+          webSocketDebuggerUrl: info.webSocketDebuggerUrl || ''
+        },
+        sycm: {
+          readyForQuery: true,
+          note: 'CDP is reachable. SYCM login/slider state is verified when running `sycm <keyword>`.'
+        },
+        nextActionCode: 'run_sycm_query',
+        nextAction: 'Run `node bin/cli.js sycm "<keyword>" --mode blue --pages 1 --json`.',
+        allowedCommands: ['node bin/cli.js sycm "<keyword>" --mode blue --pages 1 --json'],
+        nextCommand: 'node bin/cli.js sycm "<keyword>" --mode blue --pages 1 --json',
+        userMessage: 'Chrome CDP 已可用，可以继续执行 SYCM 查词。'
+      });
+      if (jsonMode) {
+        writeAsciiJson(result);
+        return;
+      }
+      console.log('\nSYCM status');
+      console.log('='.repeat(50));
+      console.log(`status: ${result.status}`);
+      console.log(`cdp: ok port=${port}`);
+      console.log(`browser: ${result.cdp.browser || '-'}`);
+      console.log(`Next: ${result.nextAction}`);
+    } catch (error) {
+      const result = withAgentResponseFields({
+        ok: false,
+        status: 'cdp_unavailable',
+        port,
+        blockers: ['browser_cdp_unavailable'],
+        cdp: {
+          ok: false,
+          error: error && error.message ? error.message : String(error)
+        },
+        nextActionCode: 'start_debug_chrome_manually',
+        nextAction: 'Start or attach Chrome with --remote-debugging-port, then rerun sycm-status. Do not run SYCM queries until CDP is reachable.',
+        allowedCommands: ['node bin/cli.js sycm-status --json'],
+        nextCommand: 'node bin/cli.js sycm-status --json',
+        userMessage: 'Chrome CDP 不可用。请先启动带远程调试端口的 Chrome，然后重新检查 SYCM 状态。'
+      });
+      if (jsonMode) {
+        writeAsciiJson(result);
+        return;
+      }
+      console.log('\nSYCM status');
+      console.log('='.repeat(50));
+      console.log(`status: ${result.status}`);
+      console.log(`cdp: blocked port=${port}`);
+      console.log(`error: ${result.cdp.error}`);
+      console.log(`Next: ${result.nextAction}`);
+      process.exitCode = 1;
+    }
+  });
+
+program
   .command('distribute')
   .description('Run 1688 multi-store distribution through an existing Chrome CDP session')
   .option('--input <text>', 'Distribution lines: URL, URL<TAB>title, URL<TAB>title<TAB>category, URL||title, URL||title||category, or URL$$title$$category')
@@ -1018,6 +1395,7 @@ program
   .option('--port <number>', 'Chrome remote debugging port', process.env.BROWSER_CDP_PORT || process.env.CHROME_DEBUG_PORT || '9222')
   .option('--state-file <path>', 'JSONL file used for duplicate-submit protection')
   .option('--check', 'Check input, duplicate state, and Chrome CDP without submitting')
+  .option('--confirm-log', 'Only confirm the current copy log for input offer ids; does not submit')
   .option('--dry-run', 'Parse and validate input without touching the browser')
   .option('--submit', 'Actually submit batches in the browser; without this flag the command only checks readiness')
   .option('--force', 'Allow submitting a batch that was recently submitted')
@@ -1028,7 +1406,7 @@ program
     const mainOpts = commandObj && commandObj.parent ? commandObj.parent.opts() : {};
     const jsonMode = !!options.json || !!mainOpts.json;
     try {
-      const { checkDistributionReadiness, distributeProducts } = require('../skills/1688-distribution');
+      const { checkDistributionReadiness, confirmDistributionLog, distributeProducts } = require('../skills/1688-distribution');
       const inputText = options.input || mainOpts.input;
       if (!inputText && !options.inputFile) {
         throw new Error('Provide --input or --input-file');
@@ -1044,6 +1422,8 @@ program
       };
       const result = options.dryRun
         ? await distributeProducts(payload)
+        : options.confirmLog
+        ? await confirmDistributionLog(payload)
         : (options.check || !options.submit)
         ? await checkDistributionReadiness(payload)
         : await distributeProducts(payload);
@@ -1089,19 +1469,25 @@ program
     try {
       const { syncSkill, defaultHermesSkillsDir } = require('../scripts/sync-hermes-skills');
       const targetRoot = options.target || defaultHermesSkillsDir();
-      const skills = options.skill.length > 0 ? options.skill : ['1688-distribution', 'keyword-mining', 'pipeline-flow'];
+      const skills = options.skill.length > 0 ? options.skill : ['1688-distribution', 'keyword-mining', 'pipeline-flow', 'title-gen'];
       const results = skills.map(skillName => syncSkill(skillName, {
         targetRoot,
         dryRun: !options.apply,
         mode: options.mode || 'copy',
         projectRoot: options.projectRoot
       }));
-      const payload = {
+      const mode = options.mode || 'copy';
+      const payload = withAgentResponseFields({
         ok: true,
+        status: 'ready',
         dryRun: !options.apply,
+        mode,
         targetRoot,
-        results
-      };
+        results,
+        userMessage: mode === 'wrapper'
+          ? 'Hermes wrapper 模式会调用当前项目路径，Codex 修改后可实时生效。'
+          : 'Hermes copy 模式会复制 skill 快照，Codex 修改后需要重新同步。'
+      });
       if (jsonMode) {
         writeAsciiJson(payload);
         return;
@@ -1114,6 +1500,150 @@ program
       });
     } catch (error) {
       if (jsonMode) writeAsciiJson({ ok: false, error: error.message });
+      else console.error('\nError:', error.message);
+      process.exit(1);
+    }
+  });
+
+const workflowCommand = program
+  .command('workflow')
+  .description('Deterministic keyword-to-distribution workflow that stops before submit confirmation');
+
+function workflowStateFile(options = {}) {
+  const os = require('os');
+  const stateDir = options.stateDir || path.join(os.homedir(), '.hermes', 'state');
+  return path.join(stateDir, 'ecommerce-workflow.json');
+}
+
+function writeWorkflowState(file, value) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, stringifyAsciiJson({
+    version: 1,
+    updatedAt: new Date().toISOString(),
+    ...value
+  }, 2) + '\n', 'utf8');
+}
+
+function readWorkflowState(file) {
+  return JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
+}
+
+workflowCommand
+  .command('run')
+  .description('Run product selection and distribution preparation; never submits')
+  .requiredOption('--keyword <keyword>', 'Keyword to select and prepare')
+  .option('--state-dir <dir>', 'Workflow state directory')
+  .option('--data-dir <dir>', 'Pipeline data directory')
+  .option('--products-per-keyword <number>', 'Products per keyword', '12')
+  .option('--export <number>', 'Export limit', '20')
+  .option('--dry-run', 'Return a mocked ready workflow result without touching browser')
+  .option('--json', 'JSON output')
+  .action(async function(options, command) {
+    const mainOpts = command && command.parent && command.parent.parent ? command.parent.parent.opts() : {};
+    const jsonMode = !!options.json || !!mainOpts.json;
+    try {
+      const { createWorkflowRunner } = require('../skills/pipeline-flow');
+      const deps = options.dryRun
+        ? {
+            sycm: async () => ({ ok: true, status: 'ready', keyword: options.keyword }),
+            selectProducts: async () => ({ ok: true, products: [{ offerId: 'dry-run-offer' }] }),
+            prepareDistribution: async () => ({
+              ok: true,
+              status: 'ready_to_distribute',
+              canSubmit: true,
+              file: path.join(options.stateDir || process.cwd(), 'dry-run-distribution-batch.txt'),
+              runId: 'dry-run'
+            })
+          }
+        : {};
+      const runner = createWorkflowRunner(deps);
+      const result = await runner.run({
+        keyword: options.keyword,
+        dataDir: options.dataDir,
+        productsPerKeyword: Number(options.productsPerKeyword || 12),
+        export: Number(options.export || 20)
+      });
+      const stateFile = workflowStateFile(options);
+      if (result.status === 'awaiting_user_confirmation') {
+        writeWorkflowState(stateFile, {
+          keyword: options.keyword,
+          status: result.status,
+          runId: result.runId || '',
+          runDir: result.runDir || '',
+          file: result.file || '',
+          result
+        });
+      }
+      const payload = withAgentResponseFields({
+        ...result,
+        stateFile
+      });
+      if (jsonMode) {
+        writeAsciiJson(payload);
+        return;
+      }
+      console.log(payload.userMessage);
+      console.log(`State: ${stateFile}`);
+    } catch (error) {
+      const payload = withAgentResponseFields({
+        ok: false,
+        status: 'workflow_failed',
+        error: error.message,
+        blockers: ['workflow_failed']
+      });
+      if (jsonMode) writeAsciiJson(payload);
+      else console.error('\nError:', error.message);
+      process.exit(1);
+    }
+  });
+
+workflowCommand
+  .command('resume')
+  .description('Resume workflow after explicit user confirmation')
+  .option('--state-dir <dir>', 'Workflow state directory')
+  .option('--confirm-submit', 'Required to submit distribution')
+  .option('--json', 'JSON output')
+  .action(async function(options, command) {
+    const mainOpts = command && command.parent && command.parent.parent ? command.parent.parent.opts() : {};
+    const jsonMode = !!options.json || !!mainOpts.json;
+    const stateFile = workflowStateFile(options);
+    try {
+      const state = readWorkflowState(stateFile);
+      if (!options.confirmSubmit) {
+        const payload = withAgentResponseFields({
+          ok: false,
+          status: 'awaiting_user_confirmation',
+          requiresUserAction: true,
+          nextActionCode: 'confirm_before_submit',
+          stateFile,
+          userMessage: '提交铺货前需要用户明确确认。确认后才可运行 workflow resume --confirm-submit --json。'
+        });
+        if (jsonMode) writeAsciiJson(payload);
+        else console.log(payload.userMessage);
+        return;
+      }
+      if (!state.file) throw new Error('workflow state does not include distribution batch file');
+      const { distributeProducts } = require('../skills/1688-distribution');
+      const result = await distributeProducts({
+        inputFile: state.file,
+        submit: true
+      });
+      const payload = withAgentResponseFields({
+        ...result,
+        status: result.status || 'workflow_complete',
+        stateFile
+      });
+      if (jsonMode) writeAsciiJson(payload);
+      else console.log(payload.userMessage || 'Workflow resumed.');
+    } catch (error) {
+      const payload = withAgentResponseFields({
+        ok: false,
+        status: 'workflow_resume_failed',
+        error: error.message,
+        blockers: ['workflow_resume_failed'],
+        stateFile
+      });
+      if (jsonMode) writeAsciiJson(payload);
       else console.error('\nError:', error.message);
       process.exit(1);
     }
@@ -1151,14 +1681,44 @@ program
     let userPeriod = options.period || DEFAULT_PAGE_FILTERS.timePeriod;
     
     if (!VALID_COMPARE_TYPES.includes(userCompare)) {
+      if (jsonMode) {
+        writeAsciiJson(withAgentResponseFields({
+          ok: false,
+          status: 'invalid_option',
+          blockers: ['invalid_compare_type'],
+          message: 'Invalid --compare value: ' + userCompare,
+          allowedValues: VALID_COMPARE_TYPES
+        }));
+        return;
+      }
       console.error('错误: 无效的 --compare 值 "' + userCompare + '", 有效选项: ' + VALID_COMPARE_TYPES.join(', '));
       process.exit(1);
     }
     if (!VALID_PERIODS.includes(userPeriod)) {
+      if (jsonMode) {
+        writeAsciiJson(withAgentResponseFields({
+          ok: false,
+          status: 'invalid_option',
+          blockers: ['invalid_period'],
+          message: 'Invalid --period value: ' + userPeriod,
+          allowedValues: VALID_PERIODS
+        }));
+        return;
+      }
       console.error('错误: 无效的 --period 值 "' + userPeriod + '", 有效选项: ' + VALID_PERIODS.join(', '));
       process.exit(1);
     }
     if (!['manual'].includes(String(options.loginMode || '').toLowerCase())) {
+      if (jsonMode) {
+        writeAsciiJson(withAgentResponseFields({
+          ok: false,
+          status: 'invalid_option',
+          blockers: ['invalid_login_mode'],
+          message: 'Invalid --login-mode value: ' + options.loginMode,
+          allowedValues: ['manual']
+        }));
+        return;
+      }
       console.error('错误: 无效的 --login-mode 值 "' + options.loginMode + '", 当前仅支持 manual');
       process.exit(1);
     }
@@ -1189,11 +1749,15 @@ program
       const launchResult = await autoLaunchChrome(port, { userDataDir: options.chromeProfileDir });
       if (!launchResult.success) {
         if (jsonMode) {
-          process.stdout.write(JSON.stringify({
+          writeAsciiJson(withAgentResponseFields({
             ok: false,
             status: 'chrome_launch_failed',
+            blockers: ['browser_cdp_unavailable'],
             message: launchResult.message,
-          }, null, 2) + '\n');
+            allowedCommands: ['node bin/cli.js sycm-status --json'],
+            nextCommand: 'node bin/cli.js sycm-status --json',
+            userMessage: 'Chrome 无法自动启动。请手动启动调试端口后重试 SYCM 查词。'
+          }));
           return;
         } else {
           console.error('\n❌ ' + launchResult.message);
@@ -1221,8 +1785,9 @@ program
       });
 
        if (jsonMode) {
-         process.stdout.write(JSON.stringify({
+         writeAsciiJson(withAgentResponseFields({
            ok: true,
+           status: 'ready',
            keyword: result.keyword,
            source: result.source,
            extractedAt: result.extractedAt,
@@ -1234,8 +1799,12 @@ program
            currentPage: result.currentPage,
            totalCount: result.totalCount,
            headers: result.headers,
-           data: result.data
-         }, null, 2) + '\n');
+           data: result.data,
+           categoryAnalysis: result.categoryAnalysis || null,
+           nextActionCode: 'sycm_query_complete',
+           requiresUserAction: false,
+           userMessage: 'SYCM 查词完成，可以继续选品或生成标题。'
+         }));
          return;
        }
 
@@ -1284,15 +1853,16 @@ program
 
     } catch (error) {
       if (error && error.status && error.status !== 'login_required') {
-        const payload = error.details || {
+        const payload = withAgentResponseFields(error.details || {
           ok: false,
           status: error.status,
+          blockers: [String(error.status)],
           message: error.message,
           loginUrl: error.loginUrl,
           profileDir: error.profileDir
-        };
+        });
         if (jsonMode) {
-          process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
+          writeAsciiJson(payload);
         } else {
           console.error('\n[SYCM] ' + payload.message);
           if (payload.action) console.error('Action: ' + payload.action);
@@ -1302,15 +1872,19 @@ program
         process.exit(1);
       }
       if (error && error.status === 'login_required') {
-        const payload = error.details || {
+        const payload = withAgentResponseFields(error.details || {
           ok: false,
           status: 'login_required',
+          blockers: ['sycm_login_required'],
           message: error.message,
           loginUrl: error.loginUrl,
-          profileDir: error.profileDir
-        };
+          profileDir: error.profileDir,
+          allowedCommands: ['node bin/cli.js sycm-status --json'],
+          nextCommand: 'node bin/cli.js sycm-status --json',
+          userMessage: '生意参谋需要人工登录。请在当前 Chrome profile 完成登录后重新运行 SYCM 命令。'
+        });
         if (jsonMode) {
-          process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
+          writeAsciiJson(payload);
         } else {
           console.error('\n🔐 ' + payload.message);
           console.error('请用当前 Chrome profile 人工登录: ' + payload.loginUrl);
@@ -1319,7 +1893,12 @@ program
         process.exit(1);
       }
       if (jsonMode) {
-        process.stdout.write(JSON.stringify({ ok: false, error: error.message }) + '\n');
+        writeAsciiJson(withAgentResponseFields({
+          ok: false,
+          status: 'error',
+          error: error.message,
+          blockers: ['sycm_query_failed']
+        }));
       } else {
         console.error('\n❌ 错误:', error.message);
       }

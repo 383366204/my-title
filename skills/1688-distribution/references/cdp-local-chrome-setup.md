@@ -17,19 +17,48 @@ Hermes browser tools (browser_navigate, click, type, ...)
 
 ## 设置步骤
 
-### Step 1: 完全关闭 Chrome
+### Step 1: 确认是否已有 CDP Chrome
 
-**必须完全关闭**，否则调试端口参数不生效：
+先检查端口：
 
 ```bash
-# Windows: 任务管理器结束所有 chrome.exe 进程
-# 或命令行:
-taskkill /F /IM chrome.exe
+curl -s http://127.0.0.1:9222/json/version
 ```
 
-> 常见错误：只关了窗口但后台进程还在 → 新 Chrome 启动时复用旧进程 → 端口参数被忽略
+如果返回 JSON，说明 CDP 已就绪。不要重复启动。
+
+如果无响应，再启动带 CDP 的 Chrome。
 
 ### Step 2: 以调试模式启动 Chrome
+
+```bash
+# macOS: 推荐。-n 强制新实例，独立 profile 避免复用普通 Chrome 导致参数失效。
+mkdir -p "$HOME/.hermes/chrome-profiles/1688"
+open -na "Google Chrome" --args \
+  --remote-debugging-port=9222 \
+  --user-data-dir="$HOME/.hermes/chrome-profiles/1688" \
+  --no-first-run \
+  --no-default-browser-check
+```
+
+```bash
+# Linux: 使用已安装的 Chrome/Chromium。保持独立 profile 保存登录态。
+mkdir -p "$HOME/.hermes/chrome-profiles/1688"
+CHROME_BIN="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium-browser || command -v chromium)"
+"$CHROME_BIN" \
+  --remote-debugging-port=9222 \
+  --user-data-dir="$HOME/.hermes/chrome-profiles/1688" \
+  --no-first-run \
+  --no-default-browser-check
+```
+
+Hermes terminal 工具注意：
+
+```text
+不要在前台 terminal 命令里加 &。
+如果直接执行 Chrome 可执行文件，必须用 terminal(background=true) 启动长驻进程。
+使用 macOS open -na 命令时不需要 &，命令会立即返回；Linux 直接执行 Chrome 时应由后台/长驻进程管理。
+```
 
 ```bash
 # WSL 中启动 Windows Chrome
@@ -39,6 +68,8 @@ taskkill /F /IM chrome.exe
 其他常见 Chrome 路径：
 - `C:\Program Files (x86)\Google\Chrome\Application\chrome.exe`
 - Edge: `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe --remote-debugging-port=9222`
+
+> 常见错误：普通 Chrome 已经在运行时，`open -a "Google Chrome" --args ...` 可能复用旧实例并忽略调试参数。macOS 用 `open -na` 加独立 `--user-data-dir`。
 
 ### Step 3: 验证端口就绪
 

@@ -29,15 +29,24 @@ class Alibaba1688Client {
       throw new Error('Invalid ALI_1688_AK: must be at least 32 characters');
     }
     // 先尝试 Base64 解码，失败则回退到原始字符串
+    // 注意：必须先尝试标准 base64（含 +/），再回退到 base64url（- _）。
+    // 反过来用 base64url 解码标准 base64 字符串会因 +/ 被丢弃而偏移错位，产生非法字符。
     let decoded = ak;
-    try {
-      const buf = Buffer.from(ak, 'base64url');
-      const text = buf.toString('utf-8');
-      if (text && text.length >= 32) {
-        decoded = text;
+    if (typeof ak === 'string' && ak.length >= 32) {
+      const candidates = ['base64', 'base64url'];
+      for (const enc of candidates) {
+        try {
+          const buf = Buffer.from(ak, enc);
+          const text = buf.toString('utf-8');
+          // 必须确认解码后是可打印 ASCII 字符串（避免出现 Armenian 字符等非法 header 值）
+          if (text && text.length >= 32 && /^[\x20-\x7E]+$/.test(text)) {
+            decoded = text;
+            break;
+          }
+        } catch (e) {
+          // 继续尝试下一个编码
+        }
       }
-    } catch (e) {
-      // 非 Base64，使用原始值
     }
     this.secret = decoded.substring(0, 32);
     this.keyId = decoded.substring(32);

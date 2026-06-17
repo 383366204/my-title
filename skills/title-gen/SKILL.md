@@ -24,6 +24,14 @@ If the user or upstream agent can wait longer, pass an explicit runtime budget:
 node bin/cli.js "<keyword>" --length 60 --count 3 --run-timeout-ms 180000 --json
 ```
 
+Before planning to use `--use-image-search`, run preflight as an independent step:
+
+```bash
+node bin/cli.js title-gen-preflight --json
+```
+
+If preflight returns `requiresUserAction=true` or exits non-zero, stop before image search and show `userMessage`. Do not wait for the main title command to time out.
+
 Run with SYCM data already collected:
 
 ```bash
@@ -49,6 +57,8 @@ node bin/cli.js --keywords "<keyword1>,<keyword2>" --length 60 --json
 - `count` / `--count`: candidate title count, not product count. Do not use `--count 10` or `--count 15` to mean "select 10 products".
 - `keyword_data` / `--keyword-file`: optional SYCM rows. Use this when available.
 - `products`: optional prepared 1688 products. If passed by API, the skill can skip 1688 search.
+
+Set `ECOM_BANNED_WORDS_EXTRA=/path/to/custom-banned-words.json` to add local custom banned words. This is safer than remote auto-sync.
 
 ## Success Criteria
 
@@ -94,6 +104,7 @@ https://detail.1688.com/offer/<id>.html$$<铺货标题>$$<SYCM推荐类目>
 
 - LLM JSON parse error: retry once. The project has robust JSON repair, so repeated parse errors usually mean provider output is broken.
 - No products: retry with a broader keyword or call `alibaba1688` web search first.
+- If result `status` is `no_products_fallback_titles`, these are generic title ideas only. Do not export them to distribution and do not call `1688-distribution`.
 - `taobao-native` unavailable: continue without peer titles. Do not block title generation only because Taobao search failed.
 - SYCM unavailable, `login_required`, `slider_required`, or `sycm_feature_required`: stop and ask the user to fix SYCM manually. Do not auto-login or drag sliders.
 - Title too short: retry once with `--length 60`. If still short, report the exact title and do not pad with meaningless words manually.

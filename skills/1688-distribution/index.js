@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const { withAgentResponseFields } = require('../../core/agent-response');
 
 const DEFAULT_CDP_PORT = 9222;
 const DEFAULT_BASE_URL = 'https://item.jnesoft.com/';
@@ -8,10 +9,19 @@ const DEFAULT_MULTI_STORE_URL = 'https://item.jnesoft.com/ali_view/ali_multiStor
 const DEFAULT_BATCH_LOG_URL = 'https://item.jnesoft.com/ali_view/ali_batchLog';
 const DEFAULT_STATE_FILE = path.join(process.cwd(), 'data', 'distribution-runs.jsonl');
 const RECENT_SUBMIT_WINDOW_MS = 30 * 60 * 1000;
+const DISTRIBUTION_AUTO = 'auto';
+const DISTRIBUTION_RANDOM_AVERAGE = 'random-average';
+const SHOP_SELECTION_AUTO = 'auto';
+const SHOP_SELECTION_ALL = 'all';
+const SHOP_SELECTION_FIRST = 'first';
 const TXT_RANDOM_AVERAGE = '\u968f\u673a\u5e73\u5747\u5206\u914d';
 const TXT_SELECT_ALL = '\u5168\u9009';
 const TXT_START_BATCH_COPY = '\u5f00\u59cb\u6279\u91cf\u590d\u5236';
 const TXT_VIEW_COPY_RECORDS = '\u67e5\u770b\u590d\u5236\u8bb0\u5f55';
+const TXT_RELOGIN = '\u91cd\u65b0\u767b\u5f55';
+const TXT_REAUTHORIZE = '\u91cd\u65b0\u6388\u6743';
+const TXT_CANCEL = '\u53d6\u6d88';
+const TXT_AUTHORIZE_AND_LOGIN = '\u6388\u6743\u5e76\u767b\u5f55';
 const TXT_COPY_LOG = '\u590d\u5236\u65e5\u5fd7';
 const TXT_SEARCH = '\u641c\u7d22';
 const TXT_COMMA_OR_SPACE = '\u9017\u53f7\u6216\u7a7a\u683c';
@@ -115,10 +125,28 @@ function createBatchHash(items, options = {}) {
   const payload = JSON.stringify({
     items: items.map(item => ({ url: item.url, title: item.title || '' })),
     categories: items.map(item => item.category || ''),
-    distributionMode: options.distributionMode || 'random-average',
-    shops: options.shops || 'all'
+    distributionMode: options.distributionMode || DISTRIBUTION_AUTO,
+    shops: options.shops || SHOP_SELECTION_AUTO
   });
   return crypto.createHash('sha256').update(payload).digest('hex');
+}
+
+function resolveDistributionMode({ itemCount, shopCount, preferredMode = DISTRIBUTION_AUTO } = {}) {
+  const preferred = preferredMode || DISTRIBUTION_AUTO;
+  if (preferred === DISTRIBUTION_AUTO) {
+    return DISTRIBUTION_RANDOM_AVERAGE;
+  }
+  return preferred;
+}
+
+function resolveShopSelectionMode({ itemCount, shopCount, preferredShops = SHOP_SELECTION_AUTO } = {}) {
+  const preferred = preferredShops || SHOP_SELECTION_AUTO;
+  if (preferred === SHOP_SELECTION_AUTO) {
+    return itemCount > 0 && shopCount > 0 && itemCount < shopCount
+      ? SHOP_SELECTION_FIRST
+      : SHOP_SELECTION_ALL;
+  }
+  return preferred;
 }
 
 function readRunRecords(stateFile = DEFAULT_STATE_FILE) {
@@ -165,12 +193,24 @@ async function listTargets(port = DEFAULT_CDP_PORT) {
   return fetchJson(`${cdpHttpBase(port)}/json/list`);
 }
 
+async function createPageTarget(port = DEFAULT_CDP_PORT, url = DEFAULT_BASE_URL) {
+  const response = await fetch(`${cdpHttpBase(port)}/json/new?${encodeURIComponent(url)}`, { method: 'PUT' });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status} creating Chrome target`);
+  }
+  return response.json();
+}
+
 function pickBusinessTarget(targets) {
   return targets.find(t => t.type === 'page' && t.url.includes('item.jnesoft.com/ali_view/ali_multiStore'))
     || targets.find(t => t.type === 'page' && t.url.includes('item.jnesoft.com/ali_view/ali_batchLog'))
     || targets.find(t => t.type === 'page' && t.url.includes('item.jnesoft.com'))
     || targets.find(t => t.type === 'page' && (t.url === 'about:blank' || t.url.startsWith('chrome://newtab')))
     || targets.find(t => t.type === 'page');
+}
+
+function isJnesoftTarget(target) {
+  return Boolean(target && target.type === 'page' && String(target.url || '').includes('item.jnesoft.com'));
 }
 
 async function getBusinessTarget(port = DEFAULT_CDP_PORT) {
@@ -180,12 +220,27 @@ async function getBusinessTarget(port = DEFAULT_CDP_PORT) {
   return target;
 }
 
-async function inspectBrowser(port = DEFAULT_CDP_PORT) {
+async function inspectBrowser(port = DEFAULT_CDP_PORT, options = {}) {
   try {
-    const targets = await listTargets(port);
-    const target = pickBusinessTarget(targets);
+    let targets = await listTargets(port);
+    let target = pickBusinessTarget(targets);
+    if (options.ensureJnesoft && !isJnesoftTarget(target)) {
+      await createPageTarget(port, DEFAULT_BASE_URL).catch(async () => {
+        if (!target || !target.webSocketDebuggerUrl) return;
+        const fallbackClient = await createCdpClientForTarget(target);
+        try {
+          await navigate(fallbackClient, DEFAULT_BASE_URL);
+        } finally {
+          await fallbackClient.close();
+        }
+      });
+      targets = await listTargets(port);
+      target = pickBusinessTarget(targets);
+    }
+    const jnesoftTarget = isJnesoftTarget(target);
     let pageState = null;
     let loginExpired = false;
+    let loginState = { kind: 'ok', recoverable: false, reason: '' };
     if (target && target.webSocketDebuggerUrl) {
       const client = await createCdpClientForTarget(target);
       try {
@@ -194,13 +249,23 @@ async function inspectBrowser(port = DEFAULT_CDP_PORT) {
           title: document.title,
           body: document.body ? document.body.innerText.slice(0, 3000) : ''
         }))()`);
-        loginExpired = isLoginExpiredText(pageState.body || '');
+        if (options.ensureJnesoft && jnesoftTarget && !String(pageState.url || '').includes('item.jnesoft.com')) {
+          await navigate(client, DEFAULT_BASE_URL);
+          pageState = await client.evaluate(`(() => ({
+            url: location.href,
+            title: document.title,
+            body: document.body ? document.body.innerText.slice(0, 3000) : ''
+          }))()`);
+        }
+        loginState = classifyLoginState(pageState);
+        loginExpired = loginState.kind !== 'ok';
       } finally {
         await client.close();
       }
     }
+    const jnesoftPageLoaded = jnesoftTarget && pageState && String(pageState.url || '').includes('item.jnesoft.com');
     return {
-      ok: !!target && !loginExpired,
+      ok: !!target && jnesoftPageLoaded && !loginExpired,
       port,
       targetCount: targets.length,
       target: target ? {
@@ -211,10 +276,18 @@ async function inspectBrowser(port = DEFAULT_CDP_PORT) {
       } : null,
       pageState,
       loginExpired,
+      loginState,
+      jnesoftTarget,
+      jnesoftPageLoaded,
+      loginRecoverable: loginState.recoverable === true,
       message: target
-        ? (loginExpired
-          ? 'Chrome CDP is available, but the distribution page login/authorization is expired'
-          : 'Chrome CDP is available and a reusable page target was found')
+        ? (!jnesoftTarget
+          ? 'Chrome CDP is available, but no item.jnesoft.com distribution page was found'
+          : (!jnesoftPageLoaded
+            ? 'Chrome CDP created a jnesoft target, but the page did not finish loading'
+            : (loginExpired
+            ? `Chrome CDP is available, but the distribution page needs login recovery (${loginState.kind})`
+            : 'Chrome CDP is available and a jnesoft distribution page target was found')))
         : 'Chrome CDP is available but no reusable page target was found'
     };
   } catch (err) {
@@ -232,10 +305,51 @@ function isLoginExpiredText(text) {
 }
 
 function isLoginExpiredTextStable(text) {
-  return /\u767b\u5f55\u4fe1\u606f\u5df2\u8fc7\u671f|\u91cd\u65b0\u767b\u5f55|\u626b\u7801\u767b\u5f55|\u77ed\u4fe1\u767b\u5f55|\u5bc6\u7801\u767b\u5f55|\u6388\u6743\u72b6\u6001\u5931\u8d25|\u83b7\u53d6\u6388\u6743\u72b6\u6001\u5931\u8d25|\u8bf7\u767b\u5f55/.test(String(text || ''));
+  return /\u767b\u5f55\u4fe1\u606f\u5df2\u8fc7\u671f|\u91cd\u65b0\u767b\u5f55|\u626b\u7801\u767b\u5f55|\u77ed\u4fe1\u767b\u5f55|\u5bc6\u7801\u767b\u5f55|\u6388\u6743\u72b6\u6001\u5931\u8d25|\u83b7\u53d6\u6388\u6743\u72b6\u6001\u5931\u8d25|\u8bf7\u767b\u5f55|\u5e94\u7528\u6388\u6743|\u767b\u5f55\u5e76\u6388\u6743|\u70b9\u51fb\u6388\u6743\u5e76\u767b\u5f55|\u6388\u6743\u987b\u77e5/.test(String(text || ''));
 }
 
 isLoginExpiredText = isLoginExpiredTextStable;
+
+function classifyLoginState(pageState = {}) {
+  const body = String(pageState.body || '');
+  const url = String(pageState.url || '');
+  if (/\u626b\u7801\u767b\u5f55|\u77ed\u4fe1\u767b\u5f55|\u5bc6\u7801\u767b\u5f55|\u9a8c\u8bc1\u7801|\u5b89\u5168\u9a8c\u8bc1|\u6ed1\u5757/.test(body)) {
+    return {
+      kind: 'manual_login_required',
+      recoverable: false,
+      reason: 'manual_login_required'
+    };
+  }
+  if (
+    /oauth\.taobao\.com/.test(url)
+    || /\u767b\u5f55\u5e76\u6388\u6743|\u6388\u6743\u5e76\u767b\u5f55|\u70b9\u51fb\u6388\u6743\u5e76\u767b\u5f55|\u6388\u6743\u987b\u77e5|\u5e94\u7528\u6388\u6743/.test(body)
+  ) {
+    return {
+      kind: 'taobao_oauth_authorize',
+      recoverable: true,
+      reason: 'taobao_authorization'
+    };
+  }
+  if (/\u767b\u5f55\u4fe1\u606f\u5df2\u8fc7\u671f|\u91cd\u65b0\u767b\u5f55|\u6388\u6743\u72b6\u6001\u5931\u8d25|\u83b7\u53d6\u6388\u6743\u72b6\u6001\u5931\u8d25|\u8bf7\u767b\u5f55/.test(body)) {
+    return {
+      kind: 'expired_modal',
+      recoverable: true,
+      reason: 'login_expired'
+    };
+  }
+  if (isLoginExpiredText(body)) {
+    return {
+      kind: 'manual_login_required',
+      recoverable: false,
+      reason: 'login_required'
+    };
+  }
+  return {
+    kind: 'ok',
+    recoverable: false,
+    reason: ''
+  };
+}
 
 async function waitForTarget(predicate, { port = DEFAULT_CDP_PORT, timeoutMs = 30000, intervalMs = 500 } = {}) {
   const started = Date.now();
@@ -278,8 +392,9 @@ class CdpClient {
       return;
     }
     if (!msg.id || !this.pending.has(msg.id)) return;
-    const { resolve, reject } = this.pending.get(msg.id);
+    const { resolve, reject, timer } = this.pending.get(msg.id);
     this.pending.delete(msg.id);
+    clearTimeout(timer);
     if (msg.error) reject(new Error(`CDP ${msg.error.code}: ${msg.error.message}`));
     else resolve(msg.result || {});
   }
@@ -288,12 +403,13 @@ class CdpClient {
     const id = this.seq++;
     this.ws.send(JSON.stringify({ id, method, params }));
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      setTimeout(() => {
+      const timer = setTimeout(() => {
         if (!this.pending.has(id)) return;
         this.pending.delete(id);
         reject(new Error(`CDP timeout: ${method}`));
       }, 120000); // 2分钟超时（轮询+翻页需要更长时间）
+      if (timer.unref) timer.unref();
+      this.pending.set(id, { resolve, reject, timer });
     });
   }
 
@@ -311,7 +427,18 @@ class CdpClient {
   }
 
   async close() {
-    if (this.ws) this.ws.close();
+    for (const [id, pending] of this.pending.entries()) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error('CDP client closed'));
+      this.pending.delete(id);
+    }
+    if (!this.ws) return;
+    if (this.ws.readyState >= 2) return;
+    await new Promise(resolve => {
+      this.ws.once('close', resolve);
+      this.ws.close();
+      setTimeout(resolve, 1000).unref?.();
+    });
   }
 }
 
@@ -350,12 +477,21 @@ function pageHelpersExpression() {
       window.__ecom1688.hasExactText = (el, text) => (el.innerText || el.textContent || '')
         .split(/\\s+/)
         .some(part => part.trim() === text);
+      window.__ecom1688.rankClickable = el => {
+        const r = el.getBoundingClientRect();
+        const tag = el.tagName ? el.tagName.toLowerCase() : '';
+        const role = el.getAttribute && el.getAttribute('role');
+        const clickable = tag === 'button' || tag === 'a' || role === 'button' || el.classList.contains('el-button') || el.classList.contains('el-link');
+        return (clickable ? 0 : 100000000) + Math.max(1, r.width * r.height);
+      };
       window.__ecom1688.findExactText = (text, selectors = 'button,a,li,span,div,label') =>
         Array.from(document.querySelectorAll(selectors))
-          .find(el => window.__ecom1688.visible(el) && window.__ecom1688.hasExactText(el, text));
+          .filter(el => window.__ecom1688.visible(el) && window.__ecom1688.hasExactText(el, text))
+          .sort((a, b) => window.__ecom1688.rankClickable(a) - window.__ecom1688.rankClickable(b))[0];
       window.__ecom1688.findTextContains = (text, selectors = 'button,a,li,span,div,label') =>
         Array.from(document.querySelectorAll(selectors))
-          .find(el => window.__ecom1688.visible(el) && (el.innerText || el.textContent || '').includes(text));
+          .filter(el => window.__ecom1688.visible(el) && (el.innerText || el.textContent || '').includes(text))
+          .sort((a, b) => window.__ecom1688.rankClickable(a) - window.__ecom1688.rankClickable(b))[0];
       window.__ecom1688.clickExact = (text, selectors = 'button,a,li,span,div,label') => {
         const el = window.__ecom1688.findExactText(text, selectors);
         if (!el) return { ok: false, reason: text + ' not found', url: location.href, body: document.body.innerText.slice(0, 1000) };
@@ -386,25 +522,233 @@ function pageHelpersExpression() {
   `;
 }
 
+async function readBrowserState(client) {
+  await client.evaluate(pageHelpersExpression());
+  return client.evaluate('window.__ecom1688.readState()');
+}
+
+async function clickText(client, text, selectors = 'button,a,span,div,label') {
+  await client.evaluate(pageHelpersExpression());
+  const forceClickExpression = `
+    (() => {
+      const text = ${jsString(text)};
+      const selectors = ${jsString(selectors)};
+      const el = window.__ecom1688.findExactText(text, selectors) || window.__ecom1688.findTextContains(text, selectors);
+      if (!el) return { ok: false, reason: text + ' not found for force click', url: location.href };
+      const target = el.closest('button,a,[role="button"],.el-button') || el;
+      target.scrollIntoView && target.scrollIntoView({ block: 'center', inline: 'center' });
+      target.focus && target.focus();
+      for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+        target.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+      }
+      target.click && target.click();
+      return {
+        ok: true,
+        text,
+        tag: target.tagName,
+        className: target.className || '',
+        url: location.href
+      };
+    })()
+  `;
+  if (client.send) {
+    await client.send('Page.bringToFront').catch(() => {});
+    await client.evaluate('window.focus && window.focus()').catch(() => {});
+    const point = await client.evaluate(`
+      (() => {
+        const text = ${jsString(text)};
+        const selectors = ${jsString(selectors)};
+        const exact = window.__ecom1688.findExactText(text, selectors);
+        const el = exact || window.__ecom1688.findTextContains(text, selectors);
+        if (!el) return { ok: false, reason: text + ' not found', url: location.href, body: document.body.innerText.slice(0, 1000) };
+        const r = el.getBoundingClientRect();
+        return {
+          ok: true,
+          text,
+          tag: el.tagName,
+          x: r.left + r.width / 2,
+          y: r.top + r.height / 2,
+          width: r.width,
+          height: r.height,
+          url: location.href
+        };
+      })()
+    `);
+    if (point && point.ok && Number.isFinite(point.x) && Number.isFinite(point.y)) {
+      await client.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: point.x, y: point.y, button: 'none' });
+      await client.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: point.x, y: point.y, button: 'left', clickCount: 1 });
+      await client.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: point.x, y: point.y, button: 'left', clickCount: 1 });
+      const domClick = await client.evaluate(forceClickExpression).catch(err => ({ ok: false, reason: err.message }));
+      return { ...point, domClick };
+    }
+  }
+  let click = await client.evaluate(forceClickExpression);
+  if (click && click.ok) return click;
+  click = await client.evaluate(`window.__ecom1688.clickExact(${jsString(text)}, ${jsString(selectors)})`);
+  if (!click || !click.ok) {
+    click = await client.evaluate(`window.__ecom1688.clickContains(${jsString(text)}, ${jsString(selectors)})`);
+  }
+  return click;
+}
+
+async function createRecoveryFollowupClient({ port = DEFAULT_CDP_PORT, currentWsUrl = '' } = {}) {
+  const targets = await listTargets(port);
+  const target = targets.find(t => t.type === 'page' && /oauth\.taobao\.com/.test(t.url || ''))
+    || targets.find(t => t.type === 'page' && /itemserver\.jnesoft\.com/.test(t.url || ''));
+  if (!target || !target.webSocketDebuggerUrl || target.webSocketDebuggerUrl === currentWsUrl) return null;
+  const client = await createCdpClientForTarget(target);
+  return { client, shouldClose: true, target };
+}
+
+async function recoverLoginIfNeeded(client, {
+  state = null,
+  maxSteps = 4,
+  waitMs = 2500,
+  port = DEFAULT_CDP_PORT,
+  createFollowupClient = createRecoveryFollowupClient
+} = {}) {
+  let current = state || await readBrowserState(client);
+  const steps = [];
+  for (let step = 0; step < maxSteps; step += 1) {
+    const loginState = classifyLoginState(current);
+    if (loginState.kind === 'ok') {
+      return {
+        ok: true,
+        recovered: steps.length > 0,
+        steps,
+        state: current
+      };
+    }
+    if (!loginState.recoverable) {
+      return {
+        ok: false,
+        recovered: steps.length > 0,
+        steps,
+        state: current,
+        loginState
+      };
+    }
+
+    let click = null;
+    if (loginState.kind === 'expired_modal') {
+      click = await clickText(client, TXT_RELOGIN, 'button,a,span,div');
+    } else if (loginState.kind === 'taobao_oauth_authorize') {
+      click = await clickText(client, TXT_AUTHORIZE_AND_LOGIN, 'button,a,span,div');
+    }
+    if (!click || !click.ok) {
+      return {
+        ok: false,
+        recovered: steps.length > 0,
+        steps,
+        state: current,
+        loginState,
+        reason: click && click.reason ? click.reason : `Failed to click login recovery action for ${loginState.kind}`
+      };
+    }
+    steps.push(loginState.kind);
+    if (waitMs > 0) await sleep(waitMs);
+    current = await readBrowserState(client);
+
+    const nextState = classifyLoginState(current);
+    if (loginState.kind === 'expired_modal' && nextState.kind === 'expired_modal') {
+      if (String(current.body || '').includes(TXT_REAUTHORIZE)) {
+        await clickText(client, TXT_CANCEL, 'button,a,span,div').catch(() => null);
+        if (waitMs > 0) await sleep(600);
+        const reauth = await clickText(client, TXT_REAUTHORIZE, 'button,a,span,div').catch(err => ({
+          ok: false,
+          reason: err.message
+        }));
+        if (reauth && reauth.ok) {
+          steps.push('reauthorize_link');
+          if (waitMs > 0) await sleep(waitMs);
+          current = await readBrowserState(client);
+        }
+      }
+      const followup = await createFollowupClient({
+        port,
+        currentWsUrl: client.wsUrl || '',
+        loginState,
+        state: current
+      }).catch(() => null);
+      if (followup && followup.client) {
+        try {
+          const nested = await recoverLoginIfNeeded(followup.client, {
+            maxSteps: Math.max(1, maxSteps - step - 1),
+            waitMs,
+            port,
+            createFollowupClient
+          });
+          steps.push(...(nested.steps || []));
+          if (!nested.ok) {
+            return {
+              ...nested,
+              recovered: steps.length > 0,
+              steps
+            };
+          }
+        } finally {
+          if (followup.shouldClose && typeof followup.client.close === 'function') {
+            await followup.client.close().catch(() => {});
+          }
+        }
+        if (client.send) {
+          await client.send('Page.navigate', { url: current.url || DEFAULT_BASE_URL }).catch(() => {});
+          if (waitMs > 0) await sleep(waitMs);
+        }
+        current = await readBrowserState(client);
+      }
+    }
+  }
+
+  return {
+    ok: false,
+    recovered: steps.length > 0,
+    steps,
+    state: current,
+    loginState: classifyLoginState(current),
+    reason: 'Login recovery did not complete before timeout'
+  };
+}
+
+async function recoverBrowserLogin(port = DEFAULT_CDP_PORT) {
+  const target = await getBusinessTarget(port);
+  const client = await createCdpClientForTarget(target);
+  try {
+    return await recoverLoginIfNeeded(client);
+  } finally {
+    await client.close();
+  }
+}
+
+async function assertOrRecoverLogin(client, state, context) {
+  const recovery = await recoverLoginIfNeeded(client, { state });
+  if (!recovery.ok) {
+    const kind = recovery.loginState && recovery.loginState.kind;
+    const reason = recovery.reason || kind || 'login_required';
+    throw new Error(`Login recovery failed ${context}: ${reason}; user must complete login manually`);
+  }
+  return recovery.state;
+}
+
 async function navigate(client, url) {
   await client.send('Page.navigate', { url });
   await sleep(2500);
 }
 
 async function ensureMultiStorePage(client, { port = DEFAULT_CDP_PORT } = {}) {
-  await client.evaluate(pageHelpersExpression());
-  let state = await client.evaluate('window.__ecom1688.readState()');
+  let state = await readBrowserState(client);
+  state = await assertOrRecoverLogin(client, state, 'before entering multi-store page');
   if (state.url.includes('ali_batchLog')) {
     await client.evaluate('history.back()');
     await sleep(2500);
-    await client.evaluate(pageHelpersExpression());
-    state = await client.evaluate('window.__ecom1688.readState()');
+    state = await readBrowserState(client);
+    state = await assertOrRecoverLogin(client, state, 'after returning from copy log');
   }
 
   if (!state.url.includes('item.jnesoft.com')) {
     await navigate(client, DEFAULT_BASE_URL);
-    await client.evaluate(pageHelpersExpression());
-    state = await client.evaluate('window.__ecom1688.readState()');
+    state = await readBrowserState(client);
+    state = await assertOrRecoverLogin(client, state, 'after opening distribution home');
   }
 
   if (state.url.includes('ali_multiStore') || state.body.includes('商品分配方式')) {
@@ -418,16 +762,16 @@ async function ensureMultiStorePage(client, { port = DEFAULT_CDP_PORT } = {}) {
     const click = await client.evaluate(`window.__ecom1688.clickExact('多店复制')`);
     if (click && click.ok) {
       await sleep(2500);
-      await client.evaluate(pageHelpersExpression());
-      state = await client.evaluate('window.__ecom1688.readState()');
+      state = await readBrowserState(client);
+      state = await assertOrRecoverLogin(client, state, 'after clicking multi-store copy');
       if (state.url.includes('ali_multiStore') || state.body.includes('商品分配方式')) return state;
     }
   }
 
   await navigate(client, DEFAULT_MULTI_STORE_URL);
   await waitForTarget(t => t.type === 'page' && t.url.includes('item.jnesoft.com'), { port }).catch(() => null);
-  await client.evaluate(pageHelpersExpression());
-  state = await client.evaluate('window.__ecom1688.readState()');
+  state = await readBrowserState(client);
+  state = await assertOrRecoverLogin(client, state, 'after direct multi-store navigation');
   if (!state.url.includes('ali_multiStore') && !state.body.includes('商品分配方式')) {
     throw new Error('Failed to enter multi-store distribution page');
   }
@@ -541,14 +885,56 @@ async function readShopSelectionState(client) {
   `);
 }
 
-async function selectRandomAverageAndAllShopsStable(client) {
+async function selectDistributionModeAndAllShopsStable(client, { itemCount = 0, distributionMode = DISTRIBUTION_AUTO } = {}) {
   await client.evaluate(pageHelpersExpression());
-  const random = await client.evaluate(`window.__ecom1688.clickExact(${jsString(TXT_RANDOM_AVERAGE)}, 'label,span,div,button')`);
-  if (!random || !random.ok) throw new Error(random && random.reason ? random.reason : 'Failed to select random average distribution');
-  await sleep(500);
 
   let selection = await readShopSelectionState(client);
-  if (selection.ok) return selection;
+  const mode = resolveDistributionMode({
+    itemCount,
+    shopCount: selection.total || 0,
+    preferredMode: distributionMode
+  });
+  const shopMode = resolveShopSelectionMode({
+    itemCount,
+    shopCount: selection.total || 0,
+    preferredShops: SHOP_SELECTION_AUTO
+  });
+  const modeText = TXT_RANDOM_AVERAGE;
+  const modeClick = await client.evaluate(`window.__ecom1688.clickExact(${jsString(modeText)}, 'label,span,div,button')`);
+  if (!modeClick || !modeClick.ok) {
+    throw new Error(modeClick && modeClick.reason ? modeClick.reason : `Failed to select ${modeText} distribution`);
+  }
+  await sleep(500);
+
+  selection = await readShopSelectionState(client);
+  if (shopMode === SHOP_SELECTION_FIRST) {
+    const first = await client.evaluate(`
+      (() => {
+        const labels = Array.from(document.querySelectorAll('.shopItem label.el-checkbox'));
+        if (labels.length === 0) return { ok: false, reason: 'shop checkbox labels not found' };
+        let clicked = 0;
+        labels.forEach((label, index) => {
+          const input = label.querySelector('input[type="checkbox"]');
+          const checked = input ? input.checked : label.classList.contains('is-checked');
+          const shouldCheck = index === 0;
+          if (checked !== shouldCheck) {
+            label.click();
+            clicked += 1;
+          }
+        });
+        return { ok: true, clicked, total: labels.length };
+      })()
+    `);
+    if (!first || !first.ok) throw new Error(first && first.reason ? first.reason : 'Failed to select first shop');
+    await sleep(1200);
+    selection = await readShopSelectionState(client);
+    if (selection.selected !== 1) {
+      throw new Error(`First shop was not confirmed as the only selected shop (selected=${selection.selected || 0}, total=${selection.total || 0})`);
+    }
+    return { ...selection, distributionMode: mode, distributionModeText: modeText, shopSelectionMode: shopMode };
+  }
+
+  if (selection.ok) return { ...selection, distributionMode: mode, distributionModeText: modeText, shopSelectionMode: shopMode };
 
   let selectAll = await client.evaluate(`window.__ecom1688.clickExact(${jsString(TXT_SELECT_ALL)}, 'label,span,div,button')`);
   if (!selectAll || !selectAll.ok) {
@@ -594,7 +980,10 @@ async function selectRandomAverageAndAllShopsStable(client) {
   if (!selection.ok) {
     throw new Error(`All shops were not confirmed as selected (selected=${selection.selected || 0}, total=${selection.total || 0})`);
   }
-  return selection;
+  if (itemCount > 0 && selection.selected > itemCount) {
+    throw new Error(`Selected shop count (${selection.selected}) exceeds product count (${itemCount}); select only the first shop for this batch`);
+  }
+  return { ...selection, distributionMode: mode, distributionModeText: modeText, shopSelectionMode: shopMode };
 }
 
 function validateFilledText(readText, items) {
@@ -613,11 +1002,19 @@ function validateFilledText(readText, items) {
   }
 }
 
-async function preSubmitCheck(client, items) {
-  const state = await client.evaluate('window.__ecom1688.readState()');
-  if (isLoginExpiredText(state.body)) {
-    throw new Error('Login expired or authorization failed before submit; user must log in again');
+function assertNoDistributionAllocationError(text) {
+  const normalized = String(text || '');
+  if (/提交复制商品数小于当前所选店铺数|无法分配复制|请更换分配方式/.test(normalized)) {
+    throw new Error('Selected distribution mode is incompatible with product/shop count; use repeat distribution when product count is smaller than selected shop count');
   }
+}
+
+async function preSubmitCheck(client, items) {
+  let state = await client.evaluate('window.__ecom1688.readState()');
+  if (isLoginExpiredText(state.body)) {
+    state = await assertOrRecoverLogin(client, state, 'before submit');
+  }
+  assertNoDistributionAllocationError(state.body);
   validateFilledText(state.body, items);
   if (state.body.includes('不合规') && !state.body.includes('其中0条不合规')) {
     throw new Error('Page reports non-compliant links; stop before submit');
@@ -629,10 +1026,11 @@ async function preSubmitCheck(client, items) {
 }
 
 async function preSubmitCheckStable(client, items) {
-  const state = await client.evaluate('window.__ecom1688.readState()');
+  let state = await client.evaluate('window.__ecom1688.readState()');
   if (isLoginExpiredText(state.body)) {
-    throw new Error('Login expired or authorization failed before submit; user must log in again');
+    state = await assertOrRecoverLogin(client, state, 'before submit');
   }
+  assertNoDistributionAllocationError(state.body);
   validateFilledText(state.body, items);
   if (state.body.includes('\u4e0d\u5408\u89c4') && !state.body.includes('\u5176\u4e2d0\u6761\u4e0d\u5408\u89c4')) {
     throw new Error('Page reports non-compliant links; stop before submit');
@@ -651,8 +1049,9 @@ async function submitAndOpenLog(client) {
   await client.evaluate(pageHelpersExpression());
   let state = await client.evaluate('window.__ecom1688.readState()');
   if (isLoginExpiredText(state.body)) {
-    throw new Error('Login expired or authorization failed after submit click; user must log in again before distribution can continue');
+    state = await assertOrRecoverLogin(client, state, 'after submit click');
   }
+  assertNoDistributionAllocationError(state.body);
   if (state.url.includes('ali_batchLog')) return state;
   const logClick = await client.evaluate(`window.__ecom1688.clickExact('查看复制记录', 'button,a,span,div')`);
   if (!logClick || !logClick.ok) throw new Error(logClick && logClick.reason ? logClick.reason : 'Failed to click view copy records');
@@ -660,8 +1059,9 @@ async function submitAndOpenLog(client) {
   await client.evaluate(pageHelpersExpression());
   state = await client.evaluate('window.__ecom1688.readState()');
   if (isLoginExpiredText(state.body)) {
-    throw new Error('Login expired or authorization failed while opening copy records');
+    state = await assertOrRecoverLogin(client, state, 'while opening copy records');
   }
+  assertNoDistributionAllocationError(state.body);
   if (!state.url.includes('ali_batchLog') && !state.body.includes('复制日志')) {
     await navigate(client, DEFAULT_BATCH_LOG_URL);
     await client.evaluate(pageHelpersExpression());
@@ -681,8 +1081,9 @@ async function submitAndOpenLogStable(client) {
   await client.evaluate(pageHelpersExpression());
   let state = await client.evaluate('window.__ecom1688.readState()');
   if (isLoginExpiredText(state.body)) {
-    throw new Error('Login expired or authorization failed after submit click; user must log in again before distribution can continue');
+    state = await assertOrRecoverLogin(client, state, 'after submit click');
   }
+  assertNoDistributionAllocationError(state.body);
   if (state.url.includes('ali_batchLog')) return state;
   const logClick = await client.evaluate(`window.__ecom1688.clickExact(${jsString(TXT_VIEW_COPY_RECORDS)}, 'button,a,span,div')`);
   if (!logClick || !logClick.ok) throw new Error(logClick && logClick.reason ? logClick.reason : 'Failed to click view copy records');
@@ -690,8 +1091,9 @@ async function submitAndOpenLogStable(client) {
   await client.evaluate(pageHelpersExpression());
   state = await client.evaluate('window.__ecom1688.readState()');
   if (isLoginExpiredText(state.body)) {
-    throw new Error('Login expired or authorization failed while opening copy records');
+    state = await assertOrRecoverLogin(client, state, 'while opening copy records');
   }
+  assertNoDistributionAllocationError(state.body);
   if (!state.url.includes('ali_batchLog') && !state.body.includes(TXT_COPY_LOG)) {
     await navigate(client, DEFAULT_BATCH_LOG_URL);
     await client.evaluate(pageHelpersExpression());
@@ -705,8 +1107,31 @@ async function submitAndOpenLogStable(client) {
 
 function classifyCopyRecordText(offerIds, body, extra = {}) {
   const text = String(body || '');
-  const foundOfferIds = offerIds.filter(id => text.includes(id));
-  const missingOfferIds = offerIds.filter(id => !text.includes(id));
+  const confirmedIds = extra.perOfferId && typeof extra.perOfferId === 'object'
+    ? new Set(Object.keys(extra.perOfferId))
+    : null;
+  const searchableText = text
+    .split('\n')
+    .filter(line => !line.startsWith('--- SINGLE SEARCH '))
+    .join('\n');
+  const foundOfferIds = confirmedIds
+    ? offerIds.filter(id => confirmedIds.has(id))
+    : offerIds.filter(id => searchableText.includes(id));
+  const foundSet = new Set(foundOfferIds);
+  const missingOfferIds = offerIds.filter(id => !foundSet.has(id));
+  const perOfferId = {
+    ...(extra.perOfferId && typeof extra.perOfferId === 'object' ? extra.perOfferId : {})
+  };
+  for (const id of foundOfferIds) {
+    perOfferId[id] = {
+      ...(perOfferId[id] || {}),
+      status: inferOfferCopyStatus(searchableText, id)
+    };
+  }
+  const issueOfferIds = foundOfferIds.filter(id => {
+    const status = perOfferId[id] && perOfferId[id].status;
+    return ['failed', 'skipped', 'stopped', 'cancelled'].includes(status);
+  });
   const statusCounts = {
     copying: (text.match(RE_COPYING) || []).length,
     success: (text.match(RE_SUCCESS) || []).length,
@@ -714,28 +1139,51 @@ function classifyCopyRecordText(offerIds, body, extra = {}) {
     skipped: (text.match(RE_SKIPPED) || []).length
   };
   const totalLine = text.split('\n').find(line => line.startsWith('\u5168\u90e8(')) || '';
-  const status = foundOfferIds.length === offerIds.length
-    ? 'confirmed'
+  const status = missingOfferIds.length === 0
+    ? (issueOfferIds.length > 0 ? 'completed_with_issues' : 'confirmed')
     : foundOfferIds.length > 0
       ? 'partial_confirmed'
       : 'not_confirmed';
   return {
+    ...extra,
     ok: status === 'confirmed',
     status,
     foundOfferIds,
     missingOfferIds,
+    issueOfferIds,
     totalLine,
     statusCounts,
-    ...extra
+    perOfferId
   };
+}
+
+function inferOfferCopyStatus(text, offerId) {
+  const body = String(text || '');
+  const id = String(offerId || '');
+  const marker = '\u4e0a\u5bb6ID\uff1a' + id;
+  const markerIndex = body.indexOf(marker);
+  const idIndex = markerIndex >= 0 ? markerIndex : body.indexOf(id);
+  if (idIndex < 0) return 'unknown';
+  const after = body.slice(idIndex, Math.min(body.length, idIndex + 900));
+  const nextIdIndex = after.slice(markerIndex >= 0 ? marker.length : id.length).search(/\u4e0a\u5bb6ID\uff1a\d{6,}/);
+  const window = nextIdIndex >= 0
+    ? after.slice(0, (markerIndex >= 0 ? marker.length : id.length) + nextIdIndex)
+    : after;
+  if (window.includes('\u8df3\u8fc7\u590d\u5236')) return 'skipped';
+  if (window.includes('\u590d\u5236\u5931\u8d25')) return 'failed';
+  if (window.includes('\u590d\u5236\u6210\u529f')) return 'success';
+  if (window.includes('\u590d\u5236\u4e2d')) return 'copying';
+  return 'unknown';
 }
 
 async function confirmCopyRecords(client, offerIds) {
   await client.evaluate(pageHelpersExpression());
   let state = await client.evaluate('window.__ecom1688.readState()');
+  state = await assertOrRecoverLogin(client, state, 'before confirming copy records');
   if (!state.url.includes('ali_batchLog')) {
     await navigate(client, DEFAULT_BATCH_LOG_URL);
-    await client.evaluate(pageHelpersExpression());
+    state = await readBrowserState(client);
+    state = await assertOrRecoverLogin(client, state, 'after opening copy records');
   }
 
   const result = await client.evaluate(`
@@ -814,6 +1262,7 @@ async function confirmCopyRecords(client, offerIds) {
         status,
         foundOfferIds,
         missingOfferIds,
+        issueOfferIds: [],
         totalLine,
         statusCounts,
         preview: body.slice(0, 2000),
@@ -827,9 +1276,11 @@ async function confirmCopyRecords(client, offerIds) {
 async function confirmCopyRecordsStable(client, offerIds) {
   await client.evaluate(pageHelpersExpression());
   let state = await client.evaluate('window.__ecom1688.readState()');
+  state = await assertOrRecoverLogin(client, state, 'before confirming copy records');
   if (!state.url.includes('ali_batchLog')) {
     await navigate(client, DEFAULT_BATCH_LOG_URL);
-    await client.evaluate(pageHelpersExpression());
+    state = await readBrowserState(client);
+    state = await assertOrRecoverLogin(client, state, 'after opening copy records');
   }
 
   const pageResult = await client.evaluate(`
@@ -964,7 +1415,10 @@ async function distributeProducts(options = {}) {
       await ensureMultiStorePage(client, { port });
       const filled = await fillItems(client, normalizeItemsForInput(batchItems));
       validateFilledText(filled.text, batchItems);
-      await selectRandomAverageAndAllShopsStable(client);
+      const shopSelection = await selectDistributionModeAndAllShopsStable(client, {
+        itemCount: batchItems.length,
+        distributionMode: options.distributionMode || DISTRIBUTION_AUTO
+      });
       await preSubmitCheckStable(client, batchItems);
       const logState = await submitAndOpenLogStable(client);
       const confirmation = await confirmCopyRecordsStable(client, batchItems.map(item => item.offerId));
@@ -976,6 +1430,8 @@ async function distributeProducts(options = {}) {
           count: batchItems.length,
           offerIds: batchItems.map(item => item.offerId),
           batchHash,
+          distributionMode: shopSelection.distributionMode,
+          shopSelectionMode: shopSelection.shopSelectionMode,
           logUrl: logState.url,
           confirmation
         });
@@ -987,6 +1443,8 @@ async function distributeProducts(options = {}) {
         count: batchItems.length,
         offerIds: batchItems.map(item => item.offerId),
         status: 'submitted',
+        distributionMode: shopSelection.distributionMode,
+        shopSelectionMode: shopSelection.shopSelectionMode,
         logUrl: logState.url,
         confirmation
       }, stateFile);
@@ -997,6 +1455,8 @@ async function distributeProducts(options = {}) {
         count: batchItems.length,
         offerIds: batchItems.map(item => item.offerId),
         batchHash,
+        distributionMode: shopSelection.distributionMode,
+        shopSelectionMode: shopSelection.shopSelectionMode,
         logUrl: logState.url,
         confirmation,
         logPreview: confirmation.preview || logState.body.slice(0, 1000)
@@ -1006,26 +1466,70 @@ async function distributeProducts(options = {}) {
     }
   }
 
-  return {
-    ok: results.every(row => row.ok || row.skipped),
+  const reviewStatuses = ['partial_confirmed', 'not_confirmed', 'completed_with_issues'];
+  const hasReviewStatus = status => reviewStatuses.includes(status);
+  const reviewRows = results.filter(row =>
+    row.skipped
+    || hasReviewStatus(row.status)
+    || (row.confirmation && hasReviewStatus(row.confirmation.status))
+  );
+  const ok = options.dryRun
+    ? results.every(row => row.ok)
+    : results.every(row => row.ok);
+  return withAgentResponseFields({
+    ok,
     total: items.length,
     batches: results,
-    canSubmit: !options.dryRun && results.every(row => row.ok || row.skipped),
-    mustReview: results.some(row => row.status === 'partial_confirmed' || row.status === 'not_confirmed'),
-    blockers: results
-      .filter(row => row.status === 'partial_confirmed' || row.status === 'not_confirmed')
-      .map(row => row.status),
+    canSubmit: !options.dryRun && ok,
+    mustReview: reviewRows.length > 0,
+    blockers: reviewRows.map(row => row.reason || row.status || (row.confirmation && row.confirmation.status)),
     nextActionCode: options.dryRun
       ? 'review_dry_run'
-      : results.some(row => row.status === 'partial_confirmed')
+      : reviewRows.some(row => row.reason === 'recent_duplicate')
+        ? 'blocked_recent_duplicate'
+        : reviewRows.some(row => row.status === 'completed_with_issues' || (row.confirmation && row.confirmation.status === 'completed_with_issues'))
+        ? 'report_completed_with_issues'
+        : results.some(row => row.status === 'partial_confirmed')
         ? 'report_partial_confirmed'
         : results.some(row => row.status === 'not_confirmed')
           ? 'report_not_confirmed'
           : 'report_confirmed',
     nextAction: options.dryRun
       ? 'Review this dry-run output. If item count and batches are correct, rerun the same command with --submit.'
-      : 'Report copy record status to the user. If status is partial_confirmed or not_confirmed, do not retry automatically.'
-  };
+      : 'Report copy record status to the user. If status is partial_confirmed, not_confirmed, or completed_with_issues, do not retry automatically.'
+  });
+}
+
+async function confirmDistributionLog(options = {}) {
+  const input = options.inputFile ? readTextFile(options.inputFile) : options.input;
+  const items = parseItems(input);
+  if (items.length === 0) throw new Error('No distribution items provided');
+  const offerIds = items.map(item => item.offerId);
+  const client = options.client || await createCdpClientForTarget(await getBusinessTarget(
+    parseInt(options.port || process.env.BROWSER_CDP_PORT || process.env.CHROME_DEBUG_PORT || DEFAULT_CDP_PORT, 10)
+  ));
+  const shouldClose = !options.client;
+  try {
+    const confirmation = await confirmCopyRecordsStable(client, offerIds);
+    const blockers = [];
+    if (confirmation.missingOfferIds && confirmation.missingOfferIds.length) blockers.push('missing_offer_ids');
+    if (confirmation.issueOfferIds && confirmation.issueOfferIds.length) blockers.push('copy_record_issues');
+    return withAgentResponseFields({
+      ok: confirmation.ok === true,
+      status: confirmation.status || 'not_confirmed',
+      total: items.length,
+      offerIds,
+      confirmation,
+      mustReview: confirmation.ok !== true,
+      blockers,
+      nextActionCode: confirmation.ok === true ? 'report_confirmed' : 'report_copy_record_issues',
+      nextAction: confirmation.ok === true
+        ? 'Report confirmed copy log status.'
+        : 'Report copy log issues. Do not retry submit automatically.'
+    });
+  } finally {
+    if (shouldClose) await client.close();
+  }
 }
 
 async function checkDistributionReadiness(options = {}) {
@@ -1044,10 +1548,19 @@ async function checkDistributionReadiness(options = {}) {
       duplicate: duplicate || null
     };
   });
-  const browser = options.skipBrowser ? { ok: true, skipped: true } : await inspectBrowser(port);
+  let browser = options.skipBrowser ? { ok: true, skipped: true } : await inspectBrowser(port, { ensureJnesoft: true });
+  if (!options.skipBrowser && browser.loginRecoverable) {
+    const recovery = await recoverBrowserLogin(port).catch(err => ({
+      ok: false,
+      reason: err.message
+    }));
+    browser = await inspectBrowser(port, { ensureJnesoft: true });
+    browser.loginRecovery = recovery;
+  }
   const duplicates = batches.filter(batch => batch.duplicate);
   const ok = items.length > 0 && browser.ok && duplicates.length === 0;
-  return {
+  const blockers = getReadinessBlockers({ itemCount: items.length, browser, duplicates });
+  return withAgentResponseFields({
     ok,
     status: ok ? 'ready' : 'blocked',
     canSubmit: ok,
@@ -1056,17 +1569,21 @@ async function checkDistributionReadiness(options = {}) {
     batchSize: parseInt(options.batchSize, 10) || 20,
     batches,
     browser,
-    blockers: [
-      ...(items.length === 0 ? ['empty_input'] : []),
-      ...(!browser.ok ? ['browser_cdp_unavailable'] : []),
-      ...(duplicates.length > 0 ? ['recent_duplicate_batch'] : [])
-    ],
+    blockers,
     allowedCommands: ok ? ['rerun_with_submit'] : [],
     nextActionCode: ok ? 'submit_ready' : 'fix_blockers',
     nextAction: ok
       ? 'Review this readiness result. If it is correct, rerun the same command with --submit to submit.'
       : 'Fix blockers before submitting. Do not click Start Batch Copy manually.'
-  };
+  });
+}
+
+function getReadinessBlockers({ itemCount, browser, duplicates }) {
+  const blockers = [];
+  if (itemCount === 0) blockers.push('empty_input');
+  if (!browser.ok) blockers.push(browser.loginExpired ? 'login_expired' : 'browser_cdp_unavailable');
+  if (duplicates.length > 0) blockers.push('recent_duplicate_batch');
+  return blockers;
 }
 
 module.exports = {
@@ -1076,13 +1593,21 @@ module.exports = {
   splitBatches,
   normalizeItemsForInput,
   createBatchHash,
+  resolveDistributionMode,
+  resolveShopSelectionMode,
   readRunRecords,
   appendRunRecord,
   findRecentDuplicate,
   inspectBrowser,
+  isLoginExpiredText,
+  classifyLoginState,
+  recoverLoginIfNeeded,
+  getReadinessBlockers,
   confirmCopyRecords,
   confirmCopyRecordsStable,
   classifyCopyRecordText,
+  inferOfferCopyStatus,
+  confirmDistributionLog,
   checkDistributionReadiness,
   distributeProducts
 };

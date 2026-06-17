@@ -9,11 +9,19 @@ const {
   splitBatches,
   normalizeItemsForInput,
   createBatchHash,
+  resolveDistributionMode,
+  resolveShopSelectionMode,
   appendRunRecord,
   findRecentDuplicate,
+  getReadinessBlockers,
+  isLoginExpiredText,
+  classifyLoginState,
+  recoverLoginIfNeeded,
   checkDistributionReadiness,
   confirmCopyRecords,
   classifyCopyRecordText,
+  inferOfferCopyStatus,
+  confirmDistributionLog,
   distributeProducts
 } = require('../index');
 const { syncSkill } = require('../../../scripts/sync-hermes-skills');
@@ -79,6 +87,25 @@ describe('1688 distribution input handling', () => {
   it('creates stable duplicate hashes', () => {
     const items = parseItems('https://detail.1688.com/offer/640322388000.html$$宠物玩具飞盘');
     assert.equal(createBatchHash(items), createBatchHash(items));
+  });
+
+  it('selects only the first shop when products are fewer than shops', () => {
+    assert.equal(
+      resolveDistributionMode({ itemCount: 2, shopCount: 3 }),
+      'random-average'
+    );
+    assert.equal(
+      resolveShopSelectionMode({ itemCount: 2, shopCount: 3 }),
+      'first'
+    );
+    assert.equal(
+      resolveDistributionMode({ itemCount: 3, shopCount: 2 }),
+      'random-average'
+    );
+    assert.equal(
+      resolveShopSelectionMode({ itemCount: 3, shopCount: 2 }),
+      'all'
+    );
   });
 
   it('includes category in duplicate hashes', () => {
@@ -150,6 +177,89 @@ describe('1688 distribution input handling', () => {
     assert.equal(result.perOfferId['657358172481'].source, 'single');
   });
 
+  it('flags found offer ids that finished as skipped or failed', () => {
+    const body = [
+      '全部(2)',
+      '1',
+      '正常商品',
+      '上家ID：640322388000',
+      '复制成功',
+      '2',
+      '不支持商品',
+      '上家ID：657358172481',
+      '跳过复制',
+      '跳过不支持分销商品'
+    ].join('\n');
+    const result = classifyCopyRecordText(['640322388000', '657358172481'], body);
+
+    assert.equal(inferOfferCopyStatus(body, '640322388000'), 'success');
+    assert.equal(inferOfferCopyStatus(body, '657358172481'), 'skipped');
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 'completed_with_issues');
+    assert.deepEqual(result.issueOfferIds, ['657358172481']);
+    assert.equal(result.perOfferId['657358172481'].status, 'skipped');
+  });
+
+  it('confirms current copy log without submitting', async () => {
+    const client = {
+      async evaluate(expression) {
+        const text = String(expression);
+        if (text.includes('window.__ecom1688.readState')) {
+          return { url: 'https://item.jnesoft.com/ali_view/ali_batchLog', body: '复制日志' };
+        }
+        if (text.includes('const offerIds')) {
+          return {
+            ok: true,
+            text: [
+              '全部(2)',
+              '1',
+              '正常商品',
+              '上家ID：640322388000',
+              '复制成功',
+              '2',
+              '不支持商品',
+              '上家ID：657358172481',
+              '跳过复制',
+              '跳过不支持分销商品'
+            ].join('\n'),
+            perOfferId: {
+              '640322388000': { source: 'batch' },
+              '657358172481': { source: 'batch' }
+            },
+            preview: '全部(2)',
+            url: 'https://item.jnesoft.com/ali_view/ali_batchLog'
+          };
+        }
+        return true;
+      }
+    };
+
+    const result = await confirmDistributionLog({
+      input: [
+        'https://detail.1688.com/offer/640322388000.html$$宠物玩具飞盘',
+        'https://detail.1688.com/offer/657358172481.html$$宠物玩具球'
+      ].join('\n'),
+      client
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 'completed_with_issues');
+    assert.deepEqual(result.blockers, ['copy_record_issues']);
+    assert.deepEqual(result.confirmation.issueOfferIds, ['657358172481']);
+  });
+
+  it('does not treat internal single-search markers as copy-log matches', () => {
+    const result = classifyCopyRecordText(
+      ['640322388000', '657358172481'],
+      '全部(0)\n暂无数据\n--- SINGLE SEARCH 640322388000 ---\n暂无数据\n--- SINGLE SEARCH 657358172481 ---\n暂无数据',
+      { perOfferId: {} }
+    );
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 'not_confirmed');
+    assert.deepEqual(result.foundOfferIds, []);
+    assert.deepEqual(result.missingOfferIds, ['640322388000', '657358172481']);
+  });
+
   it('checks readiness without browser when requested', async () => {
     const result = await checkDistributionReadiness({
       input: 'https://detail.1688.com/offer/640322388000.html$$宠物玩具飞盘',
@@ -177,6 +287,193 @@ describe('1688 distribution input handling', () => {
     assert.equal(result.ok, false);
     assert.ok(result.blockers.includes('recent_duplicate_batch'));
   });
+
+  it('blocks direct submit when a recent duplicate batch is found', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dist-submit-dup-'));
+    const stateFile = path.join(dir, 'runs.jsonl');
+    const input = 'https://detail.1688.com/offer/640322388000.html$$宠物玩具飞盘';
+    const items = parseItems(input);
+    const batchHash = createBatchHash(items);
+    appendRunRecord({
+      batchHash,
+      submittedAt: new Date().toISOString(),
+      status: 'submitted'
+    }, stateFile);
+
+    const result = await distributeProducts({ input, stateFile });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.canSubmit, false);
+    assert.equal(result.mustReview, true);
+    assert.deepEqual(result.blockers, ['recent_duplicate']);
+    assert.equal(result.nextActionCode, 'blocked_recent_duplicate');
+  });
+
+  it('reports login_expired separately from CDP unavailable', () => {
+    assert.deepEqual(
+      getReadinessBlockers({
+        itemCount: 1,
+        browser: { ok: false, loginExpired: true },
+        duplicates: []
+      }),
+      ['login_expired']
+    );
+    assert.deepEqual(
+      getReadinessBlockers({
+        itemCount: 1,
+        browser: { ok: false, loginExpired: false },
+        duplicates: []
+      }),
+      ['browser_cdp_unavailable']
+    );
+  });
+
+  it('treats Taobao OAuth authorization page as login expired', () => {
+    const body = [
+      '淘宝网',
+      '登录并授权协议',
+      '应用【 张飞商品分销 】将获得以下权限:',
+      '点击授权并登录表示您已阅读并同意 授权须知'
+    ].join('\n');
+    assert.equal(isLoginExpiredText(body), true);
+  });
+
+  it('classifies expired modal and Taobao OAuth as recoverable login states', () => {
+    assert.deepEqual(
+      classifyLoginState({
+        url: 'https://item.jnesoft.com/home',
+        body: '提示\n当前登录信息已过期，请重新登录\n重新登录\n取消'
+      }),
+      {
+        kind: 'expired_modal',
+        recoverable: true,
+        reason: 'login_expired'
+      }
+    );
+    assert.deepEqual(
+      classifyLoginState({
+        url: 'https://oauth.taobao.com/authorize?response_type=code',
+        body: '登录并授权协议\n检测到您已登录淘宝，可以直接进行授权\n授权并登录'
+      }),
+      {
+        kind: 'taobao_oauth_authorize',
+        recoverable: true,
+        reason: 'taobao_authorization'
+      }
+    );
+  });
+
+  it('classifies QR, SMS, password, and captcha login as manual-only states', () => {
+    for (const body of ['扫码登录', '短信登录', '密码登录', '验证码', '安全验证']) {
+      const state = classifyLoginState({ url: 'https://login.taobao.com/', body });
+      assert.equal(state.kind, 'manual_login_required');
+      assert.equal(state.recoverable, false);
+    }
+  });
+
+  it('auto-clicks relogin and authorize buttons for recoverable login states', async () => {
+    const states = [
+      {
+        url: 'https://item.jnesoft.com/home',
+        body: '提示\n当前登录信息已过期，请重新登录\n重新登录\n取消'
+      },
+      {
+        url: 'https://oauth.taobao.com/authorize?response_type=code',
+        body: '登录并授权协议\n授权并登录'
+      },
+      {
+        url: 'https://item.jnesoft.com/ali_view/ali_multiStore',
+        body: '商品分配方式\n开始批量复制'
+      }
+    ];
+    const clicks = [];
+    const client = {
+      async evaluate(expression) {
+        const text = String(expression);
+        if (text.includes('pageHelpersExpression')) return true;
+        if (text.includes('window.__ecom1688.readState')) return states[0];
+        if (text.includes('clickExact')) {
+          if (text.includes('重新登录')) {
+            clicks.push('relogin');
+            states.shift();
+            return { ok: true };
+          }
+          if (text.includes('授权并登录')) {
+            clicks.push('authorize');
+            states.shift();
+            return { ok: true };
+          }
+        }
+        return true;
+      }
+    };
+
+    const result = await recoverLoginIfNeeded(client, { state: states[0], waitMs: 0 });
+    assert.equal(result.recovered, true);
+    assert.deepEqual(result.steps, ['expired_modal', 'taobao_oauth_authorize']);
+    assert.deepEqual(clicks, ['relogin', 'authorize']);
+    assert.equal(result.state.url, 'https://item.jnesoft.com/ali_view/ali_multiStore');
+  });
+
+  it('continues recovery when relogin opens Taobao OAuth in a new tab', async () => {
+    let originalState = {
+      url: 'https://item.jnesoft.com/home',
+      body: '提示\n当前登录信息已过期，请重新登录\n重新登录\n取消'
+    };
+    let oauthState = {
+      url: 'https://oauth.taobao.com/authorize?response_type=code',
+      body: '登录并授权协议\n授权并登录'
+    };
+    const clicks = [];
+    const originalClient = {
+      async evaluate(expression) {
+        const text = String(expression);
+        if (text.includes('window.__ecom1688.readState')) return originalState;
+        if (text.includes('clickExact') && text.includes('重新登录')) {
+          clicks.push('relogin');
+          return { ok: true };
+        }
+        return true;
+      },
+      async send(method) {
+        if (method === 'Page.navigate') {
+          originalState = {
+            url: 'https://item.jnesoft.com/home',
+            body: '张飞搬家\n首页'
+          };
+        }
+        return {};
+      }
+    };
+    const oauthClient = {
+      async evaluate(expression) {
+        const text = String(expression);
+        if (text.includes('window.__ecom1688.readState')) return oauthState;
+        if (text.includes('clickExact') && text.includes('授权并登录')) {
+          clicks.push('authorize');
+          oauthState = {
+            url: 'https://itemserver.jnesoft.com/tbproduct/copy/hello',
+            body: 'ok'
+          };
+          return { ok: true };
+        }
+        return true;
+      },
+      async close() {}
+    };
+
+    const result = await recoverLoginIfNeeded(originalClient, {
+      state: originalState,
+      waitMs: 0,
+      createFollowupClient: async () => ({ client: oauthClient, shouldClose: true })
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.recovered, true);
+    assert.deepEqual(result.steps, ['expired_modal', 'taobao_oauth_authorize']);
+    assert.deepEqual(clicks, ['relogin', 'authorize']);
+    assert.equal(result.state.body, '张飞搬家\n首页');
+  });
 });
 
 describe('Hermes skill sync', () => {
@@ -203,6 +500,7 @@ describe('Hermes skill sync', () => {
     assert.equal(plan.mode, 'wrapper');
     assert.equal(plan.isSymlink, false);
     assert.ok(body.includes('cd /mnt/d/project/my-title'));
+    assert.ok(body.includes('node bin/cli.js doctor --json'));
     assert.ok(body.includes('node bin/cli.js mine-keywords'));
     assert.ok(!fs.existsSync(path.join(targetRoot, 'keyword-mining', 'src')));
   });

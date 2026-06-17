@@ -12,6 +12,10 @@ Check Chrome/CDP:
 node bin/cli.js sycm-status --json
 ```
 
+This command must return a status payload with `status`, `cdp`, and `nextActionCode`. If it returns title-generation fields such as `products`, `titles`, `coreWord`, or titles containing `sycmstatus`, the CLI is stale; update/sync the project before continuing.
+
+This command must return a status payload with `status`, `cdp`, and `nextActionCode`. If it returns title-generation fields such as `products`, `titles`, `coreWord`, or titles containing `sycmstatus`, the CLI is stale; update/sync the project before continuing.
+
 Query blue-ocean related words:
 
 ```bash
@@ -41,6 +45,31 @@ Example Windows launch:
 ```powershell
 "C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="C:\Users\<User>\AppData\Local\ecom-ai-tools-chrome"
 ```
+
+Example macOS launch:
+
+```bash
+mkdir -p "$HOME/.hermes/chrome-profiles/sycm"
+open -na "Google Chrome" --args \
+  --remote-debugging-port=9222 \
+  --user-data-dir="$HOME/.hermes/chrome-profiles/sycm" \
+  --no-first-run \
+  --no-default-browser-check
+```
+
+Example Linux launch:
+
+```bash
+mkdir -p "$HOME/.hermes/chrome-profiles/sycm"
+CHROME_BIN="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium-browser || command -v chromium)"
+"$CHROME_BIN" \
+  --remote-debugging-port=9222 \
+  --user-data-dir="$HOME/.hermes/chrome-profiles/sycm" \
+  --no-first-run \
+  --no-default-browser-check
+```
+
+In Hermes terminal, do not add `&` to a foreground command. Use `terminal(background=true)` for long-running direct Chrome launches, or use `open -na` on macOS.
 
 ## Success Criteria
 

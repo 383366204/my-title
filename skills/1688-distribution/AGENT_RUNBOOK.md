@@ -26,13 +26,21 @@ Do not pass `$$` through bash unquoted because some shells expand it.
 
 ## Golden Path
 
-1. If Hermes is the caller, sync skills first:
+1. On a new device, or after moving between macOS/Linux/Windows, run:
+
+```bash
+node bin/cli.js doctor --json
+```
+
+If it reports blockers, stop and fix them before distribution.
+
+2. If Hermes is the caller, sync skills first:
 
 ```bash
 node bin/cli.js sync-hermes-skills --apply --json
 ```
 
-2. Show the concrete distribution list to the user.
+3. Show the concrete distribution list to the user.
 
 Required before submit:
 
@@ -41,7 +49,7 @@ Required before submit:
 - User has confirmed after seeing the list.
 - Batch size is reasonable. Prefer 50 or fewer items per batch.
 
-3. Validate input without touching the browser:
+4. Validate input without touching the browser:
 
 ```bash
 node bin/cli.js distribute --input-file "<distribution-batch.txt>" --dry-run --json
@@ -53,7 +61,7 @@ Success condition:
 - `total` is greater than 0.
 - Every batch has `dryRun: true`.
 
-4. Check browser readiness and duplicate-submit risk:
+5. Check browser readiness and duplicate-submit risk:
 
 ```bash
 node bin/cli.js distribute --input-file "<distribution-batch.txt>" --check --json
@@ -66,7 +74,7 @@ Success condition:
 - `browser.ok` is `true`.
 - `blockers` is empty.
 
-5. Submit only after user confirmation:
+6. Submit only after user confirmation:
 
 ```bash
 node bin/cli.js distribute --input-file "<distribution-batch.txt>" --submit --json
@@ -79,7 +87,16 @@ Success condition:
 - Each submitted batch has `status: confirmed`.
 - `confirmation.foundOfferIds` contains every submitted offer id.
 - `confirmation.missingOfferIds` is empty.
+- `confirmation.issueOfferIds` is empty.
 - `confirmation.perOfferId` may show `batch` or `single`; both are acceptable confirmation sources.
+
+7. To check final outcomes later without submitting:
+
+```bash
+node bin/cli.js distribute --input-file "<distribution-batch.txt>" --confirm-log --json
+```
+
+If status is `completed_with_issues`, report `confirmation.issueOfferIds` and per-offer statuses. Do not retry submit automatically.
 
 ## What The CLI Does
 
@@ -108,17 +125,21 @@ Stop and report if any of these happens:
 - `--check` returns `recent_duplicate_batch`.
 - The user has not confirmed the concrete list.
 - Copyright/IP precheck has not been done.
-- The page asks for login, SMS, password, QR code, or authorization.
+- The page asks for SMS, password, QR code, captcha, or any manual login challenge.
 - The CLI reports garbled Chinese such as `????`.
 - The CLI cannot click or confirm the view-copy-record button.
 - A batch returns `partial_confirmed` or `not_confirmed`.
+- A batch returns `completed_with_issues`.
 - Any `confirmation.missingOfferIds` are present.
+- Any `confirmation.issueOfferIds` are present.
 
 Do not retry submit automatically after any stop condition.
 
 ## Browser Rules
 
 - Use the existing logged-in Chrome/CDP session.
+- The CLI may automatically click jnesoft `重新登录`, fall back to jnesoft `重新授权`, and click Taobao `授权并登录` when Taobao is already logged in.
+- If Taobao asks for QR, SMS, password, captcha, or account switching, stop and ask the user to complete it manually.
 - Use one business tab only.
 - Do not open `air.1688.com` for this flow.
 - Prefer `https://item.jnesoft.com/`.

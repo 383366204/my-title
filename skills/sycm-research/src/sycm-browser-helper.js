@@ -5,9 +5,13 @@
 
 const http = require('http');
 const path = require('path');
-const fs = require('fs');
-const { exec } = require('child_process');
+const { exec, execSync } = require('child_process');
 const util = require('util');
+const {
+  buildChromeLaunchPlan,
+  findChromeExecutable,
+  getChromeProfileDir
+} = require('../../../core/platform');
 const execAsync = util.promisify(exec);
 
 // 错误提示常量
@@ -104,16 +108,11 @@ function getDefaultUserDataDir() {
 }
 
 function getDedicatedProfileDir() {
-  if (process.env.SYCM_CHROME_PROFILE_DIR) {
-    return process.env.SYCM_CHROME_PROFILE_DIR;
-  }
-  if (process.platform === 'win32' && process.env.USERPROFILE) {
-    return path.join(process.env.USERPROFILE, 'AppData', 'Local', 'ecom-ai-tools-chrome');
-  }
-  var home = process.env.HOME || '';
-  var match = home.match(/\/mnt\/[a-z]\/Users\/([^/]+)/i);
-  var winUser = match ? match[1] : '38336';
-  return 'C:\\Users\\' + winUser + '\\AppData\\Local\\ecom-ai-tools-chrome';
+  return process.env.SYCM_CHROME_PROFILE_DIR || getChromeProfileDir('sycm');
+}
+
+function shellQuote(value) {
+  return '"' + String(value).replace(/(["\\$`])/g, '\\$1') + '"';
 }
 
 /**
@@ -121,15 +120,15 @@ function getDedicatedProfileDir() {
  * @returns {string} Chrome 路径或 'chrome' 作为降级
  */
 function findWindowsChrome() {
-  const paths = [
-    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-    path.join(process.env.LOCALAPPDATA || '', 'Google', 'Chrome', 'Application', 'chrome.exe')
-  ];
-  for (const p of paths) {
-    try { if (fs.existsSync(p)) return p; } catch (e) { /* 继续查找 */ }
-  }
-  return 'chrome';
+  return findChromeExecutable({ osKind: 'windows' });
+}
+
+function findUnixChrome(osType = process.platform) {
+  return findChromeExecutable({ osKind: osType === 'darwin' ? 'macos' : 'linux' });
+}
+
+function launchPlanToShellCommand(plan) {
+  return [plan.command, ...plan.args].map(shellQuote).join(' ');
 }
 
 /**
@@ -143,32 +142,14 @@ function findWindowsChrome() {
 function generateChromeLaunchCommand(options = {}) {
   const port = options.port || 9222;
   const osType = options.os || process.platform;
-  const userDataDir = options.userDataDir || process.env.SYCM_CHROME_PROFILE_DIR || getDefaultUserDataDir();
-
-  let chromePath = '';
-  const args = [
-    `--remote-debugging-port=${port}`,
-    `--user-data-dir="${userDataDir}"`,
-    '--no-first-run'
-  ];
-
-  switch (osType) {
-    case 'win32':
-      chromePath = findWindowsChrome();
-      break;
-    case 'darwin':
-      chromePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-      break;
-    case 'linux':
-    default:
-      chromePath = 'google-chrome';
-      break;
-  }
+  const userDataDir = options.userDataDir || process.env.SYCM_CHROME_PROFILE_DIR || getDedicatedProfileDir();
+  const osKind = osType === 'darwin' ? 'macos' : osType === 'win32' ? 'windows' : 'linux';
+  const plan = buildChromeLaunchPlan({ osKind, port, userDataDir, profileName: 'sycm' });
 
   return {
-    command: `"${chromePath}" ${args.join(' ')}`,
-    chromePath,
-    args
+    command: launchPlanToShellCommand(plan),
+    chromePath: plan.chromePath,
+    args: plan.args
   };
 }
 
@@ -193,7 +174,7 @@ async function checkSycmLoginStatus(port = 9222) {
 
 /**
  * 自动启动 Chrome 调试模式并等待就绪
- * 检测到 Chrome DevTools 不可用时，通过 cmd.exe 启动 Windows Chrome 并轮询等待端口就绪
+ * 检测到 Chrome DevTools 不可用时，按当前平台启动 Chrome/Edge 并轮询等待端口就绪。
  * @param {number} [port=9222] - Chrome 调试端口
  * @param {Object} [options={}] - 配置选项
  * @param {number} [options.waitTimeout=30000] - 等待就绪超时时间（毫秒）
@@ -210,20 +191,8 @@ async function autoLaunchChrome(port, options = {}) {
   }
 
   const userDataDir = options.userDataDir || getDedicatedProfileDir();
-  const chromePath = findWindowsChrome();
-
-  const args = [
-    '--remote-debugging-port=' + port,
-    '--user-data-dir="' + userDataDir + '"',
-    '--no-first-run'
-  ];
-  const cmd = process.platform === 'win32'
-    ? ['start', '""', '"' + chromePath + '"'].concat(args).join(' ')
-    : [
-        '/mnt/c/Windows/System32/cmd.exe', '/c',
-        'start', '""',
-        '"' + chromePath + '"'
-      ].concat(args).join(' ');
+  const osKind = process.platform === 'darwin' ? 'macos' : process.platform === 'win32' ? 'windows' : 'linux';
+  const cmd = launchPlanToShellCommand(buildChromeLaunchPlan({ osKind, port, userDataDir, profileName: 'sycm' }));
 
   try {
     await execAsync(cmd, { timeout: 10000 });

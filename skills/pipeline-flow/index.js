@@ -5,6 +5,7 @@ const { generateTitlePipeline } = require('../title-gen');
 const { searchAll } = require('../alibaba1688');
 const { extractSycmData, DEFAULT_FILTER_CONDITIONS } = require('../sycm-research');
 const { checkBannedWords } = require('../../core/banned-words');
+const { withAgentResponseFields } = require('../../core/agent-response');
 const { scoreKeywordOpportunity, scoreProductOpportunity } = require('./src/opportunity-scoring');
 const { appendOpportunity, summarizeOpportunities } = require('./src/opportunity-store');
 
@@ -25,6 +26,7 @@ const DEFAULT_HOT_FILTER_CONDITIONS = {
 };
 const DEFAULT_MIN_TITLE_LENGTH = 30;
 const DEFAULT_HOT_EXPORT_LIMIT = 2;
+const DEFAULT_PRODUCTS_PER_KEYWORD = 12;
 const DEFAULT_FALLBACK_CANDIDATES = [
   { keyword: '玛瑙戒指女', category: 'accessories', coreProduct: '戒指', signature: '戒指|玛瑙|女' },
   { keyword: '宠物磨牙玩具', category: 'pet', coreProduct: '玩具', signature: '宠物|磨牙|玩具' },
@@ -36,6 +38,10 @@ const GENERIC_CATEGORY_TOKENS = new Set([
   '女', '男', '儿童', '宝宝', '新款', '爆款', '礼物', '用品', '商品',
   '饰品', '配饰', '玩具', '家居', '日用', '百货', '其他', '通用'
 ]);
+
+function flowResponse(payload) {
+  return withAgentResponseFields(payload);
+}
 
 function pad(num) {
   return String(num).padStart(2, '0');
@@ -421,6 +427,7 @@ function validateGeneratedRow(row, context = {}) {
   const banned = checkBannedWords(title);
   if (!banned.valid) reasons.push(`banned_words:${banned.words.join(',')}`);
   if (category.confidence === 'low') reasons.push('category_conflict');
+  if (category.confidence === 'unknown') reasons.push('missing_category');
   if (context.seenUrls && context.seenUrls.has(url)) reasons.push('duplicate_url');
   if (context.seenTitles && context.seenTitles.has(title)) reasons.push('duplicate_title');
   if (row.verifyMode === 'hot' && Number(context.hotUsed || 0) >= Number(context.hotExportLimit || DEFAULT_HOT_EXPORT_LIMIT)) {
@@ -443,6 +450,19 @@ function validateGeneratedRow(row, context = {}) {
   };
 }
 
+function isReviewableExportReason(reason) {
+  const value = String(reason || '');
+  return /^product_opportunity_manual_review/.test(value)
+    || /^keyword_opportunity_(observe|review)/.test(value);
+}
+
+function classifyExportStatus(validation) {
+  const reasons = validation && Array.isArray(validation.reasons) ? validation.reasons : [];
+  if (validation && validation.ok) return 'ready';
+  if (reasons.length > 0 && reasons.every(isReviewableExportReason)) return 'review_candidate';
+  return 'rejected_before_distribution';
+}
+
 function distributionLine(row) {
   const category = productCategory(row.product, row);
   return category ? `${row.url}$$${row.title}$$${category}` : `${row.url}$$${row.title}`;
@@ -457,22 +477,26 @@ function reviewLabel(row) {
 }
 
 function writeDistributionReview(file, rows) {
+  const readyRows = rows.filter(row => row.exportStatus === 'ready');
+  const reviewRows = rows.filter(row => row.exportStatus === 'review_candidate');
+  const rejectedRows = rows.filter(row => row.exportStatus === 'rejected_before_distribution');
   const lines = [
     '# Distribution Review',
     '',
-    '人工铺货前请先检查本报告。热搜趋势词不是严格蓝海词，不要当作高置信蓝海使用。',
+    '人工铺货前请先检查本报告。Recommended Submit 会写入 distribution-batch.txt；Manual Review Candidates 不会自动铺货，需要人工决定是否补进批次。',
     '',
     '## Summary',
     '',
-    `- Ready: ${rows.filter(row => row.exportStatus === 'ready').length}`,
-    `- Rejected: ${rows.filter(row => row.exportStatus === 'rejected_before_distribution').length}`,
+    `- Recommended Submit: ${readyRows.length}`,
+    `- Review Candidates: ${reviewRows.length}`,
+    `- Hard Rejected: ${rejectedRows.length}`,
     ''
   ];
-  rows.forEach((row, index) => {
-    lines.push(`## ${index + 1}. ${row.keyword}`);
+  const appendRow = (row, index) => {
+    lines.push(`### ${index + 1}. ${row.keyword}`);
     lines.push('');
     lines.push(`- Export Status: ${row.exportStatus || 'ready'}`);
-    if (row.exportReasons && row.exportReasons.length) lines.push(`- Blockers: ${row.exportReasons.join(', ')}`);
+    if (row.exportReasons && row.exportReasons.length) lines.push(`- Review Reasons: ${row.exportReasons.join(', ')}`);
     lines.push(`- URL: ${row.url}`);
     lines.push(`- Title: ${row.title}`);
     lines.push(`- Category: ${productCategory(row.product, row) || '-'}`);
@@ -497,7 +521,19 @@ function writeDistributionReview(file, rows) {
     lines.push(`- Fallback: ${row.fallbackUsed ? 'yes' : 'no'}${row.fallbackReason ? ` (${row.fallbackReason})` : ''}`);
     lines.push(`- SYCM Reason: ${row.sycmScore && row.sycmScore.reason ? row.sycmScore.reason : '-'}`);
     lines.push('');
-  });
+  };
+  lines.push('## Recommended Submit');
+  lines.push('');
+  if (readyRows.length === 0) lines.push('No rows.');
+  readyRows.forEach(appendRow);
+  lines.push('## Manual Review Candidates');
+  lines.push('');
+  if (reviewRows.length === 0) lines.push('No rows.');
+  reviewRows.forEach(appendRow);
+  lines.push('## Hard Rejected');
+  lines.push('');
+  if (rejectedRows.length === 0) lines.push('No rows.');
+  rejectedRows.forEach(appendRow);
   ensureDir(path.dirname(file));
   fs.writeFileSync(file, lines.join('\n') + '\n', 'utf8');
 }
@@ -538,6 +574,34 @@ function fallbackCandidates(limit = 10) {
   }));
 }
 
+function exactKeywordCandidate(keyword) {
+  const value = String(keyword || '').trim();
+  if (!value) throw new Error('keyword is required');
+  return {
+    date: new Date().toISOString().slice(0, 10),
+    keyword: value,
+    seed: 'user-exact-keyword',
+    category: '',
+    pattern: 'user-exact-keyword',
+    localScore: 85,
+    tier: 'direct',
+    reason: 'user requested exact keyword; do not rewrite before SYCM or product search',
+    nextAction: 'sycm_verify',
+    flags: ['user_exact_keyword'],
+    coreProduct: value,
+    signature: value,
+    productSignature: value,
+    rigid: [value],
+    optional: [],
+    nextCommands: {
+      sycm: `node bin/cli.js sycm "${value}" --mode blue --json`,
+      hotCheck: `node bin/cli.js sycm "${value}" --mode hot --json`,
+      blueExplore: `node bin/cli.js sycm "${value}" --mode blue --json`,
+      titleGenerate: `node bin/cli.js "${value}" --json`
+    }
+  };
+}
+
 /**
  * Mine candidates and write them into a flow run.
  * @param {object} options Flow options.
@@ -568,7 +632,7 @@ async function flowMine(options = {}) {
   run.status = 'mined';
   run.counts.candidates = result.candidates.length;
   writeRun(runDir, run);
-  return {
+  return flowResponse({
     ok: true,
     runId: run.runId,
     status: run.status,
@@ -577,7 +641,7 @@ async function flowMine(options = {}) {
     blockers: [],
     allowedCommands: [buildFlowCommand('verify', run.runId, { limit: options.verify || 20 })],
     nextCommand: buildFlowCommand('verify', run.runId, { limit: options.verify || 20 })
-  };
+  });
 }
 
 /**
@@ -705,7 +769,7 @@ async function flowVerify(options = {}) {
     : (verified.length > 0
       ? buildFlowCommand('generate', run.runId, { limit: options.generate || 10 })
       : buildFlowCommand('inspect', run.runId));
-  return {
+  return flowResponse({
     ok: true,
     runId: run.runId,
     status: run.status,
@@ -717,7 +781,7 @@ async function flowVerify(options = {}) {
       : (verified.length > 0 ? [] : ['no_verified_keywords']),
     allowedCommands: [nextCommand],
     nextCommand: nextCommand
-  };
+  });
 }
 
 /**
@@ -746,7 +810,7 @@ async function flowGenerate(options = {}) {
           searchAll(coreWord, blueOceanWord, modifiers, semanticGroups))
       });
       const products = Array.isArray(result.products) ? result.products : [];
-      for (const product of products.slice(0, Number(options.productsPerKeyword || 3))) {
+      for (const product of products.slice(0, Number(options.productsPerKeyword || DEFAULT_PRODUCTS_PER_KEYWORD))) {
         const row = {
           status: 'generated',
           keyword: item.keyword,
@@ -806,7 +870,7 @@ async function flowGenerate(options = {}) {
   run.status = generatedRows.some(row => row.status === 'generated') ? 'generated' : 'generate_failed';
   run.counts.generatedProducts = generatedRows.filter(row => row.status === 'generated').length;
   writeRun(runDir, run);
-  return {
+  return flowResponse({
     ok: true,
     runId: run.runId,
     status: run.status,
@@ -819,7 +883,7 @@ async function flowGenerate(options = {}) {
     nextCommand: run.counts.generatedProducts > 0
       ? buildFlowCommand('export', run.runId, { limit: options.export || 20 })
       : buildFlowCommand('inspect', run.runId)
-  };
+  });
 }
 
 /**
@@ -847,7 +911,7 @@ async function flowExport(options = {}) {
     });
     const exportRow = {
       ...row,
-      exportStatus: validation.ok ? 'ready' : 'rejected_before_distribution',
+      exportStatus: classifyExportStatus(validation),
       exportReasons: validation.reasons,
       categoryConfidence: validation.categoryConfidence,
       categoryReason: validation.categoryReason,
@@ -862,7 +926,9 @@ async function flowExport(options = {}) {
     return exportRow;
   });
   const readyRows = reviewed.filter(row => row.exportStatus === 'ready');
+  const reviewRows = reviewed.filter(row => row.exportStatus === 'review_candidate');
   const rejectedRows = reviewed.filter(row => row.exportStatus !== 'ready');
+  const hardRejectedRows = reviewed.filter(row => row.exportStatus === 'rejected_before_distribution');
   appendOpportunity('rejected', rejectedRows.map(row => ({
     runId: run.runId,
     keyword: row.keyword,
@@ -879,16 +945,18 @@ async function flowExport(options = {}) {
   writeDistributionReview(run.files.distributionReview, reviewed);
   run.status = lines.length > 0
     ? (rejectedRows.length > 0 ? 'needs_review' : 'ready_to_distribute')
-    : 'export_empty';
+    : (reviewed.length > 0 ? 'needs_review' : 'export_empty');
   run.counts.readyToDistribute = lines.length;
-  run.counts.rejectedBeforeDistribution = rejectedRows.length;
+  run.counts.reviewCandidates = reviewRows.length;
+  run.counts.rejectedBeforeDistribution = hardRejectedRows.length;
   writeRun(runDir, run);
-  return {
+  return flowResponse({
     ok: true,
     runId: run.runId,
     status: run.status,
     count: lines.length,
-    rejected: rejectedRows.length,
+    reviewCandidates: reviewRows.length,
+    rejected: hardRejectedRows.length,
     canSubmit: lines.length > 0 && rejectedRows.length === 0,
     mustReview: rejectedRows.length > 0,
     blockers: rejectedRows.length > 0 ? ['review_rejected_rows'] : [],
@@ -901,7 +969,109 @@ async function flowExport(options = {}) {
     nextCommand: lines.length > 0
       ? `人工检查 distribution-batch.txt 后调用 1688-distribution: node bin/cli.js distribute --input-file "${run.files.distributionBatch}" --dry-run --json`
       : buildFlowCommand('inspect', run.runId)
-  };
+  });
+}
+
+/**
+ * Run the flow for one user-provided keyword without keyword mining or rewriting.
+ * @param {object} options Flow options.
+ * @returns {Promise<object>} Exact keyword flow result.
+ */
+async function flowKeyword(options = {}) {
+  const keyword = String(options.keyword || '').trim();
+  if (!keyword) throw new Error('keyword is required');
+  const { runDir, run } = initRun({
+    ...options,
+    options: {
+      ...(options.options || {}),
+      exactKeyword: keyword,
+      mode: 'keyword'
+    }
+  });
+  const candidate = exactKeywordCandidate(keyword);
+  fs.writeFileSync(run.files.candidates, '', 'utf8');
+  appendJsonl(run.files.candidates, [candidate]);
+  run.status = 'mined';
+  run.counts.candidates = 1;
+  writeRun(runDir, run);
+
+  const verify = await flowVerify({ ...options, runId: run.runId, limit: 1 });
+  if (verify.verified.length === 0 || verify.blockers.includes('sycm_manual_action_required')) {
+    const latest = getRun({ dataDir: options.dataDir, runId: run.runId });
+    return flowResponse({
+      ok: true,
+      runId: run.runId,
+      runDir,
+      exactKeyword: keyword,
+      counts: latest.run.counts,
+      status: latest.run.status,
+      files: latest.run.files,
+      blockers: verify.blockers.length ? verify.blockers : ['no_verified_keywords'],
+      allowedCommands: [verify.nextCommand],
+      nextCommand: verify.nextCommand,
+      steps: {
+        mined: 1,
+        verified: 0,
+        rejected: verify.rejected.length,
+        generated: 0,
+        exported: 0
+      }
+    });
+  }
+
+  const generate = await flowGenerate({
+    ...options,
+    runId: run.runId,
+    limit: 1,
+    productsPerKeyword: options.productsPerKeyword || DEFAULT_PRODUCTS_PER_KEYWORD
+  });
+  const generatedCount = generate.generated.filter(row => row.status === 'generated').length;
+  if (generatedCount === 0) {
+    const latest = getRun({ dataDir: options.dataDir, runId: run.runId });
+    return flowResponse({
+      ok: true,
+      runId: run.runId,
+      runDir,
+      exactKeyword: keyword,
+      counts: latest.run.counts,
+      status: latest.run.status,
+      files: latest.run.files,
+      blockers: ['no_generated_products'],
+      allowedCommands: [generate.nextCommand],
+      nextCommand: generate.nextCommand,
+      steps: {
+        mined: 1,
+        verified: verify.verified.length,
+        rejected: verify.rejected.length,
+        generated: 0,
+        exported: 0
+      }
+    });
+  }
+
+  const exported = await flowExport({ ...options, runId: run.runId, limit: options.export || 20 });
+  const latest = getRun({ dataDir: options.dataDir, runId: run.runId });
+  return flowResponse({
+    ok: true,
+    runId: run.runId,
+    runDir,
+    exactKeyword: keyword,
+    counts: latest.run.counts,
+    status: latest.run.status,
+    files: latest.run.files,
+    canSubmit: exported.canSubmit,
+    mustReview: exported.mustReview,
+    blockers: exported.blockers,
+    allowedCommands: exported.allowedCommands,
+    nextCommand: exported.nextCommand,
+    steps: {
+      mined: 1,
+      verified: verify.verified.length,
+      rejected: verify.rejected.length,
+      generated: generatedCount,
+      exported: exported.count
+    }
+  });
 }
 
 /**
@@ -914,7 +1084,7 @@ async function flowDaily(options = {}) {
   const verify = await flowVerify({ ...options, runId: mine.runId, limit: options.verify || 20 });
   if (verify.verified.length === 0 || verify.blockers.includes('sycm_manual_action_required')) {
     const { run } = getRun({ dataDir: options.dataDir, runId: mine.runId });
-    return {
+    return flowResponse({
       ok: true,
       runId: mine.runId,
       runDir: mine.runDir,
@@ -931,14 +1101,14 @@ async function flowDaily(options = {}) {
         generated: 0,
         exported: 0
       }
-    };
+    });
   }
 
   const generate = await flowGenerate({ ...options, runId: mine.runId, limit: options.generate || 10 });
   const generatedCount = generate.generated.filter(row => row.status === 'generated').length;
   if (generatedCount === 0) {
     const { run } = getRun({ dataDir: options.dataDir, runId: mine.runId });
-    return {
+    return flowResponse({
       ok: true,
       runId: mine.runId,
       runDir: mine.runDir,
@@ -955,12 +1125,12 @@ async function flowDaily(options = {}) {
         generated: 0,
         exported: 0
       }
-    };
+    });
   }
 
   const exported = await flowExport({ ...options, runId: mine.runId, limit: options.export || 20 });
   const { run } = getRun({ dataDir: options.dataDir, runId: mine.runId });
-  return {
+  return flowResponse({
     ok: true,
     runId: mine.runId,
     runDir: mine.runDir,
@@ -979,6 +1149,109 @@ async function flowDaily(options = {}) {
       generated: generatedCount,
       exported: exported.count
     }
+  });
+}
+
+function createWorkflowRunner(deps = {}) {
+  return {
+    async run(input = {}) {
+      const sycm = deps.sycm || (async (payload) => {
+        const result = await flowKeyword({
+          ...payload,
+          keyword: payload.keyword,
+          productsPerKeyword: payload.productsPerKeyword || DEFAULT_PRODUCTS_PER_KEYWORD,
+          export: payload.export || 20
+        });
+        return {
+          ok: result.ok !== false,
+          status: result.status,
+          runId: result.runId,
+          runDir: result.runDir,
+          files: result.files,
+          canSubmit: result.canSubmit,
+          mustReview: result.mustReview,
+          blockers: result.blockers || [],
+          data: result
+        };
+      });
+      const selectProducts = deps.selectProducts || (async (payload) => {
+        const data = payload.sycm && payload.sycm.data ? payload.sycm.data : payload.sycm;
+        return {
+          ok: data && data.ok !== false,
+          status: data && data.status,
+          products: data && data.files && data.files.distributionBatch ? [{ file: data.files.distributionBatch }] : [],
+          data
+        };
+      });
+      const prepareDistribution = deps.prepareDistribution || (async (payload) => {
+        const data = payload.sycm && payload.sycm.data ? payload.sycm.data : payload.sycm;
+        return {
+          ok: data && data.ok !== false && data.canSubmit === true,
+          status: data && data.status,
+          canSubmit: data && data.canSubmit === true,
+          file: data && data.files && data.files.distributionBatch,
+          runId: data && data.runId,
+          runDir: data && data.runDir,
+          blockers: data && Array.isArray(data.blockers) ? data.blockers : [],
+          data
+        };
+      });
+
+      const sycmResult = await sycm(input);
+      if (!sycmResult || sycmResult.ok === false) {
+        return flowResponse({
+          ok: false,
+          status: sycmResult && sycmResult.status ? sycmResult.status : 'sycm_failed',
+          blockers: sycmResult && Array.isArray(sycmResult.blockers) ? sycmResult.blockers : ['sycm_failed'],
+          data: sycmResult
+        });
+      }
+
+      const selectionResult = await selectProducts({ ...input, sycm: sycmResult });
+      if (!selectionResult || selectionResult.ok === false) {
+        return flowResponse({
+          ok: false,
+          status: selectionResult && selectionResult.status ? selectionResult.status : 'product_selection_failed',
+          blockers: selectionResult && Array.isArray(selectionResult.blockers) ? selectionResult.blockers : ['product_selection_failed'],
+          data: { sycm: sycmResult, selection: selectionResult }
+        });
+      }
+
+      const distributionResult = await prepareDistribution({
+        ...input,
+        sycm: sycmResult,
+        products: selectionResult.products || []
+      });
+      if (!distributionResult || distributionResult.ok === false || distributionResult.canSubmit !== true) {
+        return flowResponse({
+          ok: false,
+          status: distributionResult && distributionResult.status ? distributionResult.status : 'distribution_not_ready',
+          blockers: distributionResult && Array.isArray(distributionResult.blockers) && distributionResult.blockers.length
+            ? distributionResult.blockers
+            : ['distribution_not_ready'],
+          data: { sycm: sycmResult, selection: selectionResult, distribution: distributionResult }
+        });
+      }
+
+      return flowResponse({
+        ok: true,
+        status: 'awaiting_user_confirmation',
+        requiresUserAction: true,
+        nextActionCode: 'confirm_before_submit',
+        keyword: input.keyword,
+        runId: distributionResult.runId || sycmResult.runId || '',
+        runDir: distributionResult.runDir || sycmResult.runDir || '',
+        file: distributionResult.file || '',
+        data: {
+          sycm: sycmResult,
+          selection: selectionResult,
+          distribution: distributionResult
+        },
+        allowedCommands: ['node bin/cli.js workflow resume --confirm-submit --json'],
+        nextCommand: 'node bin/cli.js workflow resume --confirm-submit --json',
+        userMessage: '选品和铺货清单已准备好。请人工确认商品和店铺后，才允许继续提交。'
+      });
+    }
   };
 }
 
@@ -993,7 +1266,9 @@ module.exports = {
   flowVerify,
   flowGenerate,
   flowExport,
+  flowKeyword,
   flowDaily,
+  createWorkflowRunner,
   validateGeneratedRow,
   categoryAssessment,
   scoreKeywordOpportunity,

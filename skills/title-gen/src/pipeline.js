@@ -1,25 +1,15 @@
 'use strict';
 
-const crypto = require('crypto');
 const { run } = require('./index');
 const { extractKeywords } = require('./extract-core');
 const { recommendResearchKeywords } = require('./keyword-analyzer');
+const { hashProducts } = require('./product-hash');
 
 /**
  * Create a stable, privacy-light hash for product inputs.
  * @param {Array<object>} products - Product candidates.
  * @returns {string} Short md5 hash, or empty string when no products exist.
  */
-function hashProducts(products) {
-  if (!Array.isArray(products) || products.length === 0) return '';
-  const normalized = products.map(p => ({
-    id: p.id || p.offerId || p.productId || p.itemId || '',
-    title: p.title || p.subject || p.name || '',
-    price: p.price || p.priceInfo || ''
-  }));
-  return crypto.createHash('md5').update(JSON.stringify(normalized)).digest('hex').slice(0, 8);
-}
-
 function normalizeSycmData(data) {
   if (!data) return data;
   if (Array.isArray(data)) return data;

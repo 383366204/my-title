@@ -39,8 +39,9 @@ node bin/cli.js "纯银项链女高级感" \
 CLI 工具已安装在系统中：
 
 - **Windows**: `C:\Users\%USERNAME%\AppData\Local\Programs\taobao\bin\taobao-native.cmd`
-- **macOS**: `~/Library/Application Support/taobao/cli/taobao-native`
+- **macOS**: `~/Library/Application Support/taobao/cli/bin/taobao-native`
 - **WSL2**: 自动通过 `cmd.exe` 调用 Windows 路径
+- **Linux**: 使用 `PATH` 中的 `taobao-native`。如果没有原生可用 CLI，淘宝桌面版相关能力会降级为不可用。
 
 ## taobao-native 功能速查
 
@@ -63,34 +64,41 @@ CLI 工具已安装在系统中：
 cat skills/taobao-native/SKILL.md
 
 # 或查看特定工具帮助
-cmd.exe /c "C:\\Users\\%USERNAME%\\AppData\\Local\\Programs\\taobao\\bin\\taobao-native.cmd --help"
+taobao-native --help
 ```
 
 ## 手动测试 CLI
 
 ```bash
-# 1. 启动淘宝桌面版
-cmd.exe /c "C:\\Users\\%USERNAME%\\AppData\\Local\\Programs\\taobao\\bin\\taobao-native.cmd launch"
+# 1. 启动淘宝桌面版（macOS）
+open -a "/Applications/淘宝桌面版.app"
+
+# Linux 如已提供 taobao-native CLI，直接检查:
+command -v taobao-native
 
 # 2. 搜索商品
-cmd.exe /c "C:\\Users\\%USERNAME%\\AppData\\Local\\Programs\\taobao\\bin\\taobao-native.cmd search_products --args '{\"keyword\":\"佛牌\"}'"
+taobao-native search_products --args '{"keyword":"佛牌","sourceApp":"ecom-ai-tools"}'
 
 # 3. 查看帮助
-cmd.exe /c "C:\\Users\\%USERNAME%\\AppData\\Local\\Programs\\taobao\\bin\\taobao-native.cmd --help"
+taobao-native --help
 ```
 
 ## 故障排查
 
 ### 问题1: "taobao-native 命令未找到"
 
-**解决**: 淘宝桌面版未安装或未启动
+**解决**: 淘宝桌面版未安装、未启动，或当前 shell 没刷新 PATH
 
 ```bash
-# 检查淘宝桌面版安装位置
-cat /mnt/c/Users/38336/AppData/Roaming/taobao/install-location.txt
+# macOS 检查 CLI
+command -v taobao-native
+ls -l "$HOME/Library/Application Support/taobao/cli/bin/taobao-native"
+
+# Linux 检查 CLI
+command -v taobao-native
 
 # 手动启动
-cmd.exe /c "C:\\Users\\%USERNAME%\\AppData\\Local\\Programs\\taobao\\bin\\taobao-native.cmd launch"
+open -a "/Applications/淘宝桌面版.app"
 ```
 
 ### 问题2: "应用未运行"
@@ -99,18 +107,25 @@ cmd.exe /c "C:\\Users\\%USERNAME%\\AppData\\Local\\Programs\\taobao\\bin\\taobao
 
 ```bash
 # 项目代码会自动启动，如需手动启动:
-cmd.exe /c "taobao-native launch"
+open -a "/Applications/淘宝桌面版.app"
 ```
 
-### 问题3: WSL2 路径问题
+### 问题3: macOS 路径问题
 
-**解决**: 项目代码已自动处理路径转换
+**解决**: 项目代码会优先查找 `PATH` 和淘宝桌面版默认 CLI 路径。
 
-```javascript
-// search-taobao.js 自动转换路径
-const winPath = wslPath
-  .replace('/mnt/c/', 'C:\\\\')
-  .replace(/\//g, '\\\\');
+```bash
+export TAOBAO_NATIVE_PATH="$HOME/Library/Application Support/taobao/cli/bin/taobao-native"
+node -e "const u=require('./skills/title-gen/src/taobao-utils'); console.log(u.resolveTaobaoNativePath())"
+```
+
+### 问题4: Linux 上没有 taobao-native
+
+**解决**: 原生 Linux 没有淘宝桌面版默认安装路径。项目会优先使用 `PATH` 或 `TAOBAO_NATIVE_PATH` 指向的兼容 CLI；如果没有 CLI，淘宝搜索/以图搜图会返回空结果，标题生成可继续使用手动同行标题。
+
+```bash
+export TAOBAO_NATIVE_PATH="/path/to/taobao-native"
+node -e "const u=require('./skills/title-gen/src/taobao-utils'); console.log(u.isTaobaoNativeInstalled())"
 ```
 
 ## 降级方案
@@ -138,8 +153,8 @@ node bin/cli.js "纯银项链女高级感" \
 ## 需要帮助?
 
 1. 查看本地文档：`cat skills/taobao-native/SKILL.md`
-2. 测试 CLI：`cmd.exe /c "taobao-native --help"`
-3. 检查日志：`ls /mnt/c/Users/38336/AppData/Roaming/taobao/logs/`
+2. 测试 CLI：`taobao-native --help`
+3. 检查日志：`ls "$HOME/Library/Application Support/taobao/logs"`
 
 ---
 

@@ -3,12 +3,35 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const util = require('util');
+const {
+  detectPlatform,
+  findTaobaoNativePath,
+  fromWindowsPath: platformFromWindowsPath,
+  normalizePathForPlatform,
+  pathExists: platformPathExists,
+  toWindowsPath: platformToWindowsPath
+} = require('../../../core/platform');
 
 const execFileAsync = util.promisify(execFile);
 
-const DEFAULT_WSL_PATH = '/mnt/c/Users/38336/AppData/Local/Programs/taobao/bin/taobao-native.cmd';
-const DEFAULT_WINDOWS_PATH = path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'taobao', 'bin', 'taobao-native.cmd');
-const TAOBAO_NATIVE_PATH = process.env.TAOBAO_NATIVE_PATH || DEFAULT_WSL_PATH;
+function isWsl() {
+  return detectPlatform().kind === 'wsl';
+}
+
+const DEFAULT_WSL_PATH = findTaobaoNativePath({ osKind: 'wsl', homeDir: os.homedir() });
+const DEFAULT_WINDOWS_PATH = findTaobaoNativePath({ osKind: 'windows', homeDir: os.homedir() });
+const DEFAULT_MACOS_PATH = findTaobaoNativePath({ osKind: 'macos', homeDir: os.homedir() });
+const DEFAULT_MACOS_RUNNER_PATH = path.join(os.homedir(), 'Library', 'Application Support', 'taobao', 'cli', 'taobao-runner');
+const DEFAULT_LINUX_COMMAND = 'taobao-native';
+const TAOBAO_NATIVE_PATH = process.env.TAOBAO_NATIVE_PATH || (
+  process.platform === 'darwin'
+    ? DEFAULT_MACOS_PATH
+    : process.platform === 'win32'
+      ? DEFAULT_WINDOWS_PATH
+      : isWsl()
+        ? DEFAULT_WSL_PATH
+        : DEFAULT_LINUX_COMMAND
+);
 
 let _desktopReady = false;
 let _desktopLaunchPromise = null;
@@ -20,12 +43,8 @@ let _resolvedCliPath = null;
  * @returns {boolean} Whether the file exists.
  */
 function pathExists(filePath) {
-  try {
-    fs.accessSync(filePath, fs.constants.F_OK);
-    return true;
-  } catch (_) {
-    return false;
-  }
+  if (!filePath || filePath === DEFAULT_LINUX_COMMAND) return false;
+  return platformPathExists(filePath);
 }
 
 /**
@@ -34,11 +53,7 @@ function pathExists(filePath) {
  * @returns {string} WSL-compatible path.
  */
 function fromWindowsPath(winPath) {
-  if (!winPath) return winPath;
-  const normalized = String(winPath).replace(/\\/g, '/');
-  const match = normalized.match(/^([A-Za-z]):\/(.*)$/);
-  if (!match) return normalized;
-  return `/mnt/${match[1].toLowerCase()}/${match[2]}`;
+  return platformFromWindowsPath(winPath);
 }
 
 /**
@@ -47,11 +62,7 @@ function fromWindowsPath(winPath) {
  * @returns {string} Windows path.
  */
 function toWindowsPath(wslPath) {
-  if (!wslPath) return wslPath;
-  if (/^[A-Za-z]:[\\/]/.test(wslPath)) return wslPath.replace(/\//g, '\\');
-  return String(wslPath)
-    .replace(/^\/mnt\/([a-z])\//i, (_, drive) => `${drive.toUpperCase()}:\\`)
-    .replace(/\//g, '\\');
+  return platformToWindowsPath(wslPath);
 }
 
 /**
@@ -60,14 +71,7 @@ function toWindowsPath(wslPath) {
  * @returns {string} Normalized path.
  */
 function normalizePathForCurrentPlatform(filePath) {
-  if (!filePath) return filePath;
-  if (process.platform === 'win32' && /^\/mnt\/[a-z]\//i.test(filePath)) {
-    return toWindowsPath(filePath);
-  }
-  if (process.platform !== 'win32' && /^[A-Za-z]:[\\/]/.test(filePath)) {
-    return fromWindowsPath(filePath);
-  }
-  return filePath;
+  return normalizePathForPlatform(filePath);
 }
 
 /**
@@ -75,6 +79,13 @@ function normalizePathForCurrentPlatform(filePath) {
  * @returns {string[]} Candidate CLI paths.
  */
 function readInstallLocationCandidates() {
+  if (process.platform === 'darwin') {
+    return [
+      DEFAULT_MACOS_PATH,
+      DEFAULT_MACOS_RUNNER_PATH
+    ];
+  }
+
   const appData = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
   const installFile = path.join(appData, 'taobao', 'install-location.txt');
   if (!pathExists(installFile)) return [];
@@ -114,11 +125,13 @@ function resolveTaobaoNativePath() {
   const candidates = [
     configuredPath,
     normalizePathForCurrentPlatform(configuredPath),
+    findCliOnPath(),
     ...readInstallLocationCandidates(),
+    DEFAULT_MACOS_PATH,
+    DEFAULT_MACOS_RUNNER_PATH,
     DEFAULT_WINDOWS_PATH,
     fromWindowsPath(DEFAULT_WINDOWS_PATH),
-    DEFAULT_WSL_PATH,
-    findCliOnPath()
+    DEFAULT_WSL_PATH
   ].filter(Boolean);
 
   for (const candidate of candidates) {
@@ -129,7 +142,7 @@ function resolveTaobaoNativePath() {
     }
   }
 
-  return normalizePathForCurrentPlatform(configuredPath);
+  return findCliOnPath() || normalizePathForCurrentPlatform(configuredPath);
 }
 
 /**
@@ -137,7 +150,8 @@ function resolveTaobaoNativePath() {
  * @returns {boolean} Whether the CLI can be found.
  */
 function isTaobaoNativeInstalled() {
-  return pathExists(resolveTaobaoNativePath());
+  const resolved = resolveTaobaoNativePath();
+  return pathExists(resolved) || Boolean(findCliOnPath());
 }
 
 /**
@@ -150,6 +164,24 @@ function getCmdExecutable() {
     : '/mnt/c/Windows/System32/cmd.exe';
 }
 
+function commandForCurrentPlatform() {
+  const cliPath = resolveTaobaoNativePath();
+  const windowsCliPath = process.platform === 'win32'
+    || /\.cmd$/i.test(cliPath)
+    || /^\/mnt\/[a-z]\//i.test(cliPath)
+    || /^[A-Za-z]:[\\/]/.test(cliPath);
+  if (windowsCliPath) {
+    return {
+      command: getCmdExecutable(),
+      argsPrefix: ['/d', '/s', '/c', toWindowsPath(cliPath)]
+    };
+  }
+  return {
+    command: cliPath,
+    argsPrefix: []
+  };
+}
+
 /**
  * Run taobao-native synchronously.
  * @param {string[]} args - CLI args.
@@ -157,11 +189,8 @@ function getCmdExecutable() {
  * @returns {Buffer|string} Command output.
  */
 function runTaobaoNativeSync(args, options = {}) {
-  return execFileSync(
-    getCmdExecutable(),
-    ['/d', '/s', '/c', toWindowsPath(resolveTaobaoNativePath()), ...args],
-    options
-  );
+  const command = commandForCurrentPlatform();
+  return execFileSync(command.command, [...command.argsPrefix, ...args], options);
 }
 
 /**
@@ -171,11 +200,8 @@ function runTaobaoNativeSync(args, options = {}) {
  * @returns {Promise<{stdout:string, stderr:string}>} Command result.
  */
 function runTaobaoNativeAsync(args, options = {}) {
-  return execFileAsync(
-    getCmdExecutable(),
-    ['/d', '/s', '/c', toWindowsPath(resolveTaobaoNativePath()), ...args],
-    options
-  );
+  const command = commandForCurrentPlatform();
+  return execFileAsync(command.command, [...command.argsPrefix, ...args], options);
 }
 
 /**
@@ -185,6 +211,11 @@ function runTaobaoNativeAsync(args, options = {}) {
 async function launchTaobaoDesktop() {
   try {
     console.error('[taobao] launching Taobao desktop...');
+    if (process.platform === 'darwin' && pathExists('/Applications/淘宝桌面版.app')) {
+      await execFileAsync('open', ['-a', '/Applications/淘宝桌面版.app'], { timeout: 10000 });
+      console.error('[taobao] Taobao desktop launched');
+      return true;
+    }
     await runTaobaoNativeAsync(['launch'], { timeout: 10000 });
     console.error('[taobao] Taobao desktop launched');
     return true;
@@ -239,6 +270,8 @@ module.exports = {
   isTaobaoNativeInstalled,
   toWindowsPath,
   fromWindowsPath,
+  commandForCurrentPlatform,
+  isWsl,
   runTaobaoNativeSync,
   runTaobaoNativeAsync,
   launchTaobaoDesktop,

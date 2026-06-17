@@ -7,6 +7,7 @@ set -euo pipefail
 # 默认端口
 DEFAULT_PORT=9222
 PORT=${SYCM_PORT:-$DEFAULT_PORT}
+PROFILE_DIR=${SYCM_CHROME_PROFILE_DIR:-"$HOME/.hermes/chrome-profiles/sycm"}
 
 # 解析命令行参数
 LAUNCH=false
@@ -20,9 +21,14 @@ while [[ $# -gt 0 ]]; do
       LAUNCH=true
       shift
       ;;
+    --profile-dir)
+      PROFILE_DIR="$2"
+      shift 2
+      ;;
     *)
-      echo "用法: $0 [--port <端口>] [--launch]"
+      echo "用法: $0 [--port <端口>] [--profile-dir <目录>] [--launch]"
       echo "  --port <端口>    指定调试端口 (默认: 9222，也可通过 SYCM_PORT 环境变量设置)"
+      echo "  --profile-dir    指定持久 Chrome profile 目录 (默认: $PROFILE_DIR)"
       echo "  --launch         如果 Chrome 未在调试模式下运行，则启动它"
       exit 1
       ;;
@@ -149,8 +155,9 @@ fi
 
 echo "✅ 找到浏览器: $CHROME_PATH"
 
-# 创建用户数据目录
-USER_DATA_DIR=$(mktemp -d -t sycm-chrome-XXXXXXXX)
+# 创建持久用户数据目录。SYCM/淘宝登录态依赖 profile，不能每次用临时目录。
+USER_DATA_DIR="$PROFILE_DIR"
+mkdir -p "$USER_DATA_DIR"
 echo "📂 创建用户数据目录: $USER_DATA_DIR"
 
 echo "🚀 启动 Chrome 调试模式..."
@@ -165,13 +172,18 @@ case $OS in
     cmd.exe /c start "" "$(wslpath -w "$CHROME_PATH")" --remote-debugging-port="${PORT}" --user-data-dir="${WIN_USER_DATA_DIR}" --no-first-run --disable-first-run-ui 2>/dev/null &
     ;;
   macos|linux)
-    # 直接启动 Chrome
-    nohup "$CHROME_PATH" --remote-debugging-port="${PORT}" --user-data-dir="${USER_DATA_DIR}" --no-first-run --disable-first-run-ui >/dev/null 2>&1 &
+    if [ "$OS" = "macos" ]; then
+      open -na "$CHROME_PATH" --args --remote-debugging-port="${PORT}" --user-data-dir="${USER_DATA_DIR}" --no-first-run --no-default-browser-check
+    else
+      nohup "$CHROME_PATH" --remote-debugging-port="${PORT}" --user-data-dir="${USER_DATA_DIR}" --no-first-run --no-default-browser-check >/dev/null 2>&1 &
+    fi
     ;;
 esac
 
-# 保存 PID 到临时文件
-echo $! > "$USER_DATA_DIR/chrome.pid"
+# 保存后台 PID 到文件。macOS open -na 不是后台 shell job，没有 $!。
+if [ "$OS" != "macos" ]; then
+  echo $! > "$USER_DATA_DIR/chrome.pid"
+fi
 
 # 等待 Chrome 启动
 echo "⏳ 等待 Chrome 启动..."

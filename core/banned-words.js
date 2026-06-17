@@ -2,8 +2,21 @@ let bannedWords = {};
 let allBanned = [];
 let bannedRegexes = [];
 
+function loadExtraBannedWords() {
+  const file = process.env.ECOM_BANNED_WORDS_EXTRA;
+  if (!file) return {};
+  try {
+    return require(file);
+  } catch (error) {
+    console.warn('[banned-words] 额外违禁词文件加载失败:', error.message);
+    return {};
+  }
+}
+
 try {
   bannedWords = require('../skills/title-gen/data/banned-words.json');
+  const extra = loadExtraBannedWords();
+  bannedWords = { ...bannedWords, ...extra };
   allBanned = [...new Set(Object.values(bannedWords).flat())].sort((a, b) => b.length - a.length);
   bannedRegexes = allBanned.map(w =>
     new RegExp(w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')

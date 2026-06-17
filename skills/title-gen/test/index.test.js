@@ -7,6 +7,11 @@ const PROJECT_ROOT = path.resolve(__dirname, '..', '..', '..');
 
 function resolveProjectModulePath(modulePath) {
   const normalized = modulePath.replace(/\\/g, '/');
+  const projectMarker = '/my-title/';
+  const projectIndex = normalized.indexOf(projectMarker);
+  if (projectIndex !== -1) {
+    return path.join(PROJECT_ROOT, normalized.slice(projectIndex + projectMarker.length));
+  }
   const mntMatch = normalized.match(/^\/mnt\/[a-z]\/(.+)$/i);
   if (mntMatch) return path.join(path.parse(PROJECT_ROOT).root, mntMatch[1]);
   return modulePath;
@@ -290,4 +295,92 @@ test('Test 6: Ensure 11 fields exist in output products when there are results',
   assert.ok('选品理由' in first);
   assert.ok('定价建议' in first);
   assert.ok('风险提示' in first);
+});
+
+test('hashProducts ignores volatile price changes when product ids are stable', () => {
+  const { hashProducts } = require('../src/pipeline');
+  const first = hashProducts([
+    { id: '1001', title: '陶瓷摆件 招财猫', price: '9.90', sales: '100+' },
+    { offerId: '1002', title: '陶瓷摆件 小花瓶', price: '12.30', sales: '200+' }
+  ]);
+  const second = hashProducts([
+    { id: '1001', title: '陶瓷摆件 招财猫', price: '10.10', sales: '130+' },
+    { offerId: '1002', title: '陶瓷摆件 小花瓶', price: '11.80', sales: '240+' }
+  ]);
+
+  assert.equal(first, second);
+});
+
+test('run limits concurrent selectAndGenerate batches', async () => {
+  const { run } = require('../src');
+  let active = 0;
+  let maxActive = 0;
+  const products = Array.from({ length: 45 }, (_, index) => ({
+    id: `offer-${index}`,
+    title: `陶瓷摆件 商品 ${index}`,
+    url: `https://detail.1688.com/offer/${100000 + index}.html`
+  }));
+
+  const glmClient = {
+    async selectAndGenerate() {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise(resolve => setTimeout(resolve, 20));
+      active -= 1;
+      return {
+        selectedProducts: [],
+        titles: [{ title: '陶瓷摆件 家用桌面装饰创意小摆件客厅玄关装饰品' }]
+      };
+    },
+    async generateTitles() {
+      return ['陶瓷摆件 家用桌面装饰创意小摆件客厅玄关装饰品'];
+    }
+  };
+
+  await run(`陶瓷摆件-${Date.now()}`, {
+    products,
+    peerTitles: ['陶瓷摆件 家用桌面装饰'],
+    coreWord: '摆件',
+    modifiers: [{ word: '陶瓷', type: 'rigid' }],
+    glmClient,
+    llmConcurrency: 2,
+    runTimeoutMs: 10000,
+    silent: true
+  });
+
+  assert.ok(maxActive <= 2);
+  assert.ok(maxActive > 0);
+});
+
+test('computeEffectiveRunTimeout expands when image search is enabled', () => {
+  const { computeEffectiveRunTimeout } = require('../src');
+  assert.equal(computeEffectiveRunTimeout({ runTimeoutMs: 120000, useImageSearch: false, maxImageSearch: 10, productCount: 10 }), 120000);
+  assert.equal(computeEffectiveRunTimeout({ runTimeoutMs: 120000, useImageSearch: true, maxImageSearch: 4, productCount: 10 }), 160000);
+  assert.equal(computeEffectiveRunTimeout({ runTimeoutMs: 60000, useImageSearch: true, maxImageSearch: 0, productCount: 3 }), 135000);
+});
+
+test('run can return non-distributable generic titles when no 1688 products exist', async () => {
+  const { run } = require('../src');
+  const glmClient = {
+    async generateTitles() {
+      return ['陶瓷摆件 桌面装饰家居客厅玄关创意小摆件礼品'];
+    }
+  };
+
+  const result = await run(`陶瓷摆件-${Date.now()}`, {
+    products: [],
+    peerTitles: ['陶瓷摆件 家居桌面装饰'],
+    allowGenericTitlesWhenNoProducts: true,
+    coreWord: '摆件',
+    modifiers: [{ word: '陶瓷', type: 'rigid' }],
+    glmClient,
+    silent: true
+  });
+
+  assert.equal(result.status, 'no_products_fallback_titles');
+  assert.equal(result.canDistribute, false);
+  assert.equal(result.products.length, 0);
+  assert.ok(result.titles.length > 0);
+  assert.deepEqual(result.modifiers, [{ word: '陶瓷', type: 'rigid' }]);
+  assert.deepEqual(result.stats.modifiers, ['陶瓷']);
 });

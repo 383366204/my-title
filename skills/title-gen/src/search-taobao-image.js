@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-const { TAOBAO_NATIVE_PATH, isTaobaoNativeInstalled, toWindowsPath, ensureTaobaoDesktopReady } = require('./taobao-utils');
+const { TAOBAO_NATIVE_PATH, isTaobaoNativeInstalled, toWindowsPath, runTaobaoNativeAsync, ensureTaobaoDesktopReady } = require('./taobao-utils');
 const logger = require('../../../core/log');
 
 let _searchLock = Promise.resolve();
@@ -271,6 +271,10 @@ async function imageSearchSingle(imageUrl, productId, options = {}) {
       return { productId, hasMatch: false, peerTitles: [], priceRange: { min: null, max: null } };
     }
 
+    if (process.platform !== 'win32' && !/^\/mnt\/[a-z]\//i.test(os.homedir())) {
+      return await imageSearchSingleNative(imageUrl, productId, { timeout, signal });
+    }
+
     // 2) 构建 CLI 参数并执行（使用 --request 文件模式完全绕过 shell 转义问题）
     // 使用 Windows 可访问的共享目录（C:\Windows\Temp）而非 WSL 的 /tmp
     const sharedTmpDir = '/mnt/c/Windows/Temp';
@@ -433,6 +437,87 @@ async function imageSearchSingle(imageUrl, productId, options = {}) {
     });
   } finally {
     releaseLock();
+  }
+}
+
+function parseImageSearchResult(data, productId) {
+  const categories = Array.isArray(data && data.result && data.result.categories)
+    ? data.result.categories
+    : [];
+  const allProducts = categories.flatMap(cat => Array.isArray(cat.products) ? cat.products : []);
+  const peerTitles = allProducts
+    .map(p => (p && p.title) ? p.title : '')
+    .filter(t => typeof t === 'string' && t.length > 0);
+
+  let min = null;
+  let max = null;
+  allProducts.forEach(p => {
+    const priceVal = parseFloat(p && p.price ? p.price : '');
+    if (!isNaN(priceVal)) {
+      if (min === null || priceVal < min) min = priceVal;
+      if (max === null || priceVal > max) max = priceVal;
+    }
+  });
+
+  return {
+    productId,
+    peerTitles,
+    priceRange: {
+      min: isNaN(min) ? null : min,
+      max: isNaN(max) ? null : max
+    },
+    hasMatch: peerTitles.length > 0
+  };
+}
+
+function readImageSearchOutput(outFile, stdout) {
+  try {
+    const text = fs.readFileSync(outFile, 'utf8');
+    return JSON.parse(text);
+  } catch (_) {
+    try {
+      const line = String(stdout || '').split('\n').find(l => l && l.trim().startsWith('{'));
+      return line ? JSON.parse(line) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+}
+
+async function imageSearchSingleNative(imageUrl, productId, options = {}) {
+  const { timeout = 30000, signal = null } = options;
+  const stamp = Date.now();
+  const reqFile = path.join(os.tmpdir(), `taobao-image-req-${productId}-${stamp}.json`);
+  const outFile = path.join(os.tmpdir(), `taobao-image-${productId}-${stamp}.json`);
+  const requestPayload = {
+    tool: 'image_search',
+    arguments: { imagePath: imageUrl, sourceApp: 'ecom-ai-tools' }
+  };
+
+  try {
+    fs.writeFileSync(reqFile, JSON.stringify(requestPayload), 'utf8');
+    const result = await runTaobaoNativeAsync(['--request', reqFile, '-o', outFile], {
+      encoding: 'utf8',
+      timeout,
+      signal
+    });
+    const data = readImageSearchOutput(outFile, result && result.stdout);
+    if (!data || typeof data !== 'object') {
+      return { productId, hasMatch: false, peerTitles: [], priceRange: { min: null, max: null } };
+    }
+    return parseImageSearchResult(data, productId);
+  } catch (error) {
+    if (error && error.name === 'AbortError') {
+      return { productId, hasMatch: false, peerTitles: [], priceRange: { min: null, max: null }, aborted: true };
+    }
+    if (error && error.message && error.message.includes('timed out')) {
+      return { productId, hasMatch: false, peerTitles: [], priceRange: { min: null, max: null }, timeout: true };
+    }
+    console.warn(`⚠️ [${productId}] image_search 本地 CLI 调用失败:`, error && error.message ? error.message : error);
+    return { productId, hasMatch: false, peerTitles: [], priceRange: { min: null, max: null } };
+  } finally {
+    try { if (fs.existsSync(reqFile)) fs.unlinkSync(reqFile); } catch (_) {}
+    try { if (fs.existsSync(outFile)) fs.unlinkSync(outFile); } catch (_) {}
   }
 }
 
