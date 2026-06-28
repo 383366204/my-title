@@ -7,7 +7,8 @@
     "ecom-ai-tools": "bin/cli.js"
   },
   "scripts": {
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "ui": "node bin/server.js"
   },
   "keywords": [
     "ecommerce",
@@ -23,6 +24,7 @@
     "axios": "^1.6.0",
     "commander": "^12.0.0",
     "dotenv": "^16.4.0",
+    "express": "^4.19.2",
     "iconv-lite": "^0.7.2",
     "jsonrepair": "^3.14.0",
     "nodejieba": "^3.5.8",

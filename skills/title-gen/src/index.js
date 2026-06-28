@@ -11,9 +11,17 @@ const { selectSycmTitleKeywords } = require('./sycm-keyword-selector');
 const { runLimited, retryWithBackoff } = require('./llm-scheduler');
 const { hashProducts } = require('./product-hash');
 
-const SCHEMA_VERSION = 4; // bump when output structure changes
+const SCHEMA_VERSION = 7; // bump when output structure changes
 const DEFAULT_RUN_TIMEOUT = parseInt(process.env.RUN_TIMEOUT || process.env.TITLE_GEN_RUN_TIMEOUT_MS, 10) || 120000;
 const MIN_TITLE_BYTES = parseInt(process.env.MIN_TITLE_BYTES, 10) || 60;
+const DEFAULT_LLM_BATCH_SIZE = parseBoundedInt(process.env.TITLE_GEN_LLM_BATCH_SIZE, 5, 1, 20);
+const DEFAULT_PRODUCT_LIMIT = parseBoundedInt(process.env.TITLE_GEN_PRODUCT_LIMIT, 12, 0, 100);
+
+function parseBoundedInt(value, fallback, min, max) {
+  const parsed = parseInt(value, 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
+}
 
 function computeEffectiveRunTimeout({ runTimeoutMs, useImageSearch, maxImageSearch, productCount }) {
   const base = Math.max(30000, parseInt(runTimeoutMs, 10) || DEFAULT_RUN_TIMEOUT);
@@ -342,7 +350,7 @@ async function _searchPeerTitles({ products, blueOceanWord, peerTitles, glmClien
  * @param {AbortSignal|null} [params.signal=null] - 取消信号
  * @returns {Promise<any>}
  */
-async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles, products, taobaoTitles, maxLength, imageSearchResults, stats, cache, _peerTitlesHash, glmClient, log, warn, limit, sycmKeywords = [], sycmDataHash = '', signal = null, useImageSearch = false, maxImageSearch = 0, minPrice = 0, maxPrice = 0, bannedWordVersion = 0, semanticGroups = {}, productsHash = '', llmCacheVersion = PROMPT_VERSION, llmConcurrency = 2, llmRetries = 2 }) {
+async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles, products, taobaoTitles, maxLength, imageSearchResults, stats, cache, _peerTitlesHash, glmClient, log, warn, limit, sycmKeywords = [], sycmDataHash = '', signal = null, useImageSearch = false, maxImageSearch = 0, minPrice = 0, maxPrice = 0, bannedWordVersion = 0, semanticGroups = {}, productsHash = '', llmCacheVersion = PROMPT_VERSION, llmConcurrency = 2, llmRetries = 2, llmBatchSize = DEFAULT_LLM_BATCH_SIZE }) {
   // Step 4: 尝试 GLM selectAndGenerate 以输出更多字段...
   // 使用与原实现相同的流程与降级策略
   let effectiveSemanticGroups = semanticGroups;
@@ -367,7 +375,7 @@ async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles,
     }
     effectiveSemanticGroups = Object.keys(semanticGroups).length > 0 ? semanticGroups : (keywordAnalysis?.semanticGroups || {});
 
-    const BATCH_SIZE = products.length <= 20 ? products.length : 20;
+    const BATCH_SIZE = Math.max(1, parseInt(llmBatchSize, 10) || DEFAULT_LLM_BATCH_SIZE);
     const batches = [];
     for (let i = 0; i < products.length; i += BATCH_SIZE) {
       batches.push({
@@ -385,6 +393,7 @@ async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles,
       err.name = 'AbortError';
       throw err;
     }
+    const batchFailures = [];
     const batchResults = await runLimited(batches, async ({ index, products: batch }) => {
       try {
         const result = await retryWithBackoff(() => glmClient.selectAndGenerate({
@@ -399,6 +408,11 @@ async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles,
         return result;
       } catch (err) {
         warn(`  ⚠️ 第 ${index + 1}/${batches.length} 批(${batch.length}个产品)处理失败:`, err.message);
+        batchFailures.push({
+          index,
+          size: batch.length,
+          reason: err && err.message ? err.message : String(err)
+        });
         return { selectedProducts: [], titles: [] };
       }
     }, { concurrency: llmConcurrency });
@@ -412,6 +426,12 @@ async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles,
     }
 
     stats.batchesProcessed = batches.length;
+    stats.llmBatchSize = BATCH_SIZE;
+    stats.llmBatchFailures = batchFailures;
+    if (batchFailures.length > 0) {
+      stats.degraded = 'partial_llm_batch_failure';
+      if (stats.trace) stats.trace.titleGeneration = 'partial_llm_fallback';
+    }
     stats.totalProductsEnriched = allSelectedProducts.length;
     stats.totalTitlesGenerated = allTitleObjs.length;
     log(`  ✓ 共处理 ${allSelectedProducts.length} 个产品的选品分析, 生成 ${allTitleObjs.length} 个标题`);
@@ -495,7 +515,7 @@ async function _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles,
 }
 
 async function run(blueOceanWord, options = {}) {
-  const { maxLength = 60, peerTitles = [], silent = false, limit = 0, onBatch = null, research = false, sycmData, sycmAuto = false, sycmFetchError = '', useImageSearch = false, maxImageSearch = 0, minPrice = 0, maxPrice = 0, signal = null, onProductsFound = null, onProgress = null, skipFlag = null, products: externalProducts = [], coreWord: providedCoreWord = '', modifiers: providedModifiers = null, semanticGroups: providedSemanticGroups = null, productsHash: providedProductsHash = '', runTimeoutMs = DEFAULT_RUN_TIMEOUT, glmClient: providedGlmClient = null, llmConcurrency = 2, llmRetries = 2, allowGenericTitlesWhenNoProducts = false } = options;
+  const { maxLength = 60, peerTitles = [], silent = false, limit = 0, onBatch = null, research = false, sycmData, sycmAuto = false, sycmFetchError = '', useImageSearch = false, maxImageSearch = 0, minPrice = 0, maxPrice = 0, signal = null, onProductsFound = null, onProgress = null, skipFlag = null, products: externalProducts = [], coreWord: providedCoreWord = '', modifiers: providedModifiers = null, semanticGroups: providedSemanticGroups = null, productsHash: providedProductsHash = '', runTimeoutMs = DEFAULT_RUN_TIMEOUT, glmClient: providedGlmClient = null, llmConcurrency = 2, llmRetries = 2, llmBatchSize = DEFAULT_LLM_BATCH_SIZE, productLimit = DEFAULT_PRODUCT_LIMIT, allowGenericTitlesWhenNoProducts = false } = options;
   
   const log = silent ? () => {} : console.log.bind(console);
   const warn = silent ? () => {} : console.warn.bind(console);
@@ -510,7 +530,9 @@ async function run(blueOceanWord, options = {}) {
   // 计算 SYCM 数据哈希，用于缓存键区分（如果存在）
   const _sycmDataHash = sycmData ? require('crypto').createHash('md5').update(typeof sycmData === 'string' ? sycmData : JSON.stringify(sycmData)).digest('hex').slice(0, 8) : '';
   const _bannedWordVersion = require('../../../core/banned-words').getBannedWordVersion();
-  const _productsHash = providedProductsHash || hashProducts(externalProducts);
+  const effectiveProductLimit = parseBoundedInt(productLimit, DEFAULT_PRODUCT_LIMIT, 0, 100);
+  const effectiveLlmBatchSize = parseBoundedInt(llmBatchSize, DEFAULT_LLM_BATCH_SIZE, 1, 20);
+  const _productsHash = `${providedProductsHash || hashProducts(externalProducts)}:pl${effectiveProductLimit}:bs${effectiveLlmBatchSize}`;
 
   // 追踪信息：记录各决策点的执行路径
   const trace = {
@@ -658,6 +680,15 @@ let finalSycmData = sycmData;
     });
     warn(`[价格过滤] ${beforeCount} → ${products.length} 个商品 (min=${minPrice}, max=${maxPrice})`);
     if (onProductsFound) onProductsFound(products.length); // 更新预估
+  }
+
+  const totalProductsBeforeLimit = Array.isArray(products) ? products.length : 0;
+  let productLimitApplied = 0;
+  if (effectiveProductLimit > 0 && totalProductsBeforeLimit > effectiveProductLimit) {
+    products = products.slice(0, effectiveProductLimit);
+    productLimitApplied = effectiveProductLimit;
+    log(`  ✂️ 货源数量限制: ${totalProductsBeforeLimit} → ${products.length} 个商品进入标题生成`);
+    if (onProductsFound) onProductsFound(products.length);
   }
 
   let finalTaobaoTitles = initialTaobaoTitles;
@@ -809,6 +840,10 @@ let finalSycmData = sycmData;
       sycmKeywordsRejected: sycmKeywordSelection.rejected || [],
       sycmKeywordStats: sycmKeywordSelection.stats || {}
     };
+    stats.totalProductsBeforeLimit = totalProductsBeforeLimit;
+    stats.productLimitApplied = productLimitApplied;
+    stats.productLimit = effectiveProductLimit;
+    stats.llmBatchSize = effectiveLlmBatchSize;
 
   let _raceTimeoutId = null;
   const effectiveRunTimeoutMs = computeEffectiveRunTimeout({
@@ -841,7 +876,7 @@ let finalSycmData = sycmData;
   });
 
     return Promise.race([
-        _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles, products, taobaoTitles: finalTaobaoTitles, maxLength, imageSearchResults, stats, cache, _peerTitlesHash, glmClient, log, warn, limit, sycmKeywords, sycmDataHash: _sycmDataHash, signal, useImageSearch, maxImageSearch, minPrice, maxPrice, bannedWordVersion: _bannedWordVersion, semanticGroups, productsHash: _productsHash, llmCacheVersion: _llmCacheVersion, llmConcurrency, llmRetries }),
+        _generateTitles({ blueOceanWord, coreWord, modifiers, peerTitles, products, taobaoTitles: finalTaobaoTitles, maxLength, imageSearchResults, stats, cache, _peerTitlesHash, glmClient, log, warn, limit, sycmKeywords, sycmDataHash: _sycmDataHash, signal, useImageSearch, maxImageSearch, minPrice, maxPrice, bannedWordVersion: _bannedWordVersion, semanticGroups, productsHash: _productsHash, llmCacheVersion: _llmCacheVersion, llmConcurrency, llmRetries, llmBatchSize: effectiveLlmBatchSize }),
        timeoutPromise
      ]).finally(() => { if (_raceTimeoutId) clearTimeout(_raceTimeoutId); });
 }

@@ -4,6 +4,7 @@ const {
   byteLen,
   constructFallbackTitle,
   appendWordsToTarget,
+  completeTitle,
   scoreTitle
 } = require('../src/title-utils');
 
@@ -46,5 +47,45 @@ describe('title-utils length expansion', () => {
     assert.ok(result.score >= 80, `expected high quality score, got ${result.score}`);
     assert.strictEqual(result.prefixOk, true);
     assert.deepStrictEqual(result.sycmWordsUsed, ['磨牙耐咬', '解闷陪伴']);
+  });
+
+  test('scoreTitle treats cleaned blue ocean word as prefix', () => {
+    const result = scoreTitle({
+      title: '本命年吊坠女朱砂貔貅项链转运招财紫金砂红绳款',
+      blueOceanWord: '本命年吊坠 女',
+      coreWord: '吊坠',
+      modifiers: [{ word: '本命年', rigidity: 'rigid' }, { word: '女', rigidity: 'rigid' }],
+      minLength: 40,
+      maxLength: 60
+    });
+
+    assert.strictEqual(result.prefixOk, true);
+    assert.ok(!result.issues.includes('蓝海词未前置'));
+  });
+
+  test('completeTitle collapses repeated cleaned blue ocean prefixes', () => {
+    const title = completeTitle(
+      '本命年吊坠女本命年吊坠女朱砂貔貅项链转运招财',
+      '本命年吊坠 女',
+      ['朱砂貔貅项链转运招财紫金砂红绳款'],
+      40,
+      60
+    );
+
+    assert.ok(title.startsWith('本命年吊坠女'));
+    assert.ok(!title.startsWith('本命年吊坠女本命年吊坠女'));
+  });
+
+  test('completeTitle removes stale year claims', () => {
+    const staleYear = new Date().getFullYear() - 1;
+    const title = completeTitle(
+      `本命年吊坠女${staleYear}年新款朱砂貔貅项链转运招财`,
+      '本命年吊坠 女',
+      ['朱砂貔貅项链转运招财紫金砂红绳款'],
+      40,
+      60
+    );
+
+    assert.ok(!title.includes(`${staleYear}年`));
   });
 });

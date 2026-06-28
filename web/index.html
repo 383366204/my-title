@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>电商选品与标题生成 AI 工作箱</title>
+  <!-- Google Fonts: Inter and Outfit -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Sidebar (3 tabs) -->
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <span class="brand-icon">⚡</span>
+        <h1 class="brand-title">Ecom AI Tools</h1>
+      </div>
+      <nav class="sidebar-nav">
+        <a href="#dashboard" class="nav-item active" id="nav-dashboard">
+          <span class="nav-icon">🏠</span>
+          <span class="nav-text">工作台</span>
+        </a>
+        <a href="#mine" class="nav-item" id="nav-mine">
+          <span class="nav-icon">⛏️</span>
+          <span class="nav-text">挖词选品</span>
+        </a>
+        <a href="#title" class="nav-item" id="nav-title">
+          <span class="nav-icon">✍️</span>
+          <span class="nav-text">标题生成</span>
+        </a>
+      </nav>
+      <div class="sidebar-footer">
+        <span class="version-tag">v1.2.0</span>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+      <div class="workflow-funnel" id="workflow-funnel" aria-label="每日铺货工作流">
+        <div class="workflow-step active" data-workflow-step="candidate">
+          <span class="workflow-step-index">1</span>
+          <span class="workflow-step-label">候选词</span>
+        </div>
+        <div class="workflow-step" data-workflow-step="verified">
+          <span class="workflow-step-index">2</span>
+          <span class="workflow-step-label">大盘验真</span>
+        </div>
+        <div class="workflow-step" data-workflow-step="generated">
+          <span class="workflow-step-index">3</span>
+          <span class="workflow-step-label">标题货源</span>
+        </div>
+        <div class="workflow-step" data-workflow-step="pending_review">
+          <span class="workflow-step-index">4</span>
+          <span class="workflow-step-label">待确认铺货</span>
+        </div>
+        <div class="workflow-step" data-workflow-step="submitted">
+          <span class="workflow-step-index">5</span>
+          <span class="workflow-step-label">已提交</span>
+        </div>
+      </div>
+
+      <!-- ========== 1. 工作台首页 (Dashboard) ========== -->
+      <section id="sec-dashboard" class="content-section active">
+        <header class="section-header">
+          <h2>今日选品工作台</h2>
+          <p class="section-desc">欢迎回来！从这里开始你的每日选品工作流。</p>
+        </header>
+
+        <!-- Quick Start Card -->
+        <div class="quick-start-card card glass">
+          <div class="quick-start-content">
+            <div class="quick-start-left">
+              <h3>⚡ 快速开始</h3>
+              <p class="quick-start-desc">选择你今天的工作方向，一键跳转并自动聚焦输入区。</p>
+              <div class="quick-start-actions">
+                <button class="btn btn-glow btn-glow-purple" id="btn-goto-mine">
+                  <span class="btn-glow-icon">⛏️</span>
+                  <span>开始挖词选品</span>
+                </button>
+                <button class="btn btn-glow btn-glow-blue" id="btn-goto-title">
+                  <span class="btn-glow-icon">✍️</span>
+                  <span>直接生成标题</span>
+                </button>
+              </div>
+            </div>
+            <div class="quick-start-right">
+              <div class="flow-steps">
+                <div class="flow-step">
+                  <span class="flow-step-num">1</span>
+                  <span class="flow-step-text">录入种子词</span>
+                </div>
+                <span class="flow-step-arrow">→</span>
+                <div class="flow-step">
+                  <span class="flow-step-num">2</span>
+                  <span class="flow-step-text">智能挖词筛选</span>
+                </div>
+                <span class="flow-step-arrow">→</span>
+                <div class="flow-step">
+                  <span class="flow-step-num">3</span>
+                  <span class="flow-step-text">选品生成标题</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card glass workflow-batch-card" id="workflow-batch-card">
+          <div class="card-header-actions">
+            <h3>自动化铺货待复核</h3>
+            <button class="btn btn-secondary btn-sm" id="btn-refresh-batches">刷新</button>
+          </div>
+          <div id="workflow-batch-content">
+            <p class="empty-state-text-sm">正在读取今日自动化批次...</p>
+          </div>
+        </div>
+
+        <!-- Status + Stats Row -->
+        <div class="dashboard-grid">
+          <div class="status-card glow-blue">
+            <h3>API 连接状态</h3>
+            <div class="status-indicator-list">
+              <div class="indicator-item">
+                <span class="indicator-dot" id="env-glm"></span>
+                <span>GLM API Key (大模型授权)</span>
+              </div>
+              <div class="indicator-item">
+                <span class="indicator-dot" id="env-ali"></span>
+                <span>Ali 1688 AK (淘宝/1688授权)</span>
+              </div>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon">🌱</div>
+            <div class="stat-info">
+              <span class="stat-value" id="stat-seeds">0</span>
+              <span class="stat-label">种子词数量</span>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon">✅</div>
+            <div class="stat-info">
+              <span class="stat-value" id="stat-seen">0</span>
+              <span class="stat-label">已输出词 (30天)</span>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon">❌</div>
+            <div class="stat-info">
+              <span class="stat-value" id="stat-rejected">0</span>
+              <span class="stat-label">历史拒绝词</span>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon">⚡</div>
+            <div class="stat-info">
+              <span class="stat-value" id="stat-cache">0</span>
+              <span class="stat-label">预检缓存词数</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Cache Cleanup (Collapsed) -->
+        <details class="cache-cleanup-details" id="cache-cleanup-section">
+          <summary class="cache-cleanup-summary">🧹 数据维护与缓存清理</summary>
+          <div class="cache-cleanup-content">
+            <p class="cache-cleanup-desc">当你想开始一轮全新的挖掘，或者想丢弃历史推荐记录时，可以清理以下文件。</p>
+            <div class="clean-actions-list">
+              <div class="clean-item">
+                <div class="clean-info">
+                  <strong>verify-cache.jsonl (生意参谋人气缓存)</strong>
+                  <p>清理后，所有词重新查生意参谋，会消耗更多爬虫额度。</p>
+                </div>
+                <button class="btn btn-danger btn-sm" data-clean-type="cache">💣 清空</button>
+              </div>
+              <div class="clean-item">
+                <div class="clean-info">
+                  <strong>seen-candidates.jsonl (已见去重词历史)</strong>
+                  <p>清理后，最近 30 天输出过的词会重新参与候选和推荐。</p>
+                </div>
+                <button class="btn btn-danger btn-sm" data-clean-type="seen">💣 清空</button>
+              </div>
+              <div class="clean-item">
+                <div class="clean-info">
+                  <strong>rejected-candidates.jsonl (被拒错题本历史)</strong>
+                  <p>清理后，大模型不会再刻意避开历史评分过低或没人气的词。</p>
+                </div>
+                <button class="btn btn-danger btn-sm" data-clean-type="rejected">💣 清空</button>
+              </div>
+            </div>
+          </div>
+        </details>
+      </section>
+
+      <!-- ========== 2. 挖词选品 (Mine + Seeds merged) ========== -->
+      <section id="sec-mine" class="content-section">
+        <header class="section-header">
+          <h2>挖词选品中心</h2>
+          <p class="section-desc">录入品类种子词，自动化裂变高质量蓝海词，一键匹配货源与标题。</p>
+        </header>
+
+        <!-- Row 1: Seed Input Bar (full width, always visible) -->
+        <div class="card glass seed-input-bar">
+          <form id="form-add-seed" class="seed-input-form">
+            <span class="seed-input-label">🌱 添加种子词</span>
+            <input type="text" name="keyword" placeholder="输入核心品类词 (如: 项链)，回车添加" required class="form-control seed-input-main" id="seed-keyword-input">
+            <input type="text" name="category" placeholder="品类 (选填)" class="form-control seed-input-cat">
+            <input type="number" name="priority" value="5" min="1" max="10" class="form-control seed-input-score" title="权重分 1-10">
+            <select name="type" class="form-control seed-input-type">
+              <option value="expand" selected>裂变</option>
+              <option value="direct">直通</option>
+            </select>
+            <button type="submit" class="btn btn-primary btn-sm">➕ 添加</button>
+          </form>
+        </div>
+
+        <!-- Row 1.5: Core Root Miner Widget (AI & Data Driven) -->
+        <details class="card glass core-root-miner-card" style="margin-bottom: 20px;">
+          <summary style="font-weight: 600; cursor: pointer; padding: 10px 15px; outline: none;">💡 核心词根智能挖掘助手 (找好种子词) <span style="font-size: 11px; color: rgba(255, 255, 255, 0.45); font-weight: normal; margin-left: 10px;">点击展开/折叠</span></summary>
+          <div style="padding: 15px; display: flex; flex-direction: column; gap: 15px; border-top: 1px solid rgba(255, 255, 255, 0.08);">
+
+            <div style="display: flex; gap: 10px;" class="tab-button-group">
+              <button class="btn btn-secondary btn-sm active" id="btn-tab-peer">🔍 同行标题提取</button>
+              <button class="btn btn-secondary btn-sm" id="btn-tab-opp">🔥 1688 爆款商机</button>
+              <button class="btn btn-secondary btn-sm" id="btn-tab-sycm-market">📊 生意参谋大盘</button>
+            </div>
+
+            <div id="miner-input-area" class="form-group" style="margin: 0;">
+              <!-- Target inputs will be switched dynamically -->
+              <div id="area-peer" class="miner-form-sub">
+                <label style="font-size: 13px; color: rgba(255, 255, 255, 0.7);" id="miner-input-label">输入同行关键词或淘宝商品链接：</label>
+                <div style="display: flex; gap: 8px; margin-top: 5px;">
+                  <input type="text" id="miner-peer-input" placeholder="例如：防晒女款 或 粘贴淘宝商品地址" class="form-control" style="flex: 1;">
+                  <button class="btn btn-primary btn-sm" id="btn-run-miner" style="white-space: nowrap;">🚀 提取并验真词根</button>
+                </div>
+              </div>
+            </div>
+
+            <div id="miner-results-area" style="display: none; border-top: 1px dashed rgba(255, 255, 255, 0.08); padding-top: 15px;">
+              <h4 style="margin: 0 0 10px 0; font-size: 13px; color: rgba(255, 255, 255, 0.85);">💡 提取出并通过参谋验证的核心词根（人气 > 10）：</h4>
+              <div id="miner-chips-container" class="chips-group" style="display: flex; flex-wrap: wrap; gap: 8px;">
+                <!-- JS will render chips here -->
+              </div>
+            </div>
+
+          </div>
+        </details>
+
+        <!-- Row 2: Seed Pool (Left) + Mine Config (Right) -->
+        <div class="grid-2col mine-top-grid">
+          <!-- Left: Compact Seed Pool -->
+          <div class="card glass seed-pool-card">
+            <div class="card-header-actions">
+              <h3>🌱 种子池 (<span id="seed-pool-count">0</span>)</h3>
+            </div>
+            <div class="seed-pool-table-wrapper">
+              <table class="data-table seed-table-compact">
+                <thead>
+                  <tr>
+                    <th>种子词</th>
+                    <th>分数</th>
+                    <th>状态</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody id="mine-seeds-tbody">
+                  <!-- Javascript will render rows here -->
+                </tbody>
+              </table>
+              <div id="seeds-empty-state" class="empty-state-inline">
+                🌱 种子池为空，在上方输入核心品类词开始工作。
+              </div>
+            </div>
+          </div>
+
+          <!-- Right: Mine Config + Progress -->
+          <div class="card glass mine-config-card">
+            <h3>⚙️ 挖掘配置</h3>
+            <form id="form-mine-config" class="config-form">
+              <div class="form-group">
+                <label>挖掘模式</label>
+                <select name="source" class="form-control">
+                  <option value="local" selected>Local (纯本地规则 - 极快)</option>
+                  <option value="ai">AI (纯大语言模型 - 慢但多创意)</option>
+                  <option value="hybrid">Hybrid (混合模式 - 全面)</option>
+                  <option value="sycm_hot">📈 SYCM Hot (生意参谋热搜词关联 - 推荐)</option>
+                  <option value="sycm_blue">🌊 SYCM Blue (生意参谋蓝海词关联 - 推荐)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>输出候选词数</label>
+                <input type="number" name="count" value="50" min="1" max="200" class="form-control">
+              </div>
+
+              <!-- Advanced Config Toggle -->
+              <details class="advanced-details">
+                <summary class="advanced-summary">🛠️ 高级参数 (生意参谋与回写)</summary>
+                <div class="advanced-content">
+                  <div class="form-group">
+                    <label>预检最低人气</label>
+                    <input type="number" name="minSearchPopularity" value="50" min="10" max="10000" class="form-control">
+                  </div>
+                  <div class="form-check-group">
+                    <label class="form-checkbox-label">
+                      <input type="checkbox" name="sycmPrecheck" checked>
+                      开启生意参谋在线热度过滤
+                    </label>
+                    <label class="form-checkbox-label">
+                      <input type="checkbox" name="autoSeedHighTier">
+                      自动将优秀词回写种子池
+                    </label>
+                  </div>
+                </div>
+              </details>
+
+              <button type="submit" class="btn btn-primary btn-mine-start" id="btn-start-mine">🚀 开始挖掘词流</button>
+              <button type="button" class="btn btn-danger btn-mine-start" id="btn-stop-mine" style="display: none;">🛑 停止挖掘</button>
+            </form>
+
+            <!-- Stage Progress Tracker -->
+            <div class="progress-tracker" id="mine-progress-tracker" style="display: none;">
+              <div class="progress-step" id="p-step-1">
+                <span class="step-dot"></span>
+                <span class="step-name">读取种子</span>
+              </div>
+              <div class="progress-step-line"></div>
+              <div class="progress-step" id="p-step-2">
+                <span class="step-dot"></span>
+                <span class="step-name">双路裂变</span>
+              </div>
+              <div class="progress-step-line"></div>
+              <div class="progress-step" id="p-step-3">
+                <span class="step-dot"></span>
+                <span class="step-name">热度预检</span>
+              </div>
+              <div class="progress-step-line"></div>
+              <div class="progress-step" id="p-step-4">
+                <span class="step-dot"></span>
+                <span class="step-name">去重采样</span>
+              </div>
+              <div class="progress-step-line"></div>
+              <div class="progress-step" id="p-step-5">
+                <span class="step-dot"></span>
+                <span class="step-name">完成</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Collapsible Log Console -->
+        <details class="log-details-drawer">
+          <summary class="log-details-summary">🔍 查看挖掘详细运行日志</summary>
+          <div class="log-details-content">
+            <div class="log-console" id="log-console">
+              <div class="log-line system">控制台就绪，等待任务启动...</div>
+            </div>
+          </div>
+        </details>
+
+        <!-- Row 3: Mined Results (Full Width) -->
+        <div class="card glass" id="mine-results-card">
+          <div class="card-header-actions">
+            <h3>📊 挖掘结果 (<span id="results-count">0</span>)</h3>
+            <div class="result-actions-group">
+              <button class="btn btn-primary btn-sm" id="btn-batch-gen-title" style="display: none;">✍️ 批量生成标题</button>
+              <button class="btn btn-secondary btn-sm" id="btn-copy-all-kws">📋 复制全部词</button>
+            </div>
+          </div>
+          <div class="table-container">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th class="th-checkbox"><input type="checkbox" id="select-all-kws" title="全选"></th>
+                  <th class="th-sortable" data-sort="keyword">关键词</th>
+                  <th class="th-sortable" data-sort="score">得分</th>
+                  <th>Tier</th>
+                  <th>状态</th>
+                  <th>来源</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="mine-results-tbody">
+                <tr><td colspan="7" class="empty-state-cell">🤖 还没有候选词。先在上方录入种子词，然后点击"开始挖掘"。</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== 3. 标题生成工作台 ========== -->
+      <section id="sec-title" class="content-section">
+        <header class="section-header">
+          <h2>标题生成工作台</h2>
+          <p class="section-desc">基于 GLM 智能化匹配 1688 铺货源并自动生成符合淘宝 SEO 的导购三段式标题。</p>
+        </header>
+
+        <div class="grid-2col">
+          <!-- Input settings -->
+          <div class="card glass">
+            <h3>生成参数</h3>
+            <!-- Source Indicator (hidden by default) -->
+            <div class="source-indicator" id="title-source-indicator" style="display: none;">
+              <span class="source-indicator-text" id="title-source-text"></span>
+              <button class="source-indicator-close" id="title-source-close" title="清除来源">✕</button>
+            </div>
+            <form id="form-title-gen" class="config-form">
+              <div class="form-group">
+                <label>核心关键词 / 蓝海词</label>
+                <input type="text" id="title-keyword" placeholder="例如: 纯银项链女高级感" required class="form-control">
+              </div>
+              <div class="form-group">
+                <label>最大标题长度 (字符数，淘宝限60字符/30中字)</label>
+                <input type="number" id="title-max-length" value="60" min="10" max="100" class="form-control">
+              </div>
+
+              <!-- Advanced Options (Collapsed) -->
+              <details class="advanced-details">
+                <summary class="advanced-summary">🛠️ 高级选项 (以图搜图 / 同行标题)</summary>
+                <div class="advanced-content">
+                  <div class="form-check-group">
+                    <label class="form-checkbox-label">
+                      <input type="checkbox" id="title-use-image">
+                      启用以图搜图（精细获取同行竞品标题，耗时较长）
+                    </label>
+                  </div>
+                  <div class="form-group">
+                    <label>参考同行标题 (每行一条，留空则自动爬取淘宝)</label>
+                    <textarea id="title-peer-titles" rows="3" class="form-control" placeholder="手工粘贴同行爆款标题可大幅提高生成精准度..."></textarea>
+                  </div>
+                </div>
+              </details>
+
+              <button type="submit" class="btn btn-primary" id="btn-gen-title">✨ 开始选品并生成标题</button>
+            </form>
+          </div>
+
+          <!-- System output summary -->
+          <div class="card glass flex-column">
+            <h3>分析诊断信息</h3>
+            <div class="title-analysis-panel" id="title-analysis-panel">
+              <p class="empty-state-text-sm">✨ 还没有商品货源？在左侧输入关键词或从挖掘看板一键导入，点击"开始选品"。</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Mapped products result -->
+        <div class="card glass margin-top" id="title-results-card" style="display: none;">
+          <div class="card-header-actions">
+            <h3>货源匹配与推荐标题</h3>
+            <div class="result-actions-group">
+              <button class="btn btn-secondary btn-sm" id="btn-copy-all-titles">📋 复制所有标题</button>
+            </div>
+          </div>
+          <div class="title-gen-meta" id="title-gen-meta" style="display: none;">
+            <span class="meta-timer" id="title-gen-timer"></span>
+          </div>
+          <div class="products-grid" id="products-result-container">
+            <!-- Javascript will render cards here -->
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- Global Toast Container -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <!-- Scripts -->
+  <script src="js/app.js"></script>
+  <script src="js/storage/history-store-contract.js"></script>
+  <script src="js/storage/indexeddb-history-store.js"></script>
+  <script src="js/storage/history-service.js"></script>
+  <script src="js/seeds.js"></script>
+  <script src="js/mine.js"></script>
+  <script src="js/title.js"></script>
+</body>
+</html>

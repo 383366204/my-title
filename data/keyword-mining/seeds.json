@@ -720,5 +720,16 @@
     "successCount": 0,
     "failCount": 0,
     "reason": "中秋礼盒包装"
+  },
+  {
+    "keyword": "吊坠",
+    "category": "",
+    "priority": 5,
+    "source": "manual",
+    "type": "expand",
+    "status": "active",
+    "successCount": 0,
+    "failCount": 0,
+    "reason": ""
   }
 ]

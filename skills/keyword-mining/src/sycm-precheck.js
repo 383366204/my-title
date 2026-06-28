@@ -1,5 +1,6 @@
 const { execFile } = require('child_process');
 const path = require('path');
+const { parseMetricNumber } = require('./candidate-gate');
 
 /**
  * SYCM 预检：并发查询候选词的搜索人气，过滤低于阈值的词
@@ -30,14 +31,14 @@ async function precheckCandidates(candidates, { minSearchPopularity = 50, timeou
         filtered.push({ ...candidate, filtered: true, reason: 'sycm无数据或解析失败' });
         return;
       }
-      if (result < minSearchPopularity) {
+      if (result.searchPopularity < minSearchPopularity) {
         stats.filtered++;
-        filtered.push({ ...candidate, filtered: true, reason: `搜索人气${result}低于阈值${minSearchPopularity}`, searchPopularity: result });
+        filtered.push({ ...candidate, filtered: true, reason: `搜索人气${result.searchPopularity}低于阈值${minSearchPopularity}`, ...result });
         return;
       }
       // 通过预检
       stats.passed++;
-      passed.push({ ...candidate, searchPopularity: result });
+      passed.push({ ...candidate, ...result });
     } catch (err) {
       stats.errors++;
       filtered.push({ ...candidate, filtered: true, reason: `sycm查询异常: ${err.message}` });
@@ -59,12 +60,12 @@ async function precheckCandidates(candidates, { minSearchPopularity = 50, timeou
         }
         try {
           const data = JSON.parse(stdout.trim());
-          const searchPopularity = extractSearchPopularityFromSycmJson(data);
-          if (searchPopularity == null) {
+          const metrics = extractSycmMetricsFromJson(data);
+          if (!metrics) {
             resolve(null); // 无数据
             return;
           }
-          resolve(searchPopularity);
+          resolve(metrics);
         } catch (e) {
           resolve(null); // JSON 解析失败视为无数据
         }
@@ -82,14 +83,27 @@ async function precheckCandidates(candidates, { minSearchPopularity = 50, timeou
 }
 
 function extractSearchPopularityFromSycmJson(payload) {
+  const metrics = extractSycmMetricsFromJson(payload);
+  return metrics ? metrics.searchPopularity : null;
+}
+
+function extractSycmMetricsFromJson(payload) {
   const rows = Array.isArray(payload && payload.items)
     ? payload.items
     : Array.isArray(payload && payload.data)
       ? payload.data
       : [];
   if (!rows.length || rows[0].searchPopularity == null) return null;
-  const value = Number(rows[0].searchPopularity);
-  return Number.isFinite(value) ? value : null;
+  const row = rows[0];
+  const searchPopularity = parseMetricNumber(row.searchPopularity);
+  if (!Number.isFinite(searchPopularity)) return null;
+  return {
+    searchPopularity,
+    demandSupplyRatio: parseMetricNumber(row.demandSupplyRatio),
+    clickRate: parseMetricNumber(row.clickRate),
+    conversionRate: parseMetricNumber(row.conversionRate || row.payConversionRate),
+    buyerCount: parseMetricNumber(row.buyerCount || row.payBuyerCount)
+  };
 }
 
-module.exports = { precheckCandidates, extractSearchPopularityFromSycmJson };
+module.exports = { precheckCandidates, extractSearchPopularityFromSycmJson, extractSycmMetricsFromJson };

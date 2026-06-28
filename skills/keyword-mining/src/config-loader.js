@@ -3,6 +3,8 @@ const path = require('path');
 const { normalizeKeyword, listSeeds, DEFAULT_DATA_DIR } = require('./seed-store');
 
 const CONFIG_DIR = path.resolve(__dirname, '../config');
+const configCache = new Map();
+const synonymMapCache = new Map();
 
 function unique(words) {
   return [...new Set((words || []).map(normalizeKeyword).filter(Boolean))];
@@ -27,12 +29,16 @@ function mergeWordMap(base, extra) {
 
 function loadKeywordConfig(options = {}) {
   const configDir = options.configDir || CONFIG_DIR;
-  return {
+  const key = path.resolve(configDir);
+  if (configCache.has(key)) return configCache.get(key);
+  const config = {
     products: readJson(path.join(configDir, 'products.json'), {}),
     synonyms: readJson(path.join(configDir, 'synonyms.json'), {}),
     rejectRules: readJson(path.join(configDir, 'reject-rules.json'), {}),
     facets: readJson(path.join(configDir, 'facets.json'), {})
   };
+  configCache.set(key, config);
+  return config;
 }
 
 function seedProductWords({ dataDir = DEFAULT_DATA_DIR, maxSeeds = 200 } = {}) {
@@ -56,6 +62,8 @@ function configuredProductWords(defaultWords = [], options = {}) {
 }
 
 function synonymMap(options = {}) {
+  const configDir = path.resolve(options.configDir || CONFIG_DIR);
+  if (synonymMapCache.has(configDir)) return synonymMapCache.get(configDir);
   const config = loadKeywordConfig(options);
   const canonical = config.synonyms.canonical || {};
   const map = new Map();
@@ -68,6 +76,7 @@ function synonymMap(options = {}) {
       if (normalizedAlias) map.set(normalizedAlias, normalizedTarget);
     }
   }
+  synonymMapCache.set(configDir, map);
   return map;
 }
 
@@ -93,9 +102,15 @@ function configuredRejectFacetRules(options = {}) {
   return Array.isArray(config.rejectRules.facetRules) ? config.rejectRules.facetRules : [];
 }
 
+function clearKeywordConfigCache() {
+  configCache.clear();
+  synonymMapCache.clear();
+}
+
 module.exports = {
   CONFIG_DIR,
   loadKeywordConfig,
+  clearKeywordConfigCache,
   configuredProductWords,
   normalizeSynonyms,
   mergeFacets,

@@ -352,6 +352,137 @@ test('run limits concurrent selectAndGenerate batches', async () => {
   assert.ok(maxActive > 0);
 });
 
+test('run applies productLimit before sending products to LLM', async () => {
+  const { run } = require('../src');
+  let seenProductCount = 0;
+  const products = Array.from({ length: 10 }, (_, index) => ({
+    id: `offer-limit-${index}`,
+    title: `陶瓷摆件 商品 ${index}`,
+    url: `https://detail.1688.com/offer/${200000 + index}.html`
+  }));
+
+  const glmClient = {
+    async selectAndGenerate({ products: batch }) {
+      seenProductCount += batch.length;
+      return {
+        selectedProducts: [],
+        titles: batch.map(p => ({
+          productId: p.id,
+          title: '陶瓷摆件 家用桌面装饰创意小摆件客厅玄关装饰品'
+        }))
+      };
+    },
+    async generateTitles() {
+      return ['陶瓷摆件 家用桌面装饰创意小摆件客厅玄关装饰品'];
+    }
+  };
+
+  const result = await run(`陶瓷摆件-limit-${Date.now()}`, {
+    products,
+    productLimit: 4,
+    peerTitles: ['陶瓷摆件 家用桌面装饰'],
+    coreWord: '摆件',
+    modifiers: [{ word: '陶瓷', type: 'rigid' }],
+    glmClient,
+    llmConcurrency: 1,
+    runTimeoutMs: 10000,
+    silent: true
+  });
+
+  assert.equal(seenProductCount, 4);
+  assert.equal(result.products.length, 4);
+  assert.equal(result.stats.totalProductsBeforeLimit, 10);
+  assert.equal(result.stats.productLimitApplied, 4);
+});
+
+test('run uses configurable small LLM batch sizes', async () => {
+  const { run } = require('../src');
+  const batchSizes = [];
+  const products = Array.from({ length: 12 }, (_, index) => ({
+    id: `offer-batch-${index}`,
+    title: `陶瓷摆件 商品 ${index}`,
+    url: `https://detail.1688.com/offer/${300000 + index}.html`
+  }));
+
+  const glmClient = {
+    async selectAndGenerate({ products: batch }) {
+      batchSizes.push(batch.length);
+      return {
+        selectedProducts: [],
+        titles: batch.map(p => ({
+          productId: p.id,
+          title: '陶瓷摆件 家用桌面装饰创意小摆件客厅玄关装饰品'
+        }))
+      };
+    },
+    async generateTitles() {
+      return ['陶瓷摆件 家用桌面装饰创意小摆件客厅玄关装饰品'];
+    }
+  };
+
+  await run(`陶瓷摆件-batch-${Date.now()}`, {
+    products,
+    peerTitles: ['陶瓷摆件 家用桌面装饰'],
+    coreWord: '摆件',
+    modifiers: [{ word: '陶瓷', type: 'rigid' }],
+    glmClient,
+    llmBatchSize: 5,
+    llmConcurrency: 1,
+    runTimeoutMs: 10000,
+    silent: true
+  });
+
+  assert.deepEqual(batchSizes, [5, 5, 2]);
+});
+
+test('run marks partial LLM batch failures as degraded while returning fallback titles', async () => {
+  const { run } = require('../src');
+  const products = Array.from({ length: 6 }, (_, index) => ({
+    id: `offer-partial-${index}`,
+    title: `陶瓷摆件 商品 ${index}`,
+    url: `https://detail.1688.com/offer/${400000 + index}.html`,
+    price: 9 + index,
+    stats: { last30DaysSales: 20 + index, goodRates: 0.95, repurchaseRate: 0.1 }
+  }));
+
+  const glmClient = {
+    async selectAndGenerate({ products: batch }) {
+      if (batch.some(p => p.id === 'offer-partial-0')) {
+        throw new Error('timeout of 60000ms exceeded');
+      }
+      return {
+        selectedProducts: [],
+        titles: batch.map(p => ({
+          productId: p.id,
+          title: '陶瓷摆件 家用桌面装饰创意小摆件客厅玄关装饰品'
+        }))
+      };
+    },
+    async generateTitles() {
+      return ['陶瓷摆件 家用桌面装饰创意小摆件客厅玄关装饰品'];
+    }
+  };
+
+  const result = await run(`陶瓷摆件-partial-${Date.now()}`, {
+    products,
+    peerTitles: ['陶瓷摆件 家用桌面装饰'],
+    coreWord: '摆件',
+    modifiers: [{ word: '陶瓷', type: 'rigid' }],
+    glmClient,
+    llmBatchSize: 3,
+    llmConcurrency: 1,
+    llmRetries: 0,
+    runTimeoutMs: 10000,
+    silent: true
+  });
+
+  assert.equal(result.products.length, 6);
+  assert.equal(result.stats.degraded, 'partial_llm_batch_failure');
+  assert.equal(result.stats.trace.titleGeneration, 'partial_llm_fallback');
+  assert.ok(result.stats.llmBatchFailures.length > 0);
+  assert.ok(result.products.every(p => p['铺货标题']));
+});
+
 test('computeEffectiveRunTimeout expands when image search is enabled', () => {
   const { computeEffectiveRunTimeout } = require('../src');
   assert.equal(computeEffectiveRunTimeout({ runTimeoutMs: 120000, useImageSearch: false, maxImageSearch: 10, productCount: 10 }), 120000);

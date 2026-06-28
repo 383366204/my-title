@@ -2,6 +2,8 @@ const { normalizeKeyword } = require('./seed-store');
 const { getCategoryRule } = require('./category-rules');
 const { rejectCandidate } = require('./reject-combinations');
 const { mergeFacets } = require('./config-loader');
+const { classifySeed } = require('./seed-classifier');
+const { checkExpansionCompatibility } = require('./facet-compatibility');
 
 const DEFAULT_FACETS = {
   crowd: ['女', '男士', '儿童', '宝宝', '学生', '情侣', '宝妈', '上班族'],
@@ -40,61 +42,72 @@ function expandSeed(seed, { maxPerSeed = 30 } = {}) {
   if (!seedKeyword) return [];
   const category = typeof seed === 'object' ? (seed.category || '') : '';
   const rule = getCategoryRule(seedKeyword, category);
+  const seedInfo = classifySeed({ keyword: seedKeyword, category });
 
   const candidates = [];
-  const add = (keyword, pattern) => {
+  const add = (keyword, pattern, modifier = '') => {
     const normalized = normalizeKeyword(keyword);
     if (!normalized || normalized === seedKeyword) return;
+    const compatibility = checkExpansionCompatibility({
+      seedInfo,
+      pattern,
+      modifier,
+      keyword: normalized
+    });
+    if (!compatibility.allowed) return;
     const reject = rejectCandidate(normalized);
     if (reject.rejected) return;
     candidates.push({
       keyword: normalized,
       seed: seedKeyword,
       category,
-      pattern
+      pattern,
+      seedRole: seedInfo.role,
+      seedCoreProduct: seedInfo.coreProduct,
+      compatibility
     });
   };
 
   if (rule.patterns.includes('material+seed') && !hasAny(seedKeyword, rule.material)) {
-    for (const material of rule.material) add(material + seedKeyword, 'material+seed');
+    for (const material of rule.material) add(material + seedKeyword, 'material+seed', material);
   }
   if (rule.patterns.includes('seed+crowd') && !hasAny(seedKeyword, rule.crowd)) {
-    for (const crowd of rule.crowd) add(seedKeyword + crowd, 'seed+crowd');
+    for (const crowd of rule.crowd) add(seedKeyword + crowd, 'seed+crowd', crowd);
   }
   if (rule.patterns.includes('crowd+seed') && !hasAny(seedKeyword, rule.crowd)) {
-    for (const crowd of rule.crowd) add(crowd + seedKeyword, 'crowd+seed');
+    for (const crowd of rule.crowd) add(crowd + seedKeyword, 'crowd+seed', crowd);
   }
   if (rule.patterns.includes('style+seed') && !hasAny(seedKeyword, rule.style)) {
-    for (const style of rule.style) add(style + seedKeyword, 'style+seed');
+    for (const style of rule.style) add(style + seedKeyword, 'style+seed', style);
   }
   if (rule.patterns.includes('scene+seed') && !hasAny(seedKeyword, rule.scene)) {
-    for (const scene of rule.scene) add(scene + seedKeyword, 'scene+seed');
+    for (const scene of rule.scene) add(scene + seedKeyword, 'scene+seed', scene);
   }
   if (rule.patterns.includes('function+seed') && !hasAny(seedKeyword, rule.function)) {
-    for (const fn of rule.function) add(fn + seedKeyword, 'function+seed');
+    for (const fn of rule.function) add(fn + seedKeyword, 'function+seed', fn);
   }
   if (rule.patterns.includes('price+seed') && !hasAny(seedKeyword, rule.price_band)) {
-    for (const price of rule.price_band) add(price + seedKeyword, 'price+seed');
+    for (const price of rule.price_band) add(price + seedKeyword, 'price+seed', price);
   }
   if (rule.patterns.includes('pain+seed') && !hasAny(seedKeyword, rule.pain_point)) {
-    for (const pain of rule.pain_point) add(pain + seedKeyword, 'pain+seed');
+    for (const pain of rule.pain_point) add(pain + seedKeyword, 'pain+seed', pain);
   }
   if (rule.patterns.includes('trend+seed') && !hasAny(seedKeyword, rule.trend_word)) {
-    for (const trend of rule.trend_word) add(trend + seedKeyword, 'trend+seed');
+    for (const trend of rule.trend_word) add(trend + seedKeyword, 'trend+seed', trend);
   }
 
   // 三段式长尾词更接近真实搜索词，但要限量，避免组合爆炸。
   if (rule.patterns.includes('material+seed+crowd') && !hasAny(seedKeyword, rule.crowd) && !hasAny(seedKeyword, rule.material)) {
     for (const material of rule.material.slice(0, 6)) {
       for (const crowd of rule.crowd.slice(0, 4)) {
-        add(material + seedKeyword + crowd, 'material+seed+crowd');
+        add(material + seedKeyword + crowd, 'material+seed+crowd', material + crowd);
       }
     }
   }
   if (rule.patterns.includes('crowd+function+seed') && !hasAny(seedKeyword, rule.crowd)) {
     for (const crowd of rule.crowd.slice(0, 4)) {
       for (const fn of rule.function.slice(0, 5)) {
-        add(crowd + fn + seedKeyword, 'crowd+function+seed');
+        add(crowd + fn + seedKeyword, 'crowd+function+seed', crowd + fn);
       }
     }
   }

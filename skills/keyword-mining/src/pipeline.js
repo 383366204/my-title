@@ -5,6 +5,7 @@ const { expandSeeds } = require('./expand-keywords');
 const { scoreKeyword } = require('./score-keyword');
 const { precheckCandidates } = require('./sycm-precheck');
 const { generateAIKeywordCandidates } = require('./ai-mine-keywords');
+const { gateCandidate } = require('./candidate-gate');
 
 const CANDIDATES_FILE = 'candidates.jsonl';
 
@@ -110,8 +111,27 @@ function thresholdForMode(mode) {
 
 function normalizeSource(source) {
   const value = String(source || 'local').trim().toLowerCase();
-  if (['local', 'ai', 'hybrid'].includes(value)) return value;
+  if (['local', 'ai', 'hybrid', 'sycm_hot', 'sycm_blue'].includes(value)) return value;
   throw new Error(`Unsupported keyword mining source: ${source}`);
+}
+
+function parseSearchPop(val) {
+  if (typeof val === 'number') return val;
+  if (!val) return 0;
+  const m = String(val).replace(/,/g, '').match(/(\d[\d]*)/);
+  return m ? parseInt(m[1], 10) : 0;
+}
+
+function parsePercentOrNumber(val) {
+  if (typeof val === 'number') return val;
+  if (!val) return 0;
+  const str = String(val).trim();
+  if (str.endsWith('%')) {
+    const num = parseFloat(str.slice(0, -1));
+    return Number.isFinite(num) ? num / 100 : 0;
+  }
+  const num = parseFloat(str);
+  return Number.isFinite(num) ? num : 0;
 }
 
 function buildStats({ seeds, expanded, scored, clustered, threshold, source, aiMeta = null }) {
@@ -211,10 +231,53 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
   const localExpanded = effectiveSource === 'local' || effectiveSource === 'hybrid'
     ? expandSeeds(expandableSeeds, { maxPerSeed })
     : [];
+
+  let sycmExpanded = [];
+  if (effectiveSource === 'sycm_hot' || effectiveSource === 'sycm_blue') {
+    const isBlue = effectiveSource === 'sycm_blue';
+    const sycmMode = isBlue ? 'blue' : 'hot';
+    console.log(`🔌 开始生意参谋关联词挖掘模式: ${sycmMode}...`);
+    for (const seed of expandableSeeds) {
+      try {
+        console.log(`🔍 正在查询种子词 "${seed.keyword}" 的生意参谋关联词...`);
+        const { extractSycmData } = require('../../sycm-research');
+        const sycmRes = await extractSycmData(seed.keyword, {
+          mode: sycmMode,
+          maxPages: 2,
+          port: 9222
+        });
+        const items = sycmRes.data || [];
+        console.log(`✓ 种子词 "${seed.keyword}" 成功获取到 ${items.length} 个关联词。`);
+
+        const startIndex = (items.length > 0 && String(items[0].keyword).trim() === String(seed.keyword).trim()) ? 1 : 0;
+        for (let i = startIndex; i < items.length; i++) {
+          const item = items[i];
+          sycmExpanded.push({
+            keyword: item.keyword,
+            seed: seed.keyword,
+            category: seed.category || '',
+            pattern: `sycm-${sycmMode}-related`,
+            source: effectiveSource,
+            sycmData: {
+              searchPopularity: parseSearchPop(item.searchPopularity),
+              clickRate: parsePercentOrNumber(item.clickRate),
+              clickPopularity: parseSearchPop(item.clickPopularity),
+              demandSupplyRatio: parsePercentOrNumber(item.demandSupplyRatio),
+              payConversionRate: parsePercentOrNumber(item.payConversionRate || item.conversionRate)
+            }
+          });
+        }
+      } catch (err) {
+        console.error(`❌ 查询种子词 "${seed.keyword}" 失败:`, err.message);
+      }
+    }
+  }
+
   const expanded = [
     ...(includeDirect ? directSeedCandidates(seeds) : []),
     ...aiExpanded,
-    ...localExpanded
+    ...localExpanded,
+    ...sycmExpanded
   ];
 
   const scored = expanded.map(item => {
@@ -222,13 +285,25 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
     const aiBoost = item.source === 'ai'
       ? Math.max(-4, Math.min(3, Math.round((Number(item.aiConfidence || 60) - 60) / 12)))
       : 0;
+
+    let sycmBoost = 0;
+    if (item.sycmData) {
+      const pop = item.sycmData.searchPopularity || 0;
+      if (pop > 5000) sycmBoost += 5;
+      else if (pop > 2000) sycmBoost += 3;
+      else if (pop > 500) sycmBoost += 1;
+
+      const ds = item.sycmData.demandSupplyRatio || 0;
+      if (ds > 1.5) sycmBoost += 3;
+    }
+
     const localScore = scoredItem.nextAction === 'reject'
       ? scoredItem.localScore
-      : Math.max(0, Math.min(100, scoredItem.localScore + aiBoost));
+      : Math.max(0, Math.min(100, scoredItem.localScore + aiBoost + sycmBoost));
     const nextAction = scoredItem.nextAction === 'reject'
       ? 'reject'
       : localScore >= 62 ? 'sycm_verify' : 'observe';
-    return {
+    const candidate = {
       date,
       keyword: scoredItem.keyword,
       seed: item.seed,
@@ -245,12 +320,20 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
       productSignature: scoredItem.productSignature,
       rigid: scoredItem.rigid,
       optional: scoredItem.optional,
+      seedRole: item.seedRole,
+      seedCoreProduct: item.seedCoreProduct,
+      compatibility: item.compatibility || null,
       aiConfidence: item.aiConfidence,
       aiReason: item.aiReason,
       aiRisk: item.aiRisk,
       intent: item.intent,
       targetCrowd: item.targetCrowd,
+      sycmData: item.sycmData || null,
       nextCommands: buildNextCommands(scoredItem.keyword)
+    };
+    return {
+      ...candidate,
+      ...gateCandidate(candidate, { minSearchPopularity })
     };
   });
 
@@ -259,15 +342,49 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
     .sort((a, b) => b.localScore - a.localScore || String(a.seed).localeCompare(String(b.seed), 'zh-CN') || String(a.keyword).localeCompare(String(b.keyword), 'zh-CN'));
 
   const ranked = clustered
-    .filter(item => item.localScore >= threshold && item.nextAction !== 'reject')
+    .filter(item => item.localScore >= threshold && item.nextAction !== 'reject' && item.gateStatus !== 'rejected')
     .sort((a, b) => b.localScore - a.localScore || String(a.seed).localeCompare(String(b.seed), 'zh-CN') || String(a.keyword).localeCompare(String(b.keyword), 'zh-CN'));
 
   let precheckStats = null;
   let prechecked = ranked;
   if (sycmPrecheck && ranked.length > 0) {
-    const pcResult = await precheckCandidates(ranked, { minSearchPopularity });
-    prechecked = pcResult.passed;
-    precheckStats = pcResult.stats;
+    const needPrecheck = ranked.filter(item => !item.sycmData);
+    const alreadyPassed = ranked.filter(item => !!item.sycmData && item.sycmData.searchPopularity >= minSearchPopularity);
+    const alreadyFiltered = ranked.filter(item => !!item.sycmData && item.sycmData.searchPopularity < minSearchPopularity);
+
+    if (needPrecheck.length > 0) {
+      const pcResult = await precheckCandidates(needPrecheck, { minSearchPopularity });
+      prechecked = [
+        ...alreadyPassed.map(item => ({ ...item, ...gateCandidate(item, { minSearchPopularity }) })),
+        ...pcResult.passed.map(item => {
+          const withSycmData = {
+            ...item,
+            sycmData: item.sycmData || {
+              searchPopularity: item.searchPopularity || 0,
+              demandSupplyRatio: item.demandSupplyRatio || 0,
+              clickRate: item.clickRate || 0,
+              conversionRate: item.conversionRate || 0,
+              buyerCount: item.buyerCount || 0
+            }
+          };
+          return { ...withSycmData, ...gateCandidate(withSycmData, { minSearchPopularity }) };
+        })
+      ];
+      precheckStats = {
+        total: ranked.length,
+        passed: prechecked.length,
+        filtered: alreadyFiltered.length + pcResult.stats.filtered,
+        errors: pcResult.stats.errors
+      };
+    } else {
+      prechecked = alreadyPassed;
+      precheckStats = {
+        total: ranked.length,
+        passed: prechecked.length,
+        filtered: alreadyFiltered.length,
+        errors: 0
+      };
+    }
   }
 
   const candidates = diversifyCandidates(prechecked, {

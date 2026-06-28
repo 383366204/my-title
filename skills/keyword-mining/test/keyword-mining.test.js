@@ -16,9 +16,11 @@ const {
   normalizeAIResponse,
   generateAIKeywordCandidates,
   parseAIJson,
-  normalizeSynonyms
+  normalizeSynonyms,
+  classifySeed,
+  gateCandidate
 } = require('..');
-const { extractSearchPopularityFromSycmJson } = require('../src/sycm-precheck');
+const { extractSearchPopularityFromSycmJson, extractSycmMetricsFromJson } = require('../src/sycm-precheck');
 
 function tempDataDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'keyword-mining-'));
@@ -61,6 +63,41 @@ describe('keyword-mining', () => {
     assert.ok(!ringWords.some(word => word.includes('纯银玛瑙戒指')));
     assert.ok(!hairWords.some(word => word.includes('男士')));
     assert.ok(hairWords.includes('珍珠发夹'));
+  });
+
+  test('classifySeed separates concrete products from broad scene seeds', () => {
+    assert.strictEqual(classifySeed({ keyword: '手机壳', category: '数码配件' }).role, 'product');
+    assert.strictEqual(classifySeed({ keyword: '情侣手机壳', category: '数码配件' }).role, 'qualified_product');
+    assert.strictEqual(classifySeed({ keyword: '宿舍好物', category: '开学宿舍' }).role, 'abstract');
+    assert.strictEqual(classifySeed({ keyword: '中秋', category: '节日礼品' }).role, 'event');
+  });
+
+  test('expandSeed blocks mechanical function and scene prefixes for incompatible seeds', () => {
+    const dormWords = expandSeed({ keyword: '宿舍好物', category: '开学宿舍' }, { maxPerSeed: 80 }).map(item => item.keyword);
+    const festivalWords = expandSeed({ keyword: '中秋灯笼', category: '节日礼品' }, { maxPerSeed: 80 }).map(item => item.keyword);
+    const phoneCaseWords = expandSeed({ keyword: '情侣手机壳', category: '数码配件' }, { maxPerSeed: 80 }).map(item => item.keyword);
+    const outfitWords = expandSeed({ keyword: '情侣装夏', category: '服饰' }, { maxPerSeed: 80 }).map(item => item.keyword);
+    const moonCakeWords = expandSeed({ keyword: '月饼包装礼盒', category: '节日礼品' }, { maxPerSeed: 80 }).map(item => item.keyword);
+
+    assert.ok(!dormWords.includes('收纳宿舍好物'));
+    assert.ok(!dormWords.includes('便携宿舍好物'));
+    assert.ok(!festivalWords.includes('送礼中秋灯笼'));
+    assert.ok(!festivalWords.includes('便携中秋灯笼'));
+    assert.ok(!festivalWords.includes('收纳中秋灯笼'));
+    assert.ok(!phoneCaseWords.includes('便携情侣手机壳'));
+    assert.ok(!phoneCaseWords.includes('送礼情侣手机壳'));
+    assert.ok(!phoneCaseWords.includes('生日情侣手机壳'));
+    assert.ok(!phoneCaseWords.includes('情侣手机壳儿童'));
+    assert.ok(!outfitWords.includes('便携情侣装夏'));
+    assert.ok(!outfitWords.includes('收纳情侣装夏'));
+    assert.ok(!outfitWords.includes('情侣装夏儿童'));
+    assert.ok(!moonCakeWords.includes('便携月饼包装礼盒'));
+    assert.ok(!moonCakeWords.includes('收纳月饼包装礼盒'));
+    assert.ok(!moonCakeWords.includes('月饼包装礼盒儿童'));
+    assert.ok(!festivalWords.includes('中秋灯笼儿童'));
+    assert.ok(!phoneCaseWords.includes('学生党情侣手机壳'));
+    assert.ok(!festivalWords.includes('上班族中秋灯笼'));
+    assert.ok(!festivalWords.includes('高级感中秋灯笼'));
   });
 
   test('rejectCandidate blocks unreasonable combinations', () => {
@@ -154,6 +191,8 @@ describe('keyword-mining', () => {
     assert.ok(result.stats.duplicatesRemoved >= 0);
     assert.ok(result.candidates.length > 0);
     assert.ok(result.candidates[0].localScore >= result.candidates[result.candidates.length - 1].localScore);
+    assert.ok(result.candidates.every(item => item.gateStatus));
+    assert.ok(result.candidates.every(item => item.canDistribute === false));
     assert.strictEqual(fs.existsSync(path.join(dataDir, 'candidates.jsonl')), false);
   });
 
@@ -173,6 +212,52 @@ describe('keyword-mining', () => {
     assert.notStrictEqual(scored.nextAction, 'reject');
   });
 
+  test('scoreKeyword does not promote broad seeds as concrete products', () => {
+    const scored = scoreKeyword({ keyword: '收纳宿舍好物', seed: '宿舍好物', pattern: 'function+seed' });
+
+    assert.notStrictEqual(scored.coreProduct, '宿舍好物');
+    assert.ok(scored.localScore < 62);
+    assert.notStrictEqual(scored.nextAction, 'sycm_verify');
+  });
+
+  test('gateCandidate marks unverified and rejected candidates distinctly', () => {
+    const unverified = gateCandidate({
+      keyword: '玛瑙戒指女',
+      localScore: 88,
+      nextAction: 'sycm_verify',
+      coreProduct: '戒指'
+    });
+    const verified = gateCandidate({
+      keyword: '玛瑙戒指女',
+      localScore: 88,
+      nextAction: 'sycm_verify',
+      coreProduct: '戒指',
+      sycmData: { searchPopularity: 128, demandSupplyRatio: 1.4, clickRate: 18, conversionRate: 2.5 }
+    }, { minSearchPopularity: 50 });
+    const popularityOnly = gateCandidate({
+      keyword: '玛瑙戒指女',
+      localScore: 88,
+      nextAction: 'sycm_verify',
+      coreProduct: '戒指',
+      sycmData: { searchPopularity: 128 }
+    }, { minSearchPopularity: 50 });
+    const rejected = gateCandidate({
+      keyword: '收纳宿舍好物',
+      localScore: 52,
+      nextAction: 'observe',
+      coreProduct: '',
+      compatibility: { allowed: false, reason: '抽象场景词不适合直接拼接功能词' }
+    });
+
+    assert.strictEqual(unverified.gateStatus, 'candidate');
+    assert.strictEqual(unverified.canDistribute, false);
+    assert.strictEqual(verified.gateStatus, 'verified');
+    assert.strictEqual(verified.canDistribute, true);
+    assert.strictEqual(popularityOnly.gateStatus, 'review');
+    assert.strictEqual(popularityOnly.canDistribute, false);
+    assert.strictEqual(rejected.gateStatus, 'rejected');
+  });
+
   test('sycm precheck reads CLI data payload shape', () => {
     const popularity = extractSearchPopularityFromSycmJson({
       ok: true,
@@ -180,6 +265,28 @@ describe('keyword-mining', () => {
     });
 
     assert.strictEqual(popularity, 128);
+  });
+
+  test('sycm precheck extracts market metrics beyond search popularity', () => {
+    const metrics = extractSycmMetricsFromJson({
+      ok: true,
+      data: [{
+        keyword: '弹力带',
+        searchPopularity: '128',
+        demandSupplyRatio: '1.8',
+        clickRate: '12.5%',
+        conversionRate: '2.1%',
+        buyerCount: '36'
+      }]
+    });
+
+    assert.deepStrictEqual(metrics, {
+      searchPopularity: 128,
+      demandSupplyRatio: 1.8,
+      clickRate: 12.5,
+      conversionRate: 2.1,
+      buyerCount: 36
+    });
   });
 
   test('mineKeywords applies diversity limits and next commands', async () => {

@@ -16,6 +16,9 @@ const { reverseMine } = require('./src/reverse-mine');
 const { keywordSignature } = require('./src/keyword-signature');
 const { generateAIKeywordCandidates, normalizeAIResponse, parseAIJson } = require('./src/ai-mine-keywords');
 const { normalizeSynonyms, configuredProductWords } = require('./src/config-loader');
+const { classifySeed } = require('./src/seed-classifier');
+const { checkExpansionCompatibility } = require('./src/facet-compatibility');
+const { gateCandidate } = require('./src/candidate-gate');
 
 module.exports = {
   DEFAULT_DATA_DIR,
@@ -37,6 +40,9 @@ module.exports = {
   parseAIJson,
   normalizeSynonyms,
   configuredProductWords,
+  classifySeed,
+  checkExpansionCompatibility,
+  gateCandidate,
   keywordSignature,
   rejectCandidate,
   reverseMine

@@ -64,17 +64,36 @@ function cleanTitle(title) {
   return title.replace(/[^a-zA-Z0-9\u4e00-\u9fff\u3400-\u4dbf·]/g, '');
 }
 
+function removeStaleYearClaims(title) {
+  if (typeof title !== 'string') return '';
+  const currentYear = new Date().getFullYear();
+  return title
+    .replace(/(20\d{2})年?新款/g, (match, year) => Number(year) < currentYear ? '新款' : match)
+    .replace(/(20\d{2})年/g, (match, year) => Number(year) < currentYear ? '' : match);
+}
+
 const STOPWORDS = new Set(['的', '了', '是', '在', '有', '和', '与', '或', '及', '等', '之', '为', '于', '以', '而', '被', '把', '给', '让', '向', '从', '到', '对', '将', '还', '也', '就', '都', '要', '会', '能', '可', '很', '非常']);
 const SAFE_FILLER_WORDS = ['新款', '简约', '百搭', '日常', '通用', '送礼', '创意', '实用', '耐用', '轻便', '精致', '高级感'];
 
+function normalizeTitlePrefix(value) {
+  return cleanTitle(removeBannedWords(value || '')).replace(/\s+/g, '');
+}
+
 function ensureBlueOceanPrefix(title, blueOceanWord) {
   if (typeof title !== 'string' || typeof blueOceanWord !== 'string') return title || '';
-  if (!blueOceanWord) return title;
-  if (title.startsWith(blueOceanWord)) return title;
-  if (title.includes(blueOceanWord)) {
-    return blueOceanWord + title.replaceAll(blueOceanWord, '');
+  const prefix = normalizeTitlePrefix(blueOceanWord);
+  if (!prefix) return title;
+  if (title.startsWith(prefix)) {
+    let rest = title.slice(prefix.length);
+    while (rest.startsWith(prefix)) {
+      rest = rest.slice(prefix.length);
+    }
+    return prefix + rest;
   }
-  return blueOceanWord + title;
+  if (title.includes(prefix)) {
+    return prefix + title.replaceAll(prefix, '');
+  }
+  return prefix + title;
 }
 
 function effectiveMinBytes(minLength, maxLength) {
@@ -93,7 +112,7 @@ function normalizeLength(title, minLength = 30, maxLength = 60) {
 
 function postProcessTitle(title, blueOceanWord, minLength = 30, maxLength = 60) {
   if (typeof title !== 'string' || !title.trim()) return null;
-  let result = removeBannedWords(title);
+  let result = removeStaleYearClaims(removeBannedWords(title));
   result = cleanTitle(result);
   result = ensureBlueOceanPrefix(result, blueOceanWord);
   result = normalizeLength(result, minLength, maxLength);
@@ -110,7 +129,7 @@ function collectTitleWords(texts) {
   const seen = new Set();
   for (const text of texts) {
     if (typeof text !== 'string' || !text.trim()) continue;
-    const cleaned = cleanTitle(removeBannedWords(text));
+    const cleaned = cleanTitle(removeStaleYearClaims(removeBannedWords(text)));
     for (const word of cutWords(cleaned)) {
       const w = cleanTitle(word).trim();
       if (!w || STOPWORDS.has(w) || seen.has(w)) continue;
@@ -123,7 +142,7 @@ function collectTitleWords(texts) {
 }
 
 function appendWordsToTarget(title, candidateTexts, minLength = 60, maxLength = 60) {
-  let result = cleanTitle(removeBannedWords(title || '')).replace(/\s+/g, '');
+  let result = cleanTitle(removeStaleYearClaims(removeBannedWords(title || ''))).replace(/\s+/g, '');
   const minBytes = effectiveMinBytes(minLength, maxLength);
   if (!result || byteLen(result) >= minBytes) return result;
 
@@ -141,7 +160,7 @@ function appendWordsToTarget(title, candidateTexts, minLength = 60, maxLength = 
 
 function completeTitle(title, blueOceanWord, candidateTexts = [], minLength = 60, maxLength = 60) {
   if (typeof title !== 'string' || !title.trim()) return '';
-  let result = removeBannedWords(title);
+  let result = removeStaleYearClaims(removeBannedWords(title));
   result = cleanTitle(result);
   result = ensureBlueOceanPrefix(result, blueOceanWord);
   result = appendWordsToTarget(result, candidateTexts, minLength, maxLength);
@@ -156,13 +175,14 @@ function uniqueWords(words) {
 }
 
 function scoreTitle({ title, blueOceanWord = '', coreWord = '', modifiers = [], sycmKeywords = [], minLength = 60, maxLength = 60 }) {
-  const normalized = cleanTitle(removeBannedWords(title || '')).replace(/\s+/g, '');
+  const normalized = cleanTitle(removeStaleYearClaims(removeBannedWords(title || ''))).replace(/\s+/g, '');
   const len = byteLen(normalized);
   const minBytes = effectiveMinBytes(minLength, maxLength);
   const issues = [];
   let score = 0;
 
-  const prefixOk = Boolean(blueOceanWord && normalized.startsWith(blueOceanWord));
+  const normalizedBlueOceanWord = normalizeTitlePrefix(blueOceanWord);
+  const prefixOk = Boolean(normalizedBlueOceanWord && normalized.startsWith(normalizedBlueOceanWord));
   if (prefixOk) score += 20;
   else issues.push('蓝海词未前置');
 
@@ -227,7 +247,7 @@ function constructFallbackTitle(blueOceanWord, originalTitle, taobaoTitles = [],
   const blueWords = new Set(cutWords(blueOceanWord));
 
   // 4. 清理原标题
-  let cleaned = removeBannedWords(originalTitle || '');
+  let cleaned = removeStaleYearClaims(removeBannedWords(originalTitle || ''));
   cleaned = cleanTitle(cleaned);
   let uncleaned = cleaned; // keep original cleaned for later
   // 5. 移除蓝海词整词在 cleaned 中的出现，防止重复前缀（避免破坏子串）

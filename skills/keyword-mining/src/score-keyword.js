@@ -3,6 +3,7 @@ const { normalizeKeyword } = require('./seed-store');
 const { FACETS } = require('./expand-keywords');
 const { rejectCandidate } = require('./reject-combinations');
 const { PRODUCT_WORDS, keywordSignature } = require('./keyword-signature');
+const { classifySeed } = require('./seed-classifier');
 
 const TOO_BROAD = ['女', '男', '儿童', '新款', '饰品', '用品', '家居', '玩具', '礼物'];
 
@@ -40,6 +41,18 @@ function patternAdjustment(pattern) {
   return 0;
 }
 
+function extraProductWordsFor(candidate) {
+  if (!candidate || typeof candidate !== 'object') return [];
+  const words = [candidate.coreProduct, candidate.productSignature, candidate.seedCoreProduct].filter(Boolean);
+  if (candidate.seed) {
+    const seedInfo = classifySeed({ keyword: candidate.seed, category: candidate.category || '' });
+    if (seedInfo.role === 'product' || seedInfo.role === 'qualified_product') {
+      words.push(seedInfo.coreProduct || candidate.seed);
+    }
+  }
+  return words;
+}
+
 /**
  * Locally score a candidate keyword before SYCM verification.
  * @param {string|object} candidate Candidate word or object.
@@ -48,9 +61,7 @@ function patternAdjustment(pattern) {
 function scoreKeyword(candidate) {
   const keyword = normalizeKeyword(typeof candidate === 'string' ? candidate : candidate.keyword);
   const pattern = typeof candidate === 'object' ? candidate.pattern : '';
-  const extraProductWords = typeof candidate === 'object'
-    ? [candidate.seed, candidate.coreProduct, candidate.productSignature].filter(Boolean)
-    : [];
+  const extraProductWords = extraProductWordsFor(candidate);
   const flags = [];
   let score = 30;
 
@@ -82,7 +93,7 @@ function scoreKeyword(candidate) {
     };
   }
 
-  const sig = keywordSignature(keyword, { extraProductWords });
+  const sig = keywordSignature(keyword, { extraProductWords, maxSeeds: 0 });
 
   if (keyword.length >= 3 && keyword.length <= 9) score += 16;
   else if (keyword.length > 9 && keyword.length <= 14) {
