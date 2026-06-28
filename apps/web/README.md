@@ -1,16 +1,52 @@
-# React + Vite
+# ecom-ai-tools Web UI
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+React + Vite workflow canvas for the ecommerce title and product-selection tool.
 
-Currently, two official plugins are available:
+## Commands
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+Run from the repository root:
 
-## React Compiler
+```bash
+npm run web:dev
+npm run web:build
+npm run web:preview
+npm run ui:react
+```
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+Run from this directory:
 
-## Expanding the Oxlint configuration
+```bash
+npm install
+npm run dev
+npm run build
+npm run preview
+npm run lint
+```
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+## Runtime Shape
+
+- Frontend source: `apps/web/src/`
+- Express backend: `bin/server.js`
+- Static production route: `/workflow/`
+- Workflow APIs: `/api/workflows/*`
+- Live run updates: `/api/workflows/runs/:runId/events`
+
+## Expected Local Flow
+
+1. Run `npm run ui:react` from the repository root.
+2. Open `http://localhost:3000/workflow/`.
+3. Select a workflow template or edit the canvas.
+4. Run validation before starting the workflow.
+5. Watch node status and logs update over SSE.
+
+## Verification
+
+```bash
+npm run build
+```
+
+The build must complete without Vite errors. Root-level verification is:
+
+```bash
+npm run test:all
+```
