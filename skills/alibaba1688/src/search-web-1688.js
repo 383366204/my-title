@@ -1,6 +1,7 @@
 ﻿const http = require('http');
 const WebSocket = require('ws');
 const iconv = require('iconv-lite');
+const { runWithPlatformGuard } = require('../../../core/platform-access-guard');
 
 const DEFAULT_PORT = 9222;
 const DEFAULT_WAIT_MS = 10000;
@@ -855,7 +856,7 @@ async function resolveProductUrlsDetailed(products, options = {}) {
  * @param {number} [options.maxResolveLinks=8] - Maximum redirect links to resolve.
  * @returns {Promise<{ok: boolean, products: object[], meta: object}>}
  */
-async function searchWeb1688(options = {}) {
+async function _rawSearchWeb1688(options = {}) {
   const keyword = String(options.keyword || '').trim();
   if (!keyword) throw new Error('keyword is required');
   const port = Number(options.port || process.env.BROWSER_CDP_PORT || process.env.CHROME_DEBUG_PORT || DEFAULT_PORT);
@@ -940,6 +941,19 @@ async function searchWeb1688(options = {}) {
       pageFiltersApplied: combinedFilters,
       scrollLoad: combinedScroll
     });
+    if (syntheticSnapshot.hasCaptchaText || syntheticSnapshot.hasLoginText) {
+      const error = new Error(syntheticSnapshot.hasCaptchaText
+        ? '1688 web search requires manual captcha/security verification'
+        : '1688 web search requires manual login');
+      error.status = syntheticSnapshot.hasCaptchaText ? 'captcha_required' : 'login_required';
+      error.source = '1688-web';
+      error.details = {
+        pageUrl: syntheticSnapshot.url,
+        pageTitle: syntheticSnapshot.title,
+        diagnostics
+      };
+      throw error;
+    }
     return {
       ok: true,
       products,
@@ -969,6 +983,30 @@ async function searchWeb1688(options = {}) {
   } finally {
     client.close();
   }
+}
+
+async function searchWeb1688(options = {}) {
+  return runWithPlatformGuard('1688', {
+    cacheKey: {
+      source: 'web',
+      keyword: String(options.keyword || '').trim(),
+      maxProducts: Number(options.maxProducts || DEFAULT_MAX_PRODUCTS),
+      maxPages: options.maxPages,
+      sort: options.sort,
+      minPrice: options.minPrice,
+      maxPrice: options.maxPrice,
+      minOrderQuantity: options.minOrderQuantity,
+      pageFeature: options.pageFeature
+    },
+    dataDir: options.guardDataDir,
+    cache: options.guardCache === false ? false : undefined,
+    cacheTtlMs: options.guardCacheTtlMs,
+    minCooldownMs: options.guardMinCooldownMs,
+    maxCooldownMs: options.guardMaxCooldownMs,
+    breakerCooldownMs: options.guardBreakerCooldownMs
+  }, function() {
+    return _rawSearchWeb1688(options);
+  });
 }
 
 async function checkWeb1688Status(options = {}) {
@@ -1053,5 +1091,6 @@ module.exports = {
   dedupeProducts,
   resolveOfferUrl,
   searchWeb1688,
+  _rawSearchWeb1688,
   checkWeb1688Status
 };

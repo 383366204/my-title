@@ -6,6 +6,7 @@
 var http = require('http');
 var path = require('path');
 var WebSocket = require('ws');
+var { runWithPlatformGuard } = require('../../../core/platform-access-guard');
 
 var DEFAULT_PORT = 9222;
 var DEFAULT_MAX_PAGES = 1;
@@ -556,7 +557,7 @@ function _formatDate(date) {
  * @param {Function} [options.onProgress] - 进度回调 fn(stepMsg)
  * @returns {Promise<Object>} 提取结果 { keyword, data[], totalCount, totalPages, currentPage, headers, extractedAt, pageFiltersApplied }
  */
-async function extractSycmData(keyword, options) {
+async function _rawExtractSycmData(keyword, options) {
   options = options || {};
   var port = options.port || DEFAULT_PORT;
   var maxPages = options.maxPages || DEFAULT_MAX_PAGES;
@@ -901,6 +902,28 @@ async function _extractQrCode(cdp, onProgress) {
   }
 }
 
+async function extractSycmData(keyword, options) {
+  options = options || {};
+  var pageFilters = options.pageFilters || DEFAULT_PAGE_FILTERS;
+  return runWithPlatformGuard('sycm', {
+    cacheKey: {
+      keyword: keyword,
+      mode: options.mode || 'blue',
+      maxPages: options.maxPages || DEFAULT_MAX_PAGES,
+      compareType: pageFilters.compareType || DEFAULT_PAGE_FILTERS.compareType,
+      timePeriod: pageFilters.timePeriod || DEFAULT_PAGE_FILTERS.timePeriod
+    },
+    dataDir: options.guardDataDir,
+    cache: options.guardCache === false ? false : undefined,
+    cacheTtlMs: options.guardCacheTtlMs,
+    minCooldownMs: options.guardMinCooldownMs,
+    maxCooldownMs: options.guardMaxCooldownMs,
+    breakerCooldownMs: options.guardBreakerCooldownMs
+  }, function() {
+    return _rawExtractSycmData(keyword, options);
+  });
+}
+
 function _normalizeLoginMode(mode) {
   mode = String(mode || process.env.SYCM_LOGIN_MODE || 'auto').toLowerCase();
   return ['auto', 'password', 'sms', 'qr'].includes(mode) ? mode : 'auto';
@@ -1238,6 +1261,7 @@ function _recommendCategory(categoryData) {
 
 module.exports = {
   extractSycmData: extractSycmData,
+  _rawExtractSycmData: _rawExtractSycmData,
   _extractCategoryAnalysis: _extractCategoryAnalysis,
   _recommendCategory: _recommendCategory,
   DEFAULT_PORT: DEFAULT_PORT,

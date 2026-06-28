@@ -8,7 +8,11 @@
   },
   "scripts": {
     "test": "node --test test/*.test.js",
-    "ui": "node bin/server.js"
+    "ui": "node bin/server.js",
+    "web:dev": "npm run dev --prefix apps/web",
+    "web:build": "npm run build --prefix apps/web",
+    "web:preview": "npm run preview --prefix apps/web",
+    "ui:react": "npm run web:build && npm run ui"
   },
   "keywords": [
     "ecommerce",

@@ -416,3 +416,7 @@ Important implementation details:
 - `normalizeOfferUrl()` canonicalizes mobile detail URLs with `offerId` query parameters.
 - `searchAll()` supports `options.mode = "api" | "web" | "hybrid"`.
 - Default mode is still `api`, so existing title generation is not changed unless a caller opts in.
+- 1688 API and web-search calls are protected by `core/platform-access-guard.js`
+  in addition to the existing API sliding-window limiter. A 429, login page, or
+  captcha page opens the platform breaker, so agents must stop and wait instead
+  of immediately retrying.

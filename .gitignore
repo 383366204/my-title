@@ -30,6 +30,7 @@ npm-debug.log*
 # Runtime data
 output/
 data/pipeline/
+data/workflow/
 data/distribution-runs.jsonl
 data/keyword-mining/candidates.jsonl
 data/keyword-mining/seed-events.jsonl

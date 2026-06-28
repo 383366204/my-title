@@ -2,6 +2,7 @@ const { test, afterEach } = require('node:test');
 const assert = require('assert');
 const Alibaba1688Client = require('../src/client');
 const { _resetInstance } = require('../src/rate-limiter');
+const { resetPlatformAccessState } = require('../../../core/platform-access-guard');
 const mock = require('./helpers/mock-data');
 let axios = require('axios');
 
@@ -9,6 +10,7 @@ const AK = 'a'.repeat(48);
 
 afterEach(() => {
   _resetInstance();
+  resetPlatformAccessState();
 });
 
 test('Test 1: should return products with correct structure', async () => {

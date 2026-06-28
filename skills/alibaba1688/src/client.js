@@ -1,6 +1,11 @@
 const crypto = require('crypto');
 const axios = require('axios');
 const { getRateLimiter, RateLimitError } = require('./rate-limiter');
+const {
+  PlatformAccessError,
+  reportPlatformBlocker,
+  runWithPlatformGuard
+} = require('../../../core/platform-access-guard');
 
 function normalizePriceBand(price) {
   const text = String(price ?? '').replace(/\s+/g, '');
@@ -140,6 +145,24 @@ class Alibaba1688Client {
     let lastError = null;
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+    try {
+      await runWithPlatformGuard('1688', {
+        cache: false,
+        cacheKey: { endpoint },
+        minCooldownMs: process.env.ALI1688_MIN_COOLDOWN_MS == null ? undefined : parseInt(process.env.ALI1688_MIN_COOLDOWN_MS, 10),
+        maxCooldownMs: process.env.ALI1688_MAX_COOLDOWN_MS == null ? undefined : parseInt(process.env.ALI1688_MAX_COOLDOWN_MS, 10)
+      }, async () => ({ ok: true }));
+    } catch (err) {
+      if (err instanceof PlatformAccessError) {
+        const error = new RateLimitError(err.message, err.cooldownRemainingMs);
+        error.code = '1688_rate_limited';
+        error.source = '1688';
+        error.details = err.details;
+        throw error;
+      }
+      throw err;
+    }
+
     const rateLimiter = getRateLimiter();
     const acquireResult = await rateLimiter.acquire();
     if (!acquireResult.allowed) {
@@ -188,6 +211,11 @@ class Alibaba1688Client {
           err.code = '1688_rate_limited';
           err.source = '1688';
           err.cooldownRemainingMs = rateLimiter.getStatus().cooldownRemainingMs;
+          reportPlatformBlocker('1688', {
+            status: 'rate_limited',
+            message: '1688 API returned HTTP 429',
+            cooldownMs: err.cooldownRemainingMs
+          });
         }
         const isRetryable =
           (err.response && (err.response.status === 429 || err.response.status === 503)) ||

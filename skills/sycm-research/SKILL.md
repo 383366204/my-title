@@ -163,6 +163,13 @@ If category analysis is missing, leave category empty and report that manual cat
 - Do not continue a pipeline after `slider_required`, `login_required`, or `sycm_feature_required`.
 - Do not call hot-search rows strict blue-ocean rows.
 
+## Runtime Guard
+
+All `extractSycmData()` calls pass through `core/platform-access-guard.js`.
+The guard enforces local cache, cross-process serialization, cooldown, and
+circuit breaking before Chrome/CDP is touched. If the guard returns
+`PLATFORM_ACCESS_BLOCKED`, stop and report the blocker instead of retrying.
+
 ## Public API
 
 ```js

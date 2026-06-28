@@ -8,10 +8,10 @@ const { parseMetricNumber } = require('./candidate-gate');
  * @param {object} [options] 选项
  * @param {number} [options.minSearchPopularity=50] 最低搜索人气阈值
  * @param {number} [options.timeout=25000] 每个查询超时(ms)
- * @param {number} [options.concurrency=2] 并发数
+ * @param {number} [options.concurrency=1] 并发数
  * @returns {{passed:Array, filtered:Array, stats:{total:number, passed:number, filtered:number, errors:number}}}
  */
-async function precheckCandidates(candidates, { minSearchPopularity = 50, timeout = 25000, concurrency = 2 } = {}) {
+async function precheckCandidates(candidates, { minSearchPopularity = 50, timeout = 25000, concurrency = 1 } = {}) {
   const stats = { total: candidates.length, passed: 0, filtered: 0, errors: 0 };
   const passed = [];
   const filtered = [];
