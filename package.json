@@ -8,6 +8,8 @@
   },
   "scripts": {
     "test": "node --test test/*.test.js",
+    "test:core-skills": "node --test core/test/*.js skills/alibaba1688/test/*.js skills/title-gen/test/*.js",
+    "test:all": "npm test && npm run test:core-skills && npm run web:build",
     "ui": "node bin/server.js",
     "web:dev": "npm run dev --prefix apps/web",
     "web:build": "npm run build --prefix apps/web",
