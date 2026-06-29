@@ -186,14 +186,62 @@ const TitleGeneratorNode = ({ data }) => {
   );
 };
 
+// 4. Monitor Node (只读日常流程节点)
+const MonitorStageNode = ({ data }) => {
+  const statusLabel = {
+    completed: '已完成',
+    ready: '待铺货',
+    running: '运行中',
+    paused: '待处理',
+    failed: '失败',
+    idle: '等待中'
+  }[data.status || 'idle'];
+
+  return (
+    <button
+      type="button"
+      className={`monitor-node monitor-node-${data.status || 'idle'}`}
+      onClick={data.onSelect}
+    >
+      {data.hasTarget && <Handle type="target" position={Position.Left} id="in" />}
+      <div className="monitor-node-index">{data.stageIndex + 1}</div>
+      <div className="monitor-node-body">
+        <div className="monitor-node-label">{data.label}</div>
+        <div className="monitor-node-stage">{data.stage}</div>
+      </div>
+      <span className="monitor-node-status">{statusLabel}</span>
+      {data.hasSource && <Handle type="source" position={Position.Right} id="out" />}
+    </button>
+  );
+};
+
 // ==================== Node Types Map ====================
 const nodeTypes = {
   'keyword-input': InputNode,
   'keyword-mining': MiningNode,
-  'title-generator': TitleGeneratorNode
+  'title-generator': TitleGeneratorNode,
+  'monitor-stage': MonitorStageNode
 };
 
 const isInputNodeType = (type) => type === 'keyword-input' || type === 'input';
+const MODE_MONITOR = 'monitor';
+const MODE_EXPERIMENT = 'experiment';
+const MONITOR_STAGES = [
+  { id: 'seed', label: '种子/启动', stage: 'seed', stageIndex: 0, position: { x: 40, y: 180 } },
+  { id: 'mined', label: '挖词', stage: 'mined', stageIndex: 1, position: { x: 300, y: 180 } },
+  { id: 'verified', label: '多指标验真', stage: 'verified', stageIndex: 2, position: { x: 560, y: 180 } },
+  { id: 'generated', label: '标题货源', stage: 'generated', stageIndex: 3, position: { x: 820, y: 180 } },
+  { id: 'review', label: '人工复核', stage: 'review', stageIndex: 4, position: { x: 1080, y: 180 } },
+  { id: 'ready', label: '待铺货批次', stage: 'ready', stageIndex: 5, position: { x: 1340, y: 180 } },
+  { id: 'submitted', label: '已提交', stage: 'submitted', stageIndex: 6, position: { x: 1600, y: 180 } }
+];
+const MONITOR_EDGES = MONITOR_STAGES.slice(0, -1).map((stage, index) => ({
+  id: `monitor-${stage.id}-${MONITOR_STAGES[index + 1].id}`,
+  source: stage.id,
+  target: MONITOR_STAGES[index + 1].id,
+  markerEnd: { type: MarkerType.ArrowClosed, color: '#475569' },
+  style: { stroke: '#475569', strokeWidth: 2 }
+}));
 const NODE_LAYOUT = {
   'keyword-input': { x: 80, y: 160 },
   'keyword-mining': { x: 520, y: 160 },
@@ -201,10 +249,59 @@ const NODE_LAYOUT = {
 };
 const NODE_ROW_GAP = 190;
 
+const unwrapApiData = (payload) => payload?.data || payload || {};
+
+const isFailedSummary = (summary) => {
+  if (!summary) return false;
+  return summary.ok === false || String(summary.status || '').toLowerCase().includes('failed');
+};
+
+const getSummaryVisualState = (summary) => {
+  if (!summary) return 'idle';
+  const status = String(summary.status || '').toLowerCase();
+  const stage = String(summary.stage || '').toLowerCase();
+  const activeStatuses = new Set(['created', 'started', 'running', 'in_progress', 'processing', 'mined', 'verified', 'generated', 'needs_review', 'awaiting_user_confirmation']);
+  if (isFailedSummary(summary)) return 'failed';
+  if (status === 'workflow_complete' || status === 'submitted' || stage === 'submitted') return 'completed';
+  if (status === 'ready_to_distribute' || status === 'ready' || stage === 'ready') return 'ready';
+  if (summary.requiresUserAction) return 'paused';
+  if (activeStatuses.has(status)) return 'running';
+  return 'idle';
+};
+
+const resolveSummaryStageIndex = (summary) => {
+  if (!summary) return -1;
+  if (Number.isFinite(summary.stageIndex)) return summary.stageIndex;
+  return MONITOR_STAGES.findIndex((stage) => stage.stage === summary.stage);
+};
+
+const getMonitorNodeStatus = (stage, summary) => {
+  if (!summary) return 'idle';
+  if (isFailedSummary(summary) && stage.stageIndex === resolveSummaryStageIndex(summary)) return 'failed';
+  const currentStageIndex = resolveSummaryStageIndex(summary);
+  if (stage.stageIndex < currentStageIndex) return 'completed';
+  if (stage.stageIndex === currentStageIndex) {
+    const visualState = getSummaryVisualState(summary);
+    if (visualState === 'completed') return 'completed';
+    if (visualState === 'ready') return 'ready';
+    return visualState === 'idle' ? 'running' : visualState;
+  }
+  return 'idle';
+};
+
+const formatDateTime = (value) => {
+  if (!value) return '未知时间';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString();
+};
+
 export default function App() {
+  const [mode, setMode] = useState(MODE_MONITOR);
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [selectedNodeId, setSelectedNodeId] = useState(null);
+  const [selectedMonitorNodeId, setSelectedMonitorNodeId] = useState('seed');
 
   // 工作流执行状态
   const [currentRunId, setCurrentRunId] = useState(null);
@@ -212,6 +309,12 @@ export default function App() {
   const [logs, setLogs] = useState([]);
   const [historyRuns, setHistoryRuns] = useState([]);
   const [templates, setTemplates] = useState([]);
+  const [monitorRuns, setMonitorRuns] = useState([]);
+  const [monitorLatestRun, setMonitorLatestRun] = useState(null);
+  const [selectedMonitorRunId, setSelectedMonitorRunId] = useState(null);
+  const [selectedMonitorRun, setSelectedMonitorRun] = useState(null);
+  const [monitorLoading, setMonitorLoading] = useState(false);
+  const [monitorError, setMonitorError] = useState('');
 
   // 1. 获取模板列表
   const fetchTemplates = async () => {
@@ -243,13 +346,78 @@ export default function App() {
     }
   };
 
+  const loadWorkbenchRuns = async () => {
+    setMonitorLoading(true);
+    setMonitorError('');
+    try {
+      const res = await fetch('/api/workbench/runs?limit=20');
+      const payload = await res.json();
+      if (payload.ok === false) throw new Error(payload.error || '加载流程监控失败');
+      const data = unwrapApiData(payload);
+      const runs = Array.isArray(data.runs) ? data.runs : [];
+      const latest = data.latest || runs[0] || null;
+      const selectedFreshRun = selectedMonitorRunId
+        ? runs.find((run) => run.runId === selectedMonitorRunId) || null
+        : null;
+      setMonitorRuns(runs);
+      setMonitorLatestRun(latest);
+      if (selectedFreshRun) {
+        setSelectedMonitorRun(selectedFreshRun);
+        loadWorkbenchRunDetail(selectedFreshRun.runId);
+      } else if (latest?.runId) {
+        setSelectedMonitorRunId(latest.runId);
+        setSelectedMonitorRun(latest);
+      } else {
+        setSelectedMonitorRunId(null);
+        setSelectedMonitorRun(null);
+      }
+    } catch (err) {
+      setMonitorError(err.message);
+    } finally {
+      setMonitorLoading(false);
+    }
+  };
+
+  const loadWorkbenchRunDetail = async (runId) => {
+    if (!runId) return;
+    setMonitorLoading(true);
+    setMonitorError('');
+    try {
+      const res = await fetch(`/api/workbench/runs/${runId}`);
+      const payload = await res.json();
+      if (payload.ok === false) throw new Error(payload.error || '加载流程详情失败');
+      setSelectedMonitorRun(unwrapApiData(payload));
+    } catch (err) {
+      setMonitorError(err.message);
+      setSelectedMonitorRun((current) => (
+        selectedMonitorRunId === runId || current?.runId === runId ? null : current
+      ));
+    } finally {
+      setMonitorLoading(false);
+    }
+  };
+
   useEffect(() => {
-    fetchTemplates();
-    fetchHistoryRuns();
-    // The initial boot should run once. The helpers intentionally read the
-    // current empty canvas state and then hydrate it from the default template.
+    if (mode === MODE_MONITOR) {
+      loadWorkbenchRuns();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [mode]);
+
+  useEffect(() => {
+    if (mode === MODE_EXPERIMENT) {
+      fetchTemplates();
+      fetchHistoryRuns();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
+
+  useEffect(() => {
+    if (mode === MODE_MONITOR && selectedMonitorRunId) {
+      loadWorkbenchRunDetail(selectedMonitorRunId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, selectedMonitorRunId]);
 
   // 加载工作流模板
   const loadTemplate = (template) => {
@@ -296,6 +464,25 @@ export default function App() {
   const selectedNode = useMemo(() => {
     return nodes.find(n => n.id === selectedNodeId) || null;
   }, [nodes, selectedNodeId]);
+
+  const activeMonitorSummary = selectedMonitorRun || monitorLatestRun;
+  const selectedMonitorStage = MONITOR_STAGES.find((stage) => stage.id === selectedMonitorNodeId) || MONITOR_STAGES[0];
+  const monitorNodes = useMemo(() => {
+    return MONITOR_STAGES.map((stage, index) => ({
+      id: stage.id,
+      type: 'monitor-stage',
+      position: stage.position,
+      draggable: false,
+      selectable: true,
+      data: {
+        ...stage,
+        status: getMonitorNodeStatus(stage, activeMonitorSummary),
+        hasTarget: index > 0,
+        hasSource: index < MONITOR_STAGES.length - 1,
+        onSelect: () => setSelectedMonitorNodeId(stage.id)
+      }
+    }));
+  }, [activeMonitorSummary]);
 
   // 修改节点配置参数
   const updateNodeData = (nodeId, field, value) => {
@@ -567,15 +754,31 @@ export default function App() {
 
       {/* 1. Left Sidebar: History and Node library */}
       <div className="w-80 border-r border-slate-800 bg-slate-900/60 flex flex-col h-full shrink-0">
-        <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-900">
+        <div className="p-4 border-b border-slate-800 bg-slate-900 space-y-3">
           <div className="flex items-center gap-2">
             <Layers className="text-blue-500" size={20} />
-            <h1 className="font-bold text-sm tracking-wider text-slate-200">标题生成工作流画布</h1>
+            <h1 className="font-bold text-sm tracking-wider text-slate-200">
+              {mode === MODE_MONITOR ? '流程监控' : '标题生成工作流画布'}
+            </h1>
           </div>
-          <span className="text-[10px] px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 font-bold">MVP</span>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => setMode(MODE_MONITOR)}
+              className={`mode-toggle ${mode === MODE_MONITOR ? 'mode-toggle-active' : ''}`}
+            >
+              流程监控
+            </button>
+            <button
+              onClick={() => setMode(MODE_EXPERIMENT)}
+              className={`mode-toggle ${mode === MODE_EXPERIMENT ? 'mode-toggle-active' : ''}`}
+            >
+              节点实验
+            </button>
+          </div>
         </div>
 
         {/* 节点库 */}
+        {mode === MODE_EXPERIMENT && (
         <div className="p-4 border-b border-slate-800 space-y-3 bg-slate-900/40">
           <h2 className="text-xs font-bold tracking-wider text-slate-400 uppercase">节点库 (点击添加)</h2>
           <div className="grid grid-cols-1 gap-2">
@@ -602,9 +805,10 @@ export default function App() {
             </button>
           </div>
         </div>
+        )}
 
         {/* 模板加载 */}
-        {templates.length > 0 && (
+        {mode === MODE_EXPERIMENT && templates.length > 0 && (
           <div className="p-4 border-b border-slate-800 bg-slate-900/20">
             <h2 className="text-xs font-bold tracking-wider text-slate-400 uppercase mb-2">预设链模板</h2>
             <button
@@ -623,9 +827,50 @@ export default function App() {
         {/* 历史运行列表 */}
         <div className="flex-1 overflow-y-auto p-4 space-y-2">
           <h2 className="text-xs font-bold tracking-wider text-slate-400 uppercase flex items-center gap-1.5">
-            <Clock size={12} /> 运行历史
+            <Clock size={12} /> {mode === MODE_MONITOR ? '流程批次历史' : '运行历史'}
           </h2>
-          {historyRuns.length === 0 ? (
+          {mode === MODE_MONITOR ? (
+            <div className="space-y-2">
+              <button
+                onClick={loadWorkbenchRuns}
+                className="w-full py-2 rounded border border-slate-700 bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 font-semibold flex items-center justify-center gap-1.5"
+              >
+                <RefreshCw size={13} className={monitorLoading ? 'animate-spin' : ''} /> 刷新批次
+              </button>
+              {monitorError && (
+                <div className="monitor-alert monitor-alert-error">{monitorError}</div>
+              )}
+              {monitorRuns.length === 0 ? (
+                <div className="text-xs text-slate-500 italic p-2">暂无真实流程运行记录</div>
+              ) : (
+                <div className="space-y-1.5">
+                  {monitorRuns.map((run) => (
+                    <button
+                      key={run.runId}
+                      onClick={() => {
+                        setSelectedMonitorRun(run);
+                        setSelectedMonitorRunId(run.runId);
+                      }}
+                      className={`monitor-run-card ${selectedMonitorRunId === run.runId ? 'monitor-run-card-active' : ''}`}
+                    >
+                      <div className="flex justify-between items-center font-mono text-[10px] text-slate-400 mb-1">
+                        <span className="truncate w-36">{run.runId}</span>
+                        <span className={`monitor-status-pill monitor-status-${getSummaryVisualState(run)}`}>
+                          {run.status || 'unknown'}
+                        </span>
+                      </div>
+                      <div className="font-semibold text-slate-200 truncate">
+                        {run.stage || 'unknown'} · 第 {(resolveSummaryStageIndex(run) + 1) || 0} 阶段
+                      </div>
+                      <div className="text-[10px] text-slate-500 mt-1">
+                        {formatDateTime(run.updatedAt || run.startedAt)}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : historyRuns.length === 0 ? (
             <div className="text-xs text-slate-500 italic p-2">暂无历史执行记录</div>
           ) : (
             <div className="space-y-1.5">
@@ -680,21 +925,34 @@ export default function App() {
           <div className="flex items-center gap-4">
             <span className="text-xs text-slate-400 flex items-center gap-2">
               当前状态:
-              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                runStatus === 'completed' ? 'bg-emerald-500/10 text-emerald-400' :
-                runStatus === 'failed' ? 'bg-rose-500/10 text-rose-400' :
-                runStatus === 'cancelled' ? 'bg-amber-500/10 text-amber-400' :
-                runStatus === 'running' ? 'bg-blue-500/10 text-blue-400 animate-pulse' : 'bg-slate-800 text-slate-400'
-              }`}>
-                {runStatus}
-              </span>
+              {mode === MODE_MONITOR ? (
+                <span className={`monitor-status-pill monitor-status-${getSummaryVisualState(activeMonitorSummary)}`}>
+                  {activeMonitorSummary?.status || 'no_runs'}
+                </span>
+              ) : (
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                  runStatus === 'completed' ? 'bg-emerald-500/10 text-emerald-400' :
+                  runStatus === 'failed' ? 'bg-rose-500/10 text-rose-400' :
+                  runStatus === 'cancelled' ? 'bg-amber-500/10 text-amber-400' :
+                  runStatus === 'running' ? 'bg-blue-500/10 text-blue-400 animate-pulse' : 'bg-slate-800 text-slate-400'
+                }`}>
+                  {runStatus}
+                </span>
+              )}
             </span>
-            {currentRunId && (
+            {mode === MODE_MONITOR && activeMonitorSummary?.runId && (
+              <span className="text-xs font-mono text-slate-500">RunId: {activeMonitorSummary.runId}</span>
+            )}
+            {mode === MODE_EXPERIMENT && currentRunId && (
               <span className="text-xs font-mono text-slate-500">RunId: {currentRunId}</span>
             )}
           </div>
 
           <div className="flex items-center gap-2">
+            {mode === MODE_MONITOR ? (
+              <div className="text-xs text-slate-500">只读监控 · 点击节点查看阶段详情</div>
+            ) : (
+              <>
             {selectedNodeId && (
               <button
                 onClick={handleDeleteSelected}
@@ -720,6 +978,8 @@ export default function App() {
                 <Play size={13} fill="currentColor" /> 运行工作流
               </button>
             )}
+              </>
+            )}
           </div>
         </div>
 
@@ -728,35 +988,56 @@ export default function App() {
 
           {/* 画布 */}
           <div className="flex-1 bg-slate-950 position-relative min-h-[300px]">
-            <ReactFlow
-              nodes={nodes}
-              edges={edges}
-              onNodesChange={onNodesChange}
-              onEdgesChange={onEdgesChange}
-              onConnect={onConnect}
-              onNodeClick={onNodeClick}
-              nodeTypes={nodeTypes}
-              fitView
-              fitViewOptions={{ padding: 0.25, includeHiddenNodes: false, minZoom: 0.7, maxZoom: 1 }}
-              minZoom={0.5}
-              maxZoom={1.5}
-            >
-              <Background color="#334155" gap={20} size={1} />
-              <Controls className="bg-slate-900 border border-slate-800 text-slate-100 rounded" />
-              <MiniMap
-                bgColor="#0f172a"
-                nodeColor={(n) => {
-                  if (isInputNodeType(n.type)) return '#3b82f6';
-                  if (n.type === 'keyword-mining') return '#6366f1';
-                  if (n.type === 'title-generator') return '#10b981';
-                  return '#64748b';
-                }}
-                maskColor="rgba(15, 23, 42, 0.6)"
-              />
-            </ReactFlow>
+            {mode === MODE_MONITOR ? (
+              <ReactFlow
+                nodes={monitorNodes}
+                edges={MONITOR_EDGES}
+                onNodeClick={(event, node) => setSelectedMonitorNodeId(node.id)}
+                nodeTypes={nodeTypes}
+                fitView
+                fitViewOptions={{ padding: 0.18, includeHiddenNodes: false, minZoom: 0.6, maxZoom: 0.95 }}
+                minZoom={0.35}
+                maxZoom={1.2}
+                nodesDraggable={false}
+                nodesConnectable={false}
+                edgesReconnectable={false}
+                deleteKeyCode={null}
+              >
+                <Background color="#334155" gap={24} size={1} />
+                <Controls className="bg-slate-900 border border-slate-800 text-slate-100 rounded" showInteractive={false} />
+              </ReactFlow>
+            ) : (
+              <ReactFlow
+                nodes={nodes}
+                edges={edges}
+                onNodesChange={onNodesChange}
+                onEdgesChange={onEdgesChange}
+                onConnect={onConnect}
+                onNodeClick={onNodeClick}
+                nodeTypes={nodeTypes}
+                fitView
+                fitViewOptions={{ padding: 0.25, includeHiddenNodes: false, minZoom: 0.7, maxZoom: 1 }}
+                minZoom={0.5}
+                maxZoom={1.5}
+              >
+                <Background color="#334155" gap={20} size={1} />
+                <Controls className="bg-slate-900 border border-slate-800 text-slate-100 rounded" />
+                <MiniMap
+                  bgColor="#0f172a"
+                  nodeColor={(n) => {
+                    if (isInputNodeType(n.type)) return '#3b82f6';
+                    if (n.type === 'keyword-mining') return '#6366f1';
+                    if (n.type === 'title-generator') return '#10b981';
+                    return '#64748b';
+                  }}
+                  maskColor="rgba(15, 23, 42, 0.6)"
+                />
+              </ReactFlow>
+            )}
           </div>
 
           {/* 底部控制台日志面板 */}
+          {mode === MODE_EXPERIMENT && (
           <div className="h-64 border-t border-slate-800 bg-slate-900/80 flex flex-col shrink-0">
             <div className="h-9 border-b border-slate-800 bg-slate-900 flex items-center justify-between px-4">
               <span className="text-xs font-bold tracking-wider text-slate-400 flex items-center gap-1.5">
@@ -796,6 +1077,7 @@ export default function App() {
               )}
             </div>
           </div>
+          )}
 
         </div>
 
@@ -805,10 +1087,97 @@ export default function App() {
       <div className="w-80 border-l border-slate-800 bg-slate-900/40 flex flex-col h-full shrink-0">
         <div className="p-4 border-b border-slate-800 bg-slate-900 flex items-center gap-2">
           <Settings className="text-slate-400" size={18} />
-          <h2 className="font-bold text-sm tracking-wider text-slate-200">属性配置面板</h2>
+          <h2 className="font-bold text-sm tracking-wider text-slate-200">
+            {mode === MODE_MONITOR ? '流程详情' : '属性配置面板'}
+          </h2>
         </div>
 
-        {selectedNode ? (
+        {mode === MODE_MONITOR ? (
+          <div className="p-5 flex-1 overflow-y-auto space-y-5">
+            {!activeMonitorSummary ? (
+              <div className="p-4 rounded border border-slate-800 bg-slate-950/50 text-xs text-slate-500 italic">
+                暂无可展示的流程批次。新的 daily pipeline 运行完成阶段写入后会出现在这里。
+              </div>
+            ) : (
+              <>
+                <div className="monitor-detail-block">
+                  <span className="monitor-detail-label">当前批次</span>
+                  <div className="font-mono text-xs text-slate-300 break-all">{activeMonitorSummary.runId}</div>
+                  <div className="text-[11px] text-slate-500 mt-2">
+                    更新于 {formatDateTime(activeMonitorSummary.updatedAt || activeMonitorSummary.startedAt)}
+                  </div>
+                </div>
+
+                <div className="monitor-detail-grid">
+                  <div>
+                    <span className="monitor-detail-label">状态</span>
+                    <span className={`monitor-status-pill monitor-status-${getSummaryVisualState(activeMonitorSummary)}`}>
+                      {activeMonitorSummary.status}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="monitor-detail-label">阶段</span>
+                    <div className="text-sm font-semibold text-slate-200">{activeMonitorSummary.stage}</div>
+                  </div>
+                </div>
+
+                {activeMonitorSummary.requiresUserAction && (
+                  <div className="monitor-alert monitor-alert-warning">
+                    <div className="font-bold text-amber-200 mb-1">{activeMonitorSummary.nextActionCode || '需要人工处理'}</div>
+                    <div>{activeMonitorSummary.userMessage || '请检查流程输出并继续下一步。'}</div>
+                    {(activeMonitorSummary.blockers || []).length > 0 && (
+                      <div className="mt-2 font-mono text-[10px] text-amber-100/80">
+                        {activeMonitorSummary.blockers.join(', ')}
+                      </div>
+                    )}
+                    {activeMonitorSummary.nextCommand && (
+                      <div className="monitor-command mt-2">{activeMonitorSummary.nextCommand}</div>
+                    )}
+                  </div>
+                )}
+
+                <div className="monitor-detail-block">
+                  <span className="monitor-detail-label">选中节点</span>
+                  <div className="text-sm font-semibold text-slate-200">{selectedMonitorStage.label}</div>
+                  <div className="text-[11px] text-slate-500 mt-1">
+                    {selectedMonitorStage.stage} · 阶段 {selectedMonitorStage.stageIndex + 1}
+                  </div>
+                  <div className={`monitor-stage-state monitor-stage-state-${getMonitorNodeStatus(selectedMonitorStage, activeMonitorSummary)}`}>
+                    {getMonitorNodeStatus(selectedMonitorStage, activeMonitorSummary)}
+                  </div>
+                </div>
+
+                <div className="monitor-detail-block">
+                  <span className="monitor-detail-label">关键计数</span>
+                  <div className="monitor-count-list">
+                    {Object.entries(activeMonitorSummary.counts || {}).slice(0, 8).map(([key, value]) => (
+                      <div key={key} className="monitor-count-row">
+                        <span>{key}</span>
+                        <b>{value}</b>
+                      </div>
+                    ))}
+                    {Object.keys(activeMonitorSummary.counts || {}).length === 0 && (
+                      <div className="text-xs text-slate-500 italic">暂无计数数据</div>
+                    )}
+                  </div>
+                </div>
+
+                {activeMonitorSummary.previews?.generatedProducts?.length > 0 && (
+                  <div className="monitor-detail-block">
+                    <span className="monitor-detail-label">标题货源预览</span>
+                    <div className="space-y-2">
+                      {activeMonitorSummary.previews.generatedProducts.slice(0, 3).map((item, index) => (
+                        <div key={index} className="monitor-preview-row">
+                          {item.title || item.铺货标题 || item.keyword || JSON.stringify(item).slice(0, 80)}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        ) : selectedNode ? (
           <div className="p-5 flex-1 overflow-y-auto space-y-6">
             <div>
               <span className="text-[10px] uppercase font-bold tracking-widest text-slate-500 block mb-1">
