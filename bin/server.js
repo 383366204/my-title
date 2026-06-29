@@ -4,6 +4,7 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const net = require('net');
+const { spawn } = require('child_process');
 const { AsyncLocalStorage } = require('async_hooks');
 require('dotenv').config();
 
@@ -30,6 +31,11 @@ const {
   validateWorkflow
 } = require('../core/workflow');
 
+const {
+  listPipelineRuns,
+  summarizePipelineRun
+} = require('../core/pipeline-run-summary');
+
 const app = express();
 app.use(express.json());
 
@@ -43,6 +49,8 @@ const logStorage = new AsyncLocalStorage();
 // Hook console globally once
 const originalLog = console.log;
 const originalError = console.error;
+const WORKBENCH_OUTPUT_LIMIT_BYTES = 200 * 1024;
+let activeWorkbenchProcess = null;
 
 const sendSseLog = (type, args) => {
   const res = logStorage.getStore();
@@ -126,78 +134,147 @@ app.get('/api/status', (req, res) => {
 
 // 1.5 GET /api/workflow/batches - Read-only daily pipeline batch summaries
 app.get('/api/workflow/batches', (req, res) => {
-  const pipelineDir = path.join(process.cwd(), 'data', 'pipeline');
-  const runsDir = path.join(pipelineDir, 'runs');
   try {
-    if (!fs.existsSync(runsDir)) {
-      return res.json({ ok: true, data: { runs: [], latest: null } });
-    }
-
-    const runs = fs.readdirSync(runsDir)
-      .map(runId => {
-        const runDir = path.join(runsDir, runId);
-        const runFile = path.join(runDir, 'run.json');
-        if (!fs.existsSync(runFile)) return null;
-        try {
-          const run = JSON.parse(fs.readFileSync(runFile, 'utf8').replace(/^\uFEFF/, ''));
-          const batchFile = run.files && run.files.distributionBatch ? run.files.distributionBatch : path.join(runDir, 'distribution-batch.txt');
-          const reviewFile = run.files && run.files.distributionReview ? run.files.distributionReview : path.join(runDir, 'distribution-review.md');
-          const reviewText = readTextPreview(reviewFile, 5000);
-          return {
-            runId,
-            status: run.status || 'unknown',
-            startedAt: run.startedAt || '',
-            updatedAt: run.updatedAt || '',
-            counts: run.counts || {},
-            batchFile,
-            reviewFile,
-            batchExists: fs.existsSync(batchFile),
-            reviewExists: fs.existsSync(reviewFile),
-            batchCount: countNonEmptyLines(batchFile),
-            reviewPreview: reviewText,
-            requiresReview: run.status === 'needs_review' || Number((run.counts || {}).reviewCandidates || 0) > 0
-          };
-        } catch (err) {
-          return {
-            runId,
-            status: 'unreadable',
-            error: err.message,
-            startedAt: '',
-            updatedAt: '',
-            counts: {},
-            batchExists: false,
-            reviewExists: false,
-            batchCount: 0,
-            reviewPreview: '',
-            requiresReview: true
-          };
-        }
-      })
-      .filter(Boolean)
-      .sort((a, b) => String(b.updatedAt || b.runId).localeCompare(String(a.updatedAt || a.runId)));
-
-    res.json({ ok: true, data: { runs, latest: runs[0] || null } });
+    const limit = parsePositiveNumber(req.query.limit, 20);
+    const data = listPipelineRuns({ limit });
+    const runs = data.runs.map(withLegacyBatchFields);
+    res.json({ ok: true, data: { ...data, runs, latest: runs[0] || null } });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
 });
 
-function countNonEmptyLines(file) {
+// 1.6 GET /api/workbench/runs - Daily workbench run summaries
+app.get('/api/workbench/runs', (req, res) => {
   try {
-    if (!fs.existsSync(file)) return 0;
-    return fs.readFileSync(file, 'utf8').split(/\r?\n/).filter(line => line.trim()).length;
-  } catch (_) {
-    return 0;
+    const limit = parsePositiveNumber(req.query.limit, 20);
+    res.json({ ok: true, data: listPipelineRuns({ limit }) });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// 1.7 GET /api/workbench/runs/:runId - Daily workbench run details
+app.get('/api/workbench/runs/:runId', (req, res) => {
+  try {
+    const summary = summarizePipelineRun({ runId: req.params.runId });
+    if (!summary) {
+      return res.status(404).json({ ok: false, error: '未找到该工作流运行记录' });
+    }
+    res.json({ ok: true, data: summary });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// 1.8 POST /api/workbench/run - Start guarded CLI workflow in background
+app.post('/api/workbench/run', (req, res) => {
+  if (activeWorkbenchProcess) {
+    return res.status(409).json({
+      ok: false,
+      status: 'workflow_busy',
+      error: '已有工作流正在运行，请等待完成后再启动。'
+    });
+  }
+
+  const body = req.body || {};
+  const mode = body.mode === 'keyword' ? 'keyword' : 'daily';
+  const keyword = String(body.keyword || '').trim();
+  if (mode === 'keyword' && !keyword) {
+    return res.status(400).json({ ok: false, error: '关键词不能为空' });
+  }
+
+  const args = buildWorkbenchCliArgs(mode, keyword, body);
+  let child;
+  try {
+    child = spawn(process.execPath, args, {
+      cwd: process.cwd(),
+      env: process.env
+    });
+  } catch (err) {
+    activeWorkbenchProcess = null;
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+
+  const runState = {
+    child,
+    pid: child.pid,
+    mode,
+    stdout: '',
+    stderr: ''
+  };
+  activeWorkbenchProcess = runState;
+
+  child.stdout.on('data', chunk => {
+    runState.stdout = appendCappedOutput(runState.stdout, chunk);
+  });
+  child.stderr.on('data', chunk => {
+    runState.stderr = appendCappedOutput(runState.stderr, chunk);
+  });
+  child.on('error', err => {
+    if (activeWorkbenchProcess === runState) activeWorkbenchProcess = null;
+    originalError('[Workbench Run] 子进程启动失败:', err.message);
+  });
+  child.on('exit', (code, signal) => {
+    if (activeWorkbenchProcess === runState) activeWorkbenchProcess = null;
+    if (code === 0) {
+      originalLog(`[Workbench Run] ${mode} 工作流完成，pid=${runState.pid}`);
+    } else {
+      originalError(`[Workbench Run] ${mode} 工作流失败，pid=${runState.pid}, code=${code}, signal=${signal || ''}`);
+      if (runState.stderr) originalError(runState.stderr.slice(-4000));
+    }
+  });
+
+  res.json({ ok: true, data: { status: 'started', pid: child.pid, mode } });
+});
+
+function parsePositiveNumber(value, fallback) {
+  const num = Number(value);
+  return Number.isFinite(num) && num > 0 ? num : fallback;
+}
+
+function withLegacyBatchFields(summary) {
+  return {
+    ...summary,
+    requiresReview: Boolean(
+      summary.mustReview ||
+      summary.status === 'needs_review' ||
+      Number((summary.counts || {}).reviewCandidates || 0) > 0
+    ),
+    reviewPreview: (summary.previews && summary.previews.distributionReview) || ''
+  };
+}
+
+function addNumericCliOption(args, flag, value) {
+  const num = Number(value);
+  if (Number.isFinite(num) && num > 0) {
+    args.push(flag, String(num));
   }
 }
 
-function readTextPreview(file, maxChars) {
-  try {
-    if (!fs.existsSync(file)) return '';
-    return fs.readFileSync(file, 'utf8').slice(0, maxChars);
-  } catch (_) {
-    return '';
+function buildWorkbenchCliArgs(mode, keyword, options) {
+  const args = ['bin/cli.js', 'flow', mode];
+  if (mode === 'keyword') args.push(keyword);
+  args.push('--json');
+
+  if (mode === 'daily') {
+    addNumericCliOption(args, '--mine', options.mine);
+    addNumericCliOption(args, '--verify', options.verify);
+    addNumericCliOption(args, '--generate', options.generate);
   }
+  addNumericCliOption(args, '--export', options.export);
+  addNumericCliOption(args, '--products-per-keyword', options.productsPerKeyword);
+  addNumericCliOption(args, '--length', options.length);
+  addNumericCliOption(args, '--port', options.port);
+  addNumericCliOption(args, '--pages', options.pages);
+
+  return args;
+}
+
+function appendCappedOutput(current, chunk) {
+  const buffer = Buffer.concat([Buffer.from(current), Buffer.from(String(chunk))]);
+  if (buffer.length <= WORKBENCH_OUTPUT_LIMIT_BYTES) return buffer.toString('utf8');
+  return buffer.subarray(buffer.length - WORKBENCH_OUTPUT_LIMIT_BYTES).toString('utf8');
 }
 
 // 2. GET /api/seeds - Get sorted seed list (including paused)
