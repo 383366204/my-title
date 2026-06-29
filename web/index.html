@@ -32,9 +32,9 @@
           <span class="nav-icon">✍️</span>
           <span class="nav-text">标题生成</span>
         </a>
-        <a href="/workflow/" class="nav-item" id="nav-workflow" target="_blank">
+        <a href="/workflow/" class="nav-item" id="nav-workflow">
           <span class="nav-icon">🕸️</span>
-          <span class="nav-text">工作流画布</span>
+          <span class="nav-text">流程监控</span>
         </a>
       </nav>
       <div class="sidebar-footer">
@@ -107,6 +107,82 @@
                   <span class="flow-step-num">3</span>
                   <span class="flow-step-text">选品生成标题</span>
                 </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card glass workbench-card" id="daily-workbench-card">
+          <div class="card-header-actions">
+            <div>
+              <h3>每日流程工作台</h3>
+              <p class="workbench-card-desc">启动挖词、验真、标题和铺货导出流程，最新状态会在下方同步。</p>
+            </div>
+            <a class="btn btn-secondary btn-sm" id="btn-open-workflow-monitor" href="/workflow/">流程监控</a>
+          </div>
+          <form class="workbench-run-form" id="form-workbench-run">
+            <div class="workbench-primary-controls">
+              <label class="form-group">
+                <span>模式</span>
+                <select class="form-control" id="workbench-mode" name="mode">
+                  <option value="daily" selected>daily</option>
+                  <option value="keyword">keyword</option>
+                </select>
+              </label>
+              <label class="form-group workbench-keyword-field" id="workbench-keyword-field">
+                <span>关键词</span>
+                <input type="text" class="form-control" id="workbench-keyword" name="keyword" placeholder="keyword 模式必填">
+              </label>
+            </div>
+            <div class="workbench-number-grid">
+              <label class="form-group">
+                <span>mine</span>
+                <input type="number" class="form-control" id="workbench-mine" name="mine" value="30" min="1" max="500">
+              </label>
+              <label class="form-group">
+                <span>verify</span>
+                <input type="number" class="form-control" id="workbench-verify" name="verify" value="20" min="1" max="200">
+              </label>
+              <label class="form-group">
+                <span>generate</span>
+                <input type="number" class="form-control" id="workbench-generate" name="generate" value="10" min="1" max="100">
+              </label>
+              <label class="form-group">
+                <span>export</span>
+                <input type="number" class="form-control" id="workbench-export" name="export" value="20" min="1" max="200">
+              </label>
+              <label class="form-group">
+                <span>productsPerKeyword</span>
+                <input type="number" class="form-control" id="workbench-products-per-keyword" name="productsPerKeyword" value="3" min="1" max="50">
+              </label>
+              <label class="form-group">
+                <span>length</span>
+                <input type="number" class="form-control" id="workbench-length" name="length" value="60" min="10" max="120">
+              </label>
+              <label class="form-group">
+                <span>port</span>
+                <input type="number" class="form-control" id="workbench-port" name="port" value="9222" min="1" max="65535">
+              </label>
+              <label class="form-group">
+                <span>pages</span>
+                <input type="number" class="form-control" id="workbench-pages" name="pages" value="1" min="1" max="20">
+              </label>
+            </div>
+            <div class="workbench-actions">
+              <button type="submit" class="btn btn-primary" id="btn-start-workbench-run">启动每日流程</button>
+            </div>
+          </form>
+          <div class="workbench-results-grid">
+            <div class="workbench-panel">
+              <h4>最新运行</h4>
+              <div id="workbench-run-summary">
+                <p class="empty-state-text-sm">正在读取最新流程...</p>
+              </div>
+            </div>
+            <div class="workbench-panel">
+              <h4>最近运行</h4>
+              <div id="workbench-run-list">
+                <p class="empty-state-text-sm">正在读取运行列表...</p>
               </div>
             </div>
           </div>
