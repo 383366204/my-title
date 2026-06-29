@@ -95,13 +95,16 @@ npm run ui:react
 Open:
 
 ```text
+http://localhost:3000/
 http://localhost:3000/workflow/
 ```
 
 Verify:
 
-- Templates load.
-- Validation rejects invalid graphs.
-- A demo workflow run starts.
-- Node status and logs update through SSE.
-- Cancel changes an in-progress run to a cancelled state.
+- The dashboard opens as the main daily workbench.
+- The workbench can load recent `/api/workbench/runs` summaries, even when there are no runs yet.
+- The `流程监控` navigation opens `/workflow/` in the same tab.
+- `/workflow/` defaults to the read-only pipeline monitor.
+- Monitor nodes show `种子/启动 -> 挖词 -> 多指标验真 -> 标题货源 -> 人工复核 -> 待铺货批次 -> 已提交`.
+- The `节点实验` toggle still exposes the demo canvas.
+- In `节点实验`, templates load and validation rejects invalid graphs.

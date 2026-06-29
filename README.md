@@ -13,7 +13,7 @@
 - 🔬 **生意参谋**: 自动提取搜索分析数据（蓝海词/热搜词）
 - 💡 **智能选词**: 13 种策略自动推荐候选关键词
 - 🔄 **批量生成**: 支持一次处理多个关键词
-- 🖥️ **Web UI**: React + Vite 工作流画布，支持从浏览器发起标题生成与工作流运行
+- 🖥️ **Web UI**: 浏览器工作台 + React 流程监控，支持每日挖词、验真、标题生成、复核批次查看
 - 🧩 **Workflow 编排**: 内置 workflow registry、validator、scheduler、run-store 和 SSE 实时日志
 - 🛡️ **平台访问保护**: 对 1688、淘宝、SYCM 的登录/滑块/限流状态做结构化拦截与人工动作提示
 
@@ -70,8 +70,22 @@ npm run ui:react
 访问：
 
 ```text
-http://localhost:3000/workflow/
+http://localhost:3000/
 ```
+
+Web UI 的主操作入口是旧版浏览器工作台：
+
+- `工作台`：每日流程启动、最新 run 状态、阻断原因、铺货复核批次。
+- `挖词选品`：种子词管理、候选词挖掘、去重与验真状态。
+- `标题生成`：单词/候选词标题与货源生成。
+- `流程监控`：同一 tab 打开 `/workflow/`，默认展示真实 `data/pipeline/runs/*` 的只读流程图。
+
+React Flow 页面现在分为两个视图：
+
+- `流程监控`：默认视图，读取 `/api/workbench/runs` 和 `/api/workbench/runs/:runId`，展示 `种子/启动 -> 挖词 -> 多指标验真 -> 标题货源 -> 人工复核 -> 待铺货批次 -> 已提交`。
+- `节点实验`：保留原来的可编辑 demo 画布，仍使用 `/api/workflows/*` 和 SSE 日志。
+
+真实每日流程的数据源是 `skills/pipeline-flow` 写入的 `data/pipeline/runs/<runId>/` 文件。浏览器 IndexedDB 只作为本机操作历史，不是后端 canonical 状态。
 
 开发模式：
 
@@ -79,7 +93,7 @@ http://localhost:3000/workflow/
 npm run web:dev
 ```
 
-Web UI 位于 `apps/web/`，后端 API 和 SSE 入口位于 `bin/server.js`。生产运行时 `npm run ui:react` 会先构建前端，再启动 Express 服务。
+Web UI 位于 `web/` 和 `apps/web/`，后端 API 入口位于 `bin/server.js`。生产运行时 `npm run ui:react` 会先构建 React 流程监控，再启动 Express 服务。
 
 ## MCP Server
 
@@ -100,9 +114,18 @@ Web UI 位于 `apps/web/`，后端 API 和 SSE 入口位于 `bin/server.js`。�
 
 暴露工具：`generate_title`, `generate_title_from_image`, `batch_generate_titles`, `opportunities`, `trend`, `sycm_query`, `sycm_status`, `suggest_keywords`
 
-## Workflow API
+## Workbench / Workflow API
 
-后端提供工作流模板、校验、运行、取消、历史记录和 SSE 日志：
+每日工作台 API 复用 `skills/pipeline-flow` 和 `data/pipeline/runs/*`：
+
+| API | 功能 |
+|-----|------|
+| `GET /api/workbench/runs` | 查看最近 pipeline run 摘要 |
+| `GET /api/workbench/runs/:runId` | 查看单次 pipeline run 详情、预览和下一步动作 |
+| `POST /api/workbench/run` | 后台启动 `flow daily` 或 `flow keyword`，同一时间只允许一个工作台流程 |
+| `GET /api/workflow/batches` | 兼容旧 dashboard 的铺货复核批次摘要 |
+
+React 节点实验 API 提供模板、校验、运行、取消、历史记录和 SSE 日志：
 
 | API | 功能 |
 |-----|------|
