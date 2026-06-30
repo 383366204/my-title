@@ -7,7 +7,6 @@ import {
   Database,
   ExternalLink,
   FlaskConical,
-  GitBranch,
   LayoutDashboard,
   PenLine,
   Play,
@@ -26,8 +25,17 @@ const NAV_ITEMS = [
   { id: 'dashboard', label: '工作台', icon: LayoutDashboard },
   { id: 'mine', label: '挖词选品', icon: Search },
   { id: 'title', label: '标题生成', icon: PenLine },
-  { id: 'workflow', label: '流程监控', icon: GitBranch },
-  { id: 'experiment', label: '节点实验', icon: FlaskConical }
+  { id: 'experiment', label: '开发调试', icon: FlaskConical }
+];
+
+const PIPELINE_STAGES = [
+  { id: 'seed', label: '种子' },
+  { id: 'mined', label: '挖词' },
+  { id: 'verified', label: '验真' },
+  { id: 'generated', label: '标题货源' },
+  { id: 'review', label: '人工复核' },
+  { id: 'ready', label: '待铺货' },
+  { id: 'submitted', label: '已提交' }
 ];
 
 const MINER_TABS = [
@@ -136,14 +144,14 @@ function MetricCard({ label, value, tone = 'neutral' }) {
   );
 }
 
-function DashboardView({ status, runs, loading, onRefresh, onStartWorkbench }) {
+function DashboardView({ status, runs, loading, onRefresh, onStartWorkbench, onNavigate }) {
   const latest = runs[0] || null;
 
   return (
     <div className="page-scroll">
       <PageHeader
         title="每日选品工作台"
-        subtitle="主入口已经切到 React：从这里看状态、跑工作流、进入挖词和标题生成。"
+        subtitle="从这里启动自动化、查看当前流程、处理下一步动作。"
         actions={(
           <button className="icon-button" type="button" onClick={onRefresh} title="刷新状态">
             <RefreshCw size={16} />
@@ -162,25 +170,13 @@ function DashboardView({ status, runs, loading, onRefresh, onStartWorkbench }) {
         <WorkbenchLauncher onStart={onStartWorkbench} />
         <div className="latest-run-panel">
           <div className="section-title-row">
-            <h3>最近流程</h3>
+            <h3>当前流程</h3>
             {loading && <span className="tiny-muted">刷新中...</span>}
           </div>
           {!latest ? (
             <div className="empty-panel">还没有 daily pipeline 运行记录。</div>
           ) : (
-            <div className="run-summary">
-              <div className="run-summary-top">
-                <span className={`status-pill status-${latest.status || 'idle'}`}>{latest.status}</span>
-                <span>{formatDateTime(latest.updatedAt || latest.startedAt)}</span>
-              </div>
-              <strong>{latest.runId}</strong>
-              <p>{latest.userMessage || latest.nextActionCode || '流程记录已写入，可在流程监控查看详情。'}</p>
-              <div className="count-strip">
-                {Object.entries(latest.counts || {}).slice(0, 5).map(([key, value]) => (
-                  <span key={key}>{key}: <b>{value}</b></span>
-                ))}
-              </div>
-            </div>
+            <FlowStatusPanel run={latest} onNavigate={onNavigate} />
           )}
         </div>
       </section>
@@ -204,6 +200,58 @@ function DashboardView({ status, runs, loading, onRefresh, onStartWorkbench }) {
           {runs.length === 0 && <div className="empty-panel">暂无流程批次。</div>}
         </div>
       </section>
+    </div>
+  );
+}
+
+function FlowStatusPanel({ run, onNavigate }) {
+  const currentIndex = Number.isFinite(run.stageIndex)
+    ? run.stageIndex
+    : Math.max(0, PIPELINE_STAGES.findIndex((stage) => stage.id === run.stage));
+  const needsAction = run.requiresUserAction || run.requiresReview || run.status === 'needs_review';
+  const statusText = run.status || 'unknown';
+
+  return (
+    <div className="run-summary">
+      <div className="run-summary-top">
+        <span className={`status-pill status-${statusText}`}>{statusText}</span>
+        <span>{formatDateTime(run.updatedAt || run.startedAt)}</span>
+      </div>
+      <strong>{run.runId}</strong>
+      <div className="flow-progress">
+        {PIPELINE_STAGES.map((stage, index) => {
+          const state = index < currentIndex ? 'done' : index === currentIndex ? 'current' : 'todo';
+          return (
+            <div className={`flow-step flow-step-${state}`} key={stage.id}>
+              <span>{index + 1}</span>
+              <b>{stage.label}</b>
+            </div>
+          );
+        })}
+      </div>
+      <div className={`next-action-card ${needsAction ? 'next-action-warn' : ''}`}>
+        <div>
+          <span>{needsAction ? '需要处理' : '流程状态'}</span>
+          <p>{run.userMessage || run.nextActionCode || '流程记录已更新，可继续从工作台处理。'}</p>
+        </div>
+        {needsAction ? <AlertTriangle size={18} /> : <CheckCircle2 size={18} />}
+      </div>
+      <div className="count-strip">
+        {Object.entries(run.counts || {}).slice(0, 5).map(([key, value]) => (
+          <span key={key}>{key}: <b>{value}</b></span>
+        ))}
+      </div>
+      <div className="flow-action-row">
+        <button className="secondary-button" type="button" onClick={() => onNavigate('mine')}>
+          <Search size={15} /> 去挖词
+        </button>
+        <button className="secondary-button" type="button" onClick={() => onNavigate('title')}>
+          <PenLine size={15} /> 去标题
+        </button>
+        <button className="secondary-button" type="button" onClick={() => onNavigate('experiment')}>
+          <FlaskConical size={15} /> 开发调试
+        </button>
+      </div>
     </div>
   );
 }
@@ -709,11 +757,11 @@ export default function App() {
     return data;
   };
 
-  if (activeTab === 'workflow' || activeTab === 'experiment') {
+  if (activeTab === 'experiment') {
     return (
       <AppShell activeTab={activeTab} setActiveTab={setActiveTab}>
         <div className="studio-host">
-          <WorkflowStudio key={activeTab} initialMode={activeTab === 'workflow' ? 'monitor' : 'experiment'} />
+          <WorkflowStudio key={activeTab} initialMode="experiment" />
         </div>
       </AppShell>
     );
@@ -728,6 +776,7 @@ export default function App() {
           loading={loadingRuns}
           onRefresh={() => refreshOverview().catch(() => {})}
           onStartWorkbench={startWorkbench}
+          onNavigate={setActiveTab}
         />
       )}
       {activeTab === 'mine' && <MiningView onSendToTitle={sendToTitle} />}
