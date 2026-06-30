@@ -1,1270 +1,737 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ReactFlow,
-  MiniMap,
-  Controls,
-  Background,
-  useNodesState,
-  useEdgesState,
-  addEdge,
-  Handle,
-  Position,
-  MarkerType
-} from '@xyflow/react';
-import {
-  Play,
-  Square,
-  RefreshCw,
-  Plus,
-  Trash2,
-  FileText,
+  AlertTriangle,
+  CheckCircle2,
   Clock,
-  Sparkles,
-  Settings,
-  Layers,
-  ChevronRight,
+  Copy,
   Database,
   ExternalLink,
-  Tag
+  FlaskConical,
+  GitBranch,
+  LayoutDashboard,
+  PenLine,
+  Play,
+  Plus,
+  RefreshCw,
+  Search,
+  Send,
+  Square,
+  Trash2
 } from 'lucide-react';
 
-import '@xyflow/react/dist/style.css';
+import WorkflowStudio from './WorkflowStudio.jsx';
 import './App.css';
 
-// ==================== Custom Flow Nodes ====================
+const NAV_ITEMS = [
+  { id: 'dashboard', label: '工作台', icon: LayoutDashboard },
+  { id: 'mine', label: '挖词选品', icon: Search },
+  { id: 'title', label: '标题生成', icon: PenLine },
+  { id: 'workflow', label: '流程监控', icon: GitBranch },
+  { id: 'experiment', label: '节点实验', icon: FlaskConical }
+];
 
-// 1. Input Node (输入参数节点)
-const InputNode = ({ data }) => {
-  const statusColor = {
-    idle: 'border-slate-700 bg-slate-900',
-    running: 'border-blue-500 bg-slate-900 shadow-[0_0_12px_rgba(59,130,246,0.5)]',
-    completed: 'border-emerald-500 bg-slate-900',
-    failed: 'border-rose-500 bg-slate-900'
-  }[data.status || 'idle'];
+const MINER_TABS = [
+  { id: 'peer', label: '同行词根', endpoint: '/api/miner/peer', needsInput: true },
+  { id: 'opp', label: '1688商机', endpoint: '/api/miner/opportunities', needsInput: false },
+  { id: 'sycm-market', label: '参谋关联词', endpoint: '/api/miner/sycm-market', needsInput: true }
+];
 
-  return (
-    <div className={`p-4 rounded-xl border-2 w-64 text-slate-100 ${statusColor} transition-all duration-300`}>
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-bold tracking-wider text-blue-400 uppercase flex items-center gap-1">
-          <Layers size={12} /> 输入节点
-        </span>
-        <span className={`h-2 w-2 rounded-full ${
-          data.status === 'running' ? 'bg-blue-500 animate-ping' :
-          data.status === 'completed' ? 'bg-emerald-500' :
-          data.status === 'failed' ? 'bg-rose-500' : 'bg-slate-500'
-        }`} />
-      </div>
-      <div className="text-sm font-semibold mb-1 truncate text-slate-200">
-        关键词: {data.keyword || <span className="text-slate-500 italic">未设置</span>}
-      </div>
-      <div className="text-xs text-slate-400">
-        最大长度: {data.maxLength || 60} 字符
-      </div>
-      <Handle type="source" position={Position.Right} id="a" style={{ background: '#3b82f6', width: 8, height: 8 }} />
-    </div>
-  );
+const emptyTitleSafety = {
+  canDistribute: false,
+  degraded: false,
+  reason: '未从已验真候选词导入'
 };
 
-// 2. Mining Node (关键词挖掘节点)
-const MiningNode = ({ data }) => {
-  const statusColor = {
-    idle: 'border-slate-700 bg-slate-900',
-    running: 'border-blue-500 bg-slate-900 shadow-[0_0_12px_rgba(59,130,246,0.5)]',
-    completed: 'border-emerald-500 bg-slate-900',
-    failed: 'border-rose-500 bg-slate-900'
-  }[data.status || 'idle'];
+async function fetchJson(url, options) {
+  const res = await fetch(url, options);
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok || payload.ok === false) {
+    throw new Error(payload.error || `请求失败: ${res.status}`);
+  }
+  return payload.data ?? payload;
+}
 
-  const keywords = data.output?.keywords || [];
+function formatDateTime(value) {
+  if (!value) return '暂无';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString();
+}
 
+function copyText(value) {
+  return navigator.clipboard.writeText(String(value || ''));
+}
+
+function getGateMeta(item = {}) {
+  const status = item.gateStatus || (item.canDistribute ? 'verified' : 'candidate');
+  const labels = {
+    candidate: '待验真',
+    verified: '已验真',
+    review: '待复核',
+    rejected: '已拒绝'
+  };
+  return {
+    status,
+    label: labels[status] || status,
+    reason: item.gateReason || (item.canDistribute ? '可进入待确认铺货' : '需验真后才能铺货')
+  };
+}
+
+function AppShell({ activeTab, setActiveTab, children }) {
   return (
-    <div className={`p-4 rounded-xl border-2 w-64 text-slate-100 ${statusColor} transition-all duration-300`}>
-      <Handle type="target" position={Position.Left} id="in" style={{ background: '#3b82f6', width: 8, height: 8 }} />
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-bold tracking-wider text-indigo-400 uppercase flex items-center gap-1">
-          <Database size={12} /> 关键词挖掘
-        </span>
-        <span className={`h-2 w-2 rounded-full ${
-          data.status === 'running' ? 'bg-blue-500 animate-ping' :
-          data.status === 'completed' ? 'bg-emerald-500' :
-          data.status === 'failed' ? 'bg-rose-500' : 'bg-slate-500'
-        }`} />
-      </div>
-      <div className="text-xs text-slate-400 mb-1">
-        挖掘数量限制: {data.count || 10} 个
-      </div>
-
-      {data.status === 'completed' && keywords.length > 0 ? (
-        <div className="mt-2 bg-slate-950 p-2 rounded border border-slate-800 text-[11px] max-h-24 overflow-y-auto">
-          <div className="font-semibold text-indigo-300 mb-1">挖掘词根结果:</div>
-          <div className="flex flex-wrap gap-1">
-            {keywords.map((kw, i) => (
-              <span key={i} className="px-1.5 py-0.5 bg-indigo-950/50 border border-indigo-800 text-indigo-200 rounded text-[10px]">
-                {kw}
-              </span>
-            ))}
+    <div className="app-shell">
+      <aside className="app-sidebar">
+        <div className="brand-block">
+          <div className="brand-mark">E</div>
+          <div>
+            <h1>电商选品工具</h1>
+            <p>React unified console</p>
           </div>
         </div>
-      ) : data.status === 'running' ? (
-        <div className="text-xs text-blue-400 mt-2 flex items-center gap-1.5">
-          <RefreshCw size={12} className="animate-spin" /> AI正在分词与挖掘...
-        </div>
-      ) : (
-        <div className="text-[11px] text-slate-500 mt-1 italic">等待上游输入...</div>
-      )}
-      <Handle type="source" position={Position.Right} id="out" style={{ background: '#3b82f6', width: 8, height: 8 }} />
+        <nav className="app-nav">
+          {NAV_ITEMS.map((item) => {
+            const Icon = item.icon;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                data-testid={`nav-${item.id}`}
+                className={`nav-button ${activeTab === item.id ? 'nav-button-active' : ''}`}
+                onClick={() => setActiveTab(item.id)}
+              >
+                <Icon size={17} />
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+        <a className="legacy-link" href="/legacy/">
+          <ExternalLink size={14} />
+          旧版备份
+        </a>
+      </aside>
+      <main className="app-main">{children}</main>
     </div>
   );
-};
+}
 
-// 3. Title Generator Node (标题生成与选品卡片)
-const TitleGeneratorNode = ({ data }) => {
-  const statusColor = {
-    idle: 'border-slate-700 bg-slate-900',
-    running: 'border-blue-500 bg-slate-900 shadow-[0_0_12px_rgba(59,130,246,0.5)]',
-    completed: 'border-emerald-500 bg-slate-900',
-    failed: 'border-rose-500 bg-slate-900'
-  }[data.status || 'idle'];
+function PageHeader({ title, subtitle, actions }) {
+  return (
+    <header className="page-header">
+      <div>
+        <h2>{title}</h2>
+        {subtitle && <p>{subtitle}</p>}
+      </div>
+      {actions && <div className="page-actions">{actions}</div>}
+    </header>
+  );
+}
 
-  const result = data.output || {};
-  const titles = result.titles || [];
-  const product = result.products?.[0] || null;
+function MetricCard({ label, value, tone = 'neutral' }) {
+  return (
+    <div className={`metric-card metric-${tone}`}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function DashboardView({ status, runs, loading, onRefresh, onStartWorkbench }) {
+  const latest = runs[0] || null;
 
   return (
-    <div className={`p-4 rounded-xl border-2 w-72 text-slate-100 ${statusColor} transition-all duration-300`}>
-      <Handle type="target" position={Position.Left} id="in" style={{ background: '#3b82f6', width: 8, height: 8 }} />
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-bold tracking-wider text-emerald-400 uppercase flex items-center gap-1">
-          <Sparkles size={12} /> 标题与选品生成
-        </span>
-        <span className={`h-2 w-2 rounded-full ${
-          data.status === 'running' ? 'bg-blue-500 animate-ping' :
-          data.status === 'completed' ? 'bg-emerald-500' :
-          data.status === 'failed' ? 'bg-rose-500' : 'bg-slate-500'
-        }`} />
-      </div>
+    <div className="page-scroll">
+      <PageHeader
+        title="每日选品工作台"
+        subtitle="主入口已经切到 React：从这里看状态、跑工作流、进入挖词和标题生成。"
+        actions={(
+          <button className="icon-button" type="button" onClick={onRefresh} title="刷新状态">
+            <RefreshCw size={16} />
+          </button>
+        )}
+      />
 
-      {data.status === 'completed' && titles.length > 0 ? (
-        <div className="space-y-2 mt-2">
-          <div className="bg-slate-950 p-2 rounded border border-slate-800 text-[11px]">
-            <div className="font-semibold text-emerald-300 mb-1 flex items-center gap-1">
-              <Tag size={10} /> 优化淘系标题:
-            </div>
-            <div className="font-mono text-slate-300 bg-slate-900 p-1.5 rounded border border-slate-800 break-words">
-              {titles[0]}
-            </div>
+      <section className="metric-grid">
+        <MetricCard label="种子词" value={status?.files?.seedsCount ?? '-'} tone="blue" />
+        <MetricCard label="历史候选" value={status?.files?.seenCount ?? '-'} />
+        <MetricCard label="拒绝冷却" value={status?.files?.rejectedCount ?? '-'} />
+        <MetricCard label="验真缓存" value={status?.files?.cacheCount ?? '-'} />
+      </section>
+
+      <section className="workbench-band">
+        <WorkbenchLauncher onStart={onStartWorkbench} />
+        <div className="latest-run-panel">
+          <div className="section-title-row">
+            <h3>最近流程</h3>
+            {loading && <span className="tiny-muted">刷新中...</span>}
           </div>
-
-          {product && (
-            <div className="bg-slate-950 p-2 rounded border border-slate-800 text-[11px] space-y-1">
-              <div className="font-semibold text-emerald-300">1688推荐货源:</div>
-              <div className="flex items-center gap-2">
-                {product.主图链接 && (
-                  <img src={product.主图链接} className="w-8 h-8 rounded object-cover border border-slate-800" alt="product" />
-                )}
-                <div className="flex-1 min-w-0">
-                  <div className="text-[10px] text-slate-300 truncate">{product.链接原标题}</div>
-                  <div className="text-[10px] text-slate-400 flex justify-between">
-                    <span>底价: ¥{product.商品原价}</span>
-                    <span>销: {product['30天销量']}</span>
-                  </div>
-                </div>
+          {!latest ? (
+            <div className="empty-panel">还没有 daily pipeline 运行记录。</div>
+          ) : (
+            <div className="run-summary">
+              <div className="run-summary-top">
+                <span className={`status-pill status-${latest.status || 'idle'}`}>{latest.status}</span>
+                <span>{formatDateTime(latest.updatedAt || latest.startedAt)}</span>
               </div>
-              <div className="text-[10px] text-slate-400 border-t border-slate-800/50 pt-1 mt-1 break-words">
-                <span className="text-emerald-500 font-bold">推荐理由: </span>{product.选品理由}
+              <strong>{latest.runId}</strong>
+              <p>{latest.userMessage || latest.nextActionCode || '流程记录已写入，可在流程监控查看详情。'}</p>
+              <div className="count-strip">
+                {Object.entries(latest.counts || {}).slice(0, 5).map(([key, value]) => (
+                  <span key={key}>{key}: <b>{value}</b></span>
+                ))}
               </div>
             </div>
           )}
         </div>
-      ) : data.status === 'running' ? (
-        <div className="text-xs text-blue-400 mt-2 flex items-center gap-1.5">
-          <RefreshCw size={12} className="animate-spin" /> AI正在组合生成标题及优选货源...
+      </section>
+
+      <section className="table-panel">
+        <div className="section-title-row">
+          <h3>流程批次</h3>
+          <span className="tiny-muted">{runs.length} 条</span>
         </div>
-      ) : (
-        <div className="text-[11px] text-slate-500 mt-1 italic">等待上游数据...</div>
-      )}
+        <div className="compact-run-list">
+          {runs.map((run) => (
+            <div className="compact-run-row" key={run.runId}>
+              <span className={`status-dot status-dot-${run.status || 'idle'}`} />
+              <div>
+                <strong>{run.runId}</strong>
+                <p>{run.stage || 'unknown'} · {formatDateTime(run.updatedAt || run.startedAt)}</p>
+              </div>
+              <span>{run.requiresUserAction ? '需处理' : '正常'}</span>
+            </div>
+          ))}
+          {runs.length === 0 && <div className="empty-panel">暂无流程批次。</div>}
+        </div>
+      </section>
     </div>
   );
-};
+}
 
-// 4. Monitor Node (只读日常流程节点)
-const MonitorStageNode = ({ data }) => {
-  const statusLabel = {
-    completed: '已完成',
-    ready: '待铺货',
-    running: '运行中',
-    paused: '待处理',
-    failed: '失败',
-    idle: '等待中'
-  }[data.status || 'idle'];
+function WorkbenchLauncher({ onStart }) {
+  const [form, setForm] = useState({
+    mode: 'daily',
+    keyword: '',
+    mine: 50,
+    verify: 20,
+    generate: 5,
+    export: 20,
+    productsPerKeyword: 3,
+    length: 60
+  });
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
+
+  const update = (key, value) => setForm((current) => ({ ...current, [key]: value }));
+
+  const submit = async (event) => {
+    event.preventDefault();
+    setBusy(true);
+    setMessage('');
+    try {
+      const result = await onStart(form);
+      setMessage(`已启动 ${result.mode} 工作流，pid=${result.pid}`);
+    } catch (err) {
+      setMessage(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
-    <button
-      type="button"
-      className={`monitor-node monitor-node-${data.status || 'idle'}`}
-      onClick={data.onSelect}
-    >
-      {data.hasTarget && <Handle type="target" position={Position.Left} id="in" />}
-      <div className="monitor-node-index">{data.stageIndex + 1}</div>
-      <div className="monitor-node-body">
-        <div className="monitor-node-label">{data.label}</div>
-        <div className="monitor-node-stage">{data.stage}</div>
+    <form className="launcher-panel" onSubmit={submit}>
+      <div className="section-title-row">
+        <h3>启动自动化</h3>
+        <span className="tiny-muted">受保护后台运行</span>
       </div>
-      <span className="monitor-node-status">{statusLabel}</span>
-      {data.hasSource && <Handle type="source" position={Position.Right} id="out" />}
-    </button>
+      <div className="segmented">
+        <button type="button" className={form.mode === 'daily' ? 'active' : ''} onClick={() => update('mode', 'daily')}>每日</button>
+        <button type="button" className={form.mode === 'keyword' ? 'active' : ''} onClick={() => update('mode', 'keyword')}>单词</button>
+      </div>
+      {form.mode === 'keyword' && (
+        <label className="field">
+          <span>关键词</span>
+          <input value={form.keyword} onChange={(e) => update('keyword', e.target.value)} placeholder="例如：纯银项链" />
+        </label>
+      )}
+      <div className="mini-form-grid">
+        {['mine', 'verify', 'generate', 'export', 'productsPerKeyword', 'length'].map((key) => (
+          <label className="field" key={key}>
+            <span>{key}</span>
+            <input type="number" min="1" value={form[key]} onChange={(e) => update(key, e.target.value)} />
+          </label>
+        ))}
+      </div>
+      <button className="primary-button" type="submit" disabled={busy}>
+        {busy ? <RefreshCw size={16} className="spin" /> : <Play size={16} />}
+        启动流程
+      </button>
+      {message && <div className="form-message">{message}</div>}
+    </form>
   );
-};
+}
 
-// ==================== Node Types Map ====================
-const nodeTypes = {
-  'keyword-input': InputNode,
-  'keyword-mining': MiningNode,
-  'title-generator': TitleGeneratorNode,
-  'monitor-stage': MonitorStageNode
-};
-
-const isInputNodeType = (type) => type === 'keyword-input' || type === 'input';
-const MODE_MONITOR = 'monitor';
-const MODE_EXPERIMENT = 'experiment';
-const MONITOR_STAGES = [
-  { id: 'seed', label: '种子/启动', stage: 'seed', stageIndex: 0, position: { x: 40, y: 180 } },
-  { id: 'mined', label: '挖词', stage: 'mined', stageIndex: 1, position: { x: 300, y: 180 } },
-  { id: 'verified', label: '多指标验真', stage: 'verified', stageIndex: 2, position: { x: 560, y: 180 } },
-  { id: 'generated', label: '标题货源', stage: 'generated', stageIndex: 3, position: { x: 820, y: 180 } },
-  { id: 'review', label: '人工复核', stage: 'review', stageIndex: 4, position: { x: 1080, y: 180 } },
-  { id: 'ready', label: '待铺货批次', stage: 'ready', stageIndex: 5, position: { x: 1340, y: 180 } },
-  { id: 'submitted', label: '已提交', stage: 'submitted', stageIndex: 6, position: { x: 1600, y: 180 } }
-];
-const MONITOR_EDGES = MONITOR_STAGES.slice(0, -1).map((stage, index) => ({
-  id: `monitor-${stage.id}-${MONITOR_STAGES[index + 1].id}`,
-  source: stage.id,
-  target: MONITOR_STAGES[index + 1].id,
-  markerEnd: { type: MarkerType.ArrowClosed, color: '#475569' },
-  style: { stroke: '#475569', strokeWidth: 2 }
-}));
-const NODE_LAYOUT = {
-  'keyword-input': { x: 80, y: 160 },
-  'keyword-mining': { x: 520, y: 160 },
-  'title-generator': { x: 980, y: 160 }
-};
-const NODE_ROW_GAP = 190;
-
-const unwrapApiData = (payload) => payload?.data || payload || {};
-
-const isFailedSummary = (summary) => {
-  if (!summary) return false;
-  return summary.ok === false || String(summary.status || '').toLowerCase().includes('failed');
-};
-
-const getSummaryVisualState = (summary) => {
-  if (!summary) return 'idle';
-  const status = String(summary.status || '').toLowerCase();
-  const stage = String(summary.stage || '').toLowerCase();
-  const activeStatuses = new Set(['created', 'started', 'running', 'in_progress', 'processing', 'mined', 'verified', 'generated', 'needs_review', 'awaiting_user_confirmation']);
-  if (isFailedSummary(summary)) return 'failed';
-  if (status === 'workflow_complete' || status === 'submitted' || stage === 'submitted') return 'completed';
-  if (status === 'ready_to_distribute' || status === 'ready' || stage === 'ready') return 'ready';
-  if (summary.requiresUserAction) return 'paused';
-  if (activeStatuses.has(status)) return 'running';
-  return 'idle';
-};
-
-const resolveSummaryStageIndex = (summary) => {
-  if (!summary) return -1;
-  if (Number.isFinite(summary.stageIndex)) return summary.stageIndex;
-  return MONITOR_STAGES.findIndex((stage) => stage.stage === summary.stage);
-};
-
-const getMonitorNodeStatus = (stage, summary) => {
-  if (!summary) return 'idle';
-  if (isFailedSummary(summary) && stage.stageIndex === resolveSummaryStageIndex(summary)) return 'failed';
-  const currentStageIndex = resolveSummaryStageIndex(summary);
-  if (stage.stageIndex < currentStageIndex) return 'completed';
-  if (stage.stageIndex === currentStageIndex) {
-    const visualState = getSummaryVisualState(summary);
-    if (visualState === 'completed') return 'completed';
-    if (visualState === 'ready') return 'ready';
-    return visualState === 'idle' ? 'running' : visualState;
-  }
-  return 'idle';
-};
-
-const formatDateTime = (value) => {
-  if (!value) return '未知时间';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString();
-};
-
-export default function App() {
-  const [mode, setMode] = useState(MODE_MONITOR);
-  const [nodes, setNodes, onNodesChange] = useNodesState([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
-  const [selectedNodeId, setSelectedNodeId] = useState(null);
-  const [selectedMonitorNodeId, setSelectedMonitorNodeId] = useState('seed');
-
-  // 工作流执行状态
-  const [currentRunId, setCurrentRunId] = useState(null);
-  const [runStatus, setRunStatus] = useState('idle'); // 'idle' | 'running' | 'completed' | 'failed' | 'cancelled'
+function MiningView({ onSendToTitle }) {
+  const [seeds, setSeeds] = useState([]);
+  const [seedForm, setSeedForm] = useState({ keyword: '', category: '', priority: 5, type: 'manual' });
+  const [config, setConfig] = useState({ count: 50, source: 'hybrid', minSearchPopularity: 50, sycmPrecheck: true, autoSeedHighTier: false });
   const [logs, setLogs] = useState([]);
-  const [historyRuns, setHistoryRuns] = useState([]);
-  const [templates, setTemplates] = useState([]);
-  const [monitorRuns, setMonitorRuns] = useState([]);
-  const [monitorLatestRun, setMonitorLatestRun] = useState(null);
-  const [selectedMonitorRunId, setSelectedMonitorRunId] = useState(null);
-  const [selectedMonitorRun, setSelectedMonitorRun] = useState(null);
-  const [monitorLoading, setMonitorLoading] = useState(false);
-  const [monitorError, setMonitorError] = useState('');
+  const [candidates, setCandidates] = useState([]);
+  const [running, setRunning] = useState(false);
+  const [minerTab, setMinerTab] = useState('peer');
+  const [minerInput, setMinerInput] = useState('');
+  const [minerResults, setMinerResults] = useState([]);
+  const [minerBusy, setMinerBusy] = useState(false);
+  const eventSourceRef = useRef(null);
 
-  // 1. 获取模板列表
-  const fetchTemplates = async () => {
-    try {
-      const res = await fetch('/api/workflows/templates');
-      const data = await res.json();
-      if (data.ok) {
-        setTemplates(data.data);
-        // 默认加载第一个模板
-        if (data.data.length > 0 && nodes.length === 0) {
-          loadTemplate(data.data[0]);
-        }
-      }
-    } catch (err) {
-      console.error('获取工作流模板失败', err);
-    }
-  };
-
-  // 2. 获取历史运行记录
-  const fetchHistoryRuns = async () => {
-    try {
-      const res = await fetch('/api/workflows/runs');
-      const data = await res.json();
-      if (data.ok) {
-        setHistoryRuns(data.data);
-      }
-    } catch (err) {
-      console.error('获取运行历史失败', err);
-    }
-  };
-
-  const loadWorkbenchRuns = async () => {
-    setMonitorLoading(true);
-    setMonitorError('');
-    try {
-      const res = await fetch('/api/workbench/runs?limit=20');
-      const payload = await res.json();
-      if (payload.ok === false) throw new Error(payload.error || '加载流程监控失败');
-      const data = unwrapApiData(payload);
-      const runs = Array.isArray(data.runs) ? data.runs : [];
-      const latest = data.latest || runs[0] || null;
-      const selectedFreshRun = selectedMonitorRunId
-        ? runs.find((run) => run.runId === selectedMonitorRunId) || null
-        : null;
-      setMonitorRuns(runs);
-      setMonitorLatestRun(latest);
-      if (selectedFreshRun) {
-        setSelectedMonitorRun(selectedFreshRun);
-        loadWorkbenchRunDetail(selectedFreshRun.runId);
-      } else if (latest?.runId) {
-        setSelectedMonitorRunId(latest.runId);
-        setSelectedMonitorRun(latest);
-      } else {
-        setSelectedMonitorRunId(null);
-        setSelectedMonitorRun(null);
-      }
-    } catch (err) {
-      setMonitorError(err.message);
-    } finally {
-      setMonitorLoading(false);
-    }
-  };
-
-  const loadWorkbenchRunDetail = async (runId) => {
-    if (!runId) return;
-    setMonitorLoading(true);
-    setMonitorError('');
-    try {
-      const res = await fetch(`/api/workbench/runs/${runId}`);
-      const payload = await res.json();
-      if (payload.ok === false) throw new Error(payload.error || '加载流程详情失败');
-      setSelectedMonitorRun(unwrapApiData(payload));
-    } catch (err) {
-      setMonitorError(err.message);
-      setSelectedMonitorRun((current) => (
-        selectedMonitorRunId === runId || current?.runId === runId ? null : current
-      ));
-    } finally {
-      setMonitorLoading(false);
-    }
+  const loadSeeds = async () => {
+    const data = await fetchJson('/api/seeds');
+    setSeeds(Array.isArray(data) ? data : []);
   };
 
   useEffect(() => {
-    if (mode === MODE_MONITOR) {
-      loadWorkbenchRuns();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode]);
-
-  useEffect(() => {
-    if (mode === MODE_EXPERIMENT) {
-      fetchTemplates();
-      fetchHistoryRuns();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode]);
-
-  useEffect(() => {
-    if (mode === MODE_MONITOR && selectedMonitorRunId) {
-      loadWorkbenchRunDetail(selectedMonitorRunId);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, selectedMonitorRunId]);
-
-  // 加载工作流模板
-  const loadTemplate = (template) => {
-    const defaultWorkflow = template.workflow;
-    // 重置节点状态为 idle
-    const formattedNodes = defaultWorkflow.nodes.map(n => ({
-      ...n,
-      data: {
-        ...n.data,
-        status: 'idle',
-        output: null,
-        error: null
-      }
-    }));
-    setNodes(formattedNodes);
-    setEdges(defaultWorkflow.edges.map(e => ({
-      ...e,
-      markerEnd: { type: MarkerType.ArrowClosed, color: '#3b82f6' },
-      style: { stroke: '#3b82f6', strokeWidth: 2 }
-    })));
-    setSelectedNodeId(null);
-    setRunStatus('idle');
-    setCurrentRunId(null);
-    setLogs([]);
-  };
-
-  // 添加新连接
-  const onConnect = useCallback((params) => {
-    const newEdge = {
-      ...params,
-      id: `e_${Date.now()}`,
-      markerEnd: { type: MarkerType.ArrowClosed, color: '#3b82f6' },
-      style: { stroke: '#3b82f6', strokeWidth: 2 }
+    loadSeeds().catch((err) => setLogs((current) => current.concat({ type: 'error', message: err.message })));
+    return () => {
+      if (eventSourceRef.current) eventSourceRef.current.close();
     };
-    setEdges((eds) => addEdge(newEdge, eds));
-  }, [setEdges]);
-
-  // 点击节点事件
-  const onNodeClick = useCallback((event, node) => {
-    setSelectedNodeId(node.id);
   }, []);
 
-  // 选中节点对象
-  const selectedNode = useMemo(() => {
-    return nodes.find(n => n.id === selectedNodeId) || null;
-  }, [nodes, selectedNodeId]);
-
-  const activeMonitorSummary = selectedMonitorRun || monitorLatestRun;
-  const selectedMonitorStage = MONITOR_STAGES.find((stage) => stage.id === selectedMonitorNodeId) || MONITOR_STAGES[0];
-  const monitorNodes = useMemo(() => {
-    return MONITOR_STAGES.map((stage, index) => ({
-      id: stage.id,
-      type: 'monitor-stage',
-      position: stage.position,
-      draggable: false,
-      selectable: true,
-      data: {
-        ...stage,
-        status: getMonitorNodeStatus(stage, activeMonitorSummary),
-        hasTarget: index > 0,
-        hasSource: index < MONITOR_STAGES.length - 1,
-        onSelect: () => setSelectedMonitorNodeId(stage.id)
-      }
-    }));
-  }, [activeMonitorSummary]);
-
-  // 修改节点配置参数
-  const updateNodeData = (nodeId, field, value) => {
-    setNodes((nds) =>
-      nds.map((node) => {
-        if (node.id === nodeId) {
-          return {
-            ...node,
-            data: {
-              ...node.data,
-              [field]: value
-            }
-          };
-        }
-        return node;
-      })
-    );
+  const addSeed = async (keyword = seedForm.keyword) => {
+    const cleanKeyword = String(keyword || '').trim();
+    if (!cleanKeyword) return;
+    await fetchJson('/api/seeds', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...seedForm, keyword: cleanKeyword })
+    });
+    setSeedForm((current) => ({ ...current, keyword: '' }));
+    await loadSeeds();
   };
 
-  // SSE 实时更新订阅
-  const listenToRunEvents = (runId) => {
-    const eventSource = new EventSource(`/api/workflows/runs/${runId}/events`);
+  const toggleSeed = async (keyword) => {
+    await fetchJson(`/api/seeds/${encodeURIComponent(keyword)}/toggle`, { method: 'POST' });
+    await loadSeeds();
+  };
 
-    eventSource.onmessage = (event) => {
+  const deleteSeed = async (keyword) => {
+    await fetchJson(`/api/seeds/${encodeURIComponent(keyword)}`, { method: 'DELETE' });
+    await loadSeeds();
+  };
+
+  const startMining = () => {
+    if (running) return;
+    setRunning(true);
+    setLogs([{ type: 'system', message: '正在启动关键词挖掘管道...' }]);
+    setCandidates([]);
+    const params = new URLSearchParams({
+      count: config.count,
+      source: config.source,
+      minSearchPopularity: config.minSearchPopularity,
+      sycmPrecheck: config.sycmPrecheck ? 'true' : 'false',
+      autoSeedHighTier: config.autoSeedHighTier ? 'true' : 'false'
+    });
+    const source = new EventSource(`/api/mine/run?${params.toString()}`);
+    eventSourceRef.current = source;
+
+    source.onmessage = (event) => {
       const data = JSON.parse(event.data);
-
-      if (data.event === 'init') {
-        // 初始化推送，把节点状态都同步一下
-        const { status, nodeStates } = data.payload;
-        setRunStatus(status);
-        syncNodeStates(nodeStates);
-      } else if (data.event === 'status_change') {
-        const { status } = data.payload;
-        setRunStatus(status);
-        if (status === 'completed' || status === 'failed' || status === 'cancelled') {
-          eventSource.close();
-          fetchHistoryRuns();
-        }
-      } else if (data.event === 'node_change') {
-        const { nodeId, state } = data.payload;
-        setNodes((nds) =>
-          nds.map((node) => {
-            if (node.id === nodeId) {
-              return {
-                ...node,
-                data: {
-                  ...node.data,
-                  status: state.status,
-                  output: state.output,
-                  error: state.error
-                }
-              };
-            }
-            return node;
-          })
-        );
-      } else if (data.event === 'log') {
-        const log = data.payload;
-        setLogs((prev) => [...prev, log]);
-        // 自动滚动到日志底部
-        setTimeout(() => {
-          const consoleEl = document.getElementById('console-terminal');
-          if (consoleEl) {
-            consoleEl.scrollTop = consoleEl.scrollHeight;
-          }
-        }, 50);
-      }
-    };
-
-    eventSource.onerror = () => {
-      eventSource.close();
-    };
-
-    return eventSource;
-  };
-
-  // 同步工作流节点状态到前端组件
-  const syncNodeStates = (nodeStates) => {
-    setNodes((nds) =>
-      nds.map((node) => {
-        const state = nodeStates[node.id];
-        if (state) {
-          return {
-            ...node,
-            data: {
-              ...node.data,
-              status: state.status,
-              output: state.output,
-              error: state.error
-            }
-          };
-        }
-        return node;
-      })
-    );
-  };
-
-  // 加载指定历史运行记录的详情和日志
-  const loadHistoryRun = async (runId) => {
-    try {
-      setSelectedNodeId(null);
-      setLogs([]);
-      setCurrentRunId(runId);
-      setRunStatus('running');
-
-      const res = await fetch(`/api/workflows/runs/${runId}`);
-      const data = await res.json();
-
-      if (data.ok) {
-        const run = data.data;
-        // 把工作流图载入画布
-        const defaultWorkflow = run.workflow;
-
-        // 载入节点和边，附带运行时状态
-        setNodes(defaultWorkflow.nodes.map(n => {
-          const state = run.nodeStates[n.id] || {};
-          return {
-            ...n,
-            data: {
-              ...n.data,
-              status: state.status || 'idle',
-              output: state.output || null,
-              error: state.error || null
-            }
-          };
-        }));
-
-        setEdges(defaultWorkflow.edges.map(e => ({
-          ...e,
-          markerEnd: { type: MarkerType.ArrowClosed, color: '#3b82f6' },
-          style: { stroke: '#3b82f6', strokeWidth: 2 }
-        })));
-
-        setRunStatus(run.status);
-
-        // 开启 SSE 监听这个运行的实时变动（如果它是未完成的）或者直接拉日志
-        if (run.status === 'running' || run.status === 'pending') {
-          listenToRunEvents(runId);
-        } else {
-          // 直接把历史日志塞入 logs 状态中
-          if (run.logs) {
-            setLogs(run.logs);
-          }
-        }
-      }
-    } catch (err) {
-      console.error('加载历史记录失败', err);
-    }
-  };
-
-  // 运行当前画布上的工作流
-  const handleRunWorkflow = async () => {
-    if (runStatus === 'running') return;
-
-    setLogs([]);
-    setRunStatus('pending');
-
-    // 格式化工作流的 nodes/edges
-    const workflowDef = {
-      nodes: nodes.map(n => ({
-        id: n.id,
-        type: n.type,
-        position: n.position,
-        data: n.data
-      })),
-      edges: edges.map(e => ({
-        id: e.id,
-        source: e.source,
-        target: e.target
-      }))
-    };
-
-    try {
-      const validationRes = await fetch('/api/workflows/validate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workflow: workflowDef })
-      });
-      const validationPayload = await validationRes.json();
-      if (!validationPayload.ok) {
-        const errors = validationPayload.data?.errors || [{ message: validationPayload.error || '工作流校验失败' }];
-        setRunStatus('failed');
-        setLogs(errors.map(error => ({
-          timestamp: new Date().toISOString(),
-          level: 'error',
-          message: `[${error.code || 'validation_error'}] ${error.message}`
-        })));
-        return;
-      }
-
-      const res = await fetch('/api/workflows/run', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workflow: workflowDef })
-      });
-      const data = await res.json();
-
-      if (data.ok) {
-        const runId = data.data.runId;
-        setCurrentRunId(runId);
-        // 开始 SSE 监听运行事件
-        listenToRunEvents(runId);
+      if (data.type === 'result') {
+        setCandidates(data.data?.candidates || []);
+        setLogs((current) => current.concat({ type: 'system', message: '挖掘管道执行完成。' }));
+        source.close();
+        eventSourceRef.current = null;
+        setRunning(false);
       } else {
-        alert(`启动失败: ${data.error}`);
-        setRunStatus('failed');
+        setLogs((current) => current.concat({ type: data.type || 'log', message: data.message || '' }));
       }
-    } catch (err) {
-      alert(`启动请求失败: ${err.message}`);
-      setRunStatus('failed');
-    }
+    };
+
+    source.onerror = () => {
+      setLogs((current) => current.concat({ type: 'error', message: '日志流连接中断。' }));
+      source.close();
+      eventSourceRef.current = null;
+      setRunning(false);
+    };
   };
 
-  // 取消当前正在执行的工作流
-  const handleCancelWorkflow = async () => {
-    if (!currentRunId) return;
+  const stopMining = () => {
+    if (eventSourceRef.current) eventSourceRef.current.close();
+    eventSourceRef.current = null;
+    setRunning(false);
+    setLogs((current) => current.concat({ type: 'error', message: '挖掘任务已手动停止。' }));
+  };
+
+  const runRootMiner = async () => {
+    const tab = MINER_TABS.find((item) => item.id === minerTab);
+    if (!tab) return;
+    if (tab.needsInput && !minerInput.trim()) return;
+    setMinerBusy(true);
+    setMinerResults([]);
     try {
-      await fetch(`/api/workflows/runs/${currentRunId}/cancel`, {
-        method: 'POST'
+      const data = await fetchJson(tab.endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(tab.needsInput ? { keyword: minerInput.trim() } : {})
       });
-    } catch (err) {
-      console.error('取消工作流失败', err);
+      setMinerResults(Array.isArray(data) ? data : []);
+    } finally {
+      setMinerBusy(false);
     }
-  };
-
-  // 画布添加新节点
-  const handleAddNode = (type) => {
-    const labels = {
-      'keyword-input': '输入参数',
-      'keyword-mining': '长尾词挖掘',
-      'title-generator': '标题生成器'
-    };
-    const basePosition = NODE_LAYOUT[type] || { x: 120, y: 160 };
-    const sameTypeCount = nodes.filter((node) => node.type === type).length;
-
-    const newId = `${type}_${Date.now()}`;
-    const newNode = {
-      id: newId,
-      type,
-      position: {
-        x: basePosition.x,
-        y: basePosition.y + sameTypeCount * NODE_ROW_GAP
-      },
-      data: {
-        label: labels[type],
-        status: 'idle',
-        keyword: type === 'keyword-input' ? '纯银项链' : '',
-        count: type === 'keyword-mining' ? 5 : undefined,
-        maxLength: type === 'keyword-input' ? 60 : undefined
-      }
-    };
-    setNodes((nds) => nds.concat(newNode));
-  };
-
-  // 删除选中节点或连接
-  const handleDeleteSelected = () => {
-    if (!selectedNodeId) return;
-    setNodes((nds) => nds.filter((n) => n.id !== selectedNodeId));
-    setEdges((eds) => eds.filter((e) => e.source !== selectedNodeId && e.target !== selectedNodeId));
-    setSelectedNodeId(null);
-  };
-
-  // 返回原原生 Web 界面
-  const handleGoBack = () => {
-    window.location.href = '/index.html';
   };
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-slate-950 font-sans text-slate-100">
-
-      {/* 1. Left Sidebar: History and Node library */}
-      <div className="w-80 border-r border-slate-800 bg-slate-900/60 flex flex-col h-full shrink-0">
-        <div className="p-4 border-b border-slate-800 bg-slate-900 space-y-3">
-          <div className="flex items-center gap-2">
-            <Layers className="text-blue-500" size={20} />
-            <h1 className="font-bold text-sm tracking-wider text-slate-200">
-              {mode === MODE_MONITOR ? '流程监控' : '标题生成工作流画布'}
-            </h1>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              onClick={() => setMode(MODE_MONITOR)}
-              className={`mode-toggle ${mode === MODE_MONITOR ? 'mode-toggle-active' : ''}`}
-            >
-              流程监控
-            </button>
-            <button
-              onClick={() => setMode(MODE_EXPERIMENT)}
-              className={`mode-toggle ${mode === MODE_EXPERIMENT ? 'mode-toggle-active' : ''}`}
-            >
-              节点实验
-            </button>
-          </div>
-        </div>
-
-        {/* 节点库 */}
-        {mode === MODE_EXPERIMENT && (
-        <div className="p-4 border-b border-slate-800 space-y-3 bg-slate-900/40">
-          <h2 className="text-xs font-bold tracking-wider text-slate-400 uppercase">节点库 (点击添加)</h2>
-          <div className="grid grid-cols-1 gap-2">
-            <button
-              onClick={() => handleAddNode('keyword-input')}
-              className="flex items-center justify-between p-2.5 rounded-lg border border-blue-500/30 hover:border-blue-500 bg-blue-950/20 hover:bg-blue-950/40 text-blue-300 text-xs font-semibold transition-all"
-            >
-              <span className="flex items-center gap-2"><Plus size={14} /> 输入节点</span>
-              <span className="text-[10px] text-blue-500/60">Input</span>
-            </button>
-            <button
-              onClick={() => handleAddNode('keyword-mining')}
-              className="flex items-center justify-between p-2.5 rounded-lg border border-indigo-500/30 hover:border-indigo-500 bg-indigo-950/20 hover:bg-indigo-950/40 text-indigo-300 text-xs font-semibold transition-all"
-            >
-              <span className="flex items-center gap-2"><Plus size={14} /> 关键词挖掘</span>
-              <span className="text-[10px] text-indigo-500/60">Mining</span>
-            </button>
-            <button
-              onClick={() => handleAddNode('title-generator')}
-              className="flex items-center justify-between p-2.5 rounded-lg border border-emerald-500/30 hover:border-emerald-500 bg-emerald-950/20 hover:bg-emerald-950/40 text-emerald-300 text-xs font-semibold transition-all"
-            >
-              <span className="flex items-center gap-2"><Plus size={14} /> 标题生成器</span>
-              <span className="text-[10px] text-emerald-500/60">Generator</span>
-            </button>
-          </div>
-        </div>
+    <div className="page-scroll">
+      <PageHeader
+        title="挖词选品"
+        subtitle="种子池、词根挖掘、SSE 挖词结果在同一页完成，结果可直接送入标题生成。"
+        actions={(
+          <button className="icon-button" type="button" onClick={() => loadSeeds()} title="刷新种子池">
+            <RefreshCw size={16} />
+          </button>
         )}
+      />
 
-        {/* 模板加载 */}
-        {mode === MODE_EXPERIMENT && templates.length > 0 && (
-          <div className="p-4 border-b border-slate-800 bg-slate-900/20">
-            <h2 className="text-xs font-bold tracking-wider text-slate-400 uppercase mb-2">预设链模板</h2>
-            <button
-              onClick={() => loadTemplate(templates[0])}
-              className="w-full text-left p-2.5 rounded border border-slate-700 bg-slate-800 hover:bg-slate-750 text-xs font-medium flex items-center justify-between transition-all"
-            >
-              <div>
-                <div className="text-slate-200 font-semibold">{templates[0].name}</div>
-                <div className="text-[10px] text-slate-400 truncate w-56">{templates[0].description}</div>
-              </div>
-              <ChevronRight size={14} className="text-slate-500" />
-            </button>
+      <section className="split-layout">
+        <div className="table-panel">
+          <div className="section-title-row">
+            <h3>种子池</h3>
+            <span className="tiny-muted">{seeds.length} 个</span>
           </div>
-        )}
-
-        {/* 历史运行列表 */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-2">
-          <h2 className="text-xs font-bold tracking-wider text-slate-400 uppercase flex items-center gap-1.5">
-            <Clock size={12} /> {mode === MODE_MONITOR ? '流程批次历史' : '运行历史'}
-          </h2>
-          {mode === MODE_MONITOR ? (
-            <div className="space-y-2">
-              <button
-                onClick={loadWorkbenchRuns}
-                className="w-full py-2 rounded border border-slate-700 bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 font-semibold flex items-center justify-center gap-1.5"
-              >
-                <RefreshCw size={13} className={monitorLoading ? 'animate-spin' : ''} /> 刷新批次
-              </button>
-              {monitorError && (
-                <div className="monitor-alert monitor-alert-error">{monitorError}</div>
-              )}
-              {monitorRuns.length === 0 ? (
-                <div className="text-xs text-slate-500 italic p-2">暂无真实流程运行记录</div>
-              ) : (
-                <div className="space-y-1.5">
-                  {monitorRuns.map((run) => (
-                    <button
-                      key={run.runId}
-                      onClick={() => {
-                        setSelectedMonitorRun(run);
-                        setSelectedMonitorRunId(run.runId);
-                      }}
-                      className={`monitor-run-card ${selectedMonitorRunId === run.runId ? 'monitor-run-card-active' : ''}`}
-                    >
-                      <div className="flex justify-between items-center font-mono text-[10px] text-slate-400 mb-1">
-                        <span className="truncate w-36">{run.runId}</span>
-                        <span className={`monitor-status-pill monitor-status-${getSummaryVisualState(run)}`}>
-                          {run.status || 'unknown'}
-                        </span>
-                      </div>
-                      <div className="font-semibold text-slate-200 truncate">
-                        {run.stage || 'unknown'} · 第 {(resolveSummaryStageIndex(run) + 1) || 0} 阶段
-                      </div>
-                      <div className="text-[10px] text-slate-500 mt-1">
-                        {formatDateTime(run.updatedAt || run.startedAt)}
-                      </div>
-                    </button>
-                  ))}
+          <form className="inline-form" onSubmit={(event) => { event.preventDefault(); addSeed(); }}>
+            <input value={seedForm.keyword} onChange={(e) => setSeedForm({ ...seedForm, keyword: e.target.value })} placeholder="新增种子词" />
+            <input value={seedForm.category} onChange={(e) => setSeedForm({ ...seedForm, category: e.target.value })} placeholder="类目" />
+            <input type="number" min="1" max="10" value={seedForm.priority} onChange={(e) => setSeedForm({ ...seedForm, priority: e.target.value })} />
+            <button type="submit" className="icon-button" title="添加"><Plus size={16} /></button>
+          </form>
+          <div className="seed-list">
+            {seeds.map((seed) => (
+              <div className="seed-row" key={seed.keyword}>
+                <div>
+                  <strong>{seed.keyword}</strong>
+                  <span>{seed.category || '未分类'} · 分数 {seed.priorityScore || seed.priority || '-'}</span>
                 </div>
-              )}
-            </div>
-          ) : historyRuns.length === 0 ? (
-            <div className="text-xs text-slate-500 italic p-2">暂无历史执行记录</div>
-          ) : (
-            <div className="space-y-1.5">
-              {historyRuns.map((run) => (
-                <button
-                  key={run.runId}
-                  onClick={() => loadHistoryRun(run.runId)}
-                  className={`w-full text-left p-2.5 rounded text-xs border transition-all ${
-                    currentRunId === run.runId
-                      ? 'bg-blue-950/40 border-blue-500 text-blue-100'
-                      : 'bg-slate-800/40 border-slate-800/80 hover:bg-slate-800/90 text-slate-300'
-                  }`}
-                >
-                  <div className="flex justify-between items-center font-mono text-[10px] text-slate-400 mb-1">
-                    <span className="truncate w-32">{run.runId}</span>
-                    <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold ${
-                      run.status === 'completed' ? 'bg-emerald-500/10 text-emerald-400' :
-                      run.status === 'failed' ? 'bg-rose-500/10 text-rose-400' :
-                      run.status === 'cancelled' ? 'bg-amber-500/10 text-amber-400' : 'bg-blue-500/10 text-blue-400'
-                    }`}>
-                      {run.status.toUpperCase()}
-                    </span>
-                  </div>
-                  <div className="font-semibold text-slate-200 truncate">
-                    词: {run.keyword || <span className="italic text-slate-500">未命名图</span>}
-                  </div>
-                  <div className="text-[10px] text-slate-500 mt-1">
-                    {new Date(run.startedAt).toLocaleString()}
-                  </div>
+                <span className={`status-pill status-${seed.status || 'active'}`}>{seed.status === 'paused' ? '暂停' : '活跃'}</span>
+                <button className="icon-button" type="button" onClick={() => toggleSeed(seed.keyword)} title={seed.status === 'paused' ? '恢复' : '暂停'}>
+                  {seed.status === 'paused' ? <Play size={15} /> : <Square size={15} />}
                 </button>
-              ))}
-            </div>
-          )}
+                <button className="icon-button danger" type="button" onClick={() => deleteSeed(seed.keyword)} title="删除">
+                  <Trash2 size={15} />
+                </button>
+              </div>
+            ))}
+            {seeds.length === 0 && <div className="empty-panel">种子池为空，先添加几个核心品类词。</div>}
+          </div>
         </div>
 
-        {/* 返回原生 web */}
-        <div className="p-4 border-t border-slate-800 bg-slate-900">
-          <button
-            onClick={handleGoBack}
-            className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold rounded-lg flex items-center justify-center gap-1.5 transition-all"
-          >
-            返回原生选品页 <ExternalLink size={12} />
+        <div className="table-panel">
+          <div className="section-title-row">
+            <h3>词根发现</h3>
+            <span className="tiny-muted">同行 / 商机 / 参谋</span>
+          </div>
+          <div className="segmented">
+            {MINER_TABS.map((tab) => (
+              <button type="button" key={tab.id} className={minerTab === tab.id ? 'active' : ''} onClick={() => setMinerTab(tab.id)}>{tab.label}</button>
+            ))}
+          </div>
+          {MINER_TABS.find((tab) => tab.id === minerTab)?.needsInput && (
+            <input className="wide-input" value={minerInput} onChange={(e) => setMinerInput(e.target.value)} placeholder="输入关键词或商品链接" />
+          )}
+          <button className="primary-button" type="button" onClick={runRootMiner} disabled={minerBusy}>
+            {minerBusy ? <RefreshCw size={16} className="spin" /> : <Database size={16} />}
+            提取并验真
+          </button>
+          <div className="chip-area">
+            {minerResults.map((item) => (
+              <button className="keyword-chip" type="button" key={`${item.word}-${item.searchPopularity || item.count || ''}`} onClick={() => addSeed(item.word)}>
+                <span>{item.word}</span>
+                <small>{item.searchPopularity ? `人气 ${item.searchPopularity}` : `词频 ${item.count || 1}`}</small>
+                <Plus size={13} />
+              </button>
+            ))}
+            {minerResults.length === 0 && <div className="empty-panel">提取出的词根会出现在这里，可一键导入种子池。</div>}
+          </div>
+        </div>
+      </section>
+
+      <section className="table-panel">
+        <div className="section-title-row">
+          <h3>自动挖词流</h3>
+          <span className="tiny-muted">候选词会做去重、验真和质量分层</span>
+        </div>
+        <div className="config-row">
+          <label className="field"><span>数量</span><input type="number" value={config.count} onChange={(e) => setConfig({ ...config, count: e.target.value })} /></label>
+          <label className="field"><span>来源</span><select value={config.source} onChange={(e) => setConfig({ ...config, source: e.target.value })}><option value="hybrid">hybrid</option><option value="local">local</option><option value="ai">ai</option></select></label>
+          <label className="field"><span>最低人气</span><input type="number" value={config.minSearchPopularity} onChange={(e) => setConfig({ ...config, minSearchPopularity: e.target.value })} /></label>
+          <label className="toggle-field"><input type="checkbox" checked={config.sycmPrecheck} onChange={(e) => setConfig({ ...config, sycmPrecheck: e.target.checked })} /> 生意参谋预检</label>
+          <label className="toggle-field"><input type="checkbox" checked={config.autoSeedHighTier} onChange={(e) => setConfig({ ...config, autoSeedHighTier: e.target.checked })} /> 高分自动入池</label>
+          <button className="primary-button" type="button" onClick={running ? stopMining : startMining}>
+            {running ? <Square size={16} /> : <Play size={16} />}
+            {running ? '停止' : '开始挖掘'}
           </button>
         </div>
-      </div>
-
-      {/* 2. Middle & Right: Canvas, Log panel, and Settings panel */}
-      <div className="flex-1 flex flex-col h-full relative">
-
-        {/* 控制工具条 */}
-        <div className="h-14 border-b border-slate-800 bg-slate-900 flex justify-between items-center px-6 z-10 shrink-0">
-          <div className="flex items-center gap-4">
-            <span className="text-xs text-slate-400 flex items-center gap-2">
-              当前状态:
-              {mode === MODE_MONITOR ? (
-                <span className={`monitor-status-pill monitor-status-${getSummaryVisualState(activeMonitorSummary)}`}>
-                  {activeMonitorSummary?.status || 'no_runs'}
-                </span>
-              ) : (
-                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                  runStatus === 'completed' ? 'bg-emerald-500/10 text-emerald-400' :
-                  runStatus === 'failed' ? 'bg-rose-500/10 text-rose-400' :
-                  runStatus === 'cancelled' ? 'bg-amber-500/10 text-amber-400' :
-                  runStatus === 'running' ? 'bg-blue-500/10 text-blue-400 animate-pulse' : 'bg-slate-800 text-slate-400'
-                }`}>
-                  {runStatus}
-                </span>
-              )}
-            </span>
-            {mode === MODE_MONITOR && activeMonitorSummary?.runId && (
-              <span className="text-xs font-mono text-slate-500">RunId: {activeMonitorSummary.runId}</span>
-            )}
-            {mode === MODE_EXPERIMENT && currentRunId && (
-              <span className="text-xs font-mono text-slate-500">RunId: {currentRunId}</span>
-            )}
-          </div>
-
-          <div className="flex items-center gap-2">
-            {mode === MODE_MONITOR ? (
-              <div className="text-xs text-slate-500">只读监控 · 点击节点查看阶段详情</div>
-            ) : (
-              <>
-            {selectedNodeId && (
-              <button
-                onClick={handleDeleteSelected}
-                className="px-3 py-1.5 bg-rose-950/20 hover:bg-rose-950/40 text-rose-300 border border-rose-500/30 hover:border-rose-500 text-xs font-semibold rounded-md flex items-center gap-1 transition-all"
-              >
-                <Trash2 size={13} /> 删除选中
-              </button>
-            )}
-
-            {runStatus === 'running' || runStatus === 'pending' ? (
-              <button
-                onClick={handleCancelWorkflow}
-                className="px-4 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold rounded-md flex items-center gap-1.5 shadow-lg shadow-amber-900/20 transition-all"
-              >
-                <Square size={13} fill="currentColor" /> 终止运行
-              </button>
-            ) : (
-              <button
-                onClick={handleRunWorkflow}
-                disabled={nodes.length === 0}
-                className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-bold rounded-md flex items-center gap-1.5 shadow-lg shadow-blue-900/20 transition-all"
-              >
-                <Play size={13} fill="currentColor" /> 运行工作流
-              </button>
-            )}
-              </>
-            )}
-          </div>
+        <div className="console-panel">
+          {logs.map((line, index) => <div key={index} className={`log-line log-${line.type}`}>{line.message}</div>)}
+          {logs.length === 0 && <div className="log-line">日志会在运行后实时显示。</div>}
         </div>
-
-        {/* 画布与日志面板的上下分栏布局 */}
-        <div className="flex-1 flex flex-col min-h-0">
-
-          {/* 画布 */}
-          <div className="flex-1 bg-slate-950 position-relative min-h-[300px]">
-            {mode === MODE_MONITOR ? (
-              <ReactFlow
-                nodes={monitorNodes}
-                edges={MONITOR_EDGES}
-                onNodeClick={(event, node) => setSelectedMonitorNodeId(node.id)}
-                nodeTypes={nodeTypes}
-                fitView
-                fitViewOptions={{ padding: 0.18, includeHiddenNodes: false, minZoom: 0.6, maxZoom: 0.95 }}
-                minZoom={0.35}
-                maxZoom={1.2}
-                nodesDraggable={false}
-                nodesConnectable={false}
-                edgesReconnectable={false}
-                deleteKeyCode={null}
-              >
-                <Background color="#334155" gap={24} size={1} />
-                <Controls className="bg-slate-900 border border-slate-800 text-slate-100 rounded" showInteractive={false} />
-              </ReactFlow>
-            ) : (
-              <ReactFlow
-                nodes={nodes}
-                edges={edges}
-                onNodesChange={onNodesChange}
-                onEdgesChange={onEdgesChange}
-                onConnect={onConnect}
-                onNodeClick={onNodeClick}
-                nodeTypes={nodeTypes}
-                fitView
-                fitViewOptions={{ padding: 0.25, includeHiddenNodes: false, minZoom: 0.7, maxZoom: 1 }}
-                minZoom={0.5}
-                maxZoom={1.5}
-              >
-                <Background color="#334155" gap={20} size={1} />
-                <Controls className="bg-slate-900 border border-slate-800 text-slate-100 rounded" />
-                <MiniMap
-                  bgColor="#0f172a"
-                  nodeColor={(n) => {
-                    if (isInputNodeType(n.type)) return '#3b82f6';
-                    if (n.type === 'keyword-mining') return '#6366f1';
-                    if (n.type === 'title-generator') return '#10b981';
-                    return '#64748b';
-                  }}
-                  maskColor="rgba(15, 23, 42, 0.6)"
-                />
-              </ReactFlow>
-            )}
-          </div>
-
-          {/* 底部控制台日志面板 */}
-          {mode === MODE_EXPERIMENT && (
-          <div className="h-64 border-t border-slate-800 bg-slate-900/80 flex flex-col shrink-0">
-            <div className="h-9 border-b border-slate-800 bg-slate-900 flex items-center justify-between px-4">
-              <span className="text-xs font-bold tracking-wider text-slate-400 flex items-center gap-1.5">
-                <FileText size={13} /> 实时运行控制台日志
-              </span>
-              <button
-                onClick={() => setLogs([])}
-                className="text-[10px] text-slate-500 hover:text-slate-300 uppercase tracking-wider font-bold transition-all"
-              >
-                清空控制台
-              </button>
-            </div>
-
-            <div
-              id="console-terminal"
-              className="flex-1 p-4 overflow-y-auto font-mono text-xs bg-slate-950/80 space-y-1.5 selection:bg-slate-800 selection:text-white"
-            >
-              {logs.length === 0 ? (
-                <div className="text-slate-600 italic">控制台处于闲置状态。点击“运行工作流”后即可捕获步骤执行的实时流式日志。</div>
-              ) : (
-                logs.map((log, index) => {
-                  const levelColors = {
-                    info: 'text-slate-300',
-                    warn: 'text-amber-400',
-                    error: 'text-rose-400 font-semibold'
-                  }[log.level || 'info'];
-
-                  return (
-                    <div key={index} className="flex gap-2 leading-relaxed">
-                      <span className="text-slate-600 shrink-0 select-none">
-                        [{new Date(log.timestamp).toLocaleTimeString()}]
-                      </span>
-                      <span className={levelColors}>{log.message}</span>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </div>
-          )}
-
-        </div>
-
-      </div>
-
-      {/* 3. Right Property Panel */}
-      <div className="w-80 border-l border-slate-800 bg-slate-900/40 flex flex-col h-full shrink-0">
-        <div className="p-4 border-b border-slate-800 bg-slate-900 flex items-center gap-2">
-          <Settings className="text-slate-400" size={18} />
-          <h2 className="font-bold text-sm tracking-wider text-slate-200">
-            {mode === MODE_MONITOR ? '流程详情' : '属性配置面板'}
-          </h2>
-        </div>
-
-        {mode === MODE_MONITOR ? (
-          <div className="p-5 flex-1 overflow-y-auto space-y-5">
-            {!activeMonitorSummary ? (
-              <div className="p-4 rounded border border-slate-800 bg-slate-950/50 text-xs text-slate-500 italic">
-                暂无可展示的流程批次。新的 daily pipeline 运行完成阶段写入后会出现在这里。
-              </div>
-            ) : (
-              <>
-                <div className="monitor-detail-block">
-                  <span className="monitor-detail-label">当前批次</span>
-                  <div className="font-mono text-xs text-slate-300 break-all">{activeMonitorSummary.runId}</div>
-                  <div className="text-[11px] text-slate-500 mt-2">
-                    更新于 {formatDateTime(activeMonitorSummary.updatedAt || activeMonitorSummary.startedAt)}
-                  </div>
-                </div>
-
-                <div className="monitor-detail-grid">
-                  <div>
-                    <span className="monitor-detail-label">状态</span>
-                    <span className={`monitor-status-pill monitor-status-${getSummaryVisualState(activeMonitorSummary)}`}>
-                      {activeMonitorSummary.status}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="monitor-detail-label">阶段</span>
-                    <div className="text-sm font-semibold text-slate-200">{activeMonitorSummary.stage}</div>
-                  </div>
-                </div>
-
-                {activeMonitorSummary.requiresUserAction && (
-                  <div className="monitor-alert monitor-alert-warning">
-                    <div className="font-bold text-amber-200 mb-1">{activeMonitorSummary.nextActionCode || '需要人工处理'}</div>
-                    <div>{activeMonitorSummary.userMessage || '请检查流程输出并继续下一步。'}</div>
-                    {(activeMonitorSummary.blockers || []).length > 0 && (
-                      <div className="mt-2 font-mono text-[10px] text-amber-100/80">
-                        {activeMonitorSummary.blockers.join(', ')}
-                      </div>
-                    )}
-                    {activeMonitorSummary.nextCommand && (
-                      <div className="monitor-command mt-2">{activeMonitorSummary.nextCommand}</div>
-                    )}
-                  </div>
-                )}
-
-                <div className="monitor-detail-block">
-                  <span className="monitor-detail-label">选中节点</span>
-                  <div className="text-sm font-semibold text-slate-200">{selectedMonitorStage.label}</div>
-                  <div className="text-[11px] text-slate-500 mt-1">
-                    {selectedMonitorStage.stage} · 阶段 {selectedMonitorStage.stageIndex + 1}
-                  </div>
-                  <div className={`monitor-stage-state monitor-stage-state-${getMonitorNodeStatus(selectedMonitorStage, activeMonitorSummary)}`}>
-                    {getMonitorNodeStatus(selectedMonitorStage, activeMonitorSummary)}
-                  </div>
-                </div>
-
-                <div className="monitor-detail-block">
-                  <span className="monitor-detail-label">关键计数</span>
-                  <div className="monitor-count-list">
-                    {Object.entries(activeMonitorSummary.counts || {}).slice(0, 8).map(([key, value]) => (
-                      <div key={key} className="monitor-count-row">
-                        <span>{key}</span>
-                        <b>{value}</b>
-                      </div>
-                    ))}
-                    {Object.keys(activeMonitorSummary.counts || {}).length === 0 && (
-                      <div className="text-xs text-slate-500 italic">暂无计数数据</div>
-                    )}
-                  </div>
-                </div>
-
-                {activeMonitorSummary.previews?.generatedProducts?.length > 0 && (
-                  <div className="monitor-detail-block">
-                    <span className="monitor-detail-label">标题货源预览</span>
-                    <div className="space-y-2">
-                      {activeMonitorSummary.previews.generatedProducts.slice(0, 3).map((item, index) => (
-                        <div key={index} className="monitor-preview-row">
-                          {item.title || item.铺货标题 || item.keyword || JSON.stringify(item).slice(0, 80)}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        ) : selectedNode ? (
-          <div className="p-5 flex-1 overflow-y-auto space-y-6">
-            <div>
-              <span className="text-[10px] uppercase font-bold tracking-widest text-slate-500 block mb-1">
-                节点 ID & 类型
-              </span>
-              <div className="font-mono text-xs text-slate-400 bg-slate-950/50 p-2 rounded border border-slate-800 break-all">
-                {selectedNode.id} ({selectedNode.type})
-              </div>
-            </div>
-
-            {/* 输入节点独有参数 */}
-            {isInputNodeType(selectedNode.type) && (
-              <div className="space-y-4">
-                <div className="border-t border-slate-800/80 pt-4">
-                  <label className="text-xs font-bold text-slate-300 block mb-2">搜索核心关键词</label>
-                  <input
-                    type="text"
-                    value={selectedNode.data.keyword || ''}
-                    onChange={(e) => updateNodeData(selectedNode.id, 'keyword', e.target.value)}
-                    className="w-full p-2.5 rounded-lg border border-slate-700 bg-slate-950 focus:border-blue-500 focus:outline-none text-slate-100 text-sm transition-all"
-                    placeholder="例如: 纯银项链女高级感"
-                  />
-                  <p className="text-[10px] text-slate-500 mt-1">此词作为整个标题分析与1688货源搜索的核心关键词。</p>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-slate-300 block">标题最大长度 (字符)</label>
-                  <input
-                    type="number"
-                    value={selectedNode.data.maxLength || 60}
-                    onChange={(e) => updateNodeData(selectedNode.id, 'maxLength', parseInt(e.target.value) || 60)}
-                    className="w-full p-2.5 rounded-lg border border-slate-700 bg-slate-950 focus:border-blue-500 focus:outline-none text-slate-100 text-sm transition-all"
-                    min="10"
-                    max="100"
-                  />
-                  <p className="text-[10px] text-slate-500">最终在淘系发布时限制的最大标题字数。</p>
-                </div>
-              </div>
-            )}
-
-            {/* 关键词挖掘节点参数 */}
-            {selectedNode.type === 'keyword-mining' && (
-              <div className="space-y-4 border-t border-slate-800/80 pt-4">
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-slate-300 block">最大挖掘候选词数量</label>
-                  <input
-                    type="number"
-                    value={selectedNode.data.count || 5}
-                    onChange={(e) => updateNodeData(selectedNode.id, 'count', parseInt(e.target.value) || 5)}
-                    className="w-full p-2.5 rounded-lg border border-slate-700 bg-slate-950 focus:border-blue-500 focus:outline-none text-slate-100 text-sm transition-all"
-                    min="1"
-                    max="20"
-                  />
-                  <p className="text-[10px] text-slate-500">自动从同行或1688热榜抓取的最优词根个数。</p>
-                </div>
-              </div>
-            )}
-
-            {/* 标题生成器节点参数 */}
-            {selectedNode.type === 'title-generator' && (
-              <div className="space-y-4 border-t border-slate-800/80 pt-4 text-xs text-slate-400 leading-relaxed">
-                <div>此节点将接收上一节点的关键词挖掘结果，合并淘宝与1688竞品数据，通过 GLM 大模型自动编排生成最符合 SEO 权重的高点击率标题。</div>
-                <div className="p-3 bg-slate-950/40 rounded border border-emerald-950/40 text-emerald-400/90 text-[11px]">
-                  💡 <b>温馨提示：</b>该步骤运行包含 1688 淘系商品抓取与 LLM 管道融合，有完整的 API key 时大约需 15 秒完成；若无 API 则自动秒级降级为高仿模拟数据，确保原型运行成功。
-                </div>
-              </div>
-            )}
-
-            {/* 重置标签 */}
-            <div className="border-t border-slate-800/80 pt-4">
-              <label className="text-xs font-bold text-slate-300 block mb-2">画布节点标签</label>
-              <input
-                type="text"
-                value={selectedNode.data.label || ''}
-                onChange={(e) => updateNodeData(selectedNode.id, 'label', e.target.value)}
-                className="w-full p-2.5 rounded-lg border border-slate-700 bg-slate-950 focus:border-blue-500 focus:outline-none text-slate-100 text-xs transition-all"
-              />
-            </div>
-          </div>
-        ) : (
-          <div className="p-5 flex-grow flex flex-col justify-center items-center text-slate-500 text-xs italic text-center">
-            <Settings size={28} className="text-slate-700 mb-2 animate-pulse" />
-            在左侧添加节点，或在中间画布中选中一个节点以展示其高级属性配置。
-          </div>
-        )}
-      </div>
-
+        <CandidateTable candidates={candidates} onSendToTitle={onSendToTitle} />
+      </section>
     </div>
+  );
+}
+
+function CandidateTable({ candidates, onSendToTitle }) {
+  return (
+    <div className="data-table-wrap">
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th>关键词</th>
+            <th>分数</th>
+            <th>分层</th>
+            <th>验真</th>
+            <th>来源</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {candidates.map((item) => {
+            const gate = getGateMeta(item);
+            return (
+              <tr key={`${item.keyword}-${item.source || ''}`}>
+                <td>
+                  <strong>{item.keyword}</strong>
+                  {item.sycmData && <small>人气 {item.sycmData.searchPopularity || 0} · 供需 {item.sycmData.demandSupplyRatio ?? '-'}</small>}
+                </td>
+                <td>{item.localScore ?? '-'}</td>
+                <td><span className={`tier tier-${item.tier || 'low'}`}>{item.tier || '-'}</span></td>
+                <td><span className={`gate gate-${gate.status}`}>{gate.label}</span><small>{gate.reason}</small></td>
+                <td>{item.source || '-'}</td>
+                <td className="row-actions">
+                  <button className="icon-button" type="button" title="复制" onClick={() => copyText(item.keyword)}><Copy size={15} /></button>
+                  <button className="secondary-button" type="button" onClick={() => onSendToTitle(item)}><Send size={15} /> 生成</button>
+                </td>
+              </tr>
+            );
+          })}
+          {candidates.length === 0 && (
+            <tr><td colSpan="6" className="empty-cell">还没有挖词结果。</td></tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function TitleView({ sourceCandidate }) {
+  const [form, setForm] = useState({ keyword: '', maxLength: 60, useImageSearch: false, peerTitles: '' });
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (sourceCandidate?.keyword) {
+      setForm((current) => ({ ...current, keyword: sourceCandidate.keyword }));
+    }
+  }, [sourceCandidate]);
+
+  const safety = useMemo(() => {
+    if (!result) return sourceCandidate?.canDistribute ? {
+      canDistribute: true,
+      degraded: false,
+      reason: sourceCandidate.gateReason || '生意参谋验真通过'
+    } : emptyTitleSafety;
+    const degraded = result.degraded || result.stats?.degraded || result.stats?.trace?.degraded;
+    if (degraded) return { canDistribute: false, degraded, reason: '标题生成已降级' };
+    if (sourceCandidate?.canDistribute && sourceCandidate.keyword === form.keyword.trim()) {
+      return { canDistribute: true, degraded: false, reason: sourceCandidate.gateReason || '生意参谋验真通过' };
+    }
+    return { canDistribute: false, degraded: false, reason: '该词未通过生意参谋验真或已手动修改' };
+  }, [form.keyword, result, sourceCandidate]);
+
+  const submit = async (event) => {
+    event.preventDefault();
+    setLoading(true);
+    setError('');
+    setResult(null);
+    try {
+      const peerTitles = form.peerTitles.split('\n').map((item) => item.trim()).filter(Boolean);
+      const data = await fetchJson('/api/title/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          keyword: form.keyword,
+          maxLength: form.maxLength,
+          useImageSearch: form.useImageSearch,
+          peerTitles: peerTitles.length > 0 ? peerTitles : null
+        })
+      });
+      setResult(data);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const products = result?.products || [];
+  const titles = products.map((item) => item['铺货标题']).filter(Boolean);
+
+  return (
+    <div className="page-scroll">
+      <PageHeader
+        title="标题生成"
+        subtitle="从挖词页导入的已验真词会保留铺货安全状态，手动输入则默认只能做研究参考。"
+        actions={titles.length > 0 && (
+          <button className="secondary-button" type="button" onClick={() => copyText(titles.join('\n'))}>
+            <Copy size={15} /> 复制全部标题
+          </button>
+        )}
+      />
+
+      <section className="title-layout">
+        <form className="title-form table-panel" onSubmit={submit}>
+          <label className="field">
+            <span>关键词</span>
+            <input value={form.keyword} onChange={(e) => setForm({ ...form, keyword: e.target.value })} placeholder="例如：纯银项链女高级感" />
+          </label>
+          <label className="field">
+            <span>标题最大长度</span>
+            <input type="number" min="10" max="100" value={form.maxLength} onChange={(e) => setForm({ ...form, maxLength: e.target.value })} />
+          </label>
+          <label className="toggle-field"><input type="checkbox" checked={form.useImageSearch} onChange={(e) => setForm({ ...form, useImageSearch: e.target.checked })} /> 使用图搜辅助</label>
+          <label className="field">
+            <span>同行标题</span>
+            <textarea rows="7" value={form.peerTitles} onChange={(e) => setForm({ ...form, peerTitles: e.target.value })} placeholder="可粘贴淘宝同行标题，一行一个" />
+          </label>
+          <button className="primary-button" type="submit" disabled={loading}>
+            {loading ? <RefreshCw size={16} className="spin" /> : <PenLine size={16} />}
+            {loading ? '生成中' : '开始选品并生成标题'}
+          </button>
+          {sourceCandidate?.keyword && <div className="form-message">来源：挖词候选「{sourceCandidate.keyword}」</div>}
+        </form>
+
+        <div className="analysis-panel table-panel">
+          <div className="section-title-row">
+            <h3>分析结果</h3>
+            <span className={`gate gate-${safety.canDistribute ? 'verified' : 'candidate'}`}>{safety.canDistribute ? '可进入复核' : '仅研究'}</span>
+          </div>
+          {error && <div className="alert-box alert-error"><AlertTriangle size={16} /> {error}</div>}
+          {safety.degraded && <div className="alert-box alert-error"><AlertTriangle size={16} /> {safety.reason}</div>}
+          {!safety.canDistribute && !safety.degraded && <div className="alert-box alert-warn"><Clock size={16} /> {safety.reason}</div>}
+          {result ? (
+            <div className="analysis-grid">
+              <MetricCard label="蓝海词" value={result.blueOceanWord || '-'} tone="blue" />
+              <MetricCard label="核心词" value={result.coreWord || '-'} />
+              <MetricCard label="货源数" value={result.stats?.alibaba1688Total ?? products.length} />
+              <MetricCard label="同行标题" value={result.peerTitles?.length ?? 0} />
+              {result.overallAdvice && <p className="advice-text">{result.overallAdvice}</p>}
+            </div>
+          ) : (
+            <div className="empty-panel">生成后的核心词、货源统计和选品建议会显示在这里。</div>
+          )}
+        </div>
+      </section>
+
+      <section className="product-grid">
+        {products.map((product, index) => (
+          <ProductCard key={`${product['产品链接'] || index}`} product={product} safety={safety} />
+        ))}
+        {products.length === 0 && <div className="empty-panel full-span">还没有生成的货源卡片。</div>}
+      </section>
+    </div>
+  );
+}
+
+function ProductCard({ product, safety }) {
+  return (
+    <article className="product-card">
+      <div className="product-image">
+        {product['主图链接'] ? <img src={product['主图链接']} alt={product['链接原标题'] || 'product'} /> : <div className="image-placeholder">No Image</div>}
+        <span>{product['商品原价'] ? `¥${product['商品原价']}` : '暂无价'}</span>
+      </div>
+      <div className="product-content">
+        <a href={product['产品链接']} target="_blank" rel="noreferrer">{product['链接原标题'] || '查看 1688 货源'}</a>
+        <div className="seo-title">{product['铺货标题'] || '未生成标题'}</div>
+        <div className="product-meta">
+          <span>销量 {product['30天销量'] || 0}</span>
+          <span>好评 {Math.round((product['好评率'] || 0) * 100)}%</span>
+          <span>复购 {Math.round((product['复购率'] || 0) * 100)}%</span>
+        </div>
+        <p>{product['选品理由'] || '符合核心词搜索需求'}</p>
+        <p>{product['定价建议'] || '参考同类产品定价'}</p>
+      </div>
+      <footer className="product-footer">
+        <span>质量分 {product['标题质量分'] || 0}</span>
+        <button className="secondary-button" type="button" onClick={() => copyText(product['铺货标题'])}><Copy size={15} /> 复制</button>
+        <button className="secondary-button" type="button" disabled={!safety.canDistribute}><CheckCircle2 size={15} /> 加入复核</button>
+      </footer>
+    </article>
+  );
+}
+
+export default function App() {
+  const [activeTab, setActiveTab] = useState('dashboard');
+  const [status, setStatus] = useState(null);
+  const [runs, setRuns] = useState([]);
+  const [loadingRuns, setLoadingRuns] = useState(false);
+  const [sourceCandidate, setSourceCandidate] = useState(null);
+
+  const refreshOverview = async () => {
+    setLoadingRuns(true);
+    try {
+      const [statusData, runsData] = await Promise.all([
+        fetchJson('/api/status'),
+        fetchJson('/api/workbench/runs?limit=12')
+      ]);
+      setStatus(statusData);
+      setRuns(runsData.runs || []);
+    } finally {
+      setLoadingRuns(false);
+    }
+  };
+
+  useEffect(() => {
+    refreshOverview().catch(() => {});
+  }, []);
+
+  const sendToTitle = (candidate) => {
+    setSourceCandidate(candidate);
+    setActiveTab('title');
+  };
+
+  const startWorkbench = async (form) => {
+    const data = await fetchJson('/api/workbench/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(form)
+    });
+    setTimeout(() => refreshOverview().catch(() => {}), 1200);
+    return data;
+  };
+
+  if (activeTab === 'workflow' || activeTab === 'experiment') {
+    return (
+      <AppShell activeTab={activeTab} setActiveTab={setActiveTab}>
+        <div className="studio-host">
+          <WorkflowStudio key={activeTab} initialMode={activeTab === 'workflow' ? 'monitor' : 'experiment'} />
+        </div>
+      </AppShell>
+    );
+  }
+
+  return (
+    <AppShell activeTab={activeTab} setActiveTab={setActiveTab}>
+      {activeTab === 'dashboard' && (
+        <DashboardView
+          status={status}
+          runs={runs}
+          loading={loadingRuns}
+          onRefresh={() => refreshOverview().catch(() => {})}
+          onStartWorkbench={startWorkbench}
+        />
+      )}
+      {activeTab === 'mine' && <MiningView onSendToTitle={sendToTitle} />}
+      {activeTab === 'title' && <TitleView sourceCandidate={sourceCandidate} />}
+    </AppShell>
   );
 }

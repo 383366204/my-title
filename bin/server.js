@@ -39,9 +39,11 @@ const {
 const app = express();
 app.use(express.json());
 
-// Serve static UI files from web/
-app.use(express.static(path.join(__dirname, '../web')));
-app.use('/workflow', express.static(path.join(__dirname, '../apps/web/dist')));
+const legacyWebPath = path.join(__dirname, '../web');
+const reactWebPath = path.join(__dirname, '../apps/web/dist');
+
+// Keep the old native UI as a rollback-only fallback while React owns the main entry.
+app.use('/legacy', express.static(legacyWebPath));
 
 // AsyncLocalStorage for concurrent SSE log routing
 const logStorage = new AsyncLocalStorage();
@@ -696,6 +698,17 @@ app.get('/api/workflows/runs/:runId/events', (req, res) => {
   req.on('close', () => {
     unsubscribe();
   });
+});
+
+// React SPA entry. API routes must stay above this fallback.
+app.use(express.static(reactWebPath));
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api/')) {
+    return res.status(404).json({ ok: false, error: 'API not found' });
+  }
+  const indexPath = path.join(reactWebPath, 'index.html');
+  if (!fs.existsSync(indexPath)) return next();
+  res.sendFile(indexPath);
 });
 
 // Boot Server (Explicitly bind to localhost 127.0.0.1 for local boundaries security P2)
