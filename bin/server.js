@@ -21,14 +21,13 @@ const { generateTitlePipeline } = require('../skills/title-gen');
 const { searchAll } = require('../skills/alibaba1688');
 
 const {
-  createRun,
-  getRun,
-  updateRun,
-  listRuns,
-  startWorkflow,
-  cancelWorkflow,
-  subscribeRun,
-  validateWorkflow
+  validateWorkflow,
+  listProductionWorkflowTemplates,
+  sanitizeWorkflowParams,
+  buildPipelineCliArgs,
+  listWorkflowRuns,
+  getWorkflowRun,
+  readWorkflowNodeArtifact
 } = require('../core/workflow');
 
 const {
@@ -579,32 +578,14 @@ function parsePercentOrNumber(val) {
 
 // 1. GET /api/workflows/templates - 获取工作流模板列表
 app.get('/api/workflows/templates', (req, res) => {
-  const templates = [
-    {
-      id: 'demo_chain',
-      name: '标准电商选品标题生成链',
-      description: '输入关键词 -> 自动挖掘长尾词 -> 智能生成淘宝 SEO 标题与货源推荐',
-      workflow: {
-        nodes: [
-          { id: 'node_1', type: 'keyword-input', position: { x: 80, y: 160 }, data: { keyword: '纯银项链', maxLength: 60, label: '输入参数' } },
-          { id: 'node_2', type: 'keyword-mining', position: { x: 520, y: 160 }, data: { count: 5, label: '长尾词挖掘' } },
-          { id: 'node_3', type: 'title-generator', position: { x: 980, y: 160 }, data: { label: '标题生成器' } }
-        ],
-        edges: [
-          { id: 'e1', source: 'node_1', target: 'node_2', animated: true },
-          { id: 'e2', source: 'node_2', target: 'node_3', animated: true }
-        ]
-      }
-    }
-  ];
-  res.json({ ok: true, data: templates });
+  res.json({ ok: true, data: listProductionWorkflowTemplates() });
 });
 
 // 2. GET /api/workflows/runs - 获取历史工作流运行记录列表
 app.get('/api/workflows/runs', (req, res) => {
   try {
-    const runs = listRuns();
-    res.json({ ok: true, data: runs });
+    const limit = parsePositiveNumber(req.query.limit, 20);
+    res.json({ ok: true, data: listWorkflowRuns({ limit }) });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
@@ -622,30 +603,82 @@ app.post('/api/workflows/validate', (req, res) => {
 
 // 3. POST /api/workflows/run - 启动一个新工作流
 app.post('/api/workflows/run', (req, res) => {
-  const { workflow } = req.body;
-  if (!workflow || !Array.isArray(workflow.nodes)) {
-    return res.status(400).json({ ok: false, error: '工作流定义无效' });
-  }
-  try {
-    const validation = validateWorkflow(workflow);
-    if (!validation.ok) {
-      return res.status(400).json({ ok: false, error: '工作流校验失败', data: validation });
-    }
-    const runObj = createRun(workflow);
-    // 异步启动，不阻塞 API
-    startWorkflow(runObj.runId).catch(err => {
-      console.error(`[Workflow Run] ${runObj.runId} 发生后台执行错误:`, err.message);
+  if (activeWorkbenchProcess) {
+    return res.status(409).json({
+      ok: false,
+      status: 'workflow_busy',
+      error: '已有工作流正在运行，请等待完成后再启动。'
     });
-    res.json({ ok: true, data: { runId: runObj.runId, status: runObj.status } });
+  }
+
+  try {
+    const launch = resolveWorkflowLaunch(req.body || {});
+    const params = sanitizeWorkflowParams(launch.mode, launch.params);
+    const args = buildPipelineCliArgs(launch.mode, params);
+    const child = spawn(process.execPath, args, {
+      cwd: path.resolve(__dirname, '..'),
+      env: process.env
+    });
+
+    const runState = {
+      child,
+      pid: child.pid,
+      mode: launch.mode,
+      stdout: '',
+      stderr: ''
+    };
+    activeWorkbenchProcess = runState;
+
+    child.stdout.on('data', chunk => {
+      runState.stdout = appendCappedOutput(runState.stdout, chunk);
+    });
+    child.stderr.on('data', chunk => {
+      runState.stderr = appendCappedOutput(runState.stderr, chunk);
+    });
+    child.on('error', err => {
+      if (activeWorkbenchProcess === runState) activeWorkbenchProcess = null;
+      originalError('[Workflow Run] 子进程启动失败:', err.message);
+    });
+    child.on('exit', (code, signal) => {
+      if (activeWorkbenchProcess === runState) activeWorkbenchProcess = null;
+      if (code === 0) {
+        originalLog(`[Workflow Run] ${launch.mode} pipeline 完成，pid=${runState.pid}`);
+      } else {
+        originalError(`[Workflow Run] ${launch.mode} pipeline 失败，pid=${runState.pid}, code=${code}, signal=${signal || ''}`);
+        if (runState.stderr) originalError(runState.stderr.slice(-4000));
+      }
+    });
+
+    res.json({ ok: true, data: { status: 'started', pid: child.pid, mode: launch.mode } });
+  } catch (err) {
+    if (activeWorkbenchProcess && !activeWorkbenchProcess.pid) activeWorkbenchProcess = null;
+    const status = /未知 workflow mode|未知 workflow template|关键词不能为空/.test(err.message) ? 400 : 500;
+    res.status(status).json({ ok: false, error: err.message });
+  }
+});
+
+// 4. GET /api/workflows/runs/:runId/artifacts/:nodeId - 读取节点产物
+app.get('/api/workflows/runs/:runId/artifacts/:nodeId', (req, res) => {
+  try {
+    const artifact = readWorkflowNodeArtifact({
+      runId: req.params.runId,
+      nodeId: req.params.nodeId,
+      limit: parsePositiveNumber(req.query.limit, 50),
+      maxChars: parsePositiveNumber(req.query.maxChars, 10000)
+    });
+    if (!artifact) {
+      return res.status(404).json({ ok: false, error: '未找到该节点产物' });
+    }
+    res.json({ ok: true, data: artifact });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
 });
 
-// 4. GET /api/workflows/runs/:runId - 获取工作流运行的最新状态与日志
+// 5. GET /api/workflows/runs/:runId - 获取工作流运行的最新状态与日志
 app.get('/api/workflows/runs/:runId', (req, res) => {
   try {
-    const runObj = getRun(req.params.runId);
+    const runObj = getWorkflowRun({ runId: req.params.runId });
     if (!runObj) {
       return res.status(404).json({ ok: false, error: '未找到该运行记录' });
     }
@@ -655,20 +688,19 @@ app.get('/api/workflows/runs/:runId', (req, res) => {
   }
 });
 
-// 5. POST /api/workflows/runs/:runId/cancel - 取消执行中的工作流
-app.post('/api/workflows/runs/:runId/cancel', (req, res) => {
-  try {
-    const success = cancelWorkflow(req.params.runId);
-    res.json({ ok: true, data: { cancelled: success } });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
+// 6. POST /api/workflows/runs/:runId/cancel - pipeline cancel 暂未实现
+app.post('/api/workflows/runs/:runId/cancel', sendWorkflowNotImplemented('cancel'));
 
-// 6. GET /api/workflows/runs/:runId/events - 实时 SSE 推送节点状态更新与日志
+// 7. POST /api/workflows/runs/:runId/retry-node - pipeline retry 暂未实现
+app.post('/api/workflows/runs/:runId/retry-node', sendWorkflowNotImplemented('retry-node'));
+
+// 8. POST /api/workflows/runs/:runId/resume - pipeline resume 暂未实现
+app.post('/api/workflows/runs/:runId/resume', sendWorkflowNotImplemented('resume'));
+
+// 9. GET /api/workflows/runs/:runId/events - 轮询真实 pipeline 状态并以 SSE 推送
 app.get('/api/workflows/runs/:runId/events', (req, res) => {
   const runId = req.params.runId;
-  const runObj = getRun(runId);
+  const runObj = getWorkflowRun({ runId });
   if (!runObj) {
     return res.status(404).json({ ok: false, error: '未找到运行记录' });
   }
@@ -681,24 +713,61 @@ app.get('/api/workflows/runs/:runId/events', (req, res) => {
   // 初始化推送
   res.write(`data: ${JSON.stringify({ event: 'init', payload: { status: runObj.status, nodeStates: runObj.nodeStates } })}\n\n`);
 
-  // 推送历史日志
-  if (runObj.logs && runObj.logs.length > 0) {
-    runObj.logs.forEach(log => {
-      res.write(`data: ${JSON.stringify({ event: 'log', payload: log })}\n\n`);
-    });
-  }
-
-  // 订阅更新
-  const unsubscribe = subscribeRun(runId, (evt) => {
+  let lastSnapshot = JSON.stringify({ status: runObj.status, nodeStates: runObj.nodeStates });
+  const timer = setInterval(() => {
     try {
-      res.write(`data: ${JSON.stringify(evt)}\n\n`);
-    } catch (_) {}
-  });
+      const latest = getWorkflowRun({ runId });
+      if (!latest) return;
+      const nextSnapshot = JSON.stringify({ status: latest.status, nodeStates: latest.nodeStates });
+      if (nextSnapshot === lastSnapshot) return;
+      lastSnapshot = nextSnapshot;
+      res.write(`data: ${JSON.stringify({ event: 'status_change', payload: { status: latest.status } })}\n\n`);
+      res.write(`data: ${JSON.stringify({ event: 'init', payload: { status: latest.status, nodeStates: latest.nodeStates } })}\n\n`);
+    } catch (err) {
+      res.write(`data: ${JSON.stringify({ event: 'log', payload: { level: 'error', message: err.message } })}\n\n`);
+    }
+  }, 3000);
 
   req.on('close', () => {
-    unsubscribe();
+    clearInterval(timer);
   });
 });
+
+function resolveWorkflowLaunch(body) {
+  const templates = listProductionWorkflowTemplates();
+  let template = null;
+  const templateId = body.templateId || body.template_id || body.workflow?.id;
+  if (templateId) {
+    template = templates.find(item => item.id === templateId);
+    if (!template) throw new Error(`未知 workflow template: ${templateId}`);
+  }
+
+  const mode = body.mode || body.workflow?.mode || template?.mode || 'daily';
+  const params = {
+    ...(body.params || {}),
+    ...(body.options || {})
+  };
+  for (const key of ['keyword', 'mine', 'verify', 'generate', 'export', 'productsPerKeyword', 'length', 'port', 'pages', 'minBlueRows', 'fallbackHot']) {
+    if (Object.prototype.hasOwnProperty.call(body, key)) params[key] = body[key];
+  }
+  if (!params.keyword) params.keyword = extractWorkflowKeyword(body.workflow);
+  return { mode, params };
+}
+
+function extractWorkflowKeyword(workflow) {
+  const nodes = Array.isArray(workflow?.nodes) ? workflow.nodes : [];
+  const keywordNode = nodes.find(node => node && node.data && typeof node.data.keyword === 'string');
+  return keywordNode ? keywordNode.data.keyword : '';
+}
+
+function sendWorkflowNotImplemented(action) {
+  return (req, res) => {
+    res.status(501).json({
+      ok: false,
+      error: `Workflow ${action} is not implemented for production pipeline runs yet.`
+    });
+  };
+}
 
 // React SPA entry. API routes must stay above this fallback.
 app.use(express.static(reactWebPath));

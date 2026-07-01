@@ -161,6 +161,28 @@ describe('workflow pipeline adapter', () => {
     ]);
   });
 
+  it('rejects unknown modes and never emits shell-like numeric params in CLI args', () => {
+    assert.throws(() => buildPipelineCliArgs('unknown', {}), /未知 workflow mode/);
+
+    const args = buildPipelineCliArgs('daily', {
+      mine: '20; touch /tmp/pwned',
+      verify: '5 && whoami',
+      generate: '3$(whoami)',
+      export: '`id`',
+      productsPerKeyword: '4 | cat',
+      length: '60',
+      port: '9222',
+      pages: '1',
+      minBlueRows: '1'
+    });
+
+    assert.equal(args.some(arg => /[;&|`$()]/.test(arg)), false);
+    for (const flag of ['--mine', '--verify', '--generate', '--export', '--products-per-keyword']) {
+      const value = args[args.indexOf(flag) + 1];
+      assert.match(value, /^\d+$/, `${flag} should be a plain numeric spawn argument`);
+    }
+  });
+
   it('maps pipeline summary into workflow run node states and action metadata', () => {
     const summary = {
       runId: 'review_run',
