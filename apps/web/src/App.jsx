@@ -22,8 +22,11 @@ import WorkflowStudio from './WorkflowStudio.jsx';
 import {
   BUSINESS_FUNNEL,
   getWorkflowAction,
-  mapPipelineStageToFunnel
+  mapPipelineStageToFunnel,
+  normalizeCandidateForTitle,
+  buildReviewProduct
 } from './workflow-ui.js';
+import { useSessionState } from './use-session-state.js';
 import './App.css';
 
 const NAV_ITEMS = [
@@ -139,7 +142,7 @@ function MetricCard({ label, value, tone = 'neutral' }) {
   );
 }
 
-function DashboardView({ status, runs, loading, onRefresh, onStartWorkbench, onNavigate }) {
+function DashboardView({ status, runs, loading, onRefresh, onStartWorkbench, onNavigate, reviewProducts, onClearReviewProduct }) {
   const latest = runs[0] || null;
 
   return (
@@ -174,6 +177,30 @@ function DashboardView({ status, runs, loading, onRefresh, onStartWorkbench, onN
             <FlowStatusPanel run={latest} onNavigate={onNavigate} />
           )}
         </div>
+      </section>
+
+      <section className="table-panel review-queue-panel">
+        <div className="section-title-row">
+          <h3>待确认铺货</h3>
+          <span className="tiny-muted">{reviewProducts.length} 个</span>
+        </div>
+        {reviewProducts.length === 0 ? (
+          <div className="empty-panel">从标题生成页点击“加入复核”后，商品会出现在这里。</div>
+        ) : (
+          <div className="review-queue-list">
+            {reviewProducts.map((item) => (
+              <div className="review-queue-item" key={item.id}>
+                <div>
+                  <strong>{item.title}</strong>
+                  <span>{item.keyword} · {item.price || '暂无价'}</span>
+                </div>
+                <button className="secondary-button" type="button" onClick={() => copyText(item.title)}>复制标题</button>
+                {item.productUrl && <a className="secondary-button" href={item.productUrl} target="_blank" rel="noreferrer">打开货源</a>}
+                <button className="icon-button danger" type="button" onClick={() => onClearReviewProduct(item.id)}><Trash2 size={15} /></button>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
 
       <section className="table-panel">
@@ -567,7 +594,7 @@ function CandidateTable({ candidates, onSendToTitle }) {
   );
 }
 
-function TitleView({ sourceCandidate }) {
+function TitleView({ sourceCandidate, onAddReviewProduct }) {
   const [form, setForm] = useState({ keyword: '', maxLength: 60, useImageSearch: false, peerTitles: '' });
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
@@ -635,6 +662,26 @@ function TitleView({ sourceCandidate }) {
 
       <section className="title-layout">
         <form className="title-form table-panel" onSubmit={submit}>
+          {sourceCandidate?.keyword && (
+            <div className="source-context-panel">
+              <div>
+                <span>来源候选词</span>
+                <strong>{sourceCandidate.keyword}</strong>
+              </div>
+              <div>
+                <span>质量分</span>
+                <strong>{sourceCandidate.score ?? '-'}</strong>
+              </div>
+              <div>
+                <span>搜索人气</span>
+                <strong>{sourceCandidate.market?.searchPopularity ?? '-'}</strong>
+              </div>
+              <div>
+                <span>供需比</span>
+                <strong>{sourceCandidate.market?.demandSupplyRatio ?? '-'}</strong>
+              </div>
+            </div>
+          )}
           <label className="field">
             <span>关键词</span>
             <input value={form.keyword} onChange={(e) => setForm({ ...form, keyword: e.target.value })} placeholder="例如：纯银项链女高级感" />
@@ -652,7 +699,6 @@ function TitleView({ sourceCandidate }) {
             {loading ? <RefreshCw size={16} className="spin" /> : <PenLine size={16} />}
             {loading ? '生成中' : '开始选品并生成标题'}
           </button>
-          {sourceCandidate?.keyword && <div className="form-message">来源：挖词候选「{sourceCandidate.keyword}」</div>}
         </form>
 
         <div className="analysis-panel table-panel">
@@ -679,7 +725,13 @@ function TitleView({ sourceCandidate }) {
 
       <section className="product-grid">
         {products.map((product, index) => (
-          <ProductCard key={`${product['产品链接'] || index}`} product={product} safety={safety} />
+          <ProductCard
+            key={`${product['产品链接'] || index}`}
+            product={product}
+            safety={safety}
+            sourceCandidate={sourceCandidate}
+            onAddReview={onAddReviewProduct}
+          />
         ))}
         {products.length === 0 && <div className="empty-panel full-span">还没有生成的货源卡片。</div>}
       </section>
@@ -687,7 +739,7 @@ function TitleView({ sourceCandidate }) {
   );
 }
 
-function ProductCard({ product, safety }) {
+function ProductCard({ product, safety, sourceCandidate, onAddReview }) {
   return (
     <article className="product-card">
       <div className="product-image">
@@ -708,7 +760,14 @@ function ProductCard({ product, safety }) {
       <footer className="product-footer">
         <span>质量分 {product['标题质量分'] || 0}</span>
         <button className="secondary-button" type="button" onClick={() => copyText(product['铺货标题'])}><Copy size={15} /> 复制</button>
-        <button className="secondary-button" type="button" disabled={!safety.canDistribute}><CheckCircle2 size={15} /> 加入复核</button>
+        <button
+          className="secondary-button"
+          type="button"
+          disabled={!safety.canDistribute}
+          onClick={() => onAddReview(buildReviewProduct({ keyword: sourceCandidate?.keyword, product, candidate: sourceCandidate }))}
+        >
+          <CheckCircle2 size={15} /> 加入复核
+        </button>
       </footer>
     </article>
   );
@@ -719,7 +778,8 @@ export default function App() {
   const [status, setStatus] = useState(null);
   const [runs, setRuns] = useState([]);
   const [loadingRuns, setLoadingRuns] = useState(false);
-  const [sourceCandidate, setSourceCandidate] = useState(null);
+  const [sourceCandidate, setSourceCandidate] = useSessionState('ecom.sourceCandidate', null);
+  const [reviewProducts, setReviewProducts] = useSessionState('ecom.reviewProducts', []);
 
   const refreshOverview = async () => {
     setLoadingRuns(true);
@@ -740,7 +800,7 @@ export default function App() {
   }, []);
 
   const sendToTitle = (candidate) => {
-    setSourceCandidate(candidate);
+    setSourceCandidate(normalizeCandidateForTitle(candidate));
     setActiveTab('title');
   };
 
@@ -774,10 +834,20 @@ export default function App() {
           onRefresh={() => refreshOverview().catch(() => {})}
           onStartWorkbench={startWorkbench}
           onNavigate={setActiveTab}
+          reviewProducts={reviewProducts}
+          onClearReviewProduct={(id) => setReviewProducts((current) => current.filter((item) => item.id !== id))}
         />
       )}
       {activeTab === 'mine' && <MiningView onSendToTitle={sendToTitle} />}
-      {activeTab === 'title' && <TitleView sourceCandidate={sourceCandidate} />}
+      {activeTab === 'title' && (
+        <TitleView
+          sourceCandidate={sourceCandidate}
+          onAddReviewProduct={(product) => setReviewProducts((current) => [
+            product,
+            ...current.filter((item) => item.id !== product.id)
+          ])}
+        />
+      )}
     </AppShell>
   );
 }
