@@ -78,8 +78,10 @@ function template(id, name, mode, description) {
     mode,
     description,
     production: true,
-    nodes: workflowNodes(),
-    edges: workflowEdges()
+    workflow: {
+      nodes: workflowNodes(),
+      edges: workflowEdges()
+    }
   };
 }
 
@@ -172,6 +174,111 @@ function buildPipelineCliArgs(mode, params = {}) {
     return args;
   }
   throw new Error(`未知 workflow mode: ${mode}`);
+}
+
+function normalizeWorkflowGraph(workflow) {
+  if (!workflow || typeof workflow !== 'object') return null;
+  const nodes = Array.isArray(workflow.nodes) ? workflow.nodes : [];
+  const edges = Array.isArray(workflow.edges) ? workflow.edges : [];
+  return { nodes, edges };
+}
+
+function workflowSignature(workflow) {
+  const graph = normalizeWorkflowGraph(workflow);
+  if (!graph) return '';
+  const nodes = graph.nodes
+    .map(node => `${node.id}:${node.type}`)
+    .sort()
+    .join('|');
+  const edges = graph.edges
+    .map(edge => `${edge.source}->${edge.target}`)
+    .sort()
+    .join('|');
+  return `${nodes}::${edges}`;
+}
+
+function findProductionTemplateForWorkflow(workflow) {
+  const signature = workflowSignature(workflow);
+  if (!signature) return null;
+  return listProductionWorkflowTemplates().find(item => workflowSignature(item.workflow) === signature) || null;
+}
+
+/**
+ * 校验真实 pipeline workflow 图，不依赖旧实验节点 registry。
+ * @param {object} workflow workflow graph。
+ * @returns {{ok:boolean, errors:Array<object>, production:boolean, templateId:string}}
+ */
+function validateProductionWorkflow(workflow) {
+  const graph = normalizeWorkflowGraph(workflow);
+  if (!graph) {
+    return {
+      ok: false,
+      errors: [{ code: 'invalid_workflow', message: '工作流定义无效' }],
+      production: true,
+      templateId: ''
+    };
+  }
+
+  const template = findProductionTemplateForWorkflow(graph);
+  if (template) {
+    return { ok: true, errors: [], production: true, templateId: template.id };
+  }
+
+  return {
+    ok: false,
+    errors: [{ code: 'production_template_mismatch', message: '工作流必须匹配生产 pipeline 模板' }],
+    production: true,
+    templateId: ''
+  };
+}
+
+function extractWorkflowKeyword(workflow) {
+  const nodes = Array.isArray(workflow?.nodes) ? workflow.nodes : [];
+  const keywordNode = nodes.find(node => {
+    if (!node || !node.data || typeof node.data.keyword !== 'string') return false;
+    if (node.id === WORKFLOW_NODE_IDS.start || node.type === 'keyword-input' || node.type === 'production-start') return true;
+    return node.data.keyword.trim().length > 0;
+  });
+  return keywordNode ? keywordNode.data.keyword.trim() : '';
+}
+
+/**
+ * 从新旧 UI 请求体解析真实 pipeline 启动参数。
+ * @param {object} body 请求体。
+ * @returns {{mode:string, params:object}} 启动模式与参数。
+ */
+function resolveProductionWorkflowLaunch(body = {}) {
+  const templates = listProductionWorkflowTemplates();
+  let template = null;
+  const workflow = body.workflow && typeof body.workflow === 'object' ? body.workflow : null;
+  const templateId = body.templateId || body.template_id || workflow?.id;
+  if (templateId) {
+    template = templates.find(item => item.id === templateId);
+    if (!template) throw new Error(`未知 workflow template: ${templateId}`);
+  }
+  if (!template && workflow) template = findProductionTemplateForWorkflow(workflow);
+
+  const params = {
+    ...(body.params || {}),
+    ...(body.options || {})
+  };
+  for (const key of ['keyword', 'mine', 'verify', 'generate', 'export', 'productsPerKeyword', 'length', 'port', 'pages', 'minBlueRows', 'fallbackHot']) {
+    if (Object.prototype.hasOwnProperty.call(body, key)) params[key] = body[key];
+  }
+
+  if (!params.keyword) {
+    const keyword = extractWorkflowKeyword(workflow);
+    if (keyword) params.keyword = keyword;
+  }
+
+  let mode = body.mode || workflow?.mode || template?.mode || '';
+  if (!mode && params.keyword) mode = 'keyword';
+  if (mode === 'daily' && params.keyword && !body.mode && !template) mode = 'keyword';
+  if (!mode) {
+    throw new Error('无法从工作流解析启动模式，请选择生产模板或提供关键词');
+  }
+
+  return { mode, params };
 }
 
 function nodeState(id, type, status, output = null, summary = {}) {
@@ -321,7 +428,10 @@ function templateForSummary(summary) {
  */
 function pipelineSummaryToWorkflowRun(summary) {
   if (!summary) return null;
-  const workflow = templateForSummary(summary);
+  const workflowTemplate = templateForSummary(summary);
+  const workflow = workflowTemplate
+    ? { id: workflowTemplate.id, mode: workflowTemplate.mode, ...workflowTemplate.workflow }
+    : null;
   return {
     runId: summary.runId,
     status: summary.status || 'unknown',
@@ -429,6 +539,8 @@ module.exports = {
   listProductionWorkflowTemplates,
   sanitizeWorkflowParams,
   buildPipelineCliArgs,
+  validateProductionWorkflow,
+  resolveProductionWorkflowLaunch,
   pipelineSummaryToWorkflowRun,
   listWorkflowRuns,
   getWorkflowRun,

@@ -21,14 +21,15 @@ const { generateTitlePipeline } = require('../skills/title-gen');
 const { searchAll } = require('../skills/alibaba1688');
 
 const {
-  validateWorkflow,
   listProductionWorkflowTemplates,
   sanitizeWorkflowParams,
   buildPipelineCliArgs,
+  validateProductionWorkflow,
+  resolveProductionWorkflowLaunch,
   listWorkflowRuns,
   getWorkflowRun,
   readWorkflowNodeArtifact
-} = require('../core/workflow');
+} = require('../core/workflow/pipeline-adapter');
 
 const {
   listPipelineRuns,
@@ -594,7 +595,7 @@ app.get('/api/workflows/runs', (req, res) => {
 // 2.5 POST /api/workflows/validate - 运行前校验工作流图
 app.post('/api/workflows/validate', (req, res) => {
   try {
-    const result = validateWorkflow(req.body && req.body.workflow);
+    const result = validateProductionWorkflow(req.body && req.body.workflow);
     res.status(result.ok ? 200 : 400).json({ ok: result.ok, data: result });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
@@ -612,7 +613,7 @@ app.post('/api/workflows/run', (req, res) => {
   }
 
   try {
-    const launch = resolveWorkflowLaunch(req.body || {});
+    const launch = resolveProductionWorkflowLaunch(req.body || {});
     const params = sanitizeWorkflowParams(launch.mode, launch.params);
     const args = buildPipelineCliArgs(launch.mode, params);
     const child = spawn(process.execPath, args, {
@@ -649,7 +650,17 @@ app.post('/api/workflows/run', (req, res) => {
       }
     });
 
-    res.json({ ok: true, data: { status: 'started', pid: child.pid, mode: launch.mode } });
+    res.json({
+      ok: true,
+      data: {
+        status: 'started',
+        runId: null,
+        pid: child.pid,
+        mode: launch.mode,
+        monitor: 'workbench',
+        message: '真实 pipeline 已启动；runId 会由子进程创建，请在流程监控或运行列表中查看最新记录。'
+      }
+    });
   } catch (err) {
     if (activeWorkbenchProcess && !activeWorkbenchProcess.pid) activeWorkbenchProcess = null;
     const status = /未知 workflow mode|未知 workflow template|关键词不能为空/.test(err.message) ? 400 : 500;
@@ -700,6 +711,9 @@ app.post('/api/workflows/runs/:runId/resume', sendWorkflowNotImplemented('resume
 // 9. GET /api/workflows/runs/:runId/events - 轮询真实 pipeline 状态并以 SSE 推送
 app.get('/api/workflows/runs/:runId/events', (req, res) => {
   const runId = req.params.runId;
+  if (!isValidWorkflowRunIdParam(runId)) {
+    return res.status(400).json({ ok: false, error: '无效的运行 ID，请等待真实 pipeline runId 创建后再订阅事件。' });
+  }
   const runObj = getWorkflowRun({ runId });
   if (!runObj) {
     return res.status(404).json({ ok: false, error: '未找到运行记录' });
@@ -733,31 +747,9 @@ app.get('/api/workflows/runs/:runId/events', (req, res) => {
   });
 });
 
-function resolveWorkflowLaunch(body) {
-  const templates = listProductionWorkflowTemplates();
-  let template = null;
-  const templateId = body.templateId || body.template_id || body.workflow?.id;
-  if (templateId) {
-    template = templates.find(item => item.id === templateId);
-    if (!template) throw new Error(`未知 workflow template: ${templateId}`);
-  }
-
-  const mode = body.mode || body.workflow?.mode || template?.mode || 'daily';
-  const params = {
-    ...(body.params || {}),
-    ...(body.options || {})
-  };
-  for (const key of ['keyword', 'mine', 'verify', 'generate', 'export', 'productsPerKeyword', 'length', 'port', 'pages', 'minBlueRows', 'fallbackHot']) {
-    if (Object.prototype.hasOwnProperty.call(body, key)) params[key] = body[key];
-  }
-  if (!params.keyword) params.keyword = extractWorkflowKeyword(body.workflow);
-  return { mode, params };
-}
-
-function extractWorkflowKeyword(workflow) {
-  const nodes = Array.isArray(workflow?.nodes) ? workflow.nodes : [];
-  const keywordNode = nodes.find(node => node && node.data && typeof node.data.keyword === 'string');
-  return keywordNode ? keywordNode.data.keyword : '';
+function isValidWorkflowRunIdParam(runId) {
+  const value = String(runId || '').trim();
+  return Boolean(value) && value !== 'null' && value !== 'undefined';
 }
 
 function sendWorkflowNotImplemented(action) {

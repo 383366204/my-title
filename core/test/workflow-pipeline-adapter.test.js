@@ -11,6 +11,8 @@ const {
   listProductionWorkflowTemplates,
   sanitizeWorkflowParams,
   buildPipelineCliArgs,
+  validateProductionWorkflow,
+  resolveProductionWorkflowLaunch,
   pipelineSummaryToWorkflowRun,
   listWorkflowRuns,
   getWorkflowRun,
@@ -48,8 +50,9 @@ describe('workflow pipeline adapter', () => {
     assert.deepEqual(templates.map(template => template.id), ['daily-selection-v1', 'exact-keyword-v1']);
     for (const template of templates) {
       assert.equal(template.production, true);
-      assert.deepEqual(template.nodes.map(node => node.id), Object.values(WORKFLOW_NODE_IDS));
-      assert.deepEqual(template.edges.map(edge => `${edge.source}->${edge.target}`), [
+      assert.ok(template.workflow);
+      assert.deepEqual(template.workflow.nodes.map(node => node.id), Object.values(WORKFLOW_NODE_IDS));
+      assert.deepEqual(template.workflow.edges.map(edge => `${edge.source}->${edge.target}`), [
         'start->mine',
         'mine->verify',
         'verify->generate',
@@ -58,6 +61,60 @@ describe('workflow pipeline adapter', () => {
         'review->end'
       ]);
     }
+  });
+
+  it('validates production workflow graphs without the legacy node registry', () => {
+    const [template] = listProductionWorkflowTemplates();
+
+    assert.deepEqual(validateProductionWorkflow(template.workflow), {
+      ok: true,
+      errors: [],
+      production: true,
+      templateId: 'daily-selection-v1'
+    });
+
+    const invalid = validateProductionWorkflow({
+      nodes: [{ id: 'start', type: 'production-start', data: {} }],
+      edges: []
+    });
+    assert.equal(invalid.ok, false);
+    assert.equal(invalid.production, true);
+    assert.ok(invalid.errors.some(error => error.code === 'production_template_mismatch'));
+  });
+
+  it('resolves legacy workflow launch from template or keyword-bearing nodes', () => {
+    const templates = listProductionWorkflowTemplates();
+    assert.deepEqual(resolveProductionWorkflowLaunch({
+      templateId: 'daily-selection-v1',
+      params: { mine: 3 }
+    }), {
+      mode: 'daily',
+      params: { mine: 3 }
+    });
+
+    assert.deepEqual(resolveProductionWorkflowLaunch({
+      workflow: {
+        nodes: [
+          { id: 'node_1', type: 'keyword-input', data: { keyword: '  纯银耳环  ' } }
+        ],
+        edges: []
+      }
+    }), {
+      mode: 'keyword',
+      params: { keyword: '纯银耳环' }
+    });
+
+    assert.deepEqual(resolveProductionWorkflowLaunch({
+      workflow: templates[0].workflow
+    }), {
+      mode: 'daily',
+      params: {}
+    });
+
+    assert.throws(() => resolveProductionWorkflowLaunch({
+      workflow: { nodes: [{ id: 'node_1', type: 'keyword-input', data: {} }], edges: [] }
+    }), /无法从工作流解析启动模式/);
+    assert.throws(() => resolveProductionWorkflowLaunch({ templateId: 'missing-template' }), /未知 workflow template/);
   });
 
   it('sanitizes daily and exact keyword parameters with range limits', () => {
