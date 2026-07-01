@@ -27,6 +27,8 @@ import {
   buildReviewProduct
 } from './workflow-ui.js';
 import { useSessionState } from './use-session-state.js';
+import { HistoryService } from './history-service.js';
+import { IndexedDbHistoryStore } from './indexeddb-history-store.js';
 import './App.css';
 
 const NAV_ITEMS = [
@@ -343,7 +345,7 @@ function WorkbenchLauncher({ onStart }) {
   );
 }
 
-function MiningView({ onSendToTitle }) {
+function MiningView({ onSendToTitle, historyService }) {
   const [seeds, setSeeds] = useState([]);
   const [seedForm, setSeedForm] = useState({ keyword: '', category: '', priority: 5, type: 'manual' });
   const [config, setConfig] = useState({ count: 50, source: 'hybrid', minSearchPopularity: 50, sycmPrecheck: true, autoSeedHighTier: false });
@@ -408,7 +410,9 @@ function MiningView({ onSendToTitle }) {
     source.onmessage = (event) => {
       const data = JSON.parse(event.data);
       if (data.type === 'result') {
-        setCandidates(data.data?.candidates || []);
+        const nextCandidates = data.data?.candidates || [];
+        setCandidates(nextCandidates);
+        historyService?.recordCandidates(nextCandidates).catch(() => {});
         setLogs((current) => current.concat({ type: 'system', message: '挖掘管道执行完成。' }));
         source.close();
         eventSourceRef.current = null;
@@ -594,7 +598,7 @@ function CandidateTable({ candidates, onSendToTitle }) {
   );
 }
 
-function TitleView({ sourceCandidate, onAddReviewProduct }) {
+function TitleView({ sourceCandidate, onAddReviewProduct, historyService }) {
   const [form, setForm] = useState({ keyword: '', maxLength: 60, useImageSearch: false, peerTitles: '' });
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
@@ -780,6 +784,10 @@ export default function App() {
   const [loadingRuns, setLoadingRuns] = useState(false);
   const [sourceCandidate, setSourceCandidate] = useSessionState('ecom.sourceCandidate', null);
   const [reviewProducts, setReviewProducts] = useSessionState('ecom.reviewProducts', []);
+  const historyService = useMemo(() => {
+    if (typeof window === 'undefined' || !window.indexedDB) return null;
+    return new HistoryService(new IndexedDbHistoryStore());
+  }, []);
 
   const refreshOverview = async () => {
     setLoadingRuns(true);
@@ -838,14 +846,20 @@ export default function App() {
           onClearReviewProduct={(id) => setReviewProducts((current) => current.filter((item) => item.id !== id))}
         />
       )}
-      {activeTab === 'mine' && <MiningView onSendToTitle={sendToTitle} />}
+      {activeTab === 'mine' && <MiningView onSendToTitle={sendToTitle} historyService={historyService} />}
       {activeTab === 'title' && (
         <TitleView
           sourceCandidate={sourceCandidate}
-          onAddReviewProduct={(product) => setReviewProducts((current) => [
-            product,
-            ...current.filter((item) => item.id !== product.id)
-          ])}
+          historyService={historyService}
+          onAddReviewProduct={(product) => {
+            setReviewProducts((current) => [
+              product,
+              ...current.filter((item) => item.id !== product.id)
+            ]);
+            if (sourceCandidate) {
+              historyService?.markPendingReview(sourceCandidate.raw || sourceCandidate, product).catch(() => {});
+            }
+          }}
         />
       )}
     </AppShell>
