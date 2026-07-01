@@ -1679,6 +1679,32 @@ textarea:focus {
   font-size: 11px;
 }
 
+.recovery-hint {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+  border: 1px solid rgba(245, 158, 11, 0.36);
+  border-radius: 10px;
+  background: rgba(120, 53, 15, 0.16);
+  color: #fde68a;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.recovery-hint strong,
+.recovery-hint p {
+  display: block;
+  margin: 0;
+}
+
+.recovery-hint p {
+  margin-top: 4px;
+  color: #fef3c7;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 @media (max-width: 980px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -1702,7 +1728,8 @@ textarea:focus {
   .flow-progress,
   .workflow-funnel-react,
   .source-context-panel,
-  .review-queue-item {
+  .review-queue-item,
+  .recovery-hint {
     grid-template-columns: 1fr;
   }
 

@@ -290,6 +290,19 @@ function FlowStatusPanel({ run, onNavigate }) {
   );
 }
 
+function RecoveryHint({ message, onGoTitle }) {
+  return (
+    <div className="recovery-hint">
+      <AlertTriangle size={18} />
+      <div>
+        <strong>自动抓取受阻</strong>
+        <p>{message || '如果淘宝/1688触发限流，可以先手工粘贴同行标题继续生成。'}</p>
+      </div>
+      <button className="secondary-button" type="button" onClick={onGoTitle}>去手工生成</button>
+    </div>
+  );
+}
+
 function WorkbenchLauncher({ onStart }) {
   const [form, setForm] = useState({
     mode: 'daily',
@@ -364,6 +377,7 @@ function MiningView({ onSendToTitle, historyService }) {
   const [minerInput, setMinerInput] = useState('');
   const [minerResults, setMinerResults] = useState([]);
   const [minerBusy, setMinerBusy] = useState(false);
+  const [recoveryMessage, setRecoveryMessage] = useState('');
   const eventSourceRef = useRef(null);
 
   const loadSeeds = async () => {
@@ -403,6 +417,7 @@ function MiningView({ onSendToTitle, historyService }) {
   const startMining = () => {
     if (running) return;
     setRunning(true);
+    setRecoveryMessage('');
     setLogs([{ type: 'system', message: '正在启动关键词挖掘管道...' }]);
     setCandidates([]);
     const params = new URLSearchParams({
@@ -431,7 +446,9 @@ function MiningView({ onSendToTitle, historyService }) {
     };
 
     source.onerror = () => {
-      setLogs((current) => current.concat({ type: 'error', message: '日志流连接中断。' }));
+      const message = '挖词日志流中断或平台限流，请稍后重试，或手工输入关键词进入标题生成。';
+      setRecoveryMessage(message);
+      setLogs((current) => current.concat({ type: 'error', message }));
       source.close();
       eventSourceRef.current = null;
       setRunning(false);
@@ -450,6 +467,7 @@ function MiningView({ onSendToTitle, historyService }) {
     if (!tab) return;
     if (tab.needsInput && !minerInput.trim()) return;
     setMinerBusy(true);
+    setRecoveryMessage('');
     setMinerResults([]);
     try {
       const data = await fetchJson(tab.endpoint, {
@@ -458,6 +476,8 @@ function MiningView({ onSendToTitle, historyService }) {
         body: JSON.stringify(tab.needsInput ? { keyword: minerInput.trim() } : {})
       });
       setMinerResults(Array.isArray(data) ? data : []);
+    } catch (err) {
+      setRecoveryMessage(`挖掘异常：${err.message}。可以手工输入关键词进入标题生成。`);
     } finally {
       setMinerBusy(false);
     }
@@ -474,6 +494,12 @@ function MiningView({ onSendToTitle, historyService }) {
           </button>
         )}
       />
+      {recoveryMessage && (
+        <RecoveryHint
+          message={recoveryMessage}
+          onGoTitle={() => onSendToTitle({ keyword: minerInput || seedForm.keyword })}
+        />
+      )}
 
       <section className="split-layout">
         <div className="table-panel">
@@ -651,7 +677,7 @@ function TitleView({ sourceCandidate, onAddReviewProduct, historyService }) {
       });
       setResult(data);
     } catch (err) {
-      setError(err.message);
+      setError(`${err.message}。可以粘贴同行标题后重试，减少平台抓取依赖。`);
     } finally {
       setLoading(false);
     }
