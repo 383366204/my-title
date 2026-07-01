@@ -19,6 +19,11 @@ import {
 } from 'lucide-react';
 
 import WorkflowStudio from './WorkflowStudio.jsx';
+import {
+  BUSINESS_FUNNEL,
+  getWorkflowAction,
+  mapPipelineStageToFunnel
+} from './workflow-ui.js';
 import './App.css';
 
 const NAV_ITEMS = [
@@ -26,16 +31,6 @@ const NAV_ITEMS = [
   { id: 'mine', label: '挖词选品', icon: Search },
   { id: 'title', label: '标题生成', icon: PenLine },
   { id: 'experiment', label: '开发调试', icon: FlaskConical }
-];
-
-const PIPELINE_STAGES = [
-  { id: 'seed', label: '种子' },
-  { id: 'mined', label: '挖词' },
-  { id: 'verified', label: '验真' },
-  { id: 'generated', label: '标题货源' },
-  { id: 'review', label: '人工复核' },
-  { id: 'ready', label: '待铺货' },
-  { id: 'submitted', label: '已提交' }
 ];
 
 const MINER_TABS = [
@@ -205,10 +200,9 @@ function DashboardView({ status, runs, loading, onRefresh, onStartWorkbench, onN
 }
 
 function FlowStatusPanel({ run, onNavigate }) {
-  const currentIndex = Number.isFinite(run.stageIndex)
-    ? run.stageIndex
-    : Math.max(0, PIPELINE_STAGES.findIndex((stage) => stage.id === run.stage));
-  const needsAction = run.requiresUserAction || run.requiresReview || run.status === 'needs_review';
+  const activeStage = mapPipelineStageToFunnel(run.stage);
+  const activeIndex = Math.max(0, BUSINESS_FUNNEL.findIndex((stage) => stage.id === activeStage));
+  const action = getWorkflowAction(run);
   const statusText = run.status || 'unknown';
 
   return (
@@ -218,23 +212,23 @@ function FlowStatusPanel({ run, onNavigate }) {
         <span>{formatDateTime(run.updatedAt || run.startedAt)}</span>
       </div>
       <strong>{run.runId}</strong>
-      <div className="flow-progress">
-        {PIPELINE_STAGES.map((stage, index) => {
-          const state = index < currentIndex ? 'done' : index === currentIndex ? 'current' : 'todo';
+      <div className="workflow-funnel-react">
+        {BUSINESS_FUNNEL.map((stage, index) => {
+          const state = index < activeIndex ? 'done' : index === activeIndex ? 'active' : '';
           return (
-            <div className={`flow-step flow-step-${state}`} key={stage.id}>
+            <div className={`workflow-funnel-step ${state}`} key={stage.id}>
               <span>{index + 1}</span>
               <b>{stage.label}</b>
             </div>
           );
         })}
       </div>
-      <div className={`next-action-card ${needsAction ? 'next-action-warn' : ''}`}>
+      <div className={`next-action-card ${action.tone === 'warn' ? 'next-action-warn' : ''}`}>
         <div>
-          <span>{needsAction ? '需要处理' : '流程状态'}</span>
+          <span>{action.tone === 'warn' ? '需要处理' : '下一步'}</span>
           <p>{run.userMessage || run.nextActionCode || '流程记录已更新，可继续从工作台处理。'}</p>
         </div>
-        {needsAction ? <AlertTriangle size={18} /> : <CheckCircle2 size={18} />}
+        {action.tone === 'warn' ? <AlertTriangle size={18} /> : <CheckCircle2 size={18} />}
       </div>
       <div className="count-strip">
         {Object.entries(run.counts || {}).slice(0, 5).map(([key, value]) => (
@@ -242,13 +236,16 @@ function FlowStatusPanel({ run, onNavigate }) {
         ))}
       </div>
       <div className="flow-action-row">
-        <button className="secondary-button" type="button" onClick={() => onNavigate('mine')}>
-          <Search size={15} /> 去挖词
+        <button className="secondary-button" type="button" onClick={() => onNavigate(action.targetTab)}>
+          <Play size={15} /> {action.label}
         </button>
-        <button className="secondary-button" type="button" onClick={() => onNavigate('title')}>
-          <PenLine size={15} /> 去标题
+        <button className="secondary-button muted" type="button" onClick={() => onNavigate('mine')}>
+          <Search size={15} /> 挖词
         </button>
-        <button className="secondary-button" type="button" onClick={() => onNavigate('experiment')}>
+        <button className="secondary-button muted" type="button" onClick={() => onNavigate('title')}>
+          <PenLine size={15} /> 标题
+        </button>
+        <button className="secondary-button muted" type="button" onClick={() => onNavigate('experiment')}>
           <FlaskConical size={15} /> 开发调试
         </button>
       </div>
