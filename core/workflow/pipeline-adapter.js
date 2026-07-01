@@ -21,16 +21,6 @@ const WORKFLOW_NODE_IDS = {
 
 const NODE_ORDER = Object.values(WORKFLOW_NODE_IDS);
 
-const STAGE_ACTIVE_NODE = {
-  seed: WORKFLOW_NODE_IDS.mine,
-  mined: WORKFLOW_NODE_IDS.verify,
-  verified: WORKFLOW_NODE_IDS.generate,
-  generated: WORKFLOW_NODE_IDS.export,
-  review: WORKFLOW_NODE_IDS.review,
-  ready: WORKFLOW_NODE_IDS.end,
-  submitted: WORKFLOW_NODE_IDS.end
-};
-
 const ARTIFACT_BY_NODE = {
   [WORKFLOW_NODE_IDS.mine]: { fileKey: 'candidates', type: 'jsonl' },
   [WORKFLOW_NODE_IDS.verify]: { fileKey: 'verifiedKeywords', type: 'jsonl' },
@@ -222,16 +212,96 @@ function outputForNode(id, summary) {
   return null;
 }
 
+function completeBefore(states, nodeId) {
+  const stopIndex = NODE_ORDER.indexOf(nodeId);
+  NODE_ORDER.forEach((id, index) => {
+    if (index < stopIndex) states[id] = 'completed';
+  });
+}
+
+function completeThrough(states, nodeId) {
+  const stopIndex = NODE_ORDER.indexOf(nodeId);
+  NODE_ORDER.forEach((id, index) => {
+    if (index <= stopIndex) states[id] = 'completed';
+  });
+}
+
+function statusPlanForSummary(summary) {
+  const status = summary.status || 'unknown';
+  const states = NODE_ORDER.reduce((memo, nodeId) => {
+    memo[nodeId] = 'idle';
+    return memo;
+  }, {});
+
+  if (status === 'workflow_complete') {
+    completeThrough(states, WORKFLOW_NODE_IDS.end);
+    return states;
+  }
+
+  if (status === 'manual_action_required' || status === 'verified_partial_manual_required' || status === 'verified_empty') {
+    completeBefore(states, WORKFLOW_NODE_IDS.verify);
+    states[WORKFLOW_NODE_IDS.verify] = 'blocked';
+    return states;
+  }
+
+  if (status === 'generate_failed') {
+    completeBefore(states, WORKFLOW_NODE_IDS.generate);
+    states[WORKFLOW_NODE_IDS.generate] = 'failed';
+    return states;
+  }
+
+  if (status === 'needs_review') {
+    completeBefore(states, WORKFLOW_NODE_IDS.review);
+    states[WORKFLOW_NODE_IDS.review] = 'needs_review';
+    return states;
+  }
+
+  if (status === 'ready_to_distribute' || status === 'awaiting_user_confirmation') {
+    completeBefore(states, WORKFLOW_NODE_IDS.review);
+    states[WORKFLOW_NODE_IDS.review] = 'waiting_confirmation';
+    return states;
+  }
+
+  if (status === 'created') {
+    completeThrough(states, WORKFLOW_NODE_IDS.start);
+    states[WORKFLOW_NODE_IDS.mine] = 'running';
+    return states;
+  }
+
+  if (status === 'mined') {
+    completeThrough(states, WORKFLOW_NODE_IDS.mine);
+    states[WORKFLOW_NODE_IDS.verify] = 'running';
+    return states;
+  }
+
+  if (status === 'verified') {
+    completeThrough(states, WORKFLOW_NODE_IDS.verify);
+    states[WORKFLOW_NODE_IDS.generate] = 'running';
+    return states;
+  }
+
+  if (status === 'generated') {
+    completeThrough(states, WORKFLOW_NODE_IDS.generate);
+    states[WORKFLOW_NODE_IDS.export] = 'running';
+    return states;
+  }
+
+  if (status === 'export_empty') {
+    completeBefore(states, WORKFLOW_NODE_IDS.export);
+    states[WORKFLOW_NODE_IDS.export] = 'failed';
+    return states;
+  }
+
+  // 未知状态只展示已创建 run，避免误把后续生产步骤标为完成。
+  completeThrough(states, WORKFLOW_NODE_IDS.start);
+  states[WORKFLOW_NODE_IDS.mine] = 'running';
+  return states;
+}
+
 function buildNodeStates(summary) {
-  const activeNodeId = STAGE_ACTIVE_NODE[summary.stage] || WORKFLOW_NODE_IDS.mine;
-  const activeIndex = NODE_ORDER.indexOf(activeNodeId);
-  const status = summary.status || '';
-  const completeThroughActive = status === 'workflow_complete' || summary.stage === 'submitted';
-  const failedStatuses = new Set(['generate_failed', 'export_empty']);
+  const plannedStates = statusPlanForSummary(summary);
   return NODE_ORDER.reduce((states, nodeId, index) => {
-    let nodeStatus = 'idle';
-    if (completeThroughActive ? index <= activeIndex : index < activeIndex) nodeStatus = 'completed';
-    if (!completeThroughActive && index === activeIndex) nodeStatus = failedStatuses.has(status) ? 'failed' : 'running';
+    const nodeStatus = plannedStates[nodeId] || 'idle';
     states[nodeId] = nodeState(nodeId, `pipeline-${nodeId}`, nodeStatus, nodeStatus === 'idle' ? null : outputForNode(nodeId, summary), summary);
     return states;
   }, {});
@@ -300,8 +370,15 @@ function listWorkflowRuns(options = {}) {
  * @param {string} [options.dataDir] pipeline 数据目录。
  * @returns {object|null} workflow run。
  */
-function getWorkflowRun(runId, options = {}) {
-  return pipelineSummaryToWorkflowRun(summarizePipelineRun({ ...options, runId }));
+function normalizeRunOptions(runIdOrOptions, maybeOptions = {}) {
+  if (runIdOrOptions && typeof runIdOrOptions === 'object') {
+    return { ...runIdOrOptions };
+  }
+  return { ...maybeOptions, runId: runIdOrOptions };
+}
+
+function getWorkflowRun(runIdOrOptions, options = {}) {
+  return pipelineSummaryToWorkflowRun(summarizePipelineRun(normalizeRunOptions(runIdOrOptions, options)));
 }
 
 /**
@@ -314,27 +391,35 @@ function getWorkflowRun(runId, options = {}) {
  * @param {number} [options.maxChars] 文本最大字符数。
  * @returns {object|null} artifact 内容。
  */
-function readWorkflowNodeArtifact(runId, nodeId, options = {}) {
-  const summary = summarizePipelineRun({ dataDir: options.dataDir, runId, previewLimit: 0, reviewChars: 1 });
-  const artifact = ARTIFACT_BY_NODE[nodeId];
+function normalizeArtifactOptions(runIdOrOptions, nodeId, maybeOptions = {}) {
+  if (runIdOrOptions && typeof runIdOrOptions === 'object') {
+    return { ...runIdOrOptions };
+  }
+  return { ...maybeOptions, runId: runIdOrOptions, nodeId };
+}
+
+function readWorkflowNodeArtifact(runIdOrOptions, nodeId, options = {}) {
+  const normalized = normalizeArtifactOptions(runIdOrOptions, nodeId, options);
+  const summary = summarizePipelineRun({ dataDir: normalized.dataDir, runId: normalized.runId, previewLimit: 0, reviewChars: 1 });
+  const artifact = ARTIFACT_BY_NODE[normalized.nodeId];
   if (!summary || !artifact) return null;
   const file = summary.files && summary.files[artifact.fileKey];
   if (!file) return null;
   if (artifact.type === 'jsonl') {
     return {
       runId: summary.runId,
-      nodeId,
+      nodeId: normalized.nodeId,
       file,
       type: 'jsonl',
-      rows: readJsonlPreview(file, options.limit || 50)
+      rows: readJsonlPreview(file, normalized.limit || 50)
     };
   }
   return {
     runId: summary.runId,
-    nodeId,
+    nodeId: normalized.nodeId,
     file,
     type: 'text',
-    text: readTextPreview(file, options.maxChars || 10000)
+    text: readTextPreview(file, normalized.maxChars || 10000)
   };
 }
 

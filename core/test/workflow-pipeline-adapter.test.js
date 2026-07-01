@@ -201,10 +201,79 @@ describe('workflow pipeline adapter', () => {
     assert.equal(run.nodeStates.verify.status, 'completed');
     assert.equal(run.nodeStates.generate.status, 'completed');
     assert.equal(run.nodeStates.export.status, 'completed');
-    assert.equal(run.nodeStates.review.status, 'running');
+    assert.equal(run.nodeStates.review.status, 'needs_review');
     assert.equal(run.nodeStates.end.status, 'idle');
     assert.equal(run.nodeStates.mine.output.count, 2);
     assert.equal(run.nodeStates.review.output.reviewFile, '/tmp/distribution-review.md');
+  });
+
+  it('maps explicit pipeline statuses to production node states', () => {
+    const cases = [
+      {
+        status: 'manual_action_required',
+        stage: 'verified',
+        expected: { verify: 'blocked', generate: 'idle', export: 'idle', review: 'idle', end: 'idle' }
+      },
+      {
+        status: 'verified_partial_manual_required',
+        stage: 'verified',
+        expected: { verify: 'blocked', generate: 'idle', export: 'idle', review: 'idle', end: 'idle' }
+      },
+      {
+        status: 'verified_empty',
+        stage: 'verified',
+        expected: { verify: 'blocked', generate: 'idle', export: 'idle', review: 'idle', end: 'idle' }
+      },
+      {
+        status: 'generate_failed',
+        stage: 'generated',
+        expected: { verify: 'completed', generate: 'failed', export: 'idle', review: 'idle', end: 'idle' }
+      },
+      {
+        status: 'needs_review',
+        stage: 'review',
+        expected: { export: 'completed', review: 'needs_review', end: 'idle' }
+      },
+      {
+        status: 'ready_to_distribute',
+        stage: 'ready',
+        expected: { export: 'completed', review: 'waiting_confirmation', end: 'idle' }
+      },
+      {
+        status: 'awaiting_user_confirmation',
+        stage: 'ready',
+        expected: { export: 'completed', review: 'waiting_confirmation', end: 'idle' }
+      },
+      {
+        status: 'workflow_complete',
+        stage: 'submitted',
+        expected: {
+          start: 'completed',
+          mine: 'completed',
+          verify: 'completed',
+          generate: 'completed',
+          export: 'completed',
+          review: 'completed',
+          end: 'completed'
+        }
+      }
+    ];
+
+    for (const item of cases) {
+      const run = pipelineSummaryToWorkflowRun({
+        runId: `${item.status}_run`,
+        status: item.status,
+        stage: item.stage,
+        startedAt: '2026-06-29T04:00:00.000Z',
+        updatedAt: '2026-06-29T04:10:00.000Z',
+        counts: { candidates: 2, sycmVerified: 1, generatedProducts: 1, readyToDistribute: 1 },
+        files: {}
+      });
+
+      for (const [nodeId, expectedStatus] of Object.entries(item.expected)) {
+        assert.equal(run.nodeStates[nodeId].status, expectedStatus, `${item.status} maps ${nodeId}`);
+      }
+    }
   });
 
   it('lists, gets, and reads workflow node artifacts from pipeline runs', () => {
@@ -228,15 +297,17 @@ describe('workflow pipeline adapter', () => {
     writeText(path.join(runDir, 'generated-products.jsonl'), '{"title":"纯银项链"}\n');
 
     const listed = listWorkflowRuns({ dataDir });
-    const run = getWorkflowRun(runId, { dataDir });
-    const mineArtifact = readWorkflowNodeArtifact(runId, WORKFLOW_NODE_IDS.mine, { dataDir });
-    const generateArtifact = readWorkflowNodeArtifact(runId, WORKFLOW_NODE_IDS.generate, { dataDir });
+    const run = getWorkflowRun({ dataDir, runId });
+    const legacyRun = getWorkflowRun(runId, { dataDir });
+    const mineArtifact = readWorkflowNodeArtifact({ dataDir, runId, nodeId: WORKFLOW_NODE_IDS.mine });
+    const generateArtifact = readWorkflowNodeArtifact({ dataDir, runId, nodeId: WORKFLOW_NODE_IDS.generate });
 
     assert.equal(listed.latest.runId, runId);
+    assert.equal(legacyRun.runId, runId);
     assert.equal(run.nodeStates.generate.status, 'completed');
     assert.equal(run.nodeStates.export.status, 'running');
     assert.deepEqual(mineArtifact.rows.map(row => row.keyword), ['项链', '耳环']);
     assert.deepEqual(generateArtifact.rows, [{ title: '纯银项链' }]);
-    assert.equal(readWorkflowNodeArtifact(runId, WORKFLOW_NODE_IDS.end, { dataDir }), null);
+    assert.equal(readWorkflowNodeArtifact({ dataDir, runId, nodeId: WORKFLOW_NODE_IDS.end }), null);
   });
 });
