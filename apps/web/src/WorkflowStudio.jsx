@@ -29,6 +29,11 @@ import {
 
 import '@xyflow/react/dist/style.css';
 import './App.css';
+import {
+  getCanvasNodeTone,
+  getWorkflowNodeAction,
+  summarizeWorkflowArtifact
+} from './workflow-ui.js';
 
 // ==================== Custom Flow Nodes ====================
 
@@ -214,15 +219,49 @@ const MonitorStageNode = ({ data }) => {
   );
 };
 
+const ProductionNode = ({ id, data }) => {
+  const status = data.status || data.state || 'idle';
+  const tone = getCanvasNodeTone(status);
+  const action = getWorkflowNodeAction(id, status);
+  const label = data.label || data.name || data.title || id;
+
+  return (
+    <button
+      type="button"
+      className={`production-node production-node-${tone}`}
+      onClick={data.onSelect}
+    >
+      <Handle type="target" position={Position.Left} id="in" />
+      <div className="production-node-head">
+        <span>{data.stage || data.kind || data.action || data.type || 'workflow'}</span>
+        <b>{status}</b>
+      </div>
+      <div className="production-node-title">{label}</div>
+      {data.description && <div className="production-node-description">{data.description}</div>}
+      <div className={`production-node-action production-node-action-${action.tone}`}>{action.label}</div>
+      <Handle type="source" position={Position.Right} id="out" />
+    </button>
+  );
+};
+
 // ==================== Node Types Map ====================
 const nodeTypes = {
   'keyword-input': InputNode,
+  'input': ProductionNode,
   'keyword-mining': MiningNode,
   'title-generator': TitleGeneratorNode,
-  'monitor-stage': MonitorStageNode
+  'monitor-stage': MonitorStageNode,
+  'start': ProductionNode,
+  'task': ProductionNode,
+  'agent': ProductionNode,
+  'tool': ProductionNode,
+  'review': ProductionNode,
+  'decision': ProductionNode,
+  'output': ProductionNode,
+  'end': ProductionNode
 };
 
-const isInputNodeType = (type) => type === 'keyword-input' || type === 'input';
+const isInputNodeType = (type) => type === 'keyword-input' || type === 'input' || type === 'start';
 const MODE_MONITOR = 'monitor';
 const MODE_EXPERIMENT = 'experiment';
 const MONITOR_STAGES = [
@@ -249,6 +288,92 @@ const NODE_LAYOUT = {
 const NODE_ROW_GAP = 190;
 
 const unwrapApiData = (payload) => payload?.data || payload || {};
+
+const normalizeTemplateList = (payload) => {
+  const data = unwrapApiData(payload);
+  const rawTemplates = Array.isArray(data)
+    ? data
+    : data?.templates || data?.items || data?.workflows || [];
+  return Array.isArray(rawTemplates)
+    ? rawTemplates.filter((template) => template?.workflow?.nodes && template?.workflow?.edges)
+    : [];
+};
+
+const normalizeRunList = (payload) => {
+  const data = unwrapApiData(payload);
+  const rawRuns = Array.isArray(data)
+    ? data
+    : data?.runs || data?.items || data?.history || [];
+  return Array.isArray(rawRuns) ? rawRuns : [];
+};
+
+const getTemplateMode = (template) => template?.mode || template?.workflow?.mode || MODE_EXPERIMENT;
+
+const getStartNodeParams = (nodes) => {
+  const startNode = nodes.find((node) => isInputNodeType(node.type) || node.id === 'start') || nodes[0];
+  if (!startNode?.data) return {};
+  const { status, state, output, error, onSelect, originalType, ...params } = startNode.data;
+  return params;
+};
+
+const normalizeCanvasNode = (node, selectNode) => {
+  const renderType = nodeTypes[node.type] ? node.type : 'task';
+  return {
+    ...node,
+    type: renderType,
+    data: {
+      ...node.data,
+      originalType: node.data?.originalType || node.type,
+      status: node.data?.status || 'idle',
+      output: node.data?.output || null,
+      error: node.data?.error || null,
+      onSelect: () => selectNode(node.id)
+    }
+  };
+};
+
+const ArtifactPanel = ({ state }) => {
+  const artifact = state.artifact;
+  const type = String(artifact?.type || '').toLowerCase();
+  const items = Array.isArray(artifact?.items) ? artifact.items : artifact?.rows;
+  const text = typeof artifact?.text === 'string'
+    ? artifact.text
+    : typeof artifact?.content === 'string'
+      ? artifact.content
+      : '';
+
+  return (
+    <div className="workflow-artifact-panel">
+      <div className="workflow-artifact-head">
+        <span>节点产物</span>
+        {artifact && <b>{summarizeWorkflowArtifact(artifact)}</b>}
+      </div>
+      {state.status === 'loading' && (
+        <div className="artifact-empty"><RefreshCw size={13} className="animate-spin" /> 正在加载节点产物...</div>
+      )}
+      {state.status === 'error' && (
+        <div className="artifact-error">{state.error || '节点产物加载失败'}</div>
+      )}
+      {state.status === 'empty' && (
+        <div className="artifact-empty">{state.error || '运行完成后显示产物，请到运行监控查看。'}</div>
+      )}
+      {state.status === 'ready' && artifact && Array.isArray(items) && (
+        <div className="artifact-list">
+          {items.length === 0 ? (
+            <div className="artifact-empty">暂无 JSON 数据项</div>
+          ) : items.map((item, index) => (
+            <pre key={index}>{JSON.stringify(item, null, 2)}</pre>
+          ))}
+        </div>
+      )}
+      {state.status === 'ready' && artifact && !Array.isArray(items) && (
+        <pre className="artifact-text">
+          {text || (type === 'json' ? JSON.stringify(artifact, null, 2) : '暂无文本产物')}
+        </pre>
+      )}
+    </div>
+  );
+};
 
 const isFailedSummary = (summary) => {
   if (!summary) return false;
@@ -308,27 +433,36 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
   const [logs, setLogs] = useState([]);
   const [historyRuns, setHistoryRuns] = useState([]);
   const [templates, setTemplates] = useState([]);
+  const [activeTemplateId, setActiveTemplateId] = useState(null);
+  const [activeTemplateMode, setActiveTemplateMode] = useState(MODE_EXPERIMENT);
   const [monitorRuns, setMonitorRuns] = useState([]);
   const [monitorLatestRun, setMonitorLatestRun] = useState(null);
   const [selectedMonitorRunId, setSelectedMonitorRunId] = useState(null);
   const [selectedMonitorRun, setSelectedMonitorRun] = useState(null);
   const [monitorLoading, setMonitorLoading] = useState(false);
   const [monitorError, setMonitorError] = useState('');
+  const [artifactState, setArtifactState] = useState({
+    status: 'empty',
+    nodeId: null,
+    artifact: null,
+    error: ''
+  });
 
   // 1. 获取模板列表
   const fetchTemplates = async () => {
     try {
       const res = await fetch('/api/workflows/templates');
-      const data = await res.json();
-      if (data.ok) {
-        setTemplates(data.data);
-        // 默认加载第一个模板
-        if (data.data.length > 0 && nodes.length === 0) {
-          loadTemplate(data.data[0]);
-        }
+      const payload = await res.json();
+      if (payload.ok === false) throw new Error(payload.error || '获取工作流模板失败');
+      const nextTemplates = normalizeTemplateList(payload);
+      setTemplates(nextTemplates);
+      // 默认加载第一个 production 模板
+      if (nextTemplates.length > 0 && nodes.length === 0) {
+        loadTemplate(nextTemplates[0]);
       }
     } catch (err) {
       console.error('获取工作流模板失败', err);
+      setTemplates([]);
     }
   };
 
@@ -336,12 +470,12 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
   const fetchHistoryRuns = async () => {
     try {
       const res = await fetch('/api/workflows/runs');
-      const data = await res.json();
-      if (data.ok) {
-        setHistoryRuns(data.data);
-      }
+      const payload = await res.json();
+      if (payload.ok === false) throw new Error(payload.error || '获取运行历史失败');
+      setHistoryRuns(normalizeRunList(payload));
     } catch (err) {
       console.error('获取运行历史失败', err);
+      setHistoryRuns([]);
     }
   };
 
@@ -420,9 +554,9 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
 
   // 加载工作流模板
   const loadTemplate = (template) => {
-    const defaultWorkflow = template.workflow;
+    const defaultWorkflow = template?.workflow || { nodes: [], edges: [] };
     // 重置节点状态为 idle
-    const formattedNodes = defaultWorkflow.nodes.map(n => ({
+    const formattedNodes = (defaultWorkflow.nodes || []).map(n => normalizeCanvasNode({
       ...n,
       data: {
         ...n.data,
@@ -430,17 +564,20 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
         output: null,
         error: null
       }
-    }));
+    }, setSelectedNodeId));
     setNodes(formattedNodes);
-    setEdges(defaultWorkflow.edges.map(e => ({
+    setEdges((defaultWorkflow.edges || []).map(e => ({
       ...e,
       markerEnd: { type: MarkerType.ArrowClosed, color: '#3b82f6' },
       style: { stroke: '#3b82f6', strokeWidth: 2 }
     })));
+    setActiveTemplateId(template?.id || null);
+    setActiveTemplateMode(getTemplateMode(template));
     setSelectedNodeId(null);
     setRunStatus('idle');
     setCurrentRunId(null);
     setLogs([]);
+    setArtifactState({ status: 'empty', nodeId: null, artifact: null, error: '' });
   };
 
   // 添加新连接
@@ -458,6 +595,45 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
   const onNodeClick = useCallback((event, node) => {
     setSelectedNodeId(node.id);
   }, []);
+
+  useEffect(() => {
+    if (mode !== MODE_EXPERIMENT || !selectedNodeId) return;
+    if (!currentRunId) {
+      setArtifactState({
+        status: 'empty',
+        nodeId: selectedNodeId,
+        artifact: null,
+        error: '运行完成后显示产物，请到运行监控查看。'
+      });
+      return;
+    }
+
+    let cancelled = false;
+    setArtifactState({ status: 'loading', nodeId: selectedNodeId, artifact: null, error: '' });
+    fetch(`/api/workflows/runs/${currentRunId}/artifacts/${selectedNodeId}`)
+      .then(async (res) => {
+        const payload = await res.json();
+        if (payload.ok === false || !res.ok) {
+          throw new Error(payload.error || '节点产物加载失败');
+        }
+        const data = unwrapApiData(payload);
+        return data?.artifact || data;
+      })
+      .then((artifact) => {
+        if (!cancelled) {
+          setArtifactState({ status: artifact ? 'ready' : 'empty', nodeId: selectedNodeId, artifact, error: '' });
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setArtifactState({ status: 'error', nodeId: selectedNodeId, artifact: null, error: err.message });
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, selectedNodeId, currentRunId]);
 
   // 选中节点对象
   const selectedNode = useMemo(() => {
@@ -562,7 +738,7 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
   const syncNodeStates = (nodeStates) => {
     setNodes((nds) =>
       nds.map((node) => {
-        const state = nodeStates[node.id];
+        const state = nodeStates?.[node.id];
         if (state) {
           return {
             ...node,
@@ -570,7 +746,8 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
               ...node.data,
               status: state.status,
               output: state.output,
-              error: state.error
+              error: state.error,
+              onSelect: () => setSelectedNodeId(node.id)
             }
           };
         }
@@ -591,14 +768,14 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
       const data = await res.json();
 
       if (data.ok) {
-        const run = data.data;
+        const run = unwrapApiData(data);
         // 把工作流图载入画布
-        const defaultWorkflow = run.workflow;
+        const defaultWorkflow = run.workflow || { nodes: [], edges: [] };
 
         // 载入节点和边，附带运行时状态
-        setNodes(defaultWorkflow.nodes.map(n => {
-          const state = run.nodeStates[n.id] || {};
-          return {
+        setNodes((defaultWorkflow.nodes || []).map(n => {
+          const state = run.nodeStates?.[n.id] || {};
+          return normalizeCanvasNode({
             ...n,
             data: {
               ...n.data,
@@ -606,10 +783,10 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
               output: state.output || null,
               error: state.error || null
             }
-          };
+          }, setSelectedNodeId);
         }));
 
-        setEdges(defaultWorkflow.edges.map(e => ({
+        setEdges((defaultWorkflow.edges || []).map(e => ({
           ...e,
           markerEnd: { type: MarkerType.ArrowClosed, color: '#3b82f6' },
           style: { stroke: '#3b82f6', strokeWidth: 2 }
@@ -643,7 +820,7 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
     const workflowDef = {
       nodes: nodes.map(n => ({
         id: n.id,
-        type: n.type,
+        type: n.data?.originalType || n.type,
         position: n.position,
         data: n.data
       })),
@@ -658,34 +835,64 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
       const validationRes = await fetch('/api/workflows/validate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workflow: workflowDef })
+        body: JSON.stringify({
+          templateId: activeTemplateId,
+          mode: activeTemplateMode,
+          params: getStartNodeParams(nodes),
+          workflow: workflowDef
+        })
       });
       const validationPayload = await validationRes.json();
-      if (!validationPayload.ok) {
+      if (validationPayload.ok === false) {
         const errors = validationPayload.data?.errors || [{ message: validationPayload.error || '工作流校验失败' }];
-        setRunStatus('failed');
+        const typeOnlyErrors = errors.filter((error) => String(error.code || error.message || '').toLowerCase().includes('type'));
+        if (typeOnlyErrors.length !== errors.length || !activeTemplateId) {
+          setRunStatus('failed');
+          setLogs(errors.map(error => ({
+            timestamp: new Date().toISOString(),
+            level: 'error',
+            message: `[${error.code || 'validation_error'}] ${error.message}`
+          })));
+          return;
+        }
         setLogs(errors.map(error => ({
           timestamp: new Date().toISOString(),
-          level: 'error',
-          message: `[${error.code || 'validation_error'}] ${error.message}`
+          level: 'warn',
+          message: `[${error.code || 'production_validate'}] ${error.message}`
         })));
-        return;
       }
 
       const res = await fetch('/api/workflows/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workflow: workflowDef })
+        body: JSON.stringify({
+          templateId: activeTemplateId,
+          mode: activeTemplateMode,
+          params: getStartNodeParams(nodes)
+        })
       });
-      const data = await res.json();
+      const payload = await res.json();
 
-      if (data.ok) {
-        const runId = data.data.runId;
+      if (payload.ok !== false) {
+        const data = unwrapApiData(payload);
+        const runId = data.runId || null;
+        const message = data.message || payload.message || '工作流已提交。';
         setCurrentRunId(runId);
-        // 开始 SSE 监听运行事件
-        listenToRunEvents(runId);
+        setLogs((prev) => [...prev, {
+          timestamp: new Date().toISOString(),
+          level: runId ? 'info' : 'warn',
+          message
+        }]);
+        if (runId) {
+          setRunStatus('running');
+          // 开始 SSE 监听运行事件
+          listenToRunEvents(runId);
+        } else {
+          setRunStatus('completed');
+          await Promise.allSettled([loadWorkbenchRuns(), fetchHistoryRuns()]);
+        }
       } else {
-        alert(`启动失败: ${data.error}`);
+        alert(`启动失败: ${payload.error}`);
         setRunStatus('failed');
       }
     } catch (err) {
@@ -752,7 +959,7 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
           <div className="flex items-center gap-2">
             <Layers className="text-blue-500" size={20} />
             <h1 className="font-bold text-sm tracking-wider text-slate-200">
-              {mode === MODE_MONITOR ? '流程监控' : '标题生成工作流画布'}
+              流程监控/可执行流程编排
             </h1>
           </div>
           <div className="grid grid-cols-2 gap-2">
@@ -760,13 +967,13 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
               onClick={() => setMode(MODE_MONITOR)}
               className={`mode-toggle ${mode === MODE_MONITOR ? 'mode-toggle-active' : ''}`}
             >
-              流程监控
+              运行监控
             </button>
             <button
               onClick={() => setMode(MODE_EXPERIMENT)}
               className={`mode-toggle ${mode === MODE_EXPERIMENT ? 'mode-toggle-active' : ''}`}
             >
-              节点实验
+              流程编排
             </button>
           </div>
         </div>
@@ -804,17 +1011,26 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
         {/* 模板加载 */}
         {mode === MODE_EXPERIMENT && templates.length > 0 && (
           <div className="p-4 border-b border-slate-800 bg-slate-900/20">
-            <h2 className="text-xs font-bold tracking-wider text-slate-400 uppercase mb-2">预设链模板</h2>
-            <button
-              onClick={() => loadTemplate(templates[0])}
-              className="w-full text-left p-2.5 rounded border border-slate-700 bg-slate-800 hover:bg-slate-750 text-xs font-medium flex items-center justify-between transition-all"
-            >
-              <div>
-                <div className="text-slate-200 font-semibold">{templates[0].name}</div>
-                <div className="text-[10px] text-slate-400 truncate w-56">{templates[0].description}</div>
-              </div>
-              <ChevronRight size={14} className="text-slate-500" />
-            </button>
+            <h2 className="text-xs font-bold tracking-wider text-slate-400 uppercase mb-2">Production 模板</h2>
+            <div className="space-y-2">
+              {templates.map((template) => (
+                <button
+                  key={template.id}
+                  onClick={() => loadTemplate(template)}
+                  className={`w-full text-left p-2.5 rounded border text-xs font-medium flex items-center justify-between transition-all ${
+                    activeTemplateId === template.id
+                      ? 'border-blue-500 bg-blue-950/30'
+                      : 'border-slate-700 bg-slate-800 hover:bg-slate-750'
+                  }`}
+                >
+                  <div className="min-w-0">
+                    <div className="text-slate-200 font-semibold truncate">{template.name}</div>
+                    <div className="text-[10px] text-slate-400 truncate w-56">{template.description}</div>
+                  </div>
+                  <ChevronRight size={14} className="text-slate-500 shrink-0" />
+                </button>
+              ))}
+            </div>
           </div>
         )}
 
@@ -1169,9 +1385,11 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
                 节点 ID & 类型
               </span>
               <div className="font-mono text-xs text-slate-400 bg-slate-950/50 p-2 rounded border border-slate-800 break-all">
-                {selectedNode.id} ({selectedNode.type})
+                {selectedNode.id} ({selectedNode.data?.originalType || selectedNode.type})
               </div>
             </div>
+
+            <ArtifactPanel state={artifactState} />
 
             {/* 输入节点独有参数 */}
             {isInputNodeType(selectedNode.type) && (
