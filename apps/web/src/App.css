@@ -1255,11 +1255,15 @@ textarea:focus {
 
 .studio-host {
   height: 100vh;
+  min-width: 0;
   overflow: hidden;
 }
 
 .studio-host > .flex {
   height: 100vh;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .spin {

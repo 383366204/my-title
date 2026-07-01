@@ -744,7 +744,7 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
   };
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-slate-950 font-sans text-slate-100">
+    <div className="flex h-screen w-full min-w-0 overflow-hidden bg-slate-950 font-sans text-slate-100">
 
       {/* 1. Left Sidebar: History and Node library */}
       <div className="w-80 border-r border-slate-800 bg-slate-900/60 flex flex-col h-full shrink-0">
@@ -903,7 +903,7 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
       </div>
 
       {/* 2. Middle & Right: Canvas, Log panel, and Settings panel */}
-      <div className="flex-1 flex flex-col h-full relative">
+      <div className="min-w-0 flex-1 flex flex-col h-full relative">
 
         {/* 控制工具条 */}
         <div className="h-14 border-b border-slate-800 bg-slate-900 flex justify-between items-center px-6 z-10 shrink-0">
