@@ -5,7 +5,6 @@ import {
   Clock,
   Copy,
   Database,
-  ExternalLink,
   FlaskConical,
   LayoutDashboard,
   PenLine,
@@ -14,6 +13,7 @@ import {
   RefreshCw,
   Search,
   Send,
+  Settings,
   Square,
   Trash2
 } from 'lucide-react';
@@ -34,8 +34,7 @@ import './App.css';
 const NAV_ITEMS = [
   { id: 'dashboard', label: '工作台', icon: LayoutDashboard },
   { id: 'mine', label: '挖词选品', icon: Search },
-  { id: 'title', label: '标题生成', icon: PenLine },
-  { id: 'experiment', label: '开发调试', icon: FlaskConical }
+  { id: 'title', label: '标题生成', icon: PenLine }
 ];
 
 const MINER_TABS = [
@@ -86,6 +85,8 @@ function getGateMeta(item = {}) {
 }
 
 function AppShell({ activeTab, setActiveTab, children }) {
+  const [showDeveloperTools, setShowDeveloperTools] = useState(false);
+
   return (
     <div className="app-shell">
       <aside className="app-sidebar">
@@ -113,10 +114,17 @@ function AppShell({ activeTab, setActiveTab, children }) {
             );
           })}
         </nav>
-        <a className="legacy-link" href="/legacy/">
-          <ExternalLink size={14} />
-          旧版备份
-        </a>
+        <div className="sidebar-tools">
+          <button className="sidebar-tool-button" type="button" onClick={() => setShowDeveloperTools((value) => !value)}>
+            <Settings size={14} /> 系统
+          </button>
+          {showDeveloperTools && (
+            <div className="sidebar-tool-menu">
+              <button type="button" onClick={() => setActiveTab('experiment')}>开发调试</button>
+              <a href="/legacy/">旧版备份</a>
+            </div>
+          )}
+        </div>
       </aside>
       <main className="app-main">{children}</main>
     </div>

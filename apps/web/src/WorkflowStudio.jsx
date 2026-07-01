@@ -24,7 +24,6 @@ import {
   Layers,
   ChevronRight,
   Database,
-  ExternalLink,
   Tag
 } from 'lucide-react';
 
@@ -901,15 +900,6 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
           )}
         </div>
 
-        {/* Legacy fallback */}
-        <div className="p-4 border-t border-slate-800 bg-slate-900">
-          <button
-            onClick={() => { window.location.href = '/legacy/'; }}
-            className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold rounded-lg flex items-center justify-center gap-1.5 transition-all"
-          >
-            打开旧版备份 <ExternalLink size={12} />
-          </button>
-        </div>
       </div>
 
       {/* 2. Middle & Right: Canvas, Log panel, and Settings panel */}

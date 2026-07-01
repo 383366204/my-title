@@ -1349,6 +1349,43 @@ textarea:focus {
   background: rgba(255, 255, 255, 0.04);
 }
 
+.sidebar-tools {
+  margin-top: auto;
+  display: grid;
+  gap: 8px;
+}
+
+.sidebar-tool-button,
+.sidebar-tool-menu button,
+.sidebar-tool-menu a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-secondary);
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 12px;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.sidebar-tool-button:hover,
+.sidebar-tool-menu button:hover,
+.sidebar-tool-menu a:hover {
+  border-color: rgba(139, 92, 246, 0.34);
+  background: rgba(139, 92, 246, 0.1);
+  color: #fff;
+}
+
+.sidebar-tool-menu {
+  display: grid;
+  gap: 6px;
+}
+
 .page-scroll {
   padding: 32px 36px;
   max-width: 1400px;
