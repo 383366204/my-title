@@ -4,6 +4,9 @@ import assert from 'node:assert/strict';
 import {
   mapPipelineStageToFunnel,
   getWorkflowAction,
+  getCanvasNodeTone,
+  getWorkflowNodeAction,
+  summarizeWorkflowArtifact,
   normalizeCandidateForTitle,
   buildReviewProduct
 } from './workflow-ui.js';
@@ -35,6 +38,60 @@ test('getWorkflowAction recommends the next business action', () => {
     targetTab: 'dashboard',
     tone: 'warn'
   });
+});
+
+test('getCanvasNodeTone maps workflow node states to UI tones', () => {
+  assert.equal(getCanvasNodeTone('completed'), 'success');
+  assert.equal(getCanvasNodeTone('running'), 'active');
+  assert.equal(getCanvasNodeTone('needs_review'), 'warn');
+  assert.equal(getCanvasNodeTone('waiting_confirmation'), 'warn');
+  assert.equal(getCanvasNodeTone('blocked'), 'danger');
+  assert.equal(getCanvasNodeTone('failed'), 'danger');
+  assert.equal(getCanvasNodeTone('idle'), 'muted');
+  assert.equal(getCanvasNodeTone('unknown'), 'muted');
+});
+
+test('getWorkflowNodeAction maps review and terminal states to node actions', () => {
+  assert.deepEqual(getWorkflowNodeAction('review', 'needs_review'), {
+    label: '处理复核',
+    action: 'review',
+    tone: 'warn'
+  });
+  assert.deepEqual(getWorkflowNodeAction('review', 'waiting_confirmation'), {
+    label: '处理复核',
+    action: 'review',
+    tone: 'warn'
+  });
+  assert.deepEqual(getWorkflowNodeAction('generate', 'failed'), {
+    label: '查看阻塞',
+    action: 'blocked',
+    tone: 'danger'
+  });
+  assert.deepEqual(getWorkflowNodeAction('export', 'blocked'), {
+    label: '查看阻塞',
+    action: 'blocked',
+    tone: 'danger'
+  });
+  assert.deepEqual(getWorkflowNodeAction('generate', 'completed'), {
+    label: '查看产物',
+    action: 'artifact',
+    tone: 'success'
+  });
+  assert.deepEqual(getWorkflowNodeAction('mine', 'idle'), {
+    label: '查看节点',
+    action: 'inspect',
+    tone: 'muted'
+  });
+});
+
+test('summarizeWorkflowArtifact describes jsonl, markdown, text, and empty artifacts', () => {
+  assert.equal(summarizeWorkflowArtifact({ type: 'jsonl', items: [{}, {}, {}] }), '3 条数据');
+  assert.equal(summarizeWorkflowArtifact({ type: 'jsonl', rows: [{ keyword: '项链' }] }), '1 条数据');
+  assert.equal(summarizeWorkflowArtifact({ type: 'markdown', text: '# 复核' }), '复核报告');
+  assert.equal(summarizeWorkflowArtifact({ file: '/tmp/distribution-review.md', text: '# 复核' }), '复核报告');
+  assert.equal(summarizeWorkflowArtifact({ type: 'text', text: '第一行\n第二行\n' }), '2 行文本');
+  assert.equal(summarizeWorkflowArtifact(null), '暂无产物');
+  assert.equal(summarizeWorkflowArtifact({ type: 'text', text: '' }), '暂无产物');
 });
 
 test('normalizeCandidateForTitle carries mining metrics into title context', () => {
