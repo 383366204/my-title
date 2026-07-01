@@ -117,6 +117,21 @@ describe('workflow pipeline adapter', () => {
     assert.throws(() => resolveProductionWorkflowLaunch({ templateId: 'missing-template' }), /未知 workflow template/);
   });
 
+  it('prefers extracted keyword mode for legacy production workflow launch without explicit mode or template', () => {
+    const [template] = listProductionWorkflowTemplates();
+    const workflow = JSON.parse(JSON.stringify(template.workflow));
+    workflow.nodes.find(node => node.id === WORKFLOW_NODE_IDS.start).data.keyword = '纯银项链';
+
+    const launch = resolveProductionWorkflowLaunch({ workflow });
+    const args = buildPipelineCliArgs(launch.mode, launch.params);
+
+    assert.deepEqual(launch, {
+      mode: 'keyword',
+      params: { keyword: '纯银项链' }
+    });
+    assert.deepEqual(args.slice(0, 4), ['bin/cli.js', 'flow', 'keyword', '纯银项链']);
+  });
+
   it('sanitizes daily and exact keyword parameters with range limits', () => {
     assert.deepEqual(sanitizeWorkflowParams('daily', {
       mine: '999',

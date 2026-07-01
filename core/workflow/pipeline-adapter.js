@@ -252,6 +252,8 @@ function resolveProductionWorkflowLaunch(body = {}) {
   let template = null;
   const workflow = body.workflow && typeof body.workflow === 'object' ? body.workflow : null;
   const templateId = body.templateId || body.template_id || workflow?.id;
+  const hasExplicitMode = Object.prototype.hasOwnProperty.call(body, 'mode') || Object.prototype.hasOwnProperty.call(workflow || {}, 'mode');
+  const hasExplicitTemplate = Boolean(templateId);
   if (templateId) {
     template = templates.find(item => item.id === templateId);
     if (!template) throw new Error(`未知 workflow template: ${templateId}`);
@@ -272,6 +274,7 @@ function resolveProductionWorkflowLaunch(body = {}) {
   }
 
   let mode = body.mode || workflow?.mode || template?.mode || '';
+  if (params.keyword && !hasExplicitMode && !hasExplicitTemplate) mode = 'keyword';
   if (!mode && params.keyword) mode = 'keyword';
   if (mode === 'daily' && params.keyword && !body.mode && !template) mode = 'keyword';
   if (!mode) {
