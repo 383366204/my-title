@@ -133,6 +133,18 @@ export function formatWorkflowProgressLabel(progress) {
   return parts.join(' · ');
 }
 
+/**
+ * 归一化 workflow SSE progress 事件，兼容 payload 包裹和扁平 runtime event。
+ * @param {object|null} event SSE 事件数据。
+ * @returns {object} 节点进度。
+ */
+export function normalizeWorkflowProgressEvent(event) {
+  if (!event || typeof event !== 'object') return {};
+  const source = event.payload && typeof event.payload === 'object' ? event.payload : event;
+  const { event: _event, ...progress } = source;
+  return progress;
+}
+
 export function isWorkflowInputNodeType(type) {
   return type === 'keyword-input' || type === 'input' || type === 'start';
 }

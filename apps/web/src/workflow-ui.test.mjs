@@ -10,6 +10,7 @@ import {
   normalizeCandidateForTitle,
   buildReviewProduct,
   formatWorkflowProgressLabel,
+  normalizeWorkflowProgressEvent,
   getStartNodeParams,
   getWorkflowLaunchBlocker
 } from './workflow-ui.js';
@@ -141,6 +142,34 @@ test('formatWorkflowProgressLabel formats current, total, percent, and empty val
   assert.equal(formatWorkflowProgressLabel({ message: '验真 3/10', percent: 30 }), '验真 3/10 · 30%');
   assert.equal(formatWorkflowProgressLabel(null), '');
   assert.equal(formatWorkflowProgressLabel({}), '');
+});
+
+test('normalizeWorkflowProgressEvent accepts payload and flat SSE progress events', () => {
+  assert.deepEqual(normalizeWorkflowProgressEvent({
+    event: 'progress',
+    payload: { step: 'verify', current: 3, total: 10, percent: 30, message: '验真 3/10' }
+  }), {
+    step: 'verify',
+    current: 3,
+    total: 10,
+    percent: 30,
+    message: '验真 3/10'
+  });
+
+  assert.deepEqual(normalizeWorkflowProgressEvent({
+    event: 'progress',
+    step: 'mine',
+    current: 1,
+    total: 5,
+    percent: 20,
+    message: '挖词 1/5'
+  }), {
+    step: 'mine',
+    current: 1,
+    total: 5,
+    percent: 20,
+    message: '挖词 1/5'
+  });
 });
 
 test('getStartNodeParams extracts canvas start data without runtime fields', () => {

@@ -36,6 +36,7 @@ import {
   getWorkflowLaunchBlocker,
   getWorkflowNodeAction,
   isWorkflowInputNodeType,
+  normalizeWorkflowProgressEvent,
   summarizeWorkflowArtifact
 } from './workflow-ui.js';
 
@@ -748,7 +749,7 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
           }
         }, 50);
       } else if (data.event === 'progress') {
-        const progress = data.payload || {};
+        const progress = normalizeWorkflowProgressEvent(data);
         const nodeId = progress.step || progress.nodeId;
         if (nodeId) {
           setNodes((nds) =>
