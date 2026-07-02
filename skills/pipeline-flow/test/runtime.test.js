@@ -84,6 +84,20 @@ describe('pipeline runtime store', () => {
     assert.deepEqual(readRuntimeEvents({ dataDir, runId: 'run_3' }).map(event => event.percent), [10, 100]);
   });
 
+  it('skips malformed runtime event lines', () => {
+    const dataDir = tempDataDir();
+    initRuntimeState({ dataDir, runId: 'run_4', steps: ['mine'] });
+    fs.appendFileSync(
+      path.join(dataDir, 'runs', 'run_4', 'workflow-events.jsonl'),
+      '{bad json}\n{"event":"progress","step":"mine","percent":50}\n',
+      'utf8'
+    );
+
+    const events = readRuntimeEvents({ dataDir, runId: 'run_4' });
+
+    assert.deepEqual(events, [{ event: 'progress', step: 'mine', percent: 50 }]);
+  });
+
   it('rejects unsafe run ids', () => {
     const dataDir = tempDataDir();
     assert.throws(() => assertRuntimeRunId('../bad'), /Invalid runtime run id/);

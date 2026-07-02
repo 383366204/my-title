@@ -2,9 +2,9 @@
 
 const fs = require('fs');
 const path = require('path');
-const { DEFAULT_FLOW_DIR } = require('../index');
 
 const RUN_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
+const DEFAULT_RUNTIME_DATA_DIR = path.join(process.cwd(), 'data', 'pipeline');
 
 /**
  * Assert that a runtime run id is safe for file-backed storage.
@@ -18,7 +18,7 @@ function assertRuntimeRunId(runId) {
 }
 
 function resolveDataDir(dataDir) {
-  return dataDir || DEFAULT_FLOW_DIR;
+  return dataDir || DEFAULT_RUNTIME_DATA_DIR;
 }
 
 function runDir(dataDir, runId) {
@@ -177,11 +177,19 @@ function appendRuntimeEvent({ dataDir, runId, event = {} }) {
 function readRuntimeEvents({ dataDir, runId }) {
   const file = eventsFile(dataDir, runId);
   if (!fs.existsSync(file)) return [];
-  return fs.readFileSync(file, 'utf8')
+  const events = [];
+  fs.readFileSync(file, 'utf8')
     .replace(/^\uFEFF/, '')
     .split(/\r?\n/)
     .filter(Boolean)
-    .map(line => JSON.parse(line));
+    .forEach(line => {
+      try {
+        events.push(JSON.parse(line));
+      } catch (_error) {
+        // workflow-events.jsonl can be tailed while written; skip malformed rows.
+      }
+    });
+  return events;
 }
 
 module.exports = {
