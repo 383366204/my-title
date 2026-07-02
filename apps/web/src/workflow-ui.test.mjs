@@ -8,7 +8,9 @@ import {
   getWorkflowNodeAction,
   summarizeWorkflowArtifact,
   normalizeCandidateForTitle,
-  buildReviewProduct
+  buildReviewProduct,
+  getStartNodeParams,
+  getWorkflowLaunchBlocker
 } from './workflow-ui.js';
 
 test('mapPipelineStageToFunnel maps backend stages to five business stages', () => {
@@ -129,4 +131,62 @@ test('buildReviewProduct preserves title, source product, and safety fields', ()
   assert.equal(review.productUrl, 'https://detail.1688.com/offer/1.html');
   assert.equal(review.canDistribute, true);
   assert.equal(review.reason, '已验真');
+});
+
+test('getStartNodeParams extracts canvas start data without runtime fields', () => {
+  const params = getStartNodeParams([
+    {
+      id: 'start',
+      type: 'task',
+      data: {
+        label: '开始',
+        keyword: '纯银项链女',
+        productsPerKeyword: 4,
+        length: 60,
+        status: 'completed',
+        output: { runId: 'run_1' },
+        error: null,
+        onSelect: () => {},
+        originalType: 'production-start'
+      }
+    }
+  ]);
+
+  assert.deepEqual(params, {
+    label: '开始',
+    keyword: '纯银项链女',
+    productsPerKeyword: 4,
+    length: 60
+  });
+});
+
+test('getWorkflowLaunchBlocker blocks empty keyword launches before request', () => {
+  const blocker = getWorkflowLaunchBlocker('keyword', [
+    { id: 'start', type: 'task', data: { keyword: '   ' } }
+  ]);
+
+  assert.equal(blocker.status, 'failed');
+  assert.equal(blocker.error, '关键词不能为空');
+  assert.equal(blocker.logs[0].level, 'error');
+  assert.match(blocker.logs[0].message, /关键词不能为空/);
+});
+
+test('getWorkflowLaunchBlocker keeps daily start parameters runnable', () => {
+  const blocker = getWorkflowLaunchBlocker('daily', [
+    {
+      id: 'start',
+      type: 'task',
+      data: {
+        mine: 50,
+        verify: 20,
+        generate: 10,
+        export: 20,
+        productsPerKeyword: 12,
+        length: 60,
+        pages: 1
+      }
+    }
+  ]);
+
+  assert.equal(blocker, null);
 });

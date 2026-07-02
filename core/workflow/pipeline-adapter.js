@@ -43,9 +43,28 @@ function sanitizeBool(value, fallback = true) {
   return fallback;
 }
 
-function workflowNodes() {
+function workflowNodes(mode = 'daily') {
+  const startData = mode === 'keyword'
+    ? {
+        label: '开始',
+        keyword: '',
+        export: 20,
+        productsPerKeyword: 12,
+        length: 60,
+        pages: 1
+      }
+    : {
+        label: '开始',
+        mine: 50,
+        verify: 20,
+        generate: 10,
+        export: 20,
+        productsPerKeyword: 12,
+        length: 60,
+        pages: 1
+      };
   return [
-    { id: WORKFLOW_NODE_IDS.start, type: 'production-start', data: { label: '开始' }, position: { x: 0, y: 120 } },
+    { id: WORKFLOW_NODE_IDS.start, type: 'production-start', data: startData, position: { x: 0, y: 120 } },
     { id: WORKFLOW_NODE_IDS.mine, type: 'pipeline-mine', data: { label: '选词挖掘' }, position: { x: 180, y: 120 } },
     { id: WORKFLOW_NODE_IDS.verify, type: 'pipeline-verify', data: { label: '生意参谋校验' }, position: { x: 360, y: 120 } },
     { id: WORKFLOW_NODE_IDS.generate, type: 'pipeline-generate', data: { label: '标题生成' }, position: { x: 540, y: 120 } },
@@ -79,7 +98,7 @@ function template(id, name, mode, description) {
     description,
     production: true,
     workflow: {
-      nodes: workflowNodes(),
+      nodes: workflowNodes(mode),
       edges: workflowEdges()
     }
   };

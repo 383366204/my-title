@@ -48,6 +48,19 @@ describe('workflow pipeline adapter', () => {
     const templates = listProductionWorkflowTemplates();
 
     assert.deepEqual(templates.map(template => template.id), ['daily-selection-v1', 'exact-keyword-v1']);
+    const dailyStart = templates[0].workflow.nodes.find(node => node.id === WORKFLOW_NODE_IDS.start);
+    const keywordStart = templates[1].workflow.nodes.find(node => node.id === WORKFLOW_NODE_IDS.start);
+    assert.deepEqual(Object.keys(dailyStart.data).sort(), [
+      'export',
+      'generate',
+      'label',
+      'length',
+      'mine',
+      'pages',
+      'productsPerKeyword',
+      'verify'
+    ]);
+    assert.equal(keywordStart.data.keyword, '');
     for (const template of templates) {
       assert.equal(template.production, true);
       assert.ok(template.workflow);

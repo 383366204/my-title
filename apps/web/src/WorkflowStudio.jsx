@@ -31,7 +31,10 @@ import '@xyflow/react/dist/style.css';
 import './App.css';
 import {
   getCanvasNodeTone,
+  getStartNodeParams,
+  getWorkflowLaunchBlocker,
   getWorkflowNodeAction,
+  isWorkflowInputNodeType,
   summarizeWorkflowArtifact
 } from './workflow-ui.js';
 
@@ -261,7 +264,7 @@ const nodeTypes = {
   'end': ProductionNode
 };
 
-const isInputNodeType = (type) => type === 'keyword-input' || type === 'input' || type === 'start';
+const isInputNodeType = isWorkflowInputNodeType;
 const MODE_MONITOR = 'monitor';
 const MODE_EXPERIMENT = 'experiment';
 const MONITOR_STAGES = [
@@ -286,6 +289,15 @@ const NODE_LAYOUT = {
   'title-generator': { x: 980, y: 160 }
 };
 const NODE_ROW_GAP = 190;
+const DAILY_START_FIELDS = [
+  { key: 'mine', label: '挖掘候选词', min: 1, max: 200 },
+  { key: 'verify', label: '生意参谋校验', min: 1, max: 200 },
+  { key: 'generate', label: '生成标题货源', min: 1, max: 100 },
+  { key: 'export', label: '导出清单数量', min: 1, max: 100 },
+  { key: 'productsPerKeyword', label: '每词货源数', min: 1, max: 50 },
+  { key: 'length', label: '标题长度', min: 30, max: 80 },
+  { key: 'pages', label: '采集页数', min: 1, max: 5 }
+];
 
 const unwrapApiData = (payload) => payload?.data || payload || {};
 
@@ -308,13 +320,6 @@ const normalizeRunList = (payload) => {
 };
 
 const getTemplateMode = (template) => template?.mode || template?.workflow?.mode || MODE_EXPERIMENT;
-
-const getStartNodeParams = (nodes) => {
-  const startNode = nodes.find((node) => isInputNodeType(node.type) || node.id === 'start') || nodes[0];
-  if (!startNode?.data) return {};
-  const { status, state, output, error, onSelect, originalType, ...params } = startNode.data;
-  return params;
-};
 
 const normalizeCanvasNode = (node, selectNode) => {
   const renderType = nodeTypes[node.type] ? node.type : 'task';
@@ -815,6 +820,14 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
 
     setLogs([]);
     setRunStatus('pending');
+
+    const launchBlocker = getWorkflowLaunchBlocker(activeTemplateMode, nodes);
+    if (launchBlocker) {
+      setRunStatus(launchBlocker.status);
+      setLogs(launchBlocker.logs);
+      setCurrentRunId(null);
+      return;
+    }
 
     // 格式化工作流的 nodes/edges
     const workflowDef = {
@@ -1390,6 +1403,43 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
             </div>
 
             <ArtifactPanel state={artifactState} />
+
+            {selectedNode.id === 'start' && activeTemplateMode === 'keyword' && (
+              <div className="space-y-4">
+                <div className="border-t border-slate-800/80 pt-4">
+                  <label className="text-xs font-bold text-slate-300 block mb-2">搜索核心关键词</label>
+                  <input
+                    type="text"
+                    value={selectedNode.data.keyword || ''}
+                    onChange={(e) => updateNodeData(selectedNode.id, 'keyword', e.target.value)}
+                    className="w-full p-2.5 rounded-lg border border-slate-700 bg-slate-950 focus:border-blue-500 focus:outline-none text-slate-100 text-sm transition-all"
+                    placeholder="例如: 纯银项链女高级感"
+                  />
+                  <p className="text-[10px] text-slate-500 mt-1">此词会作为精确关键词流水线的启动参数。</p>
+                </div>
+              </div>
+            )}
+
+            {selectedNode.id === 'start' && activeTemplateMode === 'daily' && (
+              <div className="space-y-4 border-t border-slate-800/80 pt-4">
+                <div className="text-xs font-bold text-slate-300">每日流水线参数</div>
+                <div className="grid grid-cols-2 gap-3">
+                  {DAILY_START_FIELDS.map((field) => (
+                    <label key={field.key} className="space-y-1">
+                      <span className="text-[10px] font-bold text-slate-400 block">{field.label}</span>
+                      <input
+                        type="number"
+                        value={selectedNode.data[field.key] ?? ''}
+                        onChange={(e) => updateNodeData(selectedNode.id, field.key, parseInt(e.target.value, 10) || field.min)}
+                        className="w-full p-2.5 rounded-lg border border-slate-700 bg-slate-950 focus:border-blue-500 focus:outline-none text-slate-100 text-sm transition-all"
+                        min={field.min}
+                        max={field.max}
+                      />
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* 输入节点独有参数 */}
             {isInputNodeType(selectedNode.type) && (

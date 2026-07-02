@@ -114,3 +114,30 @@ export function buildReviewProduct({ keyword, product = {}, candidate = {} }) {
     reason: candidate.gateReason || candidate.reason || ''
   };
 }
+
+export function isWorkflowInputNodeType(type) {
+  return type === 'keyword-input' || type === 'input' || type === 'start';
+}
+
+export function getStartNodeParams(nodes = []) {
+  const startNode = nodes.find((node) => isWorkflowInputNodeType(node.type) || node.id === 'start') || nodes[0];
+  if (!startNode?.data) return {};
+  const { status, state, output, error, onSelect, originalType, ...params } = startNode.data;
+  return params;
+}
+
+export function getWorkflowLaunchBlocker(mode, nodes = []) {
+  if (mode !== 'keyword') return null;
+  const params = getStartNodeParams(nodes);
+  if (String(params.keyword || '').trim()) return null;
+  const message = '关键词不能为空';
+  return {
+    status: 'failed',
+    error: message,
+    logs: [{
+      timestamp: new Date().toISOString(),
+      level: 'error',
+      message: `[keyword_required] ${message}`
+    }]
+  };
+}
