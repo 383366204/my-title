@@ -242,6 +242,30 @@ describe('pipeline runtime runner', () => {
     assert.equal(runtime.status, 'blocked');
   });
 
+  it('preserves verified_empty pipeline status and marks runtime blocked', async () => {
+    const dataDir = tempDataDir();
+    const result = await runPipelineRuntime({
+      dataDir,
+      mode: 'daily',
+      params: {},
+      steps: ['verify', 'generate'],
+      stepFns: {
+        verify: async ({ reportProgress }) => {
+          reportProgress({ current: 1, total: 1, message: 'no verified keywords' });
+          return { status: 'verified_empty', verified: [], rejected: [] };
+        },
+        generate: async () => {
+          throw new Error('generate should not run after verified_empty');
+        }
+      }
+    });
+
+    assert.equal(result.status, 'verified_empty');
+    assert.equal(result.runtimeStatus, 'blocked');
+    const runtime = readRuntimeState({ dataDir, runId: result.runId });
+    assert.equal(runtime.status, 'blocked');
+  });
+
   it('preserves needs_review pipeline status and marks runtime needs_review', async () => {
     const dataDir = tempDataDir();
     const result = await runPipelineRuntime({
@@ -258,6 +282,30 @@ describe('pipeline runtime runner', () => {
     });
 
     assert.equal(result.status, 'needs_review');
+    assert.equal(result.runtimeStatus, 'needs_review');
+    const runtime = readRuntimeState({ dataDir, runId: result.runId });
+    assert.equal(runtime.status, 'needs_review');
+  });
+
+  it('preserves ready_to_distribute pipeline status and marks runtime needs_review', async () => {
+    const dataDir = tempDataDir();
+    const result = await runPipelineRuntime({
+      dataDir,
+      mode: 'daily',
+      params: {},
+      steps: ['export', 'review'],
+      stepFns: {
+        export: async ({ reportProgress }) => {
+          reportProgress({ current: 1, total: 1, message: 'distribution ready' });
+          return { status: 'ready_to_distribute', canSubmit: true };
+        },
+        review: async () => {
+          throw new Error('review should not run after ready_to_distribute');
+        }
+      }
+    });
+
+    assert.equal(result.status, 'ready_to_distribute');
     assert.equal(result.runtimeStatus, 'needs_review');
     const runtime = readRuntimeState({ dataDir, runId: result.runId });
     assert.equal(runtime.status, 'needs_review');
