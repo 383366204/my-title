@@ -79,6 +79,29 @@ describe('workflow pipeline adapter', () => {
     }
   });
 
+  it('keeps production workflow template nodes compact and ordered for canvas fit', () => {
+    const templates = listProductionWorkflowTemplates();
+
+    for (const template of templates) {
+      const nodes = template.workflow.nodes;
+      const xs = nodes.map(node => node.position.x);
+      const minX = Math.min(...xs);
+      const maxX = Math.max(...xs);
+
+      assert.deepEqual(nodes.map(node => node.id), [
+        WORKFLOW_NODE_IDS.start,
+        WORKFLOW_NODE_IDS.mine,
+        WORKFLOW_NODE_IDS.verify,
+        WORKFLOW_NODE_IDS.generate,
+        WORKFLOW_NODE_IDS.export,
+        WORKFLOW_NODE_IDS.review,
+        WORKFLOW_NODE_IDS.end
+      ]);
+      assert.ok(xs.every((x, index) => index === 0 || x > xs[index - 1]), 'template node x positions should increase left to right');
+      assert.ok(maxX - minX <= 900, `template ${template.id} spans ${maxX - minX}px`);
+    }
+  });
+
   it('validates production workflow graphs without the legacy node registry', () => {
     const [template] = listProductionWorkflowTemplates();
 
