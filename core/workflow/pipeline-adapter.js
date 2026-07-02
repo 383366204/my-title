@@ -1,5 +1,6 @@
 'use strict';
 
+const fs = require('fs');
 const path = require('path');
 const {
   DEFAULT_PIPELINE_DIR,
@@ -20,6 +21,7 @@ const WORKFLOW_NODE_IDS = {
 };
 
 const NODE_ORDER = Object.values(WORKFLOW_NODE_IDS);
+const WORKFLOW_RUN_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
 
 const ARTIFACT_BY_NODE = {
   [WORKFLOW_NODE_IDS.mine]: { fileKey: 'candidates', type: 'jsonl' },
@@ -41,6 +43,63 @@ function sanitizeBool(value, fallback = true) {
   if (['false', '0', 'no', 'off'].includes(String(value).toLowerCase())) return false;
   if (['true', '1', 'yes', 'on'].includes(String(value).toLowerCase())) return true;
   return fallback;
+}
+
+function assertSafeWorkflowRunId(runId) {
+  if (!WORKFLOW_RUN_ID_PATTERN.test(String(runId || ''))) {
+    throw new Error('Invalid workflow run id');
+  }
+}
+
+function workflowRunDir(dataDir, runId) {
+  assertSafeWorkflowRunId(runId);
+  return path.join(dataDir || DEFAULT_PIPELINE_DIR, 'runs', runId);
+}
+
+/**
+ * 写入 workflow 画布定义快照。
+ * @param {object} options 写入参数。
+ * @param {string} [options.dataDir] pipeline 数据目录。
+ * @param {string} options.runId pipeline runId。
+ * @param {object} options.definition workflow 定义。
+ * @returns {string} 写入的文件路径。
+ */
+function writeWorkflowDefinition({ dataDir = DEFAULT_PIPELINE_DIR, runId, definition } = {}) {
+  const file = path.join(workflowRunDir(dataDir, runId), 'workflow-definition.json');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(definition, null, 2), 'utf8');
+  return file;
+}
+
+/**
+ * 追加 workflow 画布事件。
+ * @param {object} options 写入参数。
+ * @param {string} [options.dataDir] pipeline 数据目录。
+ * @param {string} options.runId pipeline runId。
+ * @param {object} options.event workflow 事件。
+ * @returns {string} 写入的文件路径。
+ */
+function appendWorkflowEvent({ dataDir = DEFAULT_PIPELINE_DIR, runId, event } = {}) {
+  const file = path.join(workflowRunDir(dataDir, runId), 'workflow-events.jsonl');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.appendFileSync(file, `${JSON.stringify(event)}\n`, 'utf8');
+  return file;
+}
+
+/**
+ * 读取 workflow 画布事件。
+ * @param {object} options 读取参数。
+ * @param {string} [options.dataDir] pipeline 数据目录。
+ * @param {string} options.runId pipeline runId。
+ * @returns {Array<object>} workflow 事件列表。
+ */
+function readWorkflowEvents({ dataDir = DEFAULT_PIPELINE_DIR, runId } = {}) {
+  const file = path.join(workflowRunDir(dataDir, runId), 'workflow-events.jsonl');
+  if (!fs.existsSync(file)) return [];
+  return fs.readFileSync(file, 'utf8')
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map(line => JSON.parse(line));
 }
 
 function workflowNodes(mode = 'daily') {
@@ -510,7 +569,13 @@ function normalizeRunOptions(runIdOrOptions, maybeOptions = {}) {
 }
 
 function getWorkflowRun(runIdOrOptions, options = {}) {
-  return pipelineSummaryToWorkflowRun(summarizePipelineRun(normalizeRunOptions(runIdOrOptions, options)));
+  const normalized = normalizeRunOptions(runIdOrOptions, options);
+  const run = pipelineSummaryToWorkflowRun(summarizePipelineRun(normalized));
+  if (!run) return null;
+  return {
+    ...run,
+    workflowEvents: readWorkflowEvents({ dataDir: normalized.dataDir, runId: normalized.runId || run.runId })
+  };
 }
 
 /**
@@ -563,6 +628,9 @@ module.exports = {
   buildPipelineCliArgs,
   validateProductionWorkflow,
   resolveProductionWorkflowLaunch,
+  writeWorkflowDefinition,
+  appendWorkflowEvent,
+  readWorkflowEvents,
   pipelineSummaryToWorkflowRun,
   listWorkflowRuns,
   getWorkflowRun,

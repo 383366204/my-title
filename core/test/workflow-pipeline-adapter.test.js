@@ -16,7 +16,10 @@ const {
   pipelineSummaryToWorkflowRun,
   listWorkflowRuns,
   getWorkflowRun,
-  readWorkflowNodeArtifact
+  readWorkflowNodeArtifact,
+  writeWorkflowDefinition,
+  appendWorkflowEvent,
+  readWorkflowEvents
 } = require('../workflow/pipeline-adapter');
 
 function tempPipelineDir() {
@@ -416,5 +419,69 @@ describe('workflow pipeline adapter', () => {
     assert.deepEqual(mineArtifact.rows.map(row => row.keyword), ['项链', '耳环']);
     assert.deepEqual(generateArtifact.rows, [{ title: '纯银项链' }]);
     assert.equal(readWorkflowNodeArtifact({ dataDir, runId, nodeId: WORKFLOW_NODE_IDS.end }), null);
+  });
+
+  it('persists workflow definitions and events next to pipeline runs', () => {
+    const dataDir = tempPipelineDir();
+    const runId = 'snapshot_run-1';
+    const definition = {
+      nodes: [{ id: WORKFLOW_NODE_IDS.start, type: 'production-start', data: { label: '开始' } }],
+      edges: []
+    };
+    const event = {
+      type: 'node_moved',
+      nodeId: WORKFLOW_NODE_IDS.start,
+      position: { x: 24, y: 48 }
+    };
+
+    const definitionFile = writeWorkflowDefinition({ dataDir, runId, definition });
+    const eventFile = appendWorkflowEvent({ dataDir, runId, event });
+
+    assert.equal(definitionFile, path.join(dataDir, 'runs', runId, 'workflow-definition.json'));
+    assert.equal(eventFile, path.join(dataDir, 'runs', runId, 'workflow-events.jsonl'));
+    assert.deepEqual(JSON.parse(fs.readFileSync(definitionFile, 'utf8')), definition);
+    assert.deepEqual(readWorkflowEvents({ dataDir, runId }), [event]);
+  });
+
+  it('rejects unsafe workflow run ids for snapshots and events', () => {
+    const dataDir = tempPipelineDir();
+
+    assert.throws(() => writeWorkflowDefinition({
+      dataDir,
+      runId: '../outside',
+      definition: { nodes: [], edges: [] }
+    }), /Invalid workflow run id/);
+    assert.throws(() => appendWorkflowEvent({
+      dataDir,
+      runId: 'bad/run',
+      event: { type: 'node_moved' }
+    }), /Invalid workflow run id/);
+    assert.throws(() => readWorkflowEvents({
+      dataDir,
+      runId: 'bad.run'
+    }), /Invalid workflow run id/);
+  });
+
+  it('attaches persisted workflow events to workflow run details', () => {
+    const dataDir = tempPipelineDir();
+    const runId = 'eventful_run';
+    const runDir = path.join(dataDir, 'runs', runId);
+    writeJson(path.join(runDir, 'run.json'), {
+      runId,
+      status: 'created',
+      startedAt: '2026-06-29T04:00:00.000Z',
+      updatedAt: '2026-06-29T04:01:00.000Z',
+      counts: {},
+      files: {}
+    });
+    appendWorkflowEvent({ dataDir, runId, event: { type: 'node_selected', nodeId: WORKFLOW_NODE_IDS.mine } });
+    appendWorkflowEvent({ dataDir, runId, event: { type: 'viewport_changed', zoom: 0.8 } });
+
+    const run = getWorkflowRun({ dataDir, runId });
+
+    assert.deepEqual(run.workflowEvents, [
+      { type: 'node_selected', nodeId: WORKFLOW_NODE_IDS.mine },
+      { type: 'viewport_changed', zoom: 0.8 }
+    ]);
   });
 });
