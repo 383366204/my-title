@@ -1230,7 +1230,7 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
                 onNodeClick={onNodeClick}
                 nodeTypes={nodeTypes}
                 fitView
-                fitViewOptions={{ padding: 0.25, includeHiddenNodes: false, minZoom: 0.7, maxZoom: 1 }}
+                fitViewOptions={{ padding: 0.12, includeHiddenNodes: false, minZoom: 0.42, maxZoom: 0.9 }}
                 minZoom={0.5}
                 maxZoom={1.5}
               >
