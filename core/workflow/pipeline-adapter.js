@@ -9,6 +9,9 @@ const {
   readJsonlPreview,
   readTextPreview
 } = require('../pipeline-run-summary');
+const {
+  readRuntimeState
+} = require('../../skills/pipeline-flow/runtime/store');
 
 const WORKFLOW_NODE_IDS = {
   start: 'start',
@@ -376,6 +379,37 @@ function nodeState(id, type, status, output = null, summary = {}) {
   };
 }
 
+function readRuntimeForSummary(summary, dataDir) {
+  if (!summary || !summary.runId) return null;
+  try {
+    return readRuntimeState({ dataDir, runId: summary.runId });
+  } catch (_error) {
+    return null;
+  }
+}
+
+function normalizeNodeProgress(progress = {}) {
+  return {
+    status: progress.status || 'running',
+    current: Number.isFinite(Number(progress.current)) ? Number(progress.current) : 0,
+    total: Number.isFinite(Number(progress.total)) ? Number(progress.total) : 0,
+    percent: Number.isFinite(Number(progress.percent)) ? Number(progress.percent) : 0,
+    message: progress.message || ''
+  };
+}
+
+function nodeStatusFromRuntimeProgress(progress) {
+  const status = progress && progress.status ? String(progress.status) : '';
+  if (status === 'cancelled') return 'cancelled';
+  if (status === 'failed') return 'failed';
+  if (status === 'blocked') return 'blocked';
+  if (status === 'needs_review') return 'needs_review';
+  if (status === 'waiting_confirmation') return 'waiting_confirmation';
+  if (status === 'completed') return 'completed';
+  if (status === 'running') return 'running';
+  return '';
+}
+
 function outputForNode(id, summary) {
   const counts = summary.counts || {};
   if (id === WORKFLOW_NODE_IDS.start) return { runId: summary.runId };
@@ -488,11 +522,33 @@ function statusPlanForSummary(summary) {
 
 function buildNodeStates(summary) {
   const plannedStates = statusPlanForSummary(summary);
-  return NODE_ORDER.reduce((states, nodeId, index) => {
+  const runtime = summary.runtime || null;
+  const runtimeProgress = runtime && runtime.progress && typeof runtime.progress === 'object' ? runtime.progress : {};
+  const states = NODE_ORDER.reduce((memo, nodeId, index) => {
     const nodeStatus = plannedStates[nodeId] || 'idle';
-    states[nodeId] = nodeState(nodeId, `pipeline-${nodeId}`, nodeStatus, nodeStatus === 'idle' ? null : outputForNode(nodeId, summary), summary);
-    return states;
+    memo[nodeId] = nodeState(nodeId, `pipeline-${nodeId}`, nodeStatus, nodeStatus === 'idle' ? null : outputForNode(nodeId, summary), summary);
+    return memo;
   }, {});
+  Object.entries(runtimeProgress).forEach(([nodeId, progress]) => {
+    if (!states[nodeId]) return;
+    const normalizedProgress = normalizeNodeProgress(progress);
+    const runtimeStatus = nodeStatusFromRuntimeProgress(normalizedProgress);
+    states[nodeId] = {
+      ...states[nodeId],
+      status: runtimeStatus || states[nodeId].status,
+      output: states[nodeId].output || outputForNode(nodeId, summary),
+      progress: normalizedProgress
+    };
+  });
+  if (runtime && runtime.activeStep && states[runtime.activeStep] && !states[runtime.activeStep].progress) {
+    states[runtime.activeStep] = {
+      ...states[runtime.activeStep],
+      status: runtime.status === 'cancelled' ? 'cancelled' : 'running',
+      output: states[runtime.activeStep].output || outputForNode(runtime.activeStep, summary),
+      progress: normalizeNodeProgress({ status: runtime.status === 'cancelled' ? 'cancelled' : 'running' })
+    };
+  }
+  return states;
 }
 
 function templateForSummary(summary) {
@@ -507,19 +563,25 @@ function templateForSummary(summary) {
  * @param {object} summary pipeline-run-summary 输出。
  * @returns {object|null} workflow run。
  */
-function pipelineSummaryToWorkflowRun(summary) {
+function pipelineSummaryToWorkflowRun(summary, options = {}) {
   if (!summary) return null;
+  const runtime = summary.runtime || readRuntimeForSummary(summary, options.dataDir);
+  const summaryWithRuntime = {
+    ...summary,
+    runtime
+  };
   const workflowTemplate = templateForSummary(summary);
   const workflow = workflowTemplate
     ? { id: workflowTemplate.id, mode: workflowTemplate.mode, ...workflowTemplate.workflow }
     : null;
   return {
     runId: summary.runId,
-    status: summary.status || 'unknown',
+    status: runtime?.status || summary.status || 'unknown',
     workflow,
-    nodeStates: buildNodeStates(summary),
+    nodeStates: buildNodeStates(summaryWithRuntime),
+    runtime,
     startedAt: summary.startedAt || '',
-    updatedAt: summary.updatedAt || summary.startedAt || '',
+    updatedAt: runtime?.updatedAt || summary.updatedAt || summary.startedAt || '',
     error: summary.error || null,
     logs: [],
     stage: summary.stage,
@@ -547,7 +609,7 @@ function pipelineSummaryToWorkflowRun(summary) {
  */
 function listWorkflowRuns(options = {}) {
   const result = listPipelineRuns(options);
-  const runs = result.runs.map(pipelineSummaryToWorkflowRun);
+  const runs = result.runs.map(summary => pipelineSummaryToWorkflowRun(summary, { dataDir: options.dataDir }));
   return {
     runs,
     latest: runs[0] || null
@@ -570,7 +632,7 @@ function normalizeRunOptions(runIdOrOptions, maybeOptions = {}) {
 
 function getWorkflowRun(runIdOrOptions, options = {}) {
   const normalized = normalizeRunOptions(runIdOrOptions, options);
-  const run = pipelineSummaryToWorkflowRun(summarizePipelineRun(normalized));
+  const run = pipelineSummaryToWorkflowRun(summarizePipelineRun(normalized), { dataDir: normalized.dataDir });
   if (!run) return null;
   return {
     ...run,

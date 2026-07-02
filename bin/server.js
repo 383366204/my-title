@@ -21,15 +21,26 @@ const { generateTitlePipeline } = require('../skills/title-gen');
 const { searchAll } = require('../skills/alibaba1688');
 
 const {
+  WORKFLOW_NODE_IDS,
   listProductionWorkflowTemplates,
   sanitizeWorkflowParams,
-  buildPipelineCliArgs,
   validateProductionWorkflow,
   resolveProductionWorkflowLaunch,
   listWorkflowRuns,
   getWorkflowRun,
   readWorkflowNodeArtifact
 } = require('../core/workflow/pipeline-adapter');
+const {
+  createRunId
+} = require('../skills/pipeline-flow');
+const {
+  runPipelineRuntime
+} = require('../skills/pipeline-flow/runtime/runner');
+const {
+  readRuntimeState,
+  requestRuntimeCancel,
+  readRuntimeEvents
+} = require('../skills/pipeline-flow/runtime/store');
 
 const {
   listPipelineRuns,
@@ -615,54 +626,38 @@ app.post('/api/workflows/run', (req, res) => {
   try {
     const launch = resolveProductionWorkflowLaunch(req.body || {});
     const params = sanitizeWorkflowParams(launch.mode, launch.params);
-    const args = buildPipelineCliArgs(launch.mode, params);
-    const child = spawn(process.execPath, args, {
-      cwd: path.resolve(__dirname, '..'),
-      env: process.env
-    });
-
+    const runId = createRunId();
+    const steps = launch.mode === 'daily'
+      ? [WORKFLOW_NODE_IDS.mine, WORKFLOW_NODE_IDS.verify, WORKFLOW_NODE_IDS.generate, WORKFLOW_NODE_IDS.export, WORKFLOW_NODE_IDS.review]
+      : undefined;
+    const promise = runPipelineRuntime({ runId, mode: launch.mode, params, steps });
     const runState = {
-      child,
-      pid: child.pid,
+      runId,
       mode: launch.mode,
-      stdout: '',
-      stderr: ''
+      promise
     };
     activeWorkbenchProcess = runState;
 
-    child.stdout.on('data', chunk => {
-      runState.stdout = appendCappedOutput(runState.stdout, chunk);
-    });
-    child.stderr.on('data', chunk => {
-      runState.stderr = appendCappedOutput(runState.stderr, chunk);
-    });
-    child.on('error', err => {
+    promise.then(result => {
       if (activeWorkbenchProcess === runState) activeWorkbenchProcess = null;
-      originalError('[Workflow Run] 子进程启动失败:', err.message);
-    });
-    child.on('exit', (code, signal) => {
+      originalLog(`[Workflow Run] ${launch.mode} runtime 完成，runId=${result.runId}, status=${result.runtimeStatus || result.status}`);
+    }).catch(err => {
       if (activeWorkbenchProcess === runState) activeWorkbenchProcess = null;
-      if (code === 0) {
-        originalLog(`[Workflow Run] ${launch.mode} pipeline 完成，pid=${runState.pid}`);
-      } else {
-        originalError(`[Workflow Run] ${launch.mode} pipeline 失败，pid=${runState.pid}, code=${code}, signal=${signal || ''}`);
-        if (runState.stderr) originalError(runState.stderr.slice(-4000));
-      }
+      originalError(`[Workflow Run] ${launch.mode} runtime 失败，runId=${runId}:`, err.message);
     });
 
     res.json({
       ok: true,
       data: {
         status: 'started',
-        runId: null,
-        pid: child.pid,
+        runId,
         mode: launch.mode,
-        monitor: 'workbench',
-        message: '真实 pipeline 已启动；runId 会由子进程创建，请在流程监控或运行列表中查看最新记录。'
+        monitor: 'workflow',
+        message: `真实 workflow runtime 已启动，runId=${runId}。`
       }
     });
   } catch (err) {
-    if (activeWorkbenchProcess && !activeWorkbenchProcess.pid) activeWorkbenchProcess = null;
+    if (activeWorkbenchProcess && !activeWorkbenchProcess.pid && !activeWorkbenchProcess.promise) activeWorkbenchProcess = null;
     const status = /未知 workflow mode|未知 workflow template|关键词不能为空/.test(err.message) ? 400 : 500;
     res.status(status).json({ ok: false, error: err.message });
   }
@@ -699,8 +694,23 @@ app.get('/api/workflows/runs/:runId', (req, res) => {
   }
 });
 
-// 6. POST /api/workflows/runs/:runId/cancel - pipeline cancel 暂未实现
-app.post('/api/workflows/runs/:runId/cancel', sendWorkflowNotImplemented('cancel'));
+// 6. POST /api/workflows/runs/:runId/cancel - 请求 runtime 在安全边界取消
+app.post('/api/workflows/runs/:runId/cancel', (req, res) => {
+  const runId = req.params.runId;
+  if (!isValidWorkflowRunIdParam(runId)) {
+    return res.status(400).json({ ok: false, error: '无效的运行 ID。' });
+  }
+  try {
+    const control = requestRuntimeCancel({
+      runId,
+      reason: req.body?.reason || 'user_cancelled'
+    });
+    res.json({ ok: true, data: { runId, status: 'cancel_requested', control } });
+  } catch (err) {
+    const status = /Invalid runtime run id/.test(err.message) ? 400 : 500;
+    res.status(status).json({ ok: false, error: err.message });
+  }
+});
 
 // 7. POST /api/workflows/runs/:runId/retry-node - pipeline retry 暂未实现
 app.post('/api/workflows/runs/:runId/retry-node', sendWorkflowNotImplemented('retry-node'));
@@ -714,7 +724,7 @@ app.get('/api/workflows/runs/:runId/events', (req, res) => {
   if (!isValidWorkflowRunIdParam(runId)) {
     return res.status(400).json({ ok: false, error: '无效的运行 ID，请等待真实 pipeline runId 创建后再订阅事件。' });
   }
-  const runObj = getWorkflowRun({ runId });
+  const runObj = getWorkflowRun({ runId }) || runtimeOnlyWorkflowSnapshot(runId);
   if (!runObj) {
     return res.status(404).json({ ok: false, error: '未找到运行记录' });
   }
@@ -726,11 +736,24 @@ app.get('/api/workflows/runs/:runId/events', (req, res) => {
 
   // 初始化推送
   res.write(`data: ${JSON.stringify({ event: 'init', payload: { status: runObj.status, nodeStates: runObj.nodeStates } })}\n\n`);
+  const allInitialRuntimeEvents = readRuntimeEvents({ runId });
+  allInitialRuntimeEvents.slice(-100).forEach(event => {
+    writeWorkflowSseEvent(res, event.event || event.type || 'runtime_event', event);
+  });
 
   let lastSnapshot = JSON.stringify({ status: runObj.status, nodeStates: runObj.nodeStates });
+  let runtimeEventCount = allInitialRuntimeEvents.length;
   const timer = setInterval(() => {
     try {
-      const latest = getWorkflowRun({ runId });
+      const latestEvents = readRuntimeEvents({ runId });
+      if (latestEvents.length > runtimeEventCount) {
+        latestEvents.slice(runtimeEventCount).forEach(event => {
+          writeWorkflowSseEvent(res, event.event || event.type || 'runtime_event', event);
+        });
+        runtimeEventCount = latestEvents.length;
+      }
+
+      const latest = getWorkflowRun({ runId }) || runtimeOnlyWorkflowSnapshot(runId);
       if (!latest) return;
       const nextSnapshot = JSON.stringify({ status: latest.status, nodeStates: latest.nodeStates });
       if (nextSnapshot === lastSnapshot) return;
@@ -749,7 +772,50 @@ app.get('/api/workflows/runs/:runId/events', (req, res) => {
 
 function isValidWorkflowRunIdParam(runId) {
   const value = String(runId || '').trim();
-  return Boolean(value) && value !== 'null' && value !== 'undefined';
+  return Boolean(value) && value !== 'null' && value !== 'undefined' && /^[A-Za-z0-9_-]+$/.test(value);
+}
+
+function writeWorkflowSseEvent(res, event, payload) {
+  res.write(`data: ${JSON.stringify({ event, payload })}\n\n`);
+}
+
+function runtimeOnlyWorkflowSnapshot(runId) {
+  const runtime = readRuntimeState({ runId });
+  if (!runtime) return null;
+  const nodeStates = Object.values(WORKFLOW_NODE_IDS).reduce((memo, nodeId) => {
+    memo[nodeId] = {
+      id: nodeId,
+      type: `pipeline-${nodeId}`,
+      status: nodeId === WORKFLOW_NODE_IDS.start ? 'completed' : 'idle',
+      input: null,
+      output: null,
+      error: null,
+      startedAt: runtime.startedAt || null,
+      completedAt: null
+    };
+    return memo;
+  }, {});
+  Object.entries(runtime.progress || {}).forEach(([nodeId, progress]) => {
+    if (!nodeStates[nodeId]) return;
+    nodeStates[nodeId] = {
+      ...nodeStates[nodeId],
+      status: progress.status || nodeStates[nodeId].status,
+      progress
+    };
+  });
+  if (runtime.activeStep && nodeStates[runtime.activeStep] && !nodeStates[runtime.activeStep].progress) {
+    nodeStates[runtime.activeStep] = {
+      ...nodeStates[runtime.activeStep],
+      status: runtime.status === 'cancelled' ? 'cancelled' : 'running',
+      progress: { status: runtime.status === 'cancelled' ? 'cancelled' : 'running', current: 0, total: 0, percent: 0, message: '' }
+    };
+  }
+  return {
+    runId,
+    status: runtime.status || 'running',
+    nodeStates,
+    runtime
+  };
 }
 
 function sendWorkflowNotImplemented(action) {

@@ -340,6 +340,48 @@ describe('workflow pipeline adapter', () => {
     assert.equal(run.nodeStates.review.output.reviewFile, '/tmp/distribution-review.md');
   });
 
+  it('attaches runtime state and maps runtime progress into workflow node states', () => {
+    const dataDir = tempPipelineDir();
+    const runId = 'runtime_progress_run';
+    const runDir = path.join(dataDir, 'runs', runId);
+    writeJson(path.join(runDir, 'run.json'), {
+      runId,
+      status: 'created',
+      startedAt: '2026-06-29T04:00:00.000Z',
+      updatedAt: '2026-06-29T04:01:00.000Z',
+      counts: {},
+      files: {}
+    });
+    writeJson(path.join(runDir, 'runtime.json'), {
+      status: 'running',
+      activeStep: WORKFLOW_NODE_IDS.verify,
+      steps: ['mine', 'verify', 'generate', 'export', 'review'],
+      progress: {
+        mine: { status: 'completed', current: 3, total: 3, percent: 100, message: '挖词完成' },
+        verify: { status: 'running', current: 2, total: 5, percent: 40, message: '验真 2/5' }
+      },
+      startedAt: '2026-06-29T04:00:05.000Z',
+      updatedAt: '2026-06-29T04:01:30.000Z'
+    });
+
+    const run = getWorkflowRun({ dataDir, runId });
+
+    assert.equal(run.runtime.status, 'running');
+    assert.equal(run.runtime.activeStep, WORKFLOW_NODE_IDS.verify);
+    assert.equal(run.nodeStates.mine.status, 'completed');
+    assert.deepEqual(run.nodeStates.mine.progress, {
+      status: 'completed',
+      current: 3,
+      total: 3,
+      percent: 100,
+      message: '挖词完成'
+    });
+    assert.equal(run.nodeStates.verify.status, 'running');
+    assert.equal(run.nodeStates.verify.progress.percent, 40);
+    assert.equal(run.nodeStates.verify.progress.message, '验真 2/5');
+    assert.equal(run.nodeStates.generate.status, 'idle');
+  });
+
   it('maps explicit pipeline statuses to production node states', () => {
     const cases = [
       {
