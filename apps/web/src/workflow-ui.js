@@ -162,7 +162,7 @@ export function getWorkflowLaunchBlocker(mode, nodes = []) {
   if (String(params.keyword || '').trim()) return null;
   const message = '关键词不能为空';
   return {
-    status: 'failed',
+    status: 'blocked',
     error: message,
     logs: [{
       timestamp: new Date().toISOString(),

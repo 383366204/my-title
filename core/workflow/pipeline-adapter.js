@@ -126,13 +126,13 @@ function workflowNodes(mode = 'daily') {
         pages: 1
       };
   return [
-    { id: WORKFLOW_NODE_IDS.start, type: 'production-start', data: startData, position: { x: 0, y: 120 } },
-    { id: WORKFLOW_NODE_IDS.mine, type: 'pipeline-mine', data: { label: '选词挖掘' }, position: { x: 140, y: 120 } },
-    { id: WORKFLOW_NODE_IDS.verify, type: 'pipeline-verify', data: { label: '生意参谋校验' }, position: { x: 280, y: 120 } },
-    { id: WORKFLOW_NODE_IDS.generate, type: 'pipeline-generate', data: { label: '标题生成' }, position: { x: 420, y: 120 } },
-    { id: WORKFLOW_NODE_IDS.export, type: 'pipeline-export', data: { label: '导出清单' }, position: { x: 560, y: 120 } },
-    { id: WORKFLOW_NODE_IDS.review, type: 'pipeline-review', data: { label: '人工复核' }, position: { x: 700, y: 120 } },
-    { id: WORKFLOW_NODE_IDS.end, type: 'production-end', data: { label: '完成' }, position: { x: 840, y: 120 } }
+    { id: WORKFLOW_NODE_IDS.start, type: 'production-start', data: startData, position: { x: 0, y: 40 } },
+    { id: WORKFLOW_NODE_IDS.mine, type: 'pipeline-mine', data: { label: '选词挖掘' }, position: { x: 260, y: 40 } },
+    { id: WORKFLOW_NODE_IDS.verify, type: 'pipeline-verify', data: { label: '生意参谋校验' }, position: { x: 520, y: 40 } },
+    { id: WORKFLOW_NODE_IDS.generate, type: 'pipeline-generate', data: { label: '标题生成' }, position: { x: 520, y: 220 } },
+    { id: WORKFLOW_NODE_IDS.export, type: 'pipeline-export', data: { label: '导出清单' }, position: { x: 260, y: 220 } },
+    { id: WORKFLOW_NODE_IDS.review, type: 'pipeline-review', data: { label: '人工复核' }, position: { x: 0, y: 220 } },
+    { id: WORKFLOW_NODE_IDS.end, type: 'production-end', data: { label: '完成' }, position: { x: 0, y: 400 } }
   ];
 }
 

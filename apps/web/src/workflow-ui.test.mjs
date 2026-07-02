@@ -204,7 +204,7 @@ test('getWorkflowLaunchBlocker blocks empty keyword launches before request', ()
     { id: 'start', type: 'task', data: { keyword: '   ' } }
   ]);
 
-  assert.equal(blocker.status, 'failed');
+  assert.equal(blocker.status, 'blocked');
   assert.equal(blocker.error, '关键词不能为空');
   assert.equal(blocker.logs[0].level, 'error');
   assert.match(blocker.logs[0].message, /关键词不能为空/);

@@ -1208,6 +1208,7 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
                 <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
                   runStatus === 'completed' ? 'bg-emerald-500/10 text-emerald-400' :
                   runStatus === 'failed' ? 'bg-rose-500/10 text-rose-400' :
+                  runStatus === 'blocked' ? 'bg-amber-500/10 text-amber-300' :
                   runStatus === 'cancelled' ? 'bg-amber-500/10 text-amber-400' :
                   runStatus === 'running' ? 'bg-blue-500/10 text-blue-400 animate-pulse' : 'bg-slate-800 text-slate-400'
                 }`}>
@@ -1241,9 +1242,9 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
               <button
                 onClick={handleCancelWorkflow}
                 disabled={!canCancelRun}
-                className="px-4 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold rounded-md flex items-center gap-1.5 shadow-lg shadow-amber-900/20 transition-all"
+                className="px-4 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold rounded-md flex items-center gap-1.5 shadow-lg shadow-amber-900/20 transition-all"
               >
-                <Square size={13} fill="currentColor" /> 终止运行
+                <Square size={13} fill="currentColor" /> 取消运行
               </button>
             ) : (
               <button

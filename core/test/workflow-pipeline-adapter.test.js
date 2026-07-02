@@ -85,8 +85,12 @@ describe('workflow pipeline adapter', () => {
     for (const template of templates) {
       const nodes = template.workflow.nodes;
       const xs = nodes.map(node => node.position.x);
+      const ys = nodes.map(node => node.position.y);
       const minX = Math.min(...xs);
       const maxX = Math.max(...xs);
+      const minY = Math.min(...ys);
+      const maxY = Math.max(...ys);
+      const uniquePositions = new Set(nodes.map(node => `${node.position.x},${node.position.y}`));
 
       assert.deepEqual(nodes.map(node => node.id), [
         WORKFLOW_NODE_IDS.start,
@@ -97,8 +101,9 @@ describe('workflow pipeline adapter', () => {
         WORKFLOW_NODE_IDS.review,
         WORKFLOW_NODE_IDS.end
       ]);
-      assert.ok(xs.every((x, index) => index === 0 || x > xs[index - 1]), 'template node x positions should increase left to right');
-      assert.ok(maxX - minX <= 900, `template ${template.id} spans ${maxX - minX}px`);
+      assert.equal(uniquePositions.size, nodes.length, 'template nodes should not share the same canvas position');
+      assert.ok(maxX - minX <= 540, `template ${template.id} spans ${maxX - minX}px horizontally`);
+      assert.ok(maxY - minY <= 380, `template ${template.id} spans ${maxY - minY}px vertically`);
     }
   });
 
