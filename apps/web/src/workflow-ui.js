@@ -115,6 +115,24 @@ export function buildReviewProduct({ keyword, product = {}, candidate = {} }) {
   };
 }
 
+/**
+ * 格式化 workflow 节点进度文案。
+ * @param {object|null} progress 节点进度。
+ * @returns {string} 进度展示文案。
+ */
+export function formatWorkflowProgressLabel(progress) {
+  if (!progress || typeof progress !== 'object') return '';
+  const parts = [];
+  const hasCurrent = progress.current !== null && progress.current !== undefined && progress.current !== '';
+  const hasTotal = progress.total !== null && progress.total !== undefined && progress.total !== '';
+  const hasPercent = progress.percent !== null && progress.percent !== undefined && progress.percent !== '';
+  const message = String(progress.message || '').trim();
+  if (message) parts.push(message);
+  if (hasCurrent && hasTotal) parts.push(`${progress.current}/${progress.total}`);
+  if (hasPercent) parts.push(`${progress.percent}%`);
+  return parts.join(' · ');
+}
+
 export function isWorkflowInputNodeType(type) {
   return type === 'keyword-input' || type === 'input' || type === 'start';
 }
@@ -122,7 +140,7 @@ export function isWorkflowInputNodeType(type) {
 export function getStartNodeParams(nodes = []) {
   const startNode = nodes.find((node) => isWorkflowInputNodeType(node.type) || node.id === 'start') || nodes[0];
   if (!startNode?.data) return {};
-  const { status, state, output, error, onSelect, originalType, ...params } = startNode.data;
+  const { status, state, output, error, progress, onSelect, originalType, ...params } = startNode.data;
   return params;
 }
 

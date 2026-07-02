@@ -31,6 +31,7 @@ import '@xyflow/react/dist/style.css';
 import './App.css';
 import {
   getCanvasNodeTone,
+  formatWorkflowProgressLabel,
   getStartNodeParams,
   getWorkflowLaunchBlocker,
   getWorkflowNodeAction,
@@ -227,6 +228,11 @@ const ProductionNode = ({ id, data }) => {
   const tone = getCanvasNodeTone(status);
   const action = getWorkflowNodeAction(id, status);
   const label = data.label || data.name || data.title || id;
+  const progress = data.progress || null;
+  const progressLabel = formatWorkflowProgressLabel(progress);
+  const progressPercent = progress && Number.isFinite(Number(progress.percent))
+    ? Math.max(0, Math.min(100, Number(progress.percent)))
+    : 0;
 
   return (
     <button
@@ -241,6 +247,14 @@ const ProductionNode = ({ id, data }) => {
       </div>
       <div className="production-node-title">{label}</div>
       {data.description && <div className="production-node-description">{data.description}</div>}
+      {progress && (
+        <div className="workflow-node-progress" aria-label={progressLabel || 'workflow progress'}>
+          <div className="workflow-node-progress-bar">
+            <span style={{ width: `${progressPercent}%` }} />
+          </div>
+          {progressLabel && <div className="workflow-node-progress-label">{progressLabel}</div>}
+        </div>
+      )}
       <div className={`production-node-action production-node-action-${action.tone}`}>{action.label}</div>
       <Handle type="source" position={Position.Right} id="out" />
     </button>
@@ -332,6 +346,7 @@ const normalizeCanvasNode = (node, selectNode) => {
       status: node.data?.status || 'idle',
       output: node.data?.output || null,
       error: node.data?.error || null,
+      progress: node.data?.progress || null,
       onSelect: () => selectNode(node.id)
     }
   };
@@ -646,6 +661,8 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
   }, [nodes, selectedNodeId]);
 
   const activeMonitorSummary = selectedMonitorRun || monitorLatestRun;
+  const isRunActive = runStatus === 'running' || runStatus === 'pending';
+  const canCancelRun = Boolean(currentRunId) && isRunActive;
   const selectedMonitorStage = MONITOR_STAGES.find((stage) => stage.id === selectedMonitorNodeId) || MONITOR_STAGES[0];
   const monitorNodes = useMemo(() => {
     return MONITOR_STAGES.map((stage, index) => ({
@@ -712,7 +729,8 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
                   ...node.data,
                   status: state.status,
                   output: state.output,
-                  error: state.error
+                  error: state.error,
+                  progress: state.progress || null
                 }
               };
             }
@@ -729,6 +747,32 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
             consoleEl.scrollTop = consoleEl.scrollHeight;
           }
         }, 50);
+      } else if (data.event === 'progress') {
+        const progress = data.payload || {};
+        const nodeId = progress.step || progress.nodeId;
+        if (nodeId) {
+          setNodes((nds) =>
+            nds.map((node) => {
+              if (node.id !== nodeId) return node;
+              return {
+                ...node,
+                data: {
+                  ...node.data,
+                  status: progress.status || node.data.status,
+                  progress
+                }
+              };
+            })
+          );
+        }
+        const message = progress.message || formatWorkflowProgressLabel(progress);
+        if (message) {
+          setLogs((prev) => [...prev, {
+            timestamp: progress.timestamp || new Date().toISOString(),
+            level: 'info',
+            message: `[progress:${nodeId || 'workflow'}] ${message}`
+          }]);
+        }
       }
     };
 
@@ -752,6 +796,7 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
               status: state.status,
               output: state.output,
               error: state.error,
+              progress: state.progress || null,
               onSelect: () => setSelectedNodeId(node.id)
             }
           };
@@ -786,7 +831,8 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
               ...n.data,
               status: state.status || 'idle',
               output: state.output || null,
-              error: state.error || null
+              error: state.error || null,
+              progress: state.progress || null
             }
           }, setSelectedNodeId);
         }));
@@ -916,13 +962,27 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
 
   // 取消当前正在执行的工作流
   const handleCancelWorkflow = async () => {
-    if (!currentRunId) return;
+    if (!canCancelRun) return;
     try {
-      await fetch(`/api/workflows/runs/${currentRunId}/cancel`, {
+      const res = await fetch(`/api/workflows/runs/${currentRunId}/cancel`, {
         method: 'POST'
       });
+      const payload = await res.json();
+      if (!res.ok || payload.ok === false) {
+        throw new Error(payload.error || '取消请求失败');
+      }
+      setLogs((prev) => [...prev, {
+        timestamp: new Date().toISOString(),
+        level: 'warn',
+        message: '已请求取消，当前步骤会在安全边界停止。'
+      }]);
     } catch (err) {
       console.error('取消工作流失败', err);
+      setLogs((prev) => [...prev, {
+        timestamp: new Date().toISOString(),
+        level: 'error',
+        message: `取消请求失败: ${err.message}`
+      }]);
     }
   };
 
@@ -1176,9 +1236,10 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
               </button>
             )}
 
-            {runStatus === 'running' || runStatus === 'pending' ? (
+            {isRunActive ? (
               <button
                 onClick={handleCancelWorkflow}
+                disabled={!canCancelRun}
                 className="px-4 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold rounded-md flex items-center gap-1.5 shadow-lg shadow-amber-900/20 transition-all"
               >
                 <Square size={13} fill="currentColor" /> 终止运行

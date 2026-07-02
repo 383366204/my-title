@@ -9,6 +9,7 @@ import {
   summarizeWorkflowArtifact,
   normalizeCandidateForTitle,
   buildReviewProduct,
+  formatWorkflowProgressLabel,
   getStartNodeParams,
   getWorkflowLaunchBlocker
 } from './workflow-ui.js';
@@ -131,6 +132,15 @@ test('buildReviewProduct preserves title, source product, and safety fields', ()
   assert.equal(review.productUrl, 'https://detail.1688.com/offer/1.html');
   assert.equal(review.canDistribute, true);
   assert.equal(review.reason, '已验真');
+});
+
+test('formatWorkflowProgressLabel formats current, total, percent, and empty values', () => {
+  assert.equal(formatWorkflowProgressLabel({ current: 3, total: 10, percent: 30 }), '3/10 · 30%');
+  assert.equal(formatWorkflowProgressLabel({ current: 3, total: 10 }), '3/10');
+  assert.equal(formatWorkflowProgressLabel({ percent: 45 }), '45%');
+  assert.equal(formatWorkflowProgressLabel({ message: '验真 3/10', percent: 30 }), '验真 3/10 · 30%');
+  assert.equal(formatWorkflowProgressLabel(null), '');
+  assert.equal(formatWorkflowProgressLabel({}), '');
 });
 
 test('getStartNodeParams extracts canvas start data without runtime fields', () => {
