@@ -26,7 +26,19 @@ const STOP_STATUSES = new Set([
   'verified_partial_manual_required',
   'generate_failed',
   'needs_review',
-  'ready_to_distribute'
+  'ready_to_distribute',
+  'awaiting_user_confirmation'
+]);
+const FAILED_PIPELINE_STATUSES = new Set(['generate_failed']);
+const BLOCKED_PIPELINE_STATUSES = new Set([
+  'manual_action_required',
+  'verified_partial_manual_required',
+  'verified_empty'
+]);
+const REVIEW_PIPELINE_STATUSES = new Set([
+  'needs_review',
+  'ready_to_distribute',
+  'awaiting_user_confirmation'
 ]);
 
 function runtimeRunDir(dataDir, runId) {
@@ -124,6 +136,14 @@ function adoptReturnedRunId({ dataDir, currentRunId, returnedRunId }) {
 function nextStepAfter(steps, step) {
   const currentIndex = steps.indexOf(step);
   return currentIndex >= 0 && currentIndex < steps.length - 1 ? steps[currentIndex + 1] : step;
+}
+
+function runtimeStatusForPipelineStatus(pipelineStatus) {
+  if (pipelineStatus === 'cancelled') return 'cancelled';
+  if (FAILED_PIPELINE_STATUSES.has(pipelineStatus)) return 'failed';
+  if (BLOCKED_PIPELINE_STATUSES.has(pipelineStatus)) return 'blocked';
+  if (REVIEW_PIPELINE_STATUSES.has(pipelineStatus)) return 'needs_review';
+  return 'completed';
 }
 
 /**
@@ -225,16 +245,25 @@ async function runPipelineRuntime(options = {}) {
           runId,
           event: { event: 'status', status: 'cancelled', reason: control.reason || '' }
         });
-        return { runId, runDir, status: 'cancelled' };
+        return { runId, runDir, status: 'cancelled', runtimeStatus: 'cancelled' };
       }
 
       if (lastResult.status && STOP_STATUSES.has(lastResult.status)) break;
     }
 
-    const status = lastResult.status === 'cancelled' ? 'cancelled' : 'completed';
-    updateRuntimeState({ dataDir, runId, patch: { status } });
-    appendRuntimeEvent({ dataDir, runId, event: { event: 'status', status } });
-    return { ...lastResult, runId, runDir, status };
+    const pipelineStatus = lastResult.status || 'completed';
+    const runtimeStatus = runtimeStatusForPipelineStatus(pipelineStatus);
+    updateRuntimeState({ dataDir, runId, patch: { status: runtimeStatus } });
+    appendRuntimeEvent({
+      dataDir,
+      runId,
+      event: {
+        event: 'status',
+        status: runtimeStatus,
+        pipelineStatus
+      }
+    });
+    return { ...lastResult, runId, runDir, status: pipelineStatus, runtimeStatus };
   } catch (error) {
     updateRuntimeState({
       dataDir,

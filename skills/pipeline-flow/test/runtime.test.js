@@ -190,4 +190,76 @@ describe('pipeline runtime runner', () => {
     assert.equal(runtime.status, 'cancelled');
     assert.equal(runtime.activeStep, 'verify');
   });
+
+  it('preserves generate_failed pipeline status and marks runtime failed', async () => {
+    const dataDir = tempDataDir();
+    const result = await runPipelineRuntime({
+      dataDir,
+      mode: 'daily',
+      params: {},
+      steps: ['generate', 'export'],
+      stepFns: {
+        generate: async ({ reportProgress }) => {
+          reportProgress({ current: 1, total: 1, message: 'generate failed' });
+          return { status: 'generate_failed', blockers: ['no_products'] };
+        },
+        export: async () => {
+          throw new Error('export should not run after generate_failed');
+        }
+      }
+    });
+
+    assert.equal(result.status, 'generate_failed');
+    assert.equal(result.runtimeStatus, 'failed');
+    const runtime = readRuntimeState({ dataDir, runId: result.runId });
+    assert.equal(runtime.status, 'failed');
+    assert.ok(readRuntimeEvents({ dataDir, runId: result.runId }).some(event => {
+      return event.event === 'status' && event.status === 'failed' && event.pipelineStatus === 'generate_failed';
+    }));
+  });
+
+  it('preserves manual_action_required pipeline status and marks runtime blocked', async () => {
+    const dataDir = tempDataDir();
+    const result = await runPipelineRuntime({
+      dataDir,
+      mode: 'daily',
+      params: {},
+      steps: ['verify', 'generate'],
+      stepFns: {
+        verify: async ({ reportProgress }) => {
+          reportProgress({ current: 1, total: 1, message: 'manual input needed' });
+          return { status: 'manual_action_required', blockers: ['sycm_manual_required'] };
+        },
+        generate: async () => {
+          throw new Error('generate should not run after manual_action_required');
+        }
+      }
+    });
+
+    assert.equal(result.status, 'manual_action_required');
+    assert.equal(result.runtimeStatus, 'blocked');
+    const runtime = readRuntimeState({ dataDir, runId: result.runId });
+    assert.equal(runtime.status, 'blocked');
+  });
+
+  it('preserves needs_review pipeline status and marks runtime needs_review', async () => {
+    const dataDir = tempDataDir();
+    const result = await runPipelineRuntime({
+      dataDir,
+      mode: 'daily',
+      params: {},
+      steps: ['review'],
+      stepFns: {
+        review: async ({ reportProgress }) => {
+          reportProgress({ current: 1, total: 1, message: 'review required' });
+          return { status: 'needs_review', mustReview: true };
+        }
+      }
+    });
+
+    assert.equal(result.status, 'needs_review');
+    assert.equal(result.runtimeStatus, 'needs_review');
+    const runtime = readRuntimeState({ dataDir, runId: result.runId });
+    assert.equal(runtime.status, 'needs_review');
+  });
 });
