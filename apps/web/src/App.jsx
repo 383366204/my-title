@@ -57,6 +57,59 @@ const WORKBENCH_MODE_LABEL = {
   keyword: '单词'
 };
 
+const PIPELINE_STATUS_LABEL = {
+  created: '已创建',
+  mined: '已挖词',
+  verified: '已验真',
+  verified_empty: '验真无结果',
+  verified_partial_manual_required: '部分需人工处理',
+  generated: '已生成标题',
+  generate_failed: '生成失败',
+  export_empty: '导出为空',
+  needs_review: '待人工复核',
+  ready_to_distribute: '待确认铺货',
+  awaiting_user_confirmation: '等待确认',
+  submitted: '已提交',
+  workflow_complete: '流程完成',
+  manual_action_required: '需要人工处理',
+  failed: '失败',
+  cancelled: '已取消',
+  running: '运行中',
+  blocked: '已阻塞',
+  unknown: '未知'
+};
+
+const PIPELINE_STAGE_LABEL = {
+  seed: '种子准备',
+  candidate: '候选词',
+  mined: '已挖词',
+  verified: '大盘验真',
+  generated: '标题货源',
+  review: '人工复核',
+  ready: '待铺货',
+  pending_review: '待确认铺货',
+  submitted: '已提交',
+  unknown: '未知阶段'
+};
+
+const PIPELINE_COUNT_LABEL = {
+  candidates: '候选词',
+  sycmVerified: '验真通过',
+  sycmRejected: '验真拒绝',
+  generatedProducts: '标题货源',
+  readyToDistribute: '待铺货'
+};
+
+const NEXT_ACTION_LABEL = {
+  ready_to_distribute: '确认铺货清单',
+  review_required: '处理人工复核',
+  manual_action_required: '完成人工处理',
+  fix_blockers: '处理阻塞项',
+  confirm_before_submit: '确认后提交',
+  submit_ready: '准备提交铺货',
+  sycm_query_complete: '继续选品或生成标题'
+};
+
 const emptyTitleSafety = {
   canDistribute: false,
   degraded: false,
@@ -81,6 +134,33 @@ function formatDateTime(value) {
 
 function copyText(value) {
   return navigator.clipboard.writeText(String(value || ''));
+}
+
+function labelPipelineStatus(status) {
+  return PIPELINE_STATUS_LABEL[String(status || 'unknown')] || String(status || '未知');
+}
+
+function labelPipelineStage(stage) {
+  return PIPELINE_STAGE_LABEL[String(stage || 'unknown')] || String(stage || '未知阶段');
+}
+
+function labelPipelineCount(key) {
+  return PIPELINE_COUNT_LABEL[key] || key;
+}
+
+function labelNextAction(run = {}) {
+  const code = String(run.nextActionCode || '');
+  if (NEXT_ACTION_LABEL[code]) return NEXT_ACTION_LABEL[code];
+  const command = String(run.nextCommand || run.userMessage || '');
+  if (/flow mine\b/.test(command)) return '开始挖词';
+  if (/flow verify\b/.test(command)) return '执行大盘验真';
+  if (/flow generate\b/.test(command)) return '生成标题货源';
+  if (/flow export\b/.test(command)) return '导出铺货清单';
+  if (/distribute\b/.test(command)) return '确认铺货清单';
+  if (/workflow resume\b/.test(command)) return '确认后继续提交';
+  if (/^Review\b/.test(command)) return '查看复核报告';
+  if (run.userMessage && !/[A-Za-z]{3,}/.test(run.userMessage)) return run.userMessage;
+  return '流程记录已更新，可继续从工作台处理。';
 }
 
 function getGateMeta(item = {}) {
@@ -238,9 +318,9 @@ function DashboardView({ status, runs, loading, onRefresh, onStartWorkbench, onN
               <span className={`status-dot status-dot-${run.status || 'idle'}`} />
               <div>
                 <strong>{run.runId}</strong>
-                <p>{run.stage || 'unknown'} · {formatDateTime(run.updatedAt || run.startedAt)}</p>
+                <p>{labelPipelineStage(run.stage)} · {formatDateTime(run.updatedAt || run.startedAt)}</p>
               </div>
-              <span>{run.requiresUserAction ? '需处理' : '正常'}</span>
+              <span>{run.requiresUserAction ? '需处理' : labelPipelineStatus(run.status)}</span>
             </div>
           ))}
           {runs.length === 0 && <div className="empty-panel">暂无流程批次。</div>}
@@ -255,11 +335,12 @@ function FlowStatusPanel({ run, onNavigate }) {
   const activeIndex = Math.max(0, BUSINESS_FUNNEL.findIndex((stage) => stage.id === activeStage));
   const action = getWorkflowAction(run);
   const statusText = run.status || 'unknown';
+  const nextActionText = labelNextAction(run);
 
   return (
     <div className="run-summary">
       <div className="run-summary-top">
-        <span className={`status-pill status-${statusText}`}>{statusText}</span>
+        <span className={`status-pill status-${statusText}`}>{labelPipelineStatus(statusText)}</span>
         <span>{formatDateTime(run.updatedAt || run.startedAt)}</span>
       </div>
       <strong>{run.runId}</strong>
@@ -277,13 +358,13 @@ function FlowStatusPanel({ run, onNavigate }) {
       <div className={`next-action-card ${action.tone === 'warn' ? 'next-action-warn' : ''}`}>
         <div>
           <span>{action.tone === 'warn' ? '需要处理' : '下一步'}</span>
-          <p>{run.userMessage || run.nextActionCode || '流程记录已更新，可继续从工作台处理。'}</p>
+          <p>{nextActionText}</p>
         </div>
         {action.tone === 'warn' ? <AlertTriangle size={18} /> : <CheckCircle2 size={18} />}
       </div>
       <div className="count-strip">
         {Object.entries(run.counts || {}).slice(0, 5).map(([key, value]) => (
-          <span key={key}>{key}: <b>{value}</b></span>
+          <span key={key}>{labelPipelineCount(key)}: <b>{value}</b></span>
         ))}
       </div>
       <div className="flow-action-row">
