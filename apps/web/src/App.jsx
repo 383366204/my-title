@@ -43,6 +43,20 @@ const MINER_TABS = [
   { id: 'sycm-market', label: '参谋关联词', endpoint: '/api/miner/sycm-market', needsInput: true }
 ];
 
+const WORKBENCH_FIELDS = [
+  { key: 'mine', label: '挖词数量' },
+  { key: 'verify', label: '验真数量' },
+  { key: 'generate', label: '生成数量' },
+  { key: 'export', label: '导出数量' },
+  { key: 'productsPerKeyword', label: '每词货源' },
+  { key: 'length', label: '标题长度' }
+];
+
+const WORKBENCH_MODE_LABEL = {
+  daily: '每日',
+  keyword: '单词'
+};
+
 const emptyTitleSafety = {
   canDistribute: false,
   degraded: false,
@@ -325,7 +339,7 @@ function WorkbenchLauncher({ onStart }) {
     setMessage('');
     try {
       const result = await onStart(form);
-      setMessage(`已启动 ${result.mode} 工作流，pid=${result.pid}`);
+      setMessage(`已启动${WORKBENCH_MODE_LABEL[result.mode] || result.mode}工作流，进程号 ${result.pid}`);
     } catch (err) {
       setMessage(err.message);
     } finally {
@@ -350,10 +364,10 @@ function WorkbenchLauncher({ onStart }) {
         </label>
       )}
       <div className="mini-form-grid">
-        {['mine', 'verify', 'generate', 'export', 'productsPerKeyword', 'length'].map((key) => (
-          <label className="field" key={key}>
-            <span>{key}</span>
-            <input type="number" min="1" value={form[key]} onChange={(e) => update(key, e.target.value)} />
+        {WORKBENCH_FIELDS.map((field) => (
+          <label className="field" key={field.key}>
+            <span>{field.label}</span>
+            <input type="number" min="1" value={form[field.key]} onChange={(e) => update(field.key, e.target.value)} />
           </label>
         ))}
       </div>
@@ -378,7 +392,21 @@ function MiningView({ onSendToTitle, historyService }) {
   const [minerResults, setMinerResults] = useState([]);
   const [minerBusy, setMinerBusy] = useState(false);
   const [recoveryMessage, setRecoveryMessage] = useState('');
+  const [seedSearch, setSeedSearch] = useState('');
   const eventSourceRef = useRef(null);
+
+  const filteredSeeds = useMemo(() => {
+    const query = seedSearch.trim().toLowerCase();
+    if (!query) return seeds;
+    return seeds.filter((seed) => {
+      return [
+        seed.keyword,
+        seed.category,
+        seed.status,
+        seed.type
+      ].some((value) => String(value || '').toLowerCase().includes(query));
+    });
+  }, [seeds, seedSearch]);
 
   const loadSeeds = async () => {
     const data = await fetchJson('/api/seeds');
@@ -505,7 +533,9 @@ function MiningView({ onSendToTitle, historyService }) {
         <div className="table-panel">
           <div className="section-title-row">
             <h3>种子池</h3>
-            <span className="tiny-muted">{seeds.length} 个</span>
+            <span className="tiny-muted">
+              {seedSearch.trim() ? `${filteredSeeds.length} / ${seeds.length} 个` : `${seeds.length} 个`}
+            </span>
           </div>
           <form className="inline-form" onSubmit={(event) => { event.preventDefault(); addSeed(); }}>
             <input value={seedForm.keyword} onChange={(e) => setSeedForm({ ...seedForm, keyword: e.target.value })} placeholder="新增种子词" />
@@ -513,8 +543,12 @@ function MiningView({ onSendToTitle, historyService }) {
             <input type="number" min="1" max="10" value={seedForm.priority} onChange={(e) => setSeedForm({ ...seedForm, priority: e.target.value })} />
             <button type="submit" className="icon-button" title="添加"><Plus size={16} /></button>
           </form>
+          <label className="seed-search">
+            <Search size={14} />
+            <input value={seedSearch} onChange={(e) => setSeedSearch(e.target.value)} placeholder="搜索种子词、类目或状态" />
+          </label>
           <div className="seed-list">
-            {seeds.map((seed) => (
+            {filteredSeeds.map((seed) => (
               <div className="seed-row" key={seed.keyword}>
                 <div>
                   <strong>{seed.keyword}</strong>
@@ -530,6 +564,7 @@ function MiningView({ onSendToTitle, historyService }) {
               </div>
             ))}
             {seeds.length === 0 && <div className="empty-panel">种子池为空，先添加几个核心品类词。</div>}
+            {seeds.length > 0 && filteredSeeds.length === 0 && <div className="empty-panel">没有匹配的种子词。</div>}
           </div>
         </div>
 

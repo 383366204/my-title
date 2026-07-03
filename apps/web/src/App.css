@@ -1162,6 +1162,37 @@ textarea:focus {
   gap: 8px;
 }
 
+.seed-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  margin: 10px 0;
+  border: 1px solid #273449;
+  border-radius: 7px;
+  background: #07111f;
+  color: #64748b;
+  padding: 0 10px;
+}
+
+.seed-search input {
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.seed-search input:focus {
+  box-shadow: none;
+}
+
+.seed-list {
+  max-height: 318px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 4px;
+}
+
 .compact-run-row,
 .seed-row {
   min-height: 48px;
@@ -1756,6 +1787,25 @@ textarea:focus {
 .console-panel {
   border-color: var(--card-border);
   background: rgba(255, 255, 255, 0.035);
+}
+
+.seed-search {
+  border-color: var(--card-border);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.seed-row {
+  display: grid;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  grid-template-columns: minmax(0, 1fr) auto 32px 32px;
+  padding: 7px 8px;
+}
+
+.seed-row .icon-button {
+  width: 30px;
+  height: 30px;
 }
 
 .run-summary strong,
