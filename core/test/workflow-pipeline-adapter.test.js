@@ -91,6 +91,9 @@ describe('workflow pipeline adapter', () => {
       const minY = Math.min(...ys);
       const maxY = Math.max(...ys);
       const uniquePositions = new Set(nodes.map(node => `${node.position.x},${node.position.y}`));
+      const nodeWidth = 232;
+      const nodeHeight = 118;
+      const minGap = 60;
 
       assert.deepEqual(nodes.map(node => node.id), [
         WORKFLOW_NODE_IDS.start,
@@ -102,8 +105,20 @@ describe('workflow pipeline adapter', () => {
         WORKFLOW_NODE_IDS.end
       ]);
       assert.equal(uniquePositions.size, nodes.length, 'template nodes should not share the same canvas position');
-      assert.ok(maxX - minX <= 540, `template ${template.id} spans ${maxX - minX}px horizontally`);
-      assert.ok(maxY - minY <= 380, `template ${template.id} spans ${maxY - minY}px vertically`);
+      assert.ok(maxX - minX <= 680, `template ${template.id} spans ${maxX - minX}px horizontally`);
+      assert.ok(maxY - minY <= 440, `template ${template.id} spans ${maxY - minY}px vertically`);
+      for (let index = 0; index < nodes.length; index += 1) {
+        for (let other = index + 1; other < nodes.length; other += 1) {
+          const a = nodes[index].position;
+          const b = nodes[other].position;
+          const separatedHorizontally = Math.abs(a.x - b.x) >= nodeWidth + minGap;
+          const separatedVertically = Math.abs(a.y - b.y) >= nodeHeight + minGap;
+          assert.ok(
+            separatedHorizontally || separatedVertically,
+            `template nodes ${nodes[index].id} and ${nodes[other].id} are too close`
+          );
+        }
+      }
     }
   });
 

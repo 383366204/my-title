@@ -1025,7 +1025,7 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
   };
 
   return (
-    <div className="flex h-screen w-full min-w-0 overflow-hidden bg-slate-950 font-sans text-slate-100">
+    <div className="flex min-h-screen w-full min-w-0 bg-slate-950 font-sans text-slate-100">
 
       {/* 1. Left Sidebar: History and Node library */}
       <div className="w-80 border-r border-slate-800 bg-slate-900/60 flex flex-col h-full shrink-0">
@@ -1264,7 +1264,8 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
         <div className="flex-1 flex flex-col min-h-0">
 
           {/* 画布 */}
-          <div className="flex-1 bg-slate-950 position-relative min-h-[300px]">
+          <div className="workflow-canvas-scroll">
+            <div className="workflow-canvas-surface">
             {mode === MODE_MONITOR ? (
               <ReactFlow
                 nodes={monitorNodes}
@@ -1311,6 +1312,7 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
                 />
               </ReactFlow>
             )}
+            </div>
           </div>
 
           {/* 底部控制台日志面板 */}
