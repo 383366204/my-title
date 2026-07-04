@@ -6,40 +6,26 @@ const {
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { runWithPlatformGuard } = require('../../../core/platform-access-guard');
 
-/**
- * Search Taobao peer titles through taobao-native.
- *
- * @param {string} keyword - Search keyword.
- * @param {object} [options={}] - Search options.
- * @param {number} [options.timeout=30000] - Command timeout in milliseconds.
- * @param {number} [options.maxResults=10] - Max titles to return.
- * @returns {Promise<string[]>} Peer product titles.
- */
-async function searchTaobaoTitles(keyword, options = {}) {
+async function rawSearchTaobaoTitles(keyword, options = {}) {
   const timeout = options.timeout || 30000;
-
-  if (!isTaobaoNativeInstalled()) {
-    console.warn('[taobao] taobao-native CLI 未安装，请使用 --peer-titles 手动提供同行标题');
+  const ready = await ensureTaobaoDesktopReady();
+  if (!ready) {
+    console.warn('[taobao] 淘宝桌面版启动失败');
     return [];
   }
 
+  console.error(`[taobao] 搜索关键词: ${keyword}`);
+
+  const reqFile = path.join(os.tmpdir(), `taobao-search-req-${Date.now()}.json`);
+  const outFile = path.join(os.tmpdir(), `taobao-search-out-${Date.now()}.json`);
+  fs.writeFileSync(reqFile, JSON.stringify({
+    tool: 'search_products',
+    arguments: { keyword, sourceApp: 'ecom-ai-tools' }
+  }), 'utf8');
+
   try {
-    const ready = await ensureTaobaoDesktopReady();
-    if (!ready) {
-      console.warn('[taobao] 淘宝桌面版启动失败');
-      return [];
-    }
-
-    console.error(`[taobao] 搜索关键词: ${keyword}`);
-
-    const reqFile = path.join(os.tmpdir(), `taobao-search-req-${Date.now()}.json`);
-    const outFile = path.join(os.tmpdir(), `taobao-search-out-${Date.now()}.json`);
-    fs.writeFileSync(reqFile, JSON.stringify({
-      tool: 'search_products',
-      arguments: { keyword, sourceApp: 'ecom-ai-tools' }
-    }), 'utf8');
-
     const result = runTaobaoNativeSync(['--request', reqFile, '-o', outFile], {
       encoding: 'utf8',
       timeout,
@@ -49,9 +35,6 @@ async function searchTaobaoTitles(keyword, options = {}) {
     const output = fs.existsSync(outFile)
       ? fs.readFileSync(outFile, 'utf8')
       : String(result || '');
-
-    try { fs.unlinkSync(reqFile); } catch (_) {}
-    try { fs.unlinkSync(outFile); } catch (_) {}
 
     const text = output.trim();
     if (!text) {
@@ -84,6 +67,49 @@ async function searchTaobaoTitles(keyword, options = {}) {
 
     console.warn('[taobao] 搜索结果格式异常:', Object.keys(data || {}));
     return [];
+  } finally {
+    try { fs.unlinkSync(reqFile); } catch (_) {}
+    try { fs.unlinkSync(outFile); } catch (_) {}
+  }
+}
+
+/**
+ * Search Taobao peer titles through taobao-native.
+ *
+ * @param {string} keyword - Search keyword.
+ * @param {object} [options={}] - Search options.
+ * @param {number} [options.timeout=30000] - Command timeout in milliseconds.
+ * @param {number} [options.maxResults=10] - Max titles to return.
+ * @returns {Promise<string[]>} Peer product titles.
+ */
+async function searchTaobaoTitles(keyword, options = {}) {
+  const normalizedKeyword = String(keyword || '').trim();
+  const timeout = options.timeout || 30000;
+
+  if (!normalizedKeyword) return [];
+  if (!isTaobaoNativeInstalled()) {
+    console.warn('[taobao] taobao-native CLI 未安装，请使用 --peer-titles 手动提供同行标题');
+    return [];
+  }
+
+  try {
+    const guarded = await runWithPlatformGuard('taobao', {
+      cacheKey: {
+        source: 'text',
+        keyword: normalizedKeyword,
+        maxResults: Number(options.maxResults || 10)
+      },
+      dataDir: options.guardDataDir,
+      cache: options.guardCache === false ? false : undefined,
+      cacheTtlMs: options.guardCacheTtlMs,
+      minCooldownMs: options.guardMinCooldownMs,
+      maxCooldownMs: options.guardMaxCooldownMs,
+      breakerCooldownMs: options.guardBreakerCooldownMs
+    }, async () => {
+      const titles = await rawSearchTaobaoTitles(normalizedKeyword, { ...options, timeout });
+      return { titles };
+    });
+    return Array.isArray(guarded.titles) ? guarded.titles : [];
   } catch (error) {
     const detail = [
       error && error.stdout ? String(error.stdout).trim() : '',

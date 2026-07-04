@@ -267,11 +267,27 @@ function clearBreaker(platform, options) {
   });
 }
 
+function classifyPlatformError(err) {
+  const raw = [
+    err && err.status,
+    err && err.code,
+    err && err.message,
+    err && err.stderr,
+    err && err.stdout
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  if (/slider|captcha|验证|滑块|人机/.test(raw)) return 'slider_required';
+  if (/login|登录|session|cookie/.test(raw)) return 'login_required';
+  if (/429|rate.?limit|too many|限流|频率|风控/.test(raw)) return 'rate_limited';
+  if (/permission|unauthorized|forbidden|权限|未订购|功能未开通/.test(raw)) return 'permission_required';
+  return 'transient_failure';
+}
+
 function recordFailure(platform, options, err) {
   const files = statusFiles(platform, options);
   const existing = readJson(files.breaker, {});
   const failures = Number(existing.failures || 0) + 1;
-  const status = err && (err.status || err.code);
+  const status = err && (err.status || classifyPlatformError(err));
   const isHard = HARD_BLOCKER_STATUSES.has(String(status || '').toLowerCase()) ||
     /slider|captcha|login|required|429|rate.?limit/i.test(String(status || '') + ' ' + String(err && err.message || ''));
 
@@ -385,12 +401,20 @@ function reportPlatformBlocker(platform, details = {}) {
 function getPlatformAccessStatus(platform, options = {}) {
   const guardOptions = mergeOptions(platform, options);
   const files = statusFiles(platform, guardOptions);
+  const breaker = breakerStatus(platform, guardOptions);
+  const manualAction = readJson(files.manualAction, null);
+  const state = readJson(files.state, null);
+  const cooldownRemainingMs = breaker.cooldownRemainingMs || 0;
   return {
     platform: normalizePlatform(platform),
     dataDir: files.dir,
-    breaker: breakerStatus(platform, guardOptions),
-    manualAction: readJson(files.manualAction, null),
-    state: readJson(files.state, null)
+    available: !breaker.open,
+    status: breaker.open ? (breaker.status || 'blocked') : 'ready',
+    cooldownRemainingMs,
+    queueLength: 0,
+    breaker,
+    manualAction,
+    state
   };
 }
 

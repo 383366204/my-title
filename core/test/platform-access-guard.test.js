@@ -125,3 +125,39 @@ test('platform blocker report protects 1688 without using browser-specific code'
   assert.equal(status.breaker.open, true);
   assert.equal(status.manualAction.status, 'rate_limited');
 });
+
+test('platform guard exposes normalized ready status for taobao', () => {
+  const dataDir = tempDataDir();
+  const status = getPlatformAccessStatus('taobao', { dataDir });
+
+  assert.equal(status.platform, 'taobao');
+  assert.equal(status.available, true);
+  assert.equal(status.status, 'ready');
+  assert.equal(status.cooldownRemainingMs, 0);
+  assert.equal(status.manualAction, null);
+  assert.equal(status.breaker.open, false);
+});
+
+test('platform guard classifies slider text as hard blocker status', async () => {
+  const dataDir = tempDataDir();
+  const err = new Error('淘宝出现滑块验证，请稍后重试');
+
+  await assert.rejects(
+    () => runWithPlatformGuard('taobao', {
+      dataDir,
+      cache: false,
+      minCooldownMs: 0,
+      maxCooldownMs: 0,
+      breakerCooldownMs: 60_000
+    }, async () => {
+      throw err;
+    }),
+    /滑块验证/
+  );
+
+  const status = getPlatformAccessStatus('taobao', { dataDir });
+  assert.equal(status.status, 'slider_required');
+  assert.equal(status.available, false);
+  assert.equal(status.manualAction.status, 'slider_required');
+});
+
