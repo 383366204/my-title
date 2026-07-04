@@ -412,6 +412,8 @@ function MiningView({ onSendToTitle, historyService, pipeline }) {
   const [recoveryMessage, setRecoveryMessage] = useState('');
   const [seedSearch, setSeedSearch] = useState('');
   const eventSourceRef = useRef(null);
+  const pipelineAction = getPipelineActionView(pipeline.currentRun);
+  const pipelineSummary = getPipelineSummaryText(pipeline.currentRun);
 
   const filteredSeeds = useMemo(() => {
     const query = seedSearch.trim().toLowerCase();
@@ -542,6 +544,19 @@ function MiningView({ onSendToTitle, historyService, pipeline }) {
     }
   };
 
+  const runPipelineVerify = async () => {
+    setPipelineBusy('verify');
+    setPipelineMessage('');
+    try {
+      const result = await pipeline.runStep('verify', { limit: config.count });
+      setPipelineMessage(`大盘验真完成，通过 ${result.currentRun?.counts?.sycmVerified ?? 0} 个。`);
+    } catch (err) {
+      setPipelineMessage(err.message);
+    } finally {
+      setPipelineBusy('');
+    }
+  };
+
   const appendCurrentCandidates = async (items = candidates) => {
     const rows = Array.isArray(items) ? items : [];
     if (rows.length === 0) return;
@@ -571,7 +586,7 @@ function MiningView({ onSendToTitle, historyService, pipeline }) {
     <div className="page-scroll">
       <PageHeader
         title="挖词选品"
-        subtitle="种子池、词根挖掘、SSE 挖词结果在同一页完成，结果可直接送入标题生成。"
+        subtitle="优先推进当前流程；临时挖词和词根发现只用于探索，确认后再加入流程。"
         actions={(
           <button className="icon-button" type="button" onClick={() => loadSeeds()} title="刷新种子池">
             <RefreshCw size={16} />
@@ -589,10 +604,9 @@ function MiningView({ onSendToTitle, historyService, pipeline }) {
           <span>当前流程</span>
           <strong>{pipeline.currentRun?.runId || '暂无流程'}</strong>
           <p>
-            {pipeline.currentRun
-              ? `候选词 ${pipeline.currentRun.counts?.candidates || 0} 个 · ${labelPipelineStatus(pipeline.currentRun.status)}`
-              : '先在工作台启动流程，或继续使用临时挖词探索。'}
+            {pipeline.currentRun ? pipelineSummary : pipelineAction.description}
           </p>
+          <small>{pipelineAction.description}</small>
         </div>
         <div className="context-actions">
           <button className="secondary-button" type="button" onClick={pipeline.refreshRun} disabled={pipeline.loading}>
@@ -601,6 +615,10 @@ function MiningView({ onSendToTitle, historyService, pipeline }) {
           <button className="primary-button" type="button" onClick={runPipelineMine} disabled={!pipeline.currentRun || Boolean(pipelineBusy)}>
             {pipelineBusy === 'mine' ? <RefreshCw size={15} className="spin" /> : <Play size={15} />}
             运行当前流程挖词阶段
+          </button>
+          <button className="secondary-button" type="button" onClick={runPipelineVerify} disabled={!pipeline.currentRun || Boolean(pipelineBusy)}>
+            {pipelineBusy === 'verify' ? <RefreshCw size={15} className="spin" /> : <CheckCircle2 size={15} />}
+            执行大盘验真
           </button>
         </div>
       </section>
@@ -691,10 +709,10 @@ function MiningView({ onSendToTitle, historyService, pipeline }) {
         </div>
       </section>
 
-      <section className="table-panel">
+      <section className="table-panel temporary-mining-panel">
         <div className="section-title-row">
-          <h3>自动挖词流</h3>
-          <span className="tiny-muted">候选词会做去重、验真和质量分层</span>
+          <h3>临时探索挖词</h3>
+          <span className="tiny-muted">不自动推进当前流程</span>
         </div>
         <div className="config-row">
           <label className="field"><span>数量</span><input type="number" value={config.count} onChange={(e) => setConfig({ ...config, count: e.target.value })} /></label>

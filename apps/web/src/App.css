@@ -904,6 +904,13 @@ code, pre {
   font-size: 12px;
 }
 
+.pipeline-context-band small {
+  display: block;
+  margin-top: 5px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
 .context-actions,
 .verified-keyword-strip {
   display: flex;
@@ -917,6 +924,17 @@ code, pre {
 
 .verified-keyword-strip {
   margin-bottom: 4px;
+}
+
+.temporary-mining-panel {
+  border-style: dashed;
+  background: rgba(255, 255, 255, 0.026);
+}
+
+.temporary-mining-panel .primary-button {
+  border-color: #334155;
+  background: #1f2937;
+  color: #cbd5e1;
 }
 
 .launcher-panel,
