@@ -46,7 +46,8 @@ import './App.css';
 const NAV_ITEMS = [
   { id: 'dashboard', label: '工作台', icon: LayoutDashboard },
   { id: 'mine', label: '挖词选品', icon: Search },
-  { id: 'title', label: '标题生成', icon: PenLine }
+  { id: 'title', label: '标题生成', icon: PenLine },
+  { id: 'workflow', label: '流程画布', icon: FlaskConical }
 ];
 
 const MINER_TABS = [
@@ -312,8 +313,8 @@ function FlowStatusPanel({ run, onNavigate }) {
         <button className="secondary-button muted" type="button" onClick={() => onNavigate('title')}>
           <PenLine size={15} /> 标题
         </button>
-        <button className="secondary-button muted" type="button" onClick={() => onNavigate('experiment')}>
-          <FlaskConical size={15} /> 开发调试
+        <button className="secondary-button muted" type="button" onClick={() => onNavigate('workflow')}>
+          <FlaskConical size={15} /> 流程画布
         </button>
       </div>
     </div>
@@ -1020,11 +1021,11 @@ export default function App() {
     setActiveTab('title');
   };
 
-  if (activeTab === 'experiment') {
+  if (activeTab === 'workflow') {
     return (
       <AppShell activeTab={activeTab} setActiveTab={setActiveTab}>
         <div className="studio-host">
-          <WorkflowStudio key={activeTab} initialMode="experiment" />
+          <WorkflowStudio key={activeTab} initialMode="monitor" />
         </div>
       </AppShell>
     );

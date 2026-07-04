@@ -39,6 +39,13 @@ import {
   normalizeWorkflowProgressEvent,
   summarizeWorkflowArtifact
 } from './workflow-ui.js';
+import {
+  labelPipelineStatus,
+  labelPipelineStage
+} from './pipeline-labels.js';
+import {
+  getPipelineActionView
+} from './pipeline-action-view.js';
 
 // ==================== Custom Flow Nodes ====================
 
@@ -244,7 +251,7 @@ const ProductionNode = ({ id, data }) => {
       <Handle type="target" position={Position.Left} id="in" />
       <div className="production-node-head">
         <span>{data.stage || data.kind || data.action || data.type || 'workflow'}</span>
-        <b>{status}</b>
+        <b>{labelPipelineStatus(status)}</b>
       </div>
       <div className="production-node-title">{label}</div>
       {data.description && <div className="production-node-description">{data.description}</div>}
@@ -662,6 +669,7 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
   }, [nodes, selectedNodeId]);
 
   const activeMonitorSummary = selectedMonitorRun || monitorLatestRun;
+  const activeMonitorAction = getPipelineActionView(activeMonitorSummary);
   const isRunActive = runStatus === 'running' || runStatus === 'pending';
   const canCancelRun = Boolean(currentRunId) && isRunActive;
   const selectedMonitorStage = MONITOR_STAGES.find((stage) => stage.id === selectedMonitorNodeId) || MONITOR_STAGES[0];
@@ -1033,7 +1041,7 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
           <div className="flex items-center gap-2">
             <Layers className="text-blue-500" size={20} />
             <h1 className="font-bold text-sm tracking-wider text-slate-200">
-              流程监控/可执行流程编排
+              流程画布
             </h1>
           </div>
           <div className="grid grid-cols-2 gap-2">
@@ -1055,7 +1063,7 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
         {/* 节点库 */}
         {mode === MODE_EXPERIMENT && (
         <div className="p-4 border-b border-slate-800 space-y-3 bg-slate-900/40">
-          <h2 className="text-xs font-bold tracking-wider text-slate-400 uppercase">节点库 (点击添加)</h2>
+          <h2 className="text-xs font-bold tracking-wider text-slate-400">节点库</h2>
           <div className="grid grid-cols-1 gap-2">
             <button
               onClick={() => handleAddNode('keyword-input')}
@@ -1085,7 +1093,7 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
         {/* 模板加载 */}
         {mode === MODE_EXPERIMENT && templates.length > 0 && (
           <div className="p-4 border-b border-slate-800 bg-slate-900/20">
-            <h2 className="text-xs font-bold tracking-wider text-slate-400 uppercase mb-2">Production 模板</h2>
+            <h2 className="text-xs font-bold tracking-wider text-slate-400 mb-2">流程模板</h2>
             <div className="space-y-2">
               {templates.map((template) => (
                 <button
@@ -1140,11 +1148,11 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
                       <div className="flex justify-between items-center font-mono text-[10px] text-slate-400 mb-1">
                         <span className="truncate w-36">{run.runId}</span>
                         <span className={`monitor-status-pill monitor-status-${getSummaryVisualState(run)}`}>
-                          {run.status || 'unknown'}
+                          {labelPipelineStatus(run.status)}
                         </span>
                       </div>
                       <div className="font-semibold text-slate-200 truncate">
-                        {run.stage || 'unknown'} · 第 {(resolveSummaryStageIndex(run) + 1) || 0} 阶段
+                        {labelPipelineStage(run.stage)} · 第 {(resolveSummaryStageIndex(run) + 1) || 0} 阶段
                       </div>
                       <div className="text-[10px] text-slate-500 mt-1">
                         {formatDateTime(run.updatedAt || run.startedAt)}
@@ -1391,13 +1399,18 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
                   <div>
                     <span className="monitor-detail-label">状态</span>
                     <span className={`monitor-status-pill monitor-status-${getSummaryVisualState(activeMonitorSummary)}`}>
-                      {activeMonitorSummary.status}
+                      {labelPipelineStatus(activeMonitorSummary.status)}
                     </span>
                   </div>
                   <div>
                     <span className="monitor-detail-label">阶段</span>
-                    <div className="text-sm font-semibold text-slate-200">{activeMonitorSummary.stage}</div>
+                    <div className="text-sm font-semibold text-slate-200">{labelPipelineStage(activeMonitorSummary.stage)}</div>
                   </div>
+                </div>
+
+                <div className={`monitor-alert ${activeMonitorAction.tone === 'warn' ? 'monitor-alert-warning' : ''}`}>
+                  <div className="font-bold mb-1">{activeMonitorAction.label}</div>
+                  <div>{activeMonitorAction.description}</div>
                 </div>
 
                 {activeMonitorSummary.requiresUserAction && (
