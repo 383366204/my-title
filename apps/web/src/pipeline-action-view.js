@@ -8,9 +8,7 @@ const DEFAULT_ACTION = {
   description: '流程记录已更新，可以从工作台查看当前状态。'
 };
 
-export function getPipelineActionView(run = {}) {
-  const status = String(run.status || '').toLowerCase();
-  const stage = String(run.stage || '').toLowerCase();
+export function getPipelineActionView(run = null) {
   if (!run || !run.runId) {
     return {
       label: '启动每日流程',
@@ -20,6 +18,8 @@ export function getPipelineActionView(run = {}) {
       description: '还没有当前流程，先从工作台启动每日选品。'
     };
   }
+  const status = String(run.status || '').toLowerCase();
+  const stage = String(run.stage || '').toLowerCase();
   if (status === 'created' || stage === 'seed') {
     return {
       label: '开始挖词',
@@ -36,6 +36,15 @@ export function getPipelineActionView(run = {}) {
       step: 'verify',
       tone: 'default',
       description: '候选词已经准备好，下一步需要用生意参谋等指标验真。'
+    };
+  }
+  if (status === 'manual_action_required' || status === 'verified_partial_manual_required' || status === 'verified_empty') {
+    return {
+      label: '处理验真阻塞',
+      targetTab: 'mine',
+      step: 'verify',
+      tone: 'warn',
+      description: '验真阶段需要人工处理或更换候选词。'
     };
   }
   if (status === 'verified' || stage === 'verified') {
@@ -81,15 +90,6 @@ export function getPipelineActionView(run = {}) {
       step: '',
       tone: 'success',
       description: '当前流程已经提交完成，可以查看批次记录。'
-    };
-  }
-  if (status === 'manual_action_required' || status === 'verified_partial_manual_required' || status === 'verified_empty') {
-    return {
-      label: '处理验真阻塞',
-      targetTab: 'mine',
-      step: 'verify',
-      tone: 'warn',
-      description: '验真阶段需要人工处理或更换候选词。'
     };
   }
   return {

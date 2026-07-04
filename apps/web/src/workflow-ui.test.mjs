@@ -49,6 +49,7 @@ test('pipeline labels localize status, stage, counts, and next commands', () => 
 });
 
 test('getPipelineActionView returns one primary CTA per pipeline stage', () => {
+  assert.equal(getPipelineActionView(null).label, '启动每日流程');
   assert.deepEqual(getPipelineActionView({ runId: 'run_1', status: 'mined', stage: 'mined' }), {
     label: '执行大盘验真',
     targetTab: 'mine',
@@ -67,6 +68,13 @@ test('getPipelineActionView returns one primary CTA per pipeline stage', () => {
 
   assert.equal(getPipelineActionView({ runId: 'run_1', status: 'needs_review', stage: 'review' }).tone, 'warn');
   assert.equal(getPipelineActionView({ runId: 'run_1', status: 'ready_to_distribute', stage: 'ready' }).label, '确认铺货清单');
+  assert.deepEqual(getPipelineActionView({ runId: 'run_1', status: 'verified_empty', stage: 'verified' }), {
+    label: '处理验真阻塞',
+    targetTab: 'mine',
+    step: 'verify',
+    tone: 'warn',
+    description: '验真阶段需要人工处理或更换候选词。'
+  });
 });
 
 test('getPipelineSummaryText summarizes empty and active runs', () => {

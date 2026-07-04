@@ -147,7 +147,7 @@ function AppShell({ activeTab, setActiveTab, children }) {
           </button>
           {showDeveloperTools && (
             <div className="sidebar-tool-menu">
-              <button type="button" onClick={() => setActiveTab('experiment')}>开发调试</button>
+              <button type="button" onClick={() => setActiveTab('workflow')}>流程画布</button>
               <a href="/legacy/">旧版备份</a>
             </div>
           )}
@@ -607,7 +607,7 @@ function MiningView({ onSendToTitle, historyService, pipeline }) {
           <p>
             {pipeline.currentRun ? pipelineSummary : pipelineAction.description}
           </p>
-          <small>{pipelineAction.description}</small>
+          {pipeline.currentRun && <small>{pipelineAction.description}</small>}
         </div>
         <div className="context-actions">
           <button className="secondary-button" type="button" onClick={pipeline.refreshRun} disabled={pipeline.loading}>
