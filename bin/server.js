@@ -312,6 +312,22 @@ app.get('/api/pipeline/current', (req, res) => {
   }
 });
 
+app.get('/api/pipeline/runs/:runId', (req, res) => {
+  const runId = req.params.runId;
+  if (!isValidWorkflowRunIdParam(runId)) {
+    return res.status(400).json({ ok: false, error: '无效的运行 ID。' });
+  }
+  try {
+    const summary = summarizePipelineRun({ runId });
+    if (!summary) {
+      return res.status(404).json({ ok: false, error: '未找到该流程运行记录' });
+    }
+    res.json({ ok: true, data: withPipelineRuntimeFields(summary) });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 app.post('/api/pipeline/start', (req, res) => {
   if (activeWorkbenchProcess) {
     return res.status(409).json({

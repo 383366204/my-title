@@ -504,7 +504,7 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
     setMonitorLoading(true);
     setMonitorError('');
     try {
-      const res = await fetch('/api/workbench/runs?limit=20');
+      const res = await fetch('/api/pipeline/current?limit=20');
       const payload = await res.json();
       if (payload.ok === false) throw new Error(payload.error || '加载流程监控失败');
       const data = unwrapApiData(payload);
@@ -537,7 +537,7 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
     setMonitorLoading(true);
     setMonitorError('');
     try {
-      const res = await fetch(`/api/workbench/runs/${runId}`);
+      const res = await fetch(`/api/pipeline/runs/${runId}`);
       const payload = await res.json();
       if (payload.ok === false) throw new Error(payload.error || '加载流程详情失败');
       setSelectedMonitorRun(unwrapApiData(payload));
@@ -922,7 +922,7 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
         })));
       }
 
-      const res = await fetch('/api/workflows/run', {
+      const res = await fetch('/api/pipeline/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

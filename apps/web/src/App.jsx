@@ -33,6 +33,7 @@ import {
   labelNextAction
 } from './pipeline-labels.js';
 import { useSessionState } from './use-session-state.js';
+import { usePipelineRun } from './use-pipeline-run.js';
 import { HistoryService } from './history-service.js';
 import { IndexedDbHistoryStore } from './indexeddb-history-store.js';
 import './App.css';
@@ -346,7 +347,7 @@ function WorkbenchLauncher({ onStart }) {
     setMessage('');
     try {
       const result = await onStart(form);
-      setMessage(`已启动${WORKBENCH_MODE_LABEL[result.mode] || result.mode}工作流，进程号 ${result.pid}`);
+      setMessage(`已启动${WORKBENCH_MODE_LABEL[result.mode] || result.mode}工作流，流程 ${result.runId || '已创建'}`);
     } catch (err) {
       setMessage(err.message);
     } finally {
@@ -387,7 +388,7 @@ function WorkbenchLauncher({ onStart }) {
   );
 }
 
-function MiningView({ onSendToTitle, historyService }) {
+function MiningView({ onSendToTitle, historyService, pipeline }) {
   const [seeds, setSeeds] = useState([]);
   const [seedForm, setSeedForm] = useState({ keyword: '', category: '', priority: 5, type: 'manual' });
   const [config, setConfig] = useState({ count: 50, source: 'hybrid', minSearchPopularity: 50, sycmPrecheck: true, autoSeedHighTier: false });
@@ -398,6 +399,8 @@ function MiningView({ onSendToTitle, historyService }) {
   const [minerInput, setMinerInput] = useState('');
   const [minerResults, setMinerResults] = useState([]);
   const [minerBusy, setMinerBusy] = useState(false);
+  const [pipelineBusy, setPipelineBusy] = useState('');
+  const [pipelineMessage, setPipelineMessage] = useState('');
   const [recoveryMessage, setRecoveryMessage] = useState('');
   const [seedSearch, setSeedSearch] = useState('');
   const eventSourceRef = useRef(null);
@@ -518,6 +521,44 @@ function MiningView({ onSendToTitle, historyService }) {
     }
   };
 
+  const runPipelineMine = async () => {
+    setPipelineBusy('mine');
+    setPipelineMessage('');
+    try {
+      const result = await pipeline.runStep('mine', config);
+      setPipelineMessage(`流程挖词完成，当前候选词 ${result.currentRun?.counts?.candidates ?? '-'} 个。`);
+    } catch (err) {
+      setPipelineMessage(err.message);
+    } finally {
+      setPipelineBusy('');
+    }
+  };
+
+  const appendCurrentCandidates = async (items = candidates) => {
+    const rows = Array.isArray(items) ? items : [];
+    if (rows.length === 0) return;
+    setPipelineBusy('append');
+    setPipelineMessage('');
+    try {
+      const result = await pipeline.appendCandidates(rows);
+      setPipelineMessage(`已加入当前流程 ${result.result?.added || 0} 个，跳过重复 ${result.result?.skipped || 0} 个。`);
+    } catch (err) {
+      setPipelineMessage(err.message);
+    } finally {
+      setPipelineBusy('');
+    }
+  };
+
+  const appendMinerResult = async (item) => {
+    await appendCurrentCandidates([{
+      keyword: item.word,
+      source: minerTab,
+      localScore: item.searchPopularity ? Math.min(95, Math.max(55, Math.round(item.searchPopularity / 10))) : 65,
+      reason: item.searchPopularity ? `词根发现人气 ${item.searchPopularity}` : `词根发现词频 ${item.count || 1}`,
+      nextAction: 'sycm_verify'
+    }]);
+  };
+
   return (
     <div className="page-scroll">
       <PageHeader
@@ -535,6 +576,27 @@ function MiningView({ onSendToTitle, historyService }) {
           onGoTitle={() => onSendToTitle({ keyword: minerInput || seedForm.keyword })}
         />
       )}
+      <section className="pipeline-context-band">
+        <div>
+          <span>当前流程</span>
+          <strong>{pipeline.currentRun?.runId || '暂无流程'}</strong>
+          <p>
+            {pipeline.currentRun
+              ? `候选词 ${pipeline.currentRun.counts?.candidates || 0} 个 · ${labelPipelineStatus(pipeline.currentRun.status)}`
+              : '先在工作台启动流程，或继续使用临时挖词探索。'}
+          </p>
+        </div>
+        <div className="context-actions">
+          <button className="secondary-button" type="button" onClick={pipeline.refreshRun} disabled={pipeline.loading}>
+            <RefreshCw size={15} /> 刷新
+          </button>
+          <button className="primary-button" type="button" onClick={runPipelineMine} disabled={!pipeline.currentRun || Boolean(pipelineBusy)}>
+            {pipelineBusy === 'mine' ? <RefreshCw size={15} className="spin" /> : <Play size={15} />}
+            运行当前流程挖词阶段
+          </button>
+        </div>
+      </section>
+      {pipelineMessage && <div className="form-message">{pipelineMessage}</div>}
 
       <section className="split-layout">
         <div className="table-panel">
@@ -602,6 +664,22 @@ function MiningView({ onSendToTitle, historyService }) {
             ))}
             {minerResults.length === 0 && <div className="empty-panel">提取出的词根会出现在这里，可一键导入种子池。</div>}
           </div>
+          {minerResults.length > 0 && (
+            <div className="flow-action-row">
+              <button className="secondary-button" type="button" onClick={() => appendCurrentCandidates(minerResults.map((item) => ({
+                keyword: item.word,
+                source: minerTab,
+                localScore: item.searchPopularity ? Math.min(95, Math.max(55, Math.round(item.searchPopularity / 10))) : 65,
+                reason: item.searchPopularity ? `词根发现人气 ${item.searchPopularity}` : `词根发现词频 ${item.count || 1}`,
+                nextAction: 'sycm_verify'
+              })))} disabled={!pipeline.currentRun || Boolean(pipelineBusy)}>
+                <Plus size={15} /> 全部加入当前流程
+              </button>
+              <button className="secondary-button muted" type="button" onClick={() => appendMinerResult(minerResults[0])} disabled={!pipeline.currentRun || Boolean(pipelineBusy)}>
+                <Send size={15} /> 首词加入流程
+              </button>
+            </div>
+          )}
         </div>
       </section>
 
@@ -612,15 +690,19 @@ function MiningView({ onSendToTitle, historyService }) {
         </div>
         <div className="config-row">
           <label className="field"><span>数量</span><input type="number" value={config.count} onChange={(e) => setConfig({ ...config, count: e.target.value })} /></label>
-          <label className="field"><span>来源</span><select value={config.source} onChange={(e) => setConfig({ ...config, source: e.target.value })}><option value="hybrid">hybrid</option><option value="local">local</option><option value="ai">ai</option></select></label>
+          <label className="field"><span>来源</span><select value={config.source} onChange={(e) => setConfig({ ...config, source: e.target.value })}><option value="hybrid">混合</option><option value="local">本地规则</option><option value="ai">智能扩展</option></select></label>
           <label className="field"><span>最低人气</span><input type="number" value={config.minSearchPopularity} onChange={(e) => setConfig({ ...config, minSearchPopularity: e.target.value })} /></label>
           <label className="toggle-field"><input type="checkbox" checked={config.sycmPrecheck} onChange={(e) => setConfig({ ...config, sycmPrecheck: e.target.checked })} /> 生意参谋预检</label>
           <label className="toggle-field"><input type="checkbox" checked={config.autoSeedHighTier} onChange={(e) => setConfig({ ...config, autoSeedHighTier: e.target.checked })} /> 高分自动入池</label>
           <button className="primary-button" type="button" onClick={running ? stopMining : startMining}>
             {running ? <Square size={16} /> : <Play size={16} />}
-            {running ? '停止' : '开始挖掘'}
+            {running ? '停止临时挖词' : '临时挖词'}
+          </button>
+          <button className="secondary-button" type="button" onClick={() => appendCurrentCandidates()} disabled={!pipeline.currentRun || candidates.length === 0 || Boolean(pipelineBusy)}>
+            <Plus size={15} /> 加入当前流程
           </button>
         </div>
+        <div className="form-message">临时挖词用于探索；要推进选品流水线，请使用“运行当前流程挖词阶段”或把候选词加入当前流程。</div>
         <div className="console-panel">
           {logs.map((line, index) => <div key={index} className={`log-line log-${line.type}`}>{line.message}</div>)}
           {logs.length === 0 && <div className="log-line">日志会在运行后实时显示。</div>}
@@ -674,7 +756,7 @@ function CandidateTable({ candidates, onSendToTitle }) {
   );
 }
 
-function TitleView({ sourceCandidate, onAddReviewProduct, historyService }) {
+function TitleView({ sourceCandidate, onAddReviewProduct, historyService, pipeline }) {
   const [form, setForm] = useState({ keyword: '', maxLength: 60, useImageSearch: false, peerTitles: '' });
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
@@ -727,6 +809,7 @@ function TitleView({ sourceCandidate, onAddReviewProduct, historyService }) {
 
   const products = result?.products || [];
   const titles = products.map((item) => item['铺货标题']).filter(Boolean);
+  const verifiedKeywords = pipeline.currentRun?.previews?.verifiedKeywords || [];
 
   return (
     <div className="page-scroll">
@@ -742,6 +825,24 @@ function TitleView({ sourceCandidate, onAddReviewProduct, historyService }) {
 
       <section className="title-layout">
         <form className="title-form table-panel" onSubmit={submit}>
+          <div className="section-title-row">
+            <h3>当前流程已验真词</h3>
+            <span className="tiny-muted">{verifiedKeywords.length} 个</span>
+          </div>
+          <div className="verified-keyword-strip">
+            {verifiedKeywords.map((item) => (
+              <button
+                type="button"
+                className="keyword-chip"
+                key={item.keyword}
+                onClick={() => setForm((current) => ({ ...current, keyword: item.keyword }))}
+              >
+                <span>{item.keyword}</span>
+                <small>{item.sycmScore?.score ? `分数 ${item.sycmScore.score}` : '已验真'}</small>
+              </button>
+            ))}
+            {verifiedKeywords.length === 0 && <div className="empty-panel">当前流程还没有已验真关键词，可以先去挖词页运行验真。</div>}
+          </div>
           {sourceCandidate?.keyword && (
             <div className="source-context-panel">
               <div>
@@ -856,8 +957,7 @@ function ProductCard({ product, safety, sourceCandidate, onAddReview }) {
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [status, setStatus] = useState(null);
-  const [runs, setRuns] = useState([]);
-  const [loadingRuns, setLoadingRuns] = useState(false);
+  const pipeline = usePipelineRun({ limit: 12 });
   const [sourceCandidate, setSourceCandidate] = useSessionState('ecom.sourceCandidate', null);
   const [reviewProducts, setReviewProducts] = useSessionState('ecom.reviewProducts', []);
   const historyService = useMemo(() => {
@@ -866,17 +966,11 @@ export default function App() {
   }, []);
 
   const refreshOverview = async () => {
-    setLoadingRuns(true);
-    try {
-      const [statusData, runsData] = await Promise.all([
-        fetchJson('/api/status'),
-        fetchJson('/api/workbench/runs?limit=12')
-      ]);
-      setStatus(statusData);
-      setRuns(runsData.runs || []);
-    } finally {
-      setLoadingRuns(false);
-    }
+    const [statusData] = await Promise.all([
+      fetchJson('/api/status'),
+      pipeline.refreshRun()
+    ]);
+    setStatus(statusData);
   };
 
   useEffect(() => {
@@ -889,12 +983,8 @@ export default function App() {
   };
 
   const startWorkbench = async (form) => {
-    const data = await fetchJson('/api/workbench/run', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(form)
-    });
-    setTimeout(() => refreshOverview().catch(() => {}), 1200);
+    const data = await pipeline.startRun(form);
+    setTimeout(() => pipeline.refreshRun().catch(() => {}), 1200);
     return data;
   };
 
@@ -913,8 +1003,8 @@ export default function App() {
       {activeTab === 'dashboard' && (
         <DashboardView
           status={status}
-          runs={runs}
-          loading={loadingRuns}
+          runs={pipeline.runs}
+          loading={pipeline.loading}
           onRefresh={() => refreshOverview().catch(() => {})}
           onStartWorkbench={startWorkbench}
           onNavigate={setActiveTab}
@@ -922,10 +1012,11 @@ export default function App() {
           onClearReviewProduct={(id) => setReviewProducts((current) => current.filter((item) => item.id !== id))}
         />
       )}
-      {activeTab === 'mine' && <MiningView onSendToTitle={sendToTitle} historyService={historyService} />}
+      {activeTab === 'mine' && <MiningView onSendToTitle={sendToTitle} historyService={historyService} pipeline={pipeline} />}
       {activeTab === 'title' && (
         <TitleView
           sourceCandidate={sourceCandidate}
+          pipeline={pipeline}
           historyService={historyService}
           onAddReviewProduct={(product) => {
             setReviewProducts((current) => [
