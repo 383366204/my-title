@@ -1194,6 +1194,13 @@ textarea:focus {
   line-height: 1.45;
 }
 
+.next-action-card small {
+  display: block;
+  margin-top: 5px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
 .next-action-warn {
   border-color: rgba(245, 158, 11, 0.38);
   background: rgba(120, 53, 15, 0.16);
@@ -1204,6 +1211,19 @@ textarea:focus {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.flow-primary-action {
+  border-color: rgba(20, 184, 166, 0.55);
+  background: rgba(20, 184, 166, 0.12);
+  color: #99f6e4;
+  font-weight: 800;
+}
+
+.flow-primary-warn {
+  border-color: rgba(245, 158, 11, 0.5);
+  background: rgba(120, 53, 15, 0.18);
+  color: #fde68a;
 }
 
 .compact-run-list,

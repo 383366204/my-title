@@ -32,6 +32,11 @@ import {
   labelPipelineCount,
   labelNextAction
 } from './pipeline-labels.js';
+import {
+  getPipelineActionView,
+  getPipelineSummaryText,
+  normalizeVerifiedKeywordForTitle
+} from './pipeline-action-view.js';
 import { useSessionState } from './use-session-state.js';
 import { usePipelineRun } from './use-pipeline-run.js';
 import { HistoryService } from './history-service.js';
@@ -260,9 +265,10 @@ function DashboardView({ status, runs, loading, onRefresh, onStartWorkbench, onN
 function FlowStatusPanel({ run, onNavigate }) {
   const activeStage = mapPipelineStageToFunnel(run.stage);
   const activeIndex = Math.max(0, BUSINESS_FUNNEL.findIndex((stage) => stage.id === activeStage));
-  const action = getWorkflowAction(run);
+  const action = getPipelineActionView(run);
   const statusText = run.status || 'unknown';
   const nextActionText = labelNextAction(run);
+  const summaryText = getPipelineSummaryText(run);
 
   return (
     <div className="run-summary">
@@ -271,6 +277,7 @@ function FlowStatusPanel({ run, onNavigate }) {
         <span>{formatDateTime(run.updatedAt || run.startedAt)}</span>
       </div>
       <strong>{run.runId}</strong>
+      <p>{summaryText}</p>
       <div className="workflow-funnel-react">
         {BUSINESS_FUNNEL.map((stage, index) => {
           const state = index < activeIndex ? 'done' : index === activeIndex ? 'active' : '';
@@ -285,7 +292,8 @@ function FlowStatusPanel({ run, onNavigate }) {
       <div className={`next-action-card ${action.tone === 'warn' ? 'next-action-warn' : ''}`}>
         <div>
           <span>{action.tone === 'warn' ? '需要处理' : '下一步'}</span>
-          <p>{nextActionText}</p>
+          <p>{action.description}</p>
+          <small>{nextActionText}</small>
         </div>
         {action.tone === 'warn' ? <AlertTriangle size={18} /> : <CheckCircle2 size={18} />}
       </div>
@@ -295,7 +303,7 @@ function FlowStatusPanel({ run, onNavigate }) {
         ))}
       </div>
       <div className="flow-action-row">
-        <button className="secondary-button" type="button" onClick={() => onNavigate(action.targetTab)}>
+        <button className={`secondary-button flow-primary-action ${action.tone === 'warn' ? 'flow-primary-warn' : ''}`} type="button" onClick={() => onNavigate(action.targetTab)}>
           <Play size={15} /> {action.label}
         </button>
         <button className="secondary-button muted" type="button" onClick={() => onNavigate('mine')}>
