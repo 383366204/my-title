@@ -902,6 +902,23 @@ async function _extractQrCode(cdp, onProgress) {
   }
 }
 
+function classifySycmError(err) {
+  const raw = String((err && err.status) || '') + ' ' +
+    String((err && err.code) || '') + ' ' +
+    String((err && err.message) || '');
+
+  if (/滑块|captcha|slider|验证/.test(raw)) {
+    return { status: 'slider_required', userMessage: '生意参谋需要滑块验证，请人工处理后继续。' };
+  }
+  if (/登录|login|session|cookie/.test(raw)) {
+    return { status: 'login_required', userMessage: '生意参谋登录状态失效，请重新登录后继续。' };
+  }
+  if (/未开通|无权限|permission|forbidden|feature/.test(raw)) {
+    return { status: 'sycm_feature_required', userMessage: '当前账号没有该生意参谋功能权限。' };
+  }
+  return { status: 'transient_failure', userMessage: '生意参谋暂时访问失败，可稍后重试。' };
+}
+
 async function extractSycmData(keyword, options) {
   options = options || {};
   var pageFilters = options.pageFilters || DEFAULT_PAGE_FILTERS;
@@ -920,7 +937,12 @@ async function extractSycmData(keyword, options) {
     maxCooldownMs: options.guardMaxCooldownMs,
     breakerCooldownMs: options.guardBreakerCooldownMs
   }, function() {
-    return _rawExtractSycmData(keyword, options);
+    return _rawExtractSycmData(keyword, options).catch(function(err) {
+      var classified = classifySycmError(err);
+      err.status = err.status || classified.status;
+      err.details = Object.assign({}, err.details || {}, classified);
+      throw err;
+    });
   });
 }
 
@@ -1261,6 +1283,7 @@ function _recommendCategory(categoryData) {
 
 module.exports = {
   extractSycmData: extractSycmData,
+  classifySycmError: classifySycmError,
   _rawExtractSycmData: _rawExtractSycmData,
   _extractCategoryAnalysis: _extractCategoryAnalysis,
   _recommendCategory: _recommendCategory,

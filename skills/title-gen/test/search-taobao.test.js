@@ -53,3 +53,33 @@ test('searchTaobaoTitles caches by keyword and avoids duplicate native calls', a
     else delete require.cache[taobaoUtilsPath];
   }
 });
+
+test('guardTaobaoImageSearch caches image search result by image url', async () => {
+  const dataDir = tempDataDir();
+  let calls = 0;
+  const { guardTaobaoImageSearch } = require('../src/search-taobao-image');
+
+  const first = await guardTaobaoImageSearch('https://img.example/a.jpg', {
+    guardDataDir: dataDir,
+    guardMinCooldownMs: 0,
+    guardMaxCooldownMs: 0,
+    operation: async () => {
+      calls += 1;
+      return { hasMatch: true, peerTitles: ['同款项链'], priceRange: { min: 10, max: 20 } };
+    }
+  });
+
+  const second = await guardTaobaoImageSearch('https://img.example/a.jpg', {
+    guardDataDir: dataDir,
+    guardMinCooldownMs: 0,
+    guardMaxCooldownMs: 0,
+    operation: async () => {
+      calls += 1;
+      return { hasMatch: false, peerTitles: [] };
+    }
+  });
+
+  assert.equal(calls, 1);
+  assert.equal(first.peerTitles[0], '同款项链');
+  assert.equal(second.peerTitles[0], '同款项链');
+});

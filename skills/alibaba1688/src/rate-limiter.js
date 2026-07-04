@@ -1,5 +1,19 @@
 'use strict';
 
+const fs = require('fs');
+const path = require('path');
+
+function readJson(file, fallback) {
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (_) { return fallback; }
+}
+
+function writeJson(file, value) {
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(value, null, 2) + '\n', 'utf8');
+  } catch (_) {}
+}
+
 /**
  * 1688 API 全局限流器
  * 滑动窗口限流 + 429 冷却 + 请求排队
@@ -262,7 +276,7 @@ class GlobalRateLimiter {
     const maxRequests = options.maxRequests || parseInt(process.env.API_RATE_LIMIT_MAX, 10) || 20;
     const windowMs = options.windowMs || parseInt(process.env.API_RATE_LIMIT_WINDOW, 10) || 60000;
     const cooldownMs = options.cooldownMs || parseInt(process.env.API_429_COOLDOWN, 10) || 3600000;
-    const maxQueueSize = options.maxQueueSize || parseInt(process.env.API_RATE_LIMIT_QUEUE_MAX, 10) || 10;
+    const maxQueueSize = options.maxQueueSize == null ? (parseInt(process.env.API_RATE_LIMIT_QUEUE_MAX, 10) || 10) : options.maxQueueSize;
 
     this.maxRequests = maxRequests;
     this.windowMs = windowMs;
@@ -272,6 +286,52 @@ class GlobalRateLimiter {
     this._limiter = new SlidingWindowRateLimiter({ maxRequests, windowMs });
     this._cooldown = new CooldownManager(cooldownMs);
     this._queue = new RequestQueue(maxQueueSize);
+
+    if (options.persist) {
+      this.persistFile = path.join(options.dataDir || process.env.ECOM_PLATFORM_GUARD_DIR || path.join(__dirname, '..', '..', '..', 'data', 'platform-access'), '1688', 'window.json');
+      this._loadPersisted();
+
+      const origHasSlot = this._limiter.hasSlot.bind(this._limiter);
+      this._limiter.hasSlot = () => {
+        this._loadPersisted();
+        return origHasSlot();
+      };
+
+      const origGetCurrentCount = this._limiter.getCurrentCount.bind(this._limiter);
+      this._limiter.getCurrentCount = () => {
+        this._loadPersisted();
+        return origGetCurrentCount();
+      };
+
+      const origGetNextSlotReleaseMs = this._limiter.getNextSlotReleaseMs.bind(this._limiter);
+      this._limiter.getNextSlotReleaseMs = () => {
+        this._loadPersisted();
+        return origGetNextSlotReleaseMs();
+      };
+
+      const origRecord = this._limiter.record.bind(this._limiter);
+      this._limiter.record = (now) => {
+        origRecord(now);
+        this._savePersisted();
+      };
+    }
+  }
+
+  _loadPersisted() {
+    if (this.persistFile) {
+      const data = readJson(this.persistFile, null);
+      if (data && Array.isArray(data.timestamps)) {
+        this._limiter.timestamps = data.timestamps.map(t => Number(t));
+      }
+    }
+  }
+
+  _savePersisted() {
+    if (this.persistFile) {
+      writeJson(this.persistFile, {
+        timestamps: this._limiter.timestamps
+      });
+    }
   }
 
   /**
@@ -301,6 +361,10 @@ class GlobalRateLimiter {
     // 优先级3：排队等待
     const nextRelease = this._limiter.getNextSlotReleaseMs();
     const estimatedWait = nextRelease + (this._queue.getLength() * nextRelease);
+
+    if (this.maxQueueSize === 0) {
+      return { allowed: false, waitMs: estimatedWait, queueFull: true };
+    }
 
     // 安排自动释放
     if (nextRelease > 0 && this._queue.getLength() === 0) {
@@ -362,7 +426,10 @@ let _instance = null;
  */
 function getRateLimiter(options) {
   if (!_instance) {
-    _instance = new GlobalRateLimiter(options);
+    _instance = new GlobalRateLimiter({
+      persist: true,
+      ...(options || {})
+    });
   }
   return _instance;
 }
@@ -377,4 +444,4 @@ function _resetInstance() {
   _instance = null;
 }
 
-module.exports = { getRateLimiter, RateLimitError, _resetInstance };
+module.exports = { getRateLimiter, RateLimitError, GlobalRateLimiter, _resetInstance };

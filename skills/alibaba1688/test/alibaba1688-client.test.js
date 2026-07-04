@@ -1,7 +1,10 @@
 const { test, afterEach } = require('node:test');
 const assert = require('assert');
 const Alibaba1688Client = require('../src/client');
-const { _resetInstance } = require('../src/rate-limiter');
+const { _resetInstance, GlobalRateLimiter } = require('../src/rate-limiter');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
 const { resetPlatformAccessState } = require('../../../core/platform-access-guard');
 const mock = require('./helpers/mock-data');
 let axios = require('axios');
@@ -112,4 +115,32 @@ test('Test 5: network timeout triggers retry', async () => {
   } catch (e) {
     assert.ok(attempt >= 2);
   }
+});
+
+test('1688 rate limiter can persist request window across instances', async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), '1688-window-'));
+  const first = new GlobalRateLimiter({
+    maxRequests: 1,
+    windowMs: 60_000,
+    cooldownMs: 60_000,
+    maxQueueSize: 0,
+    persist: true,
+    dataDir
+  });
+  assert.deepEqual(await first.acquire(), { allowed: true, waitMs: 0 });
+
+  const second = new GlobalRateLimiter({
+    maxRequests: 1,
+    windowMs: 60_000,
+    cooldownMs: 60_000,
+    maxQueueSize: 0,
+    persist: true,
+    dataDir
+  });
+  const result = await second.acquire();
+  assert.equal(result.allowed, false);
+  assert.equal(result.queueFull, true);
+  assert.ok(result.waitMs > 0);
+
+  _resetInstance();
 });

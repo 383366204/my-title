@@ -7,6 +7,7 @@ const os = require('os');
 
 const { TAOBAO_NATIVE_PATH, isTaobaoNativeInstalled, toWindowsPath, runTaobaoNativeAsync, ensureTaobaoDesktopReady } = require('./taobao-utils');
 const logger = require('../../../core/log');
+const { runWithPlatformGuard } = require('../../../core/platform-access-guard');
 
 let _searchLock = Promise.resolve();
 
@@ -131,15 +132,23 @@ async function searchPeerTitlesByImage(products, options = {}) {
 
   // 定义 handler：对单个商品执行图片搜索
   async function handleItem(item, handlerIndex) {
-    // imageSearchSingle 已改为异步，确保返回 Promise 并在这里等待结果
-    let result = await imageSearchSingle(item.url, item.id, { timeout, signal });
+    // 将首次搜索和重试放在同一个平台 guard 操作中，避免把首次失败结果缓存后导致重试被短路。
+    const result = await guardTaobaoImageSearch(item.url, {
+      ...options,
+      operation: async () => {
+        // imageSearchSingle 已改为异步，确保返回 Promise 并在这里等待结果
+        let searchResult = await imageSearchSingle(item.url, item.id, { timeout, signal });
 
-    // 失败重试：无匹配结果时等 2s 重试 1 次
-    if (!result.hasMatch && (!result.peerTitles || result.peerTitles.length === 0)) {
-      console.error(`🔄 [Worker-${handlerIndex}] 首次失败，2s 后重试...`);
-      await new Promise(r => setTimeout(r, 2000));
-      result = await imageSearchSingle(item.url, item.id, { timeout: 45000, signal }); // 更长超时
-    }
+        // 失败重试：无匹配结果时等 2s 重试 1 次
+        if (!searchResult.hasMatch && (!searchResult.peerTitles || searchResult.peerTitles.length === 0)) {
+          console.error(`🔄 [Worker-${handlerIndex}] 首次失败，2s 后重试...`);
+          await new Promise(r => setTimeout(r, 2000));
+          searchResult = await imageSearchSingle(item.url, item.id, { timeout: 45000, signal }); // 更长超时
+        }
+
+        return searchResult;
+      }
+    });
 
     // 保存原始索引以便回填结果
     result.originalIndex = item.originalIndex;
@@ -791,6 +800,22 @@ async function cleanPeerTitles(rawTitles, coreWord, blueOceanWord, glmClient) {
   return selected;
 }
 
+async function guardTaobaoImageSearch(imageUrl, options = {}) {
+  const normalizedUrl = String(imageUrl || '').split('?')[0];
+  return runWithPlatformGuard('taobao', {
+    cacheKey: {
+      source: 'image',
+      imageUrl: normalizedUrl
+    },
+    dataDir: options.guardDataDir,
+    cache: options.guardCache === false ? false : undefined,
+    cacheTtlMs: options.guardCacheTtlMs,
+    minCooldownMs: options.guardMinCooldownMs,
+    maxCooldownMs: options.guardMaxCooldownMs,
+    breakerCooldownMs: options.guardBreakerCooldownMs
+  }, options.operation);
+}
+
 module.exports = {
   searchPeerTitlesByImage,
   isImageSearchAvailable,
@@ -798,5 +823,7 @@ module.exports = {
   dedupeTitles,
   calculateRelevanceScore,
   selectTopTitles,
-  cleanPeerTitles
+  cleanPeerTitles,
+  imageSearchSingle,
+  guardTaobaoImageSearch
 };
