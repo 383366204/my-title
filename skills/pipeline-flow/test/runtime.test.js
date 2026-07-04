@@ -106,7 +106,6 @@ describe('pipeline runtime store', () => {
     assert.throws(() => requestRuntimeCancel({ dataDir, runId: '../bad' }), /Invalid runtime run id/);
   });
 });
-
 describe('pipeline runtime runner', () => {
   it('runs steps in order and writes progress events', async () => {
     const dataDir = tempDataDir();
@@ -309,5 +308,25 @@ describe('pipeline runtime runner', () => {
     assert.equal(result.runtimeStatus, 'needs_review');
     const runtime = readRuntimeState({ dataDir, runId: result.runId });
     assert.equal(runtime.status, 'needs_review');
+  });
+
+  it('marks runtime blocked when a step returns platform manual action status', async () => {
+    const dataDir = tempDataDir();
+    const result = await runPipelineRuntime({
+      runId: 'platform-blocked-test',
+      mode: 'manual',
+      dataDir,
+      steps: ['verify'],
+      stepFns: {
+        verify: async () => ({
+          status: 'manual_action_required',
+          platform: 'taobao',
+          manualAction: { status: 'slider_required', userMessage: '淘宝需要滑块验证' }
+        })
+      }
+    });
+
+    assert.equal(result.status, 'manual_action_required');
+    assert.equal(result.runtimeStatus, 'blocked');
   });
 });

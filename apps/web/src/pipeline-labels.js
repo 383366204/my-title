@@ -17,6 +17,12 @@ export const PIPELINE_STATUS_LABEL = {
   cancelled: '已取消',
   running: '运行中',
   blocked: '已阻塞',
+  platform_cooling_down: '平台冷却中',
+  platform_queued: '平台排队中',
+  rate_limited: '平台限流',
+  slider_required: '需要滑块验证',
+  login_required: '需要重新登录',
+  permission_required: '权限不足',
   unknown: '未知'
 };
 

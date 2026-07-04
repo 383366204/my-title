@@ -253,7 +253,15 @@ async function runPipelineRuntime(options = {}) {
 
     const pipelineStatus = lastResult.status || 'completed';
     const runtimeStatus = runtimeStatusForPipelineStatus(pipelineStatus);
-    updateRuntimeState({ dataDir, runId, patch: { status: runtimeStatus } });
+    updateRuntimeState({
+      dataDir,
+      runId,
+      patch: {
+        status: runtimeStatus,
+        platform: lastResult.platform,
+        manualAction: lastResult.manualAction
+      }
+    });
     appendRuntimeEvent({
       dataDir,
       runId,

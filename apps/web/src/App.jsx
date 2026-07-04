@@ -179,7 +179,24 @@ function MetricCard({ label, value, tone = 'neutral' }) {
   );
 }
 
-function DashboardView({ status, runs, loading, onRefresh, onStartWorkbench, onNavigate, reviewProducts, onClearReviewProduct }) {
+function PlatformStatusStrip({ platforms }) {
+  const entries = Object.entries(platforms || {});
+  if (!entries.length) return null;
+  return (
+    <section className="platform-status-strip">
+      {entries.map(([id, state]) => (
+        <div key={id} className={`platform-status platform-status-${state.status || 'ready'}`}>
+          <strong>{id === '1688' ? '1688' : id === 'sycm' ? '生意参谋' : '淘宝'}</strong>
+          <span>{labelPipelineStatus(state.status || 'ready')}</span>
+          {state.cooldownRemainingMs > 0 && <small>{Math.ceil(state.cooldownRemainingMs / 60000)} 分钟后重试</small>}
+          {state.manualAction?.userMessage && <small>{state.manualAction.userMessage}</small>}
+        </div>
+      ))}
+    </section>
+  );
+}
+
+function DashboardView({ status, platforms, runs, loading, onRefresh, onStartWorkbench, onNavigate, reviewProducts, onClearReviewProduct }) {
   const latest = runs[0] || null;
 
   return (
@@ -193,6 +210,8 @@ function DashboardView({ status, runs, loading, onRefresh, onStartWorkbench, onN
           </button>
         )}
       />
+
+      <PlatformStatusStrip platforms={platforms} />
 
       <section className="metric-grid">
         <MetricCard label="种子词" value={status?.files?.seedsCount ?? '-'} tone="blue" />
@@ -984,6 +1003,7 @@ function ProductCard({ product, safety, sourceCandidate, onAddReview }) {
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [status, setStatus] = useState(null);
+  const [platformStatus, setPlatformStatus] = useState(null);
   const pipeline = usePipelineRun({ limit: 12 });
   const [sourceCandidate, setSourceCandidate] = useSessionState('ecom.sourceCandidate', null);
   const [reviewProducts, setReviewProducts] = useSessionState('ecom.reviewProducts', []);
@@ -993,11 +1013,13 @@ export default function App() {
   }, []);
 
   const refreshOverview = async () => {
-    const [statusData] = await Promise.all([
+    const [statusData, platformData] = await Promise.all([
       fetchJson('/api/status'),
+      fetchJson('/api/platform/status').catch(() => ({})),
       pipeline.refreshRun()
     ]);
     setStatus(statusData);
+    setPlatformStatus(platformData);
   };
 
   useEffect(() => {
@@ -1036,6 +1058,7 @@ export default function App() {
       {activeTab === 'dashboard' && (
         <DashboardView
           status={status}
+          platforms={platformStatus}
           runs={pipeline.runs}
           loading={pipeline.loading}
           onRefresh={() => refreshOverview().catch(() => {})}

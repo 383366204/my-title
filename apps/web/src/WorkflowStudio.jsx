@@ -226,6 +226,9 @@ const MonitorStageNode = ({ data }) => {
         <div className="monitor-node-stage">{data.stage}</div>
       </div>
       <span className="monitor-node-status">{statusLabel}</span>
+      {data.manualAction?.userMessage && (
+        <div className="monitor-node-hint">{data.manualAction.userMessage}</div>
+      )}
       {data.hasSource && <Handle type="source" position={Position.Right} id="out" />}
     </button>
   );
@@ -685,7 +688,10 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
         status: getMonitorNodeStatus(stage, activeMonitorSummary),
         hasTarget: index > 0,
         hasSource: index < MONITOR_STAGES.length - 1,
-        onSelect: () => setSelectedMonitorNodeId(stage.id)
+        onSelect: () => setSelectedMonitorNodeId(stage.id),
+        manualAction: (stage.stageIndex === resolveSummaryStageIndex(activeMonitorSummary))
+          ? (activeMonitorSummary?.manualAction || activeMonitorSummary?.runtime?.manualAction)
+          : null
       }
     }));
   }, [activeMonitorSummary]);

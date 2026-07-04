@@ -51,6 +51,7 @@ const {
   listPipelineRuns,
   summarizePipelineRun
 } = require('../core/pipeline-run-summary');
+const { getPlatformAccessStatus } = require('../core/platform-access-guard');
 
 const app = express();
 app.use(express.json());
@@ -148,6 +149,22 @@ app.get('/api/status', (req, res) => {
   stats.files.cacheCount = getLineCount('verify-cache.jsonl');
 
   res.json({ ok: true, data: stats });
+});
+
+// GET /api/platform/status - Get current status of Taobao, SYCM, and 1688 access guards
+app.get('/api/platform/status', (req, res) => {
+  try {
+    res.json({
+      ok: true,
+      data: {
+        taobao: getPlatformAccessStatus('taobao'),
+        sycm: getPlatformAccessStatus('sycm'),
+        '1688': getPlatformAccessStatus('1688')
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
 // 1.5 GET /api/workflow/batches - Read-only daily pipeline batch summaries
@@ -992,13 +1009,17 @@ app.get('*', (req, res, next) => {
 
 // Boot Server (Explicitly bind to localhost 127.0.0.1 for local boundaries security P2)
 const defaultPort = parseInt(process.env.UI_PORT, 10) || 3000;
-findFreePort(defaultPort).then(port => {
-  app.listen(port, '127.0.0.1', () => {
-    console.log(`\n======================================================`);
-    console.log(`🌟 电商选品可视化工具 (Local Web UI) 服务已启动`);
-    console.log(`🔗 本地安全链接: http://127.0.0.1:${port}`);
-    console.log(`======================================================\n`);
+if (process.env.NODE_ENV !== 'test') {
+  findFreePort(defaultPort).then(port => {
+    app.listen(port, '127.0.0.1', () => {
+      console.log(`\n======================================================`);
+      console.log(`🌟 电商选品可视化工具 (Local Web UI) 服务已启动`);
+      console.log(`🔗 本地安全链接: http://127.0.0.1:${port}`);
+      console.log(`======================================================\n`);
+    });
+  }).catch(err => {
+    console.error('无法启动服务器端口扫描:', err.message);
   });
-}).catch(err => {
-  console.error('无法启动服务器端口扫描:', err.message);
-});
+}
+
+module.exports = app;
