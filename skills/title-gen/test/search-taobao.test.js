@@ -54,6 +54,46 @@ test('searchTaobaoTitles caches by keyword and avoids duplicate native calls', a
   }
 });
 
+test('searchTaobaoTitles does not cache desktop startup failures as empty results', async () => {
+  const dataDir = tempDataDir();
+  process.env.ECOM_PLATFORM_GUARD_DIR = dataDir;
+
+  const taobaoUtilsPath = require.resolve('../src/taobao-utils');
+  const original = require.cache[taobaoUtilsPath];
+  let calls = 0;
+  require.cache[taobaoUtilsPath] = {
+    id: taobaoUtilsPath,
+    filename: taobaoUtilsPath,
+    loaded: true,
+    exports: {
+      isTaobaoNativeInstalled: () => true,
+      ensureTaobaoDesktopReady: async () => {
+        calls += 1;
+        return false;
+      },
+      runTaobaoNativeSync: () => {
+        throw new Error('should not call native search when desktop is not ready');
+      }
+    }
+  };
+
+  try {
+    const { searchTaobaoTitles } = require('../src/search-taobao');
+    const first = await searchTaobaoTitles('启动失败检查', { maxResults: 10, guardMinCooldownMs: 0, guardMaxCooldownMs: 0 });
+    const second = await searchTaobaoTitles('启动失败检查', { maxResults: 10, guardMinCooldownMs: 0, guardMaxCooldownMs: 0 });
+    const cacheDir = path.join(dataDir, 'taobao', 'cache');
+    const cacheFiles = fs.existsSync(cacheDir) ? fs.readdirSync(cacheDir) : [];
+
+    assert.deepEqual(first, []);
+    assert.deepEqual(second, []);
+    assert.equal(calls, 2);
+    assert.equal(cacheFiles.length, 0);
+  } finally {
+    if (original) require.cache[taobaoUtilsPath] = original;
+    else delete require.cache[taobaoUtilsPath];
+  }
+});
+
 test('guardTaobaoImageSearch caches image search result by image url', async () => {
   const dataDir = tempDataDir();
   let calls = 0;

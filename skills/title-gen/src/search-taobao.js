@@ -12,8 +12,9 @@ async function rawSearchTaobaoTitles(keyword, options = {}) {
   const timeout = options.timeout || 30000;
   const ready = await ensureTaobaoDesktopReady();
   if (!ready) {
-    console.warn('[taobao] 淘宝桌面版启动失败');
-    return [];
+    const error = new Error('淘宝桌面版启动失败');
+    error.status = 'transient_failure';
+    throw error;
   }
 
   console.error(`[taobao] 搜索关键词: ${keyword}`);
@@ -38,8 +39,9 @@ async function rawSearchTaobaoTitles(keyword, options = {}) {
 
     const text = output.trim();
     if (!text) {
-      console.warn('[taobao] 未找到有效的 JSON 响应');
-      return [];
+      const error = new Error('淘宝搜索未找到有效的 JSON 响应');
+      error.status = 'transient_failure';
+      throw error;
     }
 
     let data;
@@ -49,8 +51,9 @@ async function rawSearchTaobaoTitles(keyword, options = {}) {
       const lines = text.split(/\r?\n/);
       const jsonLine = lines.find(line => line.trim().startsWith('{'));
       if (!jsonLine) {
-        console.warn('[taobao] 未找到有效的 JSON 响应');
-        return [];
+        const error = new Error('淘宝搜索未找到有效的 JSON 响应');
+        error.status = 'transient_failure';
+        throw error;
       }
       data = JSON.parse(jsonLine);
     }
@@ -65,8 +68,9 @@ async function rawSearchTaobaoTitles(keyword, options = {}) {
       return titles;
     }
 
-    console.warn('[taobao] 搜索结果格式异常:', Object.keys(data || {}));
-    return [];
+    const error = new Error(`淘宝搜索结果格式异常: ${Object.keys(data || {}).join(',')}`);
+    error.status = 'transient_failure';
+    throw error;
   } finally {
     try { fs.unlinkSync(reqFile); } catch (_) {}
     try { fs.unlinkSync(outFile); } catch (_) {}
