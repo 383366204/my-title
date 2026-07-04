@@ -602,6 +602,77 @@ function exactKeywordCandidate(keyword) {
   };
 }
 
+function normalizeExternalCandidate(candidate = {}) {
+  const keyword = String(candidate.keyword || candidate.word || '').trim();
+  if (!keyword) return null;
+  return {
+    keyword,
+    seed: candidate.seed || candidate.sourceKeyword || 'web-discovery',
+    category: candidate.category || '',
+    pattern: candidate.pattern || 'web-discovery',
+    source: candidate.source || 'web',
+    localScore: Number(candidate.localScore || candidate.score || 0),
+    tier: candidate.tier || 'mid',
+    reason: candidate.reason || candidate.gateReason || 'Web 辅助发现加入当前流程',
+    nextAction: candidate.nextAction || 'sycm_verify',
+    flags: Array.isArray(candidate.flags) ? candidate.flags : ['web_discovery'],
+    coreProduct: candidate.coreProduct || '',
+    signature: candidate.signature || keyword,
+    productSignature: candidate.productSignature || candidate.coreProduct || '',
+    rigid: Array.isArray(candidate.rigid) ? candidate.rigid : [],
+    optional: Array.isArray(candidate.optional) ? candidate.optional : [],
+    sycmData: candidate.sycmData || null,
+    addedAt: new Date().toISOString()
+  };
+}
+
+/**
+ * Append externally discovered keyword candidates into an existing flow run.
+ * @param {object} options Append options.
+ * @param {string} options.runId Existing run id.
+ * @param {Array<object>} options.candidates Candidate rows.
+ * @returns {Promise<object>} Append result.
+ */
+async function appendRunCandidates(options = {}) {
+  const { runDir, run } = getRun(options);
+  const incoming = Array.isArray(options.candidates) ? options.candidates : [];
+  const existing = readJsonl(run.files.candidates);
+  const seen = new Set(existing.map(row => row.signature || row.keyword).filter(Boolean));
+  const added = [];
+
+  for (const raw of incoming) {
+    const candidate = normalizeExternalCandidate(raw);
+    if (!candidate) continue;
+    const key = candidate.signature || candidate.keyword;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    added.push(candidate);
+  }
+
+  if (added.length > 0) {
+    appendJsonl(run.files.candidates, added);
+  }
+
+  if (!run.status || run.status === 'created') {
+    run.status = 'mined';
+  }
+  run.counts = run.counts || {};
+  run.counts.candidates = existing.length + added.length;
+  writeRun(runDir, run);
+
+  return flowResponse({
+    ok: true,
+    runId: run.runId,
+    status: run.status,
+    added: added.length,
+    skipped: incoming.length - added.length,
+    candidates: added,
+    runDir,
+    nextCommand: buildFlowCommand('verify', run.runId, { limit: options.verify || 20 }),
+    allowedCommands: [buildFlowCommand('verify', run.runId, { limit: options.verify || 20 })]
+  });
+}
+
 /**
  * Mine candidates and write them into a flow run.
  * @param {object} options Flow options.
@@ -1259,9 +1330,11 @@ module.exports = {
   DEFAULT_FLOW_DIR,
   createRunId,
   readJsonl,
+  getRun,
   scoreSycmRows,
   shouldFallbackToNextTier,
   fetchSycmWithFallback,
+  appendRunCandidates,
   flowMine,
   flowVerify,
   flowGenerate,

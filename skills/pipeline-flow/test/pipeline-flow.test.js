@@ -10,6 +10,8 @@ const {
   flowGenerate,
   flowExport,
   flowKeyword,
+  appendRunCandidates,
+  getRun,
   readJsonl,
   scoreSycmRows,
   fetchSycmWithFallback,
@@ -129,6 +131,31 @@ describe('pipeline-flow', () => {
     assert.strictEqual(result.verifyMode, 'blue_relaxed');
     assert.strictEqual(result.sycmScore.confidence, 'medium');
     assert.strictEqual(result.sycmScore.usage, 'title_optional');
+  });
+
+  test('appendRunCandidates writes discovered candidates into an existing run', async () => {
+    const dataDir = tempDataDir();
+    const mined = await flowMine({
+      dataDir,
+      limit: 1,
+      fallbackCandidates: true
+    });
+
+    const result = await appendRunCandidates({
+      dataDir,
+      runId: mined.runId,
+      candidates: [
+        { keyword: '纯银项链女', localScore: 82, source: 'peer', nextAction: 'sycm_verify' },
+        { keyword: '纯银项链女', localScore: 82, source: 'peer', nextAction: 'sycm_verify' }
+      ]
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.added, 1);
+    const { run } = getRun({ dataDir, runId: mined.runId });
+    const rows = readJsonl(run.files.candidates);
+    assert.ok(rows.some(row => row.keyword === '纯银项链女'));
+    assert.equal(run.counts.candidates, rows.length);
   });
 
   test('flowVerify stops on SYCM slider manual action', async () => {
