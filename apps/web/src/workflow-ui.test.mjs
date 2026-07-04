@@ -14,6 +14,12 @@ import {
   getStartNodeParams,
   getWorkflowLaunchBlocker
 } from './workflow-ui.js';
+import {
+  labelPipelineStatus,
+  labelPipelineStage,
+  labelPipelineCount,
+  labelNextAction
+} from './pipeline-labels.js';
 
 test('mapPipelineStageToFunnel maps backend stages to five business stages', () => {
   assert.equal(mapPipelineStageToFunnel('seed'), 'candidate');
@@ -24,6 +30,17 @@ test('mapPipelineStageToFunnel maps backend stages to five business stages', () 
   assert.equal(mapPipelineStageToFunnel('ready'), 'pending_review');
   assert.equal(mapPipelineStageToFunnel('submitted'), 'submitted');
   assert.equal(mapPipelineStageToFunnel('unknown'), 'candidate');
+});
+
+test('pipeline labels localize status, stage, counts, and next commands', () => {
+  assert.equal(labelPipelineStatus('verified_empty'), '验真无结果');
+  assert.equal(labelPipelineStatus('ready_to_distribute'), '待确认铺货');
+  assert.equal(labelPipelineStage('verified'), '大盘验真');
+  assert.equal(labelPipelineCount('sycmVerified'), '验真通过');
+  assert.equal(labelPipelineCount('generatedProducts'), '标题货源');
+  assert.equal(labelNextAction({
+    nextCommand: 'node bin/cli.js flow generate --run 2026-07-01-212255 --json'
+  }), '生成标题货源');
 });
 
 test('getWorkflowAction recommends the next business action', () => {
