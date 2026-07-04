@@ -782,7 +782,7 @@ function CandidateTable({ candidates, onSendToTitle }) {
   );
 }
 
-function TitleView({ sourceCandidate, onAddReviewProduct, historyService, pipeline }) {
+function TitleView({ sourceCandidate, onAddReviewProduct, historyService, pipeline, onUseVerifiedKeyword }) {
   const [form, setForm] = useState({ keyword: '', maxLength: 60, useImageSearch: false, peerTitles: '' });
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
@@ -861,13 +861,13 @@ function TitleView({ sourceCandidate, onAddReviewProduct, historyService, pipeli
                 type="button"
                 className="keyword-chip"
                 key={item.keyword}
-                onClick={() => setForm((current) => ({ ...current, keyword: item.keyword }))}
+                onClick={() => onUseVerifiedKeyword(item)}
               >
                 <span>{item.keyword}</span>
                 <small>{item.sycmScore?.score ? `分数 ${item.sycmScore.score}` : '已验真'}</small>
               </button>
             ))}
-            {verifiedKeywords.length === 0 && <div className="empty-panel">当前流程还没有已验真关键词，可以先去挖词页运行验真。</div>}
+            {verifiedKeywords.length === 0 && <div className="empty-panel">当前流程还没有已验真关键词。请先在挖词页执行“大盘验真”。</div>}
           </div>
           {sourceCandidate?.keyword && (
             <div className="source-context-panel">
@@ -1014,6 +1014,12 @@ export default function App() {
     return data;
   };
 
+  const useVerifiedKeywordForTitle = (row) => {
+    const candidate = normalizeCandidateForTitle(normalizeVerifiedKeywordForTitle(row));
+    setSourceCandidate(candidate);
+    setActiveTab('title');
+  };
+
   if (activeTab === 'experiment') {
     return (
       <AppShell activeTab={activeTab} setActiveTab={setActiveTab}>
@@ -1043,6 +1049,7 @@ export default function App() {
         <TitleView
           sourceCandidate={sourceCandidate}
           pipeline={pipeline}
+          onUseVerifiedKeyword={useVerifiedKeywordForTitle}
           historyService={historyService}
           onAddReviewProduct={(product) => {
             setReviewProducts((current) => [
