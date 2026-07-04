@@ -31,7 +31,12 @@ const {
   readWorkflowNodeArtifact
 } = require('../core/workflow/pipeline-adapter');
 const {
-  createRunId
+  createRunId,
+  flowMine,
+  flowVerify,
+  flowGenerate,
+  flowExport,
+  appendRunCandidates
 } = require('../skills/pipeline-flow');
 const {
   runPipelineRuntime
@@ -288,6 +293,137 @@ function appendCappedOutput(current, chunk) {
   const buffer = Buffer.concat([Buffer.from(current), Buffer.from(String(chunk))]);
   if (buffer.length <= WORKBENCH_OUTPUT_LIMIT_BYTES) return buffer.toString('utf8');
   return buffer.subarray(buffer.length - WORKBENCH_OUTPUT_LIMIT_BYTES).toString('utf8');
+}
+
+// 1.9 Unified pipeline facade. The React app should treat this as the durable flow API.
+app.get('/api/pipeline/current', (req, res) => {
+  try {
+    const limit = parsePositiveNumber(req.query.limit, 20);
+    const data = listPipelineRuns({ limit });
+    res.json({
+      ok: true,
+      data: {
+        ...data,
+        currentRun: withPipelineRuntimeFields(data.latest)
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post('/api/pipeline/start', (req, res) => {
+  if (activeWorkbenchProcess) {
+    return res.status(409).json({
+      ok: false,
+      status: 'workflow_busy',
+      error: '已有工作流正在运行，请等待完成后再启动。'
+    });
+  }
+
+  try {
+    const launch = resolveProductionWorkflowLaunch(req.body || {});
+    const params = sanitizeWorkflowParams(launch.mode, launch.params);
+    const runId = createRunId();
+    const steps = launch.mode === 'daily'
+      ? [WORKFLOW_NODE_IDS.mine, WORKFLOW_NODE_IDS.verify, WORKFLOW_NODE_IDS.generate, WORKFLOW_NODE_IDS.export, WORKFLOW_NODE_IDS.review]
+      : undefined;
+    const promise = runPipelineRuntime({ runId, mode: launch.mode, params, steps });
+    const runState = { runId, mode: launch.mode, promise };
+    activeWorkbenchProcess = runState;
+
+    promise.then(result => {
+      if (activeWorkbenchProcess === runState) activeWorkbenchProcess = null;
+      originalLog(`[Pipeline Start] ${launch.mode} runtime 完成，runId=${result.runId}, status=${result.runtimeStatus || result.status}`);
+    }).catch(err => {
+      if (activeWorkbenchProcess === runState) activeWorkbenchProcess = null;
+      originalError(`[Pipeline Start] ${launch.mode} runtime 失败，runId=${runId}:`, err.message);
+    });
+
+    res.json({
+      ok: true,
+      data: {
+        status: 'started',
+        runId,
+        mode: launch.mode,
+        runtime: readRuntimeState({ runId }),
+        currentRun: withPipelineRuntimeFields(summarizePipelineRun({ runId }))
+      }
+    });
+  } catch (err) {
+    const status = /未知 workflow mode|未知 workflow template|关键词不能为空/.test(err.message) ? 400 : 500;
+    res.status(status).json({ ok: false, error: err.message });
+  }
+});
+
+app.post('/api/pipeline/runs/:runId/candidates', async (req, res) => {
+  const runId = req.params.runId;
+  if (!isValidWorkflowRunIdParam(runId)) {
+    return res.status(400).json({ ok: false, error: '无效的运行 ID。' });
+  }
+  try {
+    const result = await appendRunCandidates({
+      ...(req.body || {}),
+      runId,
+      candidates: Array.isArray(req.body?.candidates) ? req.body.candidates : []
+    });
+    res.json({
+      ok: true,
+      data: {
+        result,
+        currentRun: withPipelineRuntimeFields(summarizePipelineRun({ runId }))
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post('/api/pipeline/runs/:runId/:step', async (req, res) => {
+  const runId = req.params.runId;
+  const step = String(req.params.step || '');
+  if (!isValidWorkflowRunIdParam(runId)) {
+    return res.status(400).json({ ok: false, error: '无效的运行 ID。' });
+  }
+  if (!['mine', 'verify', 'generate', 'export'].includes(step)) {
+    return res.status(400).json({ ok: false, error: '不支持的流程步骤。' });
+  }
+  try {
+    const result = await runPipelineStep(step, runId, req.body || {});
+    res.json({
+      ok: true,
+      data: {
+        result,
+        currentRun: withPipelineRuntimeFields(summarizePipelineRun({ runId }))
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+function withPipelineRuntimeFields(summary) {
+  if (!summary || !summary.runId) return summary || null;
+  const runtime = readRuntimeState({ runId: summary.runId });
+  const workflow = getWorkflowRun({ runId: summary.runId }) || runtimeOnlyWorkflowSnapshot(summary.runId);
+  return {
+    ...summary,
+    runtime,
+    workflow
+  };
+}
+
+async function runPipelineStep(step, runId, body = {}) {
+  const options = {
+    ...body,
+    runId,
+    limit: parsePositiveNumber(body.limit || body[step], step === 'mine' ? 50 : 20)
+  };
+  if (step === 'mine') return flowMine(options);
+  if (step === 'verify') return flowVerify(options);
+  if (step === 'generate') return flowGenerate(options);
+  if (step === 'export') return flowExport(options);
+  throw new Error('不支持的流程步骤。');
 }
 
 // 2. GET /api/seeds - Get sorted seed list (including paused)
