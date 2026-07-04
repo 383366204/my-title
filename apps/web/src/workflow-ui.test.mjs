@@ -20,6 +20,11 @@ import {
   labelPipelineCount,
   labelNextAction
 } from './pipeline-labels.js';
+import {
+  getPipelineActionView,
+  getPipelineSummaryText,
+  normalizeVerifiedKeywordForTitle
+} from './pipeline-action-view.js';
 
 test('mapPipelineStageToFunnel maps backend stages to five business stages', () => {
   assert.equal(mapPipelineStageToFunnel('seed'), 'candidate');
@@ -41,6 +46,50 @@ test('pipeline labels localize status, stage, counts, and next commands', () => 
   assert.equal(labelNextAction({
     nextCommand: 'node bin/cli.js flow generate --run 2026-07-01-212255 --json'
   }), '生成标题货源');
+});
+
+test('getPipelineActionView returns one primary CTA per pipeline stage', () => {
+  assert.deepEqual(getPipelineActionView({ runId: 'run_1', status: 'mined', stage: 'mined' }), {
+    label: '执行大盘验真',
+    targetTab: 'mine',
+    step: 'verify',
+    tone: 'default',
+    description: '候选词已经准备好，下一步需要用生意参谋等指标验真。'
+  });
+
+  assert.deepEqual(getPipelineActionView({ runId: 'run_1', status: 'verified', stage: 'verified' }), {
+    label: '生成标题货源',
+    targetTab: 'title',
+    step: 'generate',
+    tone: 'default',
+    description: '已有通过验真的关键词，可以进入标题和货源生成。'
+  });
+
+  assert.equal(getPipelineActionView({ runId: 'run_1', status: 'needs_review', stage: 'review' }).tone, 'warn');
+  assert.equal(getPipelineActionView({ runId: 'run_1', status: 'ready_to_distribute', stage: 'ready' }).label, '确认铺货清单');
+});
+
+test('getPipelineSummaryText summarizes empty and active runs', () => {
+  assert.equal(getPipelineSummaryText(null), '暂无当前流程');
+  assert.equal(getPipelineSummaryText({
+    runId: '2026-07-04-120000',
+    status: 'mined',
+    counts: { candidates: 12, sycmVerified: 0, generatedProducts: 0 }
+  }), '候选词 12 个 · 验真通过 0 个 · 标题货源 0 个');
+});
+
+test('normalizeVerifiedKeywordForTitle preserves verified safety context', () => {
+  const candidate = normalizeVerifiedKeywordForTitle({
+    keyword: '纯银项链女',
+    sycmScore: { score: 86, reason: '搜索人气和供需通过' },
+    sycmData: { searchPopularity: 2300, demandSupplyRatio: 1.8 }
+  });
+
+  assert.equal(candidate.keyword, '纯银项链女');
+  assert.equal(candidate.canDistribute, true);
+  assert.equal(candidate.gateStatus, 'verified');
+  assert.equal(candidate.localScore, 86);
+  assert.equal(candidate.sycmData.searchPopularity, 2300);
 });
 
 test('getWorkflowAction recommends the next business action', () => {
