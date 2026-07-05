@@ -14,6 +14,10 @@ function writeJson(file, value) {
   } catch (_) {}
 }
 
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 /**
  * 1688 API 全局限流器
  * 滑动窗口限流 + 429 冷却 + 请求排队
@@ -286,9 +290,12 @@ class GlobalRateLimiter {
     this._limiter = new SlidingWindowRateLimiter({ maxRequests, windowMs });
     this._cooldown = new CooldownManager(cooldownMs);
     this._queue = new RequestQueue(maxQueueSize);
+    this.lockTimeoutMs = options.lockTimeoutMs || 60000;
+    this.staleLockMs = options.staleLockMs || 60000;
 
     if (options.persist) {
       this.persistFile = path.join(options.dataDir || process.env.ECOM_PLATFORM_GUARD_DIR || path.join(__dirname, '..', '..', '..', 'data', 'platform-access'), '1688', 'window.json');
+      this.persistLockDir = `${this.persistFile}.lock`;
       this._loadPersisted();
 
       const origHasSlot = this._limiter.hasSlot.bind(this._limiter);
@@ -334,11 +341,90 @@ class GlobalRateLimiter {
     }
   }
 
+  async _withPersistLock(fn) {
+    if (!this.persistLockDir) return fn();
+    const timeoutAt = Date.now() + this.lockTimeoutMs;
+    while (true) {
+      try {
+        fs.mkdirSync(path.dirname(this.persistLockDir), { recursive: true });
+        fs.mkdirSync(this.persistLockDir, { recursive: false });
+        writeJson(path.join(this.persistLockDir, 'owner.json'), {
+          pid: process.pid,
+          acquiredAt: new Date().toISOString()
+        });
+        break;
+      } catch (err) {
+        const owner = readJson(path.join(this.persistLockDir, 'owner.json'), null);
+        const acquiredAt = owner && Date.parse(owner.acquiredAt);
+        if (acquiredAt && Date.now() - acquiredAt > this.staleLockMs) {
+          try {
+            fs.rmSync(this.persistLockDir, { recursive: true, force: true });
+            continue;
+          } catch (_) {}
+        }
+        if (Date.now() >= timeoutAt) {
+          return {
+            allowed: false,
+            waitMs: this.lockTimeoutMs,
+            queueFull: true,
+            lockTimeout: true
+          };
+        }
+        await sleep(25);
+      }
+    }
+
+    try {
+      return await fn();
+    } finally {
+      try {
+        fs.rmSync(this.persistLockDir, { recursive: true, force: true });
+      } catch (_) {}
+    }
+  }
+
+  async _acquirePersisted() {
+    if (this._cooldown.isCooldown()) {
+      const remaining = this._cooldown.getRemainingMs();
+      if (this._queue.getLength() > 0) {
+        this._queue.rejectAll(remaining);
+      }
+      return {
+        allowed: false,
+        waitMs: remaining,
+        cooldown: true,
+      };
+    }
+
+    const result = await this._withPersistLock(async () => {
+      this._loadPersisted();
+      if (this._limiter.hasSlot()) {
+        this._limiter.record();
+        return { allowed: true, waitMs: 0 };
+      }
+
+      const nextRelease = this._limiter.getNextSlotReleaseMs();
+      const estimatedWait = nextRelease + (this._queue.getLength() * nextRelease);
+      if (this.maxQueueSize === 0) {
+        return { allowed: false, waitMs: estimatedWait, queueFull: true };
+      }
+      return { allowed: false, waitMs: estimatedWait, retryAfterWait: true };
+    });
+
+    if (!result.retryAfterWait) return result;
+    await sleep(Math.max(1, result.waitMs));
+    return this._acquirePersisted();
+  }
+
   /**
    * 请求一个 API 调用令牌
    * @returns {Promise<{allowed: boolean, waitMs: number, cooldown?: boolean, queuePosition?: number, queueFull?: boolean, fromQueue?: boolean}>}
    */
   async acquire() {
+    if (this.persistFile) {
+      return this._acquirePersisted();
+    }
+
     // 优先级1：检查冷却
     if (this._cooldown.isCooldown()) {
       const remaining = this._cooldown.getRemainingMs();
