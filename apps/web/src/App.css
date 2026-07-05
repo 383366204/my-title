@@ -471,6 +471,35 @@ code, pre {
   white-space: nowrap;
 }
 
+.workflow-node-callout {
+  margin-top: 8px;
+  display: grid;
+  gap: 3px;
+  padding: 7px 8px;
+  border: 1px solid var(--card-border);
+  border-radius: 7px;
+  background: rgba(15, 23, 42, 0.72);
+  color: var(--text-secondary);
+  font-size: 10px;
+  line-height: 1.35;
+  text-align: left;
+}
+
+.workflow-node-callout strong {
+  color: var(--text-primary);
+  font-size: 10px;
+}
+
+.workflow-node-callout-warn {
+  border-color: rgba(245, 158, 11, 0.42);
+  background: rgba(120, 53, 15, 0.18);
+}
+
+.workflow-node-callout-danger {
+  border-color: rgba(248, 113, 113, 0.4);
+  background: rgba(127, 29, 29, 0.18);
+}
+
 .production-node-action {
   display: inline-flex;
   margin-top: 10px;

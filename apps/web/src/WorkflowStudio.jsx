@@ -30,11 +30,10 @@ import {
 import '@xyflow/react/dist/style.css';
 import './App.css';
 import {
-  getCanvasNodeTone,
   formatWorkflowProgressLabel,
   getStartNodeParams,
   getWorkflowLaunchBlocker,
-  getWorkflowNodeAction,
+  getWorkflowNodeViewModel,
   isWorkflowInputNodeType,
   normalizeWorkflowProgressEvent,
   summarizeWorkflowArtifact
@@ -92,14 +91,42 @@ const getStatusDotColor = (status) => {
   }
 };
 
+const WorkflowProgressStrip = ({ view }) => {
+  if (!view.progress) return null;
+  return (
+    <div className="workflow-node-progress" aria-label={view.progressLabel || '节点进度'}>
+      <div className="workflow-node-progress-bar">
+        <span style={{ width: `${view.progressPercent}%` }} />
+      </div>
+      {view.progressLabel && <div className="workflow-node-progress-label">{view.progressLabel}</div>}
+    </div>
+  );
+};
+
+const WorkflowBlockerCallout = ({ view }) => {
+  if (!view.hasBlocker) return null;
+  return (
+    <div className={`workflow-node-callout workflow-node-callout-${view.tone}`}>
+      <strong>{view.blockerTitle}</strong>
+      <span>{view.blockerMessage}</span>
+    </div>
+  );
+};
+
+const WorkflowNodeActionChip = ({ view }) => (
+  <div className={`production-node-action production-node-action-${view.primaryAction.tone}`}>
+    {view.primaryAction.label}
+  </div>
+);
+
+const shouldShowNodeActionChip = (status) => (
+  ['blocked', 'waiting_manual', 'retryable', 'paused', 'failed'].includes(String(status || '').toLowerCase())
+);
+
 const InputNode = ({ data }) => {
   const statusColor = getStatusBorderColor(data.status);
   const dotColor = getStatusDotColor(data.status);
-  const progress = data.progress || null;
-  const progressLabel = formatWorkflowProgressLabel(progress);
-  const progressPercent = progress && Number.isFinite(Number(progress.percent))
-    ? Math.max(0, Math.min(100, Number(progress.percent)))
-    : 0;
+  const view = getWorkflowNodeViewModel(data.id || data.label, data);
 
   return (
     <div
@@ -127,42 +154,9 @@ const InputNode = ({ data }) => {
         最大长度: {data.maxLength || 60} 字符
       </div>
 
-      {progress && (
-        <div className="workflow-node-progress mt-2" aria-label={progressLabel || 'workflow progress'}>
-          <div className="workflow-node-progress-bar h-1 bg-slate-800 rounded-full overflow-hidden">
-            <span className="block h-full bg-blue-500" style={{ width: `${progressPercent}%` }} />
-          </div>
-          {progressLabel && <div className="workflow-node-progress-label text-[9px] text-slate-400 mt-0.5">{progressLabel}</div>}
-        </div>
-      )}
-
-      {(data.blocker || data.actionHint || data.cooldownRemainingMs > 0) && (
-        <div className="mt-2 text-[10px] space-y-1 p-1.5 rounded bg-slate-950/60 border border-slate-800">
-          {data.blocker && (
-            <div className="text-rose-400 font-semibold truncate">
-              阻塞：{data.blocker}
-            </div>
-          )}
-          {data.cooldownRemainingMs > 0 && (
-            <div className="text-blue-400">
-              冷却中 ({Math.ceil(data.cooldownRemainingMs / 1000)}s)
-            </div>
-          )}
-          {data.actionHint && (
-            <div className="text-amber-300 break-words line-clamp-2">
-              提示：{data.actionHint}
-            </div>
-          )}
-        </div>
-      )}
-
-      {(data.status === 'blocked' || data.status === 'waiting_manual' || data.status === 'retryable') && (
-        <div className="mt-2 flex">
-          <span className={`px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-300`}>
-            {getWorkflowNodeAction(data.id, data.status).label}
-          </span>
-        </div>
-      )}
+      <WorkflowProgressStrip view={view} />
+      <WorkflowBlockerCallout view={view} />
+      {shouldShowNodeActionChip(data.status) && <WorkflowNodeActionChip view={view} />}
 
       <Handle type="source" position={Position.Right} id="a" style={{ background: '#3b82f6', width: 8, height: 8 }} />
     </div>
@@ -173,11 +167,7 @@ const InputNode = ({ data }) => {
 const MiningNode = ({ data }) => {
   const statusColor = getStatusBorderColor(data.status);
   const dotColor = getStatusDotColor(data.status);
-  const progress = data.progress || null;
-  const progressLabel = formatWorkflowProgressLabel(progress);
-  const progressPercent = progress && Number.isFinite(Number(progress.percent))
-    ? Math.max(0, Math.min(100, Number(progress.percent)))
-    : 0;
+  const view = getWorkflowNodeViewModel(data.id || data.label, data);
 
   const keywords = data.output?.keywords || [];
 
@@ -224,42 +214,9 @@ const MiningNode = ({ data }) => {
         <div className="text-[11px] text-slate-500 mt-1 italic">等待上游输入...</div>
       )}
 
-      {progress && (
-        <div className="workflow-node-progress mt-2" aria-label={progressLabel || 'workflow progress'}>
-          <div className="workflow-node-progress-bar h-1 bg-slate-800 rounded-full overflow-hidden">
-            <span className="block h-full bg-blue-500" style={{ width: `${progressPercent}%` }} />
-          </div>
-          {progressLabel && <div className="workflow-node-progress-label text-[9px] text-slate-400 mt-0.5">{progressLabel}</div>}
-        </div>
-      )}
-
-      {(data.blocker || data.actionHint || data.cooldownRemainingMs > 0) && (
-        <div className="mt-2 text-[10px] space-y-1 p-1.5 rounded bg-slate-950/60 border border-slate-800">
-          {data.blocker && (
-            <div className="text-rose-400 font-semibold truncate">
-              阻塞：{data.blocker}
-            </div>
-          )}
-          {data.cooldownRemainingMs > 0 && (
-            <div className="text-blue-400">
-              冷却中 ({Math.ceil(data.cooldownRemainingMs / 1000)}s)
-            </div>
-          )}
-          {data.actionHint && (
-            <div className="text-amber-300 break-words line-clamp-2">
-              提示：{data.actionHint}
-            </div>
-          )}
-        </div>
-      )}
-
-      {(data.status === 'blocked' || data.status === 'waiting_manual' || data.status === 'retryable') && (
-        <div className="mt-2 flex">
-          <span className={`px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-300`}>
-            {getWorkflowNodeAction(data.id, data.status).label}
-          </span>
-        </div>
-      )}
+      <WorkflowProgressStrip view={view} />
+      <WorkflowBlockerCallout view={view} />
+      {shouldShowNodeActionChip(data.status) && <WorkflowNodeActionChip view={view} />}
 
       <Handle type="source" position={Position.Right} id="out" style={{ background: '#3b82f6', width: 8, height: 8 }} />
     </div>
@@ -270,11 +227,7 @@ const MiningNode = ({ data }) => {
 const TitleGeneratorNode = ({ data }) => {
   const statusColor = getStatusBorderColor(data.status);
   const dotColor = getStatusDotColor(data.status);
-  const progress = data.progress || null;
-  const progressLabel = formatWorkflowProgressLabel(progress);
-  const progressPercent = progress && Number.isFinite(Number(progress.percent))
-    ? Math.max(0, Math.min(100, Number(progress.percent)))
-    : 0;
+  const view = getWorkflowNodeViewModel(data.id || data.label, data);
 
   const result = data.output || {};
   const titles = result.titles || [];
@@ -341,42 +294,9 @@ const TitleGeneratorNode = ({ data }) => {
         <div className="text-[11px] text-slate-500 mt-1 italic">等待上游数据...</div>
       )}
 
-      {progress && (
-        <div className="workflow-node-progress mt-2" aria-label={progressLabel || 'workflow progress'}>
-          <div className="workflow-node-progress-bar h-1 bg-slate-800 rounded-full overflow-hidden">
-            <span className="block h-full bg-blue-500" style={{ width: `${progressPercent}%` }} />
-          </div>
-          {progressLabel && <div className="workflow-node-progress-label text-[9px] text-slate-400 mt-0.5">{progressLabel}</div>}
-        </div>
-      )}
-
-      {(data.blocker || data.actionHint || data.cooldownRemainingMs > 0) && (
-        <div className="mt-2 text-[10px] space-y-1 p-1.5 rounded bg-slate-950/60 border border-slate-800">
-          {data.blocker && (
-            <div className="text-rose-400 font-semibold truncate">
-              阻塞：{data.blocker}
-            </div>
-          )}
-          {data.cooldownRemainingMs > 0 && (
-            <div className="text-blue-400">
-              冷却中 ({Math.ceil(data.cooldownRemainingMs / 1000)}s)
-            </div>
-          )}
-          {data.actionHint && (
-            <div className="text-amber-300 break-words line-clamp-2">
-              提示：{data.actionHint}
-            </div>
-          )}
-        </div>
-      )}
-
-      {(data.status === 'blocked' || data.status === 'waiting_manual' || data.status === 'retryable') && (
-        <div className="mt-2 flex">
-          <span className={`px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-300`}>
-            {getWorkflowNodeAction(data.id, data.status).label}
-          </span>
-        </div>
-      )}
+      <WorkflowProgressStrip view={view} />
+      <WorkflowBlockerCallout view={view} />
+      {shouldShowNodeActionChip(data.status) && <WorkflowNodeActionChip view={view} />}
 
       <Handle type="source" position={Position.Right} id="out" style={{ background: '#3b82f6', width: 8, height: 8 }} />
     </div>
@@ -417,14 +337,9 @@ const MonitorStageNode = ({ data }) => {
 
 const ProductionNode = ({ id, data }) => {
   const status = data.status || data.state || 'idle';
-  const tone = getCanvasNodeTone(status);
-  const action = getWorkflowNodeAction(id, status);
+  const view = getWorkflowNodeViewModel(id, data);
+  const tone = view.tone;
   const label = data.label || data.name || data.title || id;
-  const progress = data.progress || null;
-  const progressLabel = formatWorkflowProgressLabel(progress);
-  const progressPercent = progress && Number.isFinite(Number(progress.percent))
-    ? Math.max(0, Math.min(100, Number(progress.percent)))
-    : 0;
 
   return (
     <button
@@ -444,36 +359,9 @@ const ProductionNode = ({ id, data }) => {
       <div className="production-node-title">{label}</div>
       {data.description && <div className="production-node-description">{data.description}</div>}
 
-      {progress && (
-        <div className="workflow-node-progress" aria-label={progressLabel || 'workflow progress'}>
-          <div className="workflow-node-progress-bar">
-            <span style={{ width: `${progressPercent}%` }} />
-          </div>
-          {progressLabel && <div className="workflow-node-progress-label">{progressLabel}</div>}
-        </div>
-      )}
-
-      {(data.blocker || data.actionHint || data.cooldownRemainingMs > 0) && (
-        <div className="mt-2 text-[10px] space-y-1 p-1.5 rounded bg-slate-950/60 border border-slate-800 text-slate-300">
-          {data.blocker && (
-            <div className="text-rose-400 font-semibold truncate">
-              阻塞：{data.blocker}
-            </div>
-          )}
-          {data.cooldownRemainingMs > 0 && (
-            <div className="text-blue-400">
-              冷却中 ({Math.ceil(data.cooldownRemainingMs / 1000)}s)
-            </div>
-          )}
-          {data.actionHint && (
-            <div className="text-amber-300 break-words line-clamp-2 text-left">
-              提示：{data.actionHint}
-            </div>
-          )}
-        </div>
-      )}
-
-      <div className={`production-node-action production-node-action-${action.tone}`}>{action.label}</div>
+      <WorkflowProgressStrip view={view} />
+      <WorkflowBlockerCallout view={view} />
+      <WorkflowNodeActionChip view={view} />
       <Handle type="source" position={Position.Right} id="out" />
     </button>
   );
