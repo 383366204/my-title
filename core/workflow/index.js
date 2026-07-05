@@ -6,6 +6,7 @@ const events = require('./events');
 const scheduler = require('./scheduler');
 const validator = require('./validator');
 const pipelineAdapter = require('./pipeline-adapter');
+const stateHelper = require('./state-helper');
 
 module.exports = {
   ...registry,
@@ -13,5 +14,6 @@ module.exports = {
   ...events,
   ...scheduler,
   ...validator,
-  ...pipelineAdapter
+  ...pipelineAdapter,
+  ...stateHelper
 };

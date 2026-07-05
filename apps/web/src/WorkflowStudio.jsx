@@ -50,25 +50,75 @@ import {
 // ==================== Custom Flow Nodes ====================
 
 // 1. Input Node (输入参数节点)
+const getStatusBorderColor = (status) => {
+  switch (status) {
+    case 'running':
+      return 'border-blue-500 bg-slate-900 shadow-[0_0_12px_rgba(59,130,246,0.5)]';
+    case 'completed':
+      return 'border-emerald-500 bg-slate-900';
+    case 'failed':
+      return 'border-rose-500 bg-slate-900';
+    case 'blocked':
+      return 'border-red-500 bg-slate-900 shadow-[0_0_12px_rgba(239,68,68,0.5)]';
+    case 'waiting_manual':
+      return 'border-amber-500 bg-slate-900 shadow-[0_0_12px_rgba(245,158,11,0.5)]';
+    case 'retryable':
+      return 'border-orange-500 bg-slate-900 shadow-[0_0_12px_rgba(249,115,22,0.5)]';
+    case 'paused':
+      return 'border-slate-500 bg-slate-900';
+    default:
+      return 'border-slate-700 bg-slate-900';
+  }
+};
+
+const getStatusDotColor = (status) => {
+  switch (status) {
+    case 'running':
+      return 'bg-blue-500 animate-ping';
+    case 'completed':
+      return 'bg-emerald-500';
+    case 'failed':
+      return 'bg-rose-500';
+    case 'blocked':
+      return 'bg-red-500';
+    case 'waiting_manual':
+      return 'bg-amber-500';
+    case 'retryable':
+      return 'bg-orange-500';
+    case 'paused':
+      return 'bg-slate-500';
+    default:
+      return 'bg-slate-500';
+  }
+};
+
 const InputNode = ({ data }) => {
-  const statusColor = {
-    idle: 'border-slate-700 bg-slate-900',
-    running: 'border-blue-500 bg-slate-900 shadow-[0_0_12px_rgba(59,130,246,0.5)]',
-    completed: 'border-emerald-500 bg-slate-900',
-    failed: 'border-rose-500 bg-slate-900'
-  }[data.status || 'idle'];
+  const statusColor = getStatusBorderColor(data.status);
+  const dotColor = getStatusDotColor(data.status);
+  const progress = data.progress || null;
+  const progressLabel = formatWorkflowProgressLabel(progress);
+  const progressPercent = progress && Number.isFinite(Number(progress.percent))
+    ? Math.max(0, Math.min(100, Number(progress.percent)))
+    : 0;
 
   return (
-    <div className={`p-4 rounded-xl border-2 w-64 text-slate-100 ${statusColor} transition-all duration-300`}>
+    <div
+      className={`p-4 rounded-xl border-2 w-64 text-slate-100 ${statusColor} transition-all duration-300`}
+      onPointerDown={(event) => {
+        event.stopPropagation();
+        data.onSelect?.();
+      }}
+      onClick={data.onSelect}
+      style={{ cursor: 'pointer' }}
+    >
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs font-bold tracking-wider text-blue-400 uppercase flex items-center gap-1">
           <Layers size={12} /> 输入节点
         </span>
-        <span className={`h-2 w-2 rounded-full ${
-          data.status === 'running' ? 'bg-blue-500 animate-ping' :
-          data.status === 'completed' ? 'bg-emerald-500' :
-          data.status === 'failed' ? 'bg-rose-500' : 'bg-slate-500'
-        }`} />
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] text-slate-400">{labelPipelineStatus(data.status)}</span>
+          <span className={`h-2 w-2 rounded-full ${dotColor}`} />
+        </div>
       </div>
       <div className="text-sm font-semibold mb-1 truncate text-slate-200">
         关键词: {data.keyword || <span className="text-slate-500 italic">未设置</span>}
@@ -76,6 +126,44 @@ const InputNode = ({ data }) => {
       <div className="text-xs text-slate-400">
         最大长度: {data.maxLength || 60} 字符
       </div>
+
+      {progress && (
+        <div className="workflow-node-progress mt-2" aria-label={progressLabel || 'workflow progress'}>
+          <div className="workflow-node-progress-bar h-1 bg-slate-800 rounded-full overflow-hidden">
+            <span className="block h-full bg-blue-500" style={{ width: `${progressPercent}%` }} />
+          </div>
+          {progressLabel && <div className="workflow-node-progress-label text-[9px] text-slate-400 mt-0.5">{progressLabel}</div>}
+        </div>
+      )}
+
+      {(data.blocker || data.actionHint || data.cooldownRemainingMs > 0) && (
+        <div className="mt-2 text-[10px] space-y-1 p-1.5 rounded bg-slate-950/60 border border-slate-800">
+          {data.blocker && (
+            <div className="text-rose-400 font-semibold truncate">
+              阻塞：{data.blocker}
+            </div>
+          )}
+          {data.cooldownRemainingMs > 0 && (
+            <div className="text-blue-400">
+              冷却中 ({Math.ceil(data.cooldownRemainingMs / 1000)}s)
+            </div>
+          )}
+          {data.actionHint && (
+            <div className="text-amber-300 break-words line-clamp-2">
+              提示：{data.actionHint}
+            </div>
+          )}
+        </div>
+      )}
+
+      {(data.status === 'blocked' || data.status === 'waiting_manual' || data.status === 'retryable') && (
+        <div className="mt-2 flex">
+          <span className={`px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-300`}>
+            {getWorkflowNodeAction(data.id, data.status).label}
+          </span>
+        </div>
+      )}
+
       <Handle type="source" position={Position.Right} id="a" style={{ background: '#3b82f6', width: 8, height: 8 }} />
     </div>
   );
@@ -83,27 +171,35 @@ const InputNode = ({ data }) => {
 
 // 2. Mining Node (关键词挖掘节点)
 const MiningNode = ({ data }) => {
-  const statusColor = {
-    idle: 'border-slate-700 bg-slate-900',
-    running: 'border-blue-500 bg-slate-900 shadow-[0_0_12px_rgba(59,130,246,0.5)]',
-    completed: 'border-emerald-500 bg-slate-900',
-    failed: 'border-rose-500 bg-slate-900'
-  }[data.status || 'idle'];
+  const statusColor = getStatusBorderColor(data.status);
+  const dotColor = getStatusDotColor(data.status);
+  const progress = data.progress || null;
+  const progressLabel = formatWorkflowProgressLabel(progress);
+  const progressPercent = progress && Number.isFinite(Number(progress.percent))
+    ? Math.max(0, Math.min(100, Number(progress.percent)))
+    : 0;
 
   const keywords = data.output?.keywords || [];
 
   return (
-    <div className={`p-4 rounded-xl border-2 w-64 text-slate-100 ${statusColor} transition-all duration-300`}>
+    <div
+      className={`p-4 rounded-xl border-2 w-64 text-slate-100 ${statusColor} transition-all duration-300`}
+      onPointerDown={(event) => {
+        event.stopPropagation();
+        data.onSelect?.();
+      }}
+      onClick={data.onSelect}
+      style={{ cursor: 'pointer' }}
+    >
       <Handle type="target" position={Position.Left} id="in" style={{ background: '#3b82f6', width: 8, height: 8 }} />
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs font-bold tracking-wider text-indigo-400 uppercase flex items-center gap-1">
           <Database size={12} /> 关键词挖掘
         </span>
-        <span className={`h-2 w-2 rounded-full ${
-          data.status === 'running' ? 'bg-blue-500 animate-ping' :
-          data.status === 'completed' ? 'bg-emerald-500' :
-          data.status === 'failed' ? 'bg-rose-500' : 'bg-slate-500'
-        }`} />
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] text-slate-400">{labelPipelineStatus(data.status)}</span>
+          <span className={`h-2 w-2 rounded-full ${dotColor}`} />
+        </div>
       </div>
       <div className="text-xs text-slate-400 mb-1">
         挖掘数量限制: {data.count || 10} 个
@@ -127,6 +223,44 @@ const MiningNode = ({ data }) => {
       ) : (
         <div className="text-[11px] text-slate-500 mt-1 italic">等待上游输入...</div>
       )}
+
+      {progress && (
+        <div className="workflow-node-progress mt-2" aria-label={progressLabel || 'workflow progress'}>
+          <div className="workflow-node-progress-bar h-1 bg-slate-800 rounded-full overflow-hidden">
+            <span className="block h-full bg-blue-500" style={{ width: `${progressPercent}%` }} />
+          </div>
+          {progressLabel && <div className="workflow-node-progress-label text-[9px] text-slate-400 mt-0.5">{progressLabel}</div>}
+        </div>
+      )}
+
+      {(data.blocker || data.actionHint || data.cooldownRemainingMs > 0) && (
+        <div className="mt-2 text-[10px] space-y-1 p-1.5 rounded bg-slate-950/60 border border-slate-800">
+          {data.blocker && (
+            <div className="text-rose-400 font-semibold truncate">
+              阻塞：{data.blocker}
+            </div>
+          )}
+          {data.cooldownRemainingMs > 0 && (
+            <div className="text-blue-400">
+              冷却中 ({Math.ceil(data.cooldownRemainingMs / 1000)}s)
+            </div>
+          )}
+          {data.actionHint && (
+            <div className="text-amber-300 break-words line-clamp-2">
+              提示：{data.actionHint}
+            </div>
+          )}
+        </div>
+      )}
+
+      {(data.status === 'blocked' || data.status === 'waiting_manual' || data.status === 'retryable') && (
+        <div className="mt-2 flex">
+          <span className={`px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-300`}>
+            {getWorkflowNodeAction(data.id, data.status).label}
+          </span>
+        </div>
+      )}
+
       <Handle type="source" position={Position.Right} id="out" style={{ background: '#3b82f6', width: 8, height: 8 }} />
     </div>
   );
@@ -134,29 +268,37 @@ const MiningNode = ({ data }) => {
 
 // 3. Title Generator Node (标题生成与选品卡片)
 const TitleGeneratorNode = ({ data }) => {
-  const statusColor = {
-    idle: 'border-slate-700 bg-slate-900',
-    running: 'border-blue-500 bg-slate-900 shadow-[0_0_12px_rgba(59,130,246,0.5)]',
-    completed: 'border-emerald-500 bg-slate-900',
-    failed: 'border-rose-500 bg-slate-900'
-  }[data.status || 'idle'];
+  const statusColor = getStatusBorderColor(data.status);
+  const dotColor = getStatusDotColor(data.status);
+  const progress = data.progress || null;
+  const progressLabel = formatWorkflowProgressLabel(progress);
+  const progressPercent = progress && Number.isFinite(Number(progress.percent))
+    ? Math.max(0, Math.min(100, Number(progress.percent)))
+    : 0;
 
   const result = data.output || {};
   const titles = result.titles || [];
   const product = result.products?.[0] || null;
 
   return (
-    <div className={`p-4 rounded-xl border-2 w-72 text-slate-100 ${statusColor} transition-all duration-300`}>
+    <div
+      className={`p-4 rounded-xl border-2 w-72 text-slate-100 ${statusColor} transition-all duration-300`}
+      onPointerDown={(event) => {
+        event.stopPropagation();
+        data.onSelect?.();
+      }}
+      onClick={data.onSelect}
+      style={{ cursor: 'pointer' }}
+    >
       <Handle type="target" position={Position.Left} id="in" style={{ background: '#3b82f6', width: 8, height: 8 }} />
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs font-bold tracking-wider text-emerald-400 uppercase flex items-center gap-1">
           <Sparkles size={12} /> 标题与选品生成
         </span>
-        <span className={`h-2 w-2 rounded-full ${
-          data.status === 'running' ? 'bg-blue-500 animate-ping' :
-          data.status === 'completed' ? 'bg-emerald-500' :
-          data.status === 'failed' ? 'bg-rose-500' : 'bg-slate-500'
-        }`} />
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] text-slate-400">{labelPipelineStatus(data.status)}</span>
+          <span className={`h-2 w-2 rounded-full ${dotColor}`} />
+        </div>
       </div>
 
       {data.status === 'completed' && titles.length > 0 ? (
@@ -198,6 +340,45 @@ const TitleGeneratorNode = ({ data }) => {
       ) : (
         <div className="text-[11px] text-slate-500 mt-1 italic">等待上游数据...</div>
       )}
+
+      {progress && (
+        <div className="workflow-node-progress mt-2" aria-label={progressLabel || 'workflow progress'}>
+          <div className="workflow-node-progress-bar h-1 bg-slate-800 rounded-full overflow-hidden">
+            <span className="block h-full bg-blue-500" style={{ width: `${progressPercent}%` }} />
+          </div>
+          {progressLabel && <div className="workflow-node-progress-label text-[9px] text-slate-400 mt-0.5">{progressLabel}</div>}
+        </div>
+      )}
+
+      {(data.blocker || data.actionHint || data.cooldownRemainingMs > 0) && (
+        <div className="mt-2 text-[10px] space-y-1 p-1.5 rounded bg-slate-950/60 border border-slate-800">
+          {data.blocker && (
+            <div className="text-rose-400 font-semibold truncate">
+              阻塞：{data.blocker}
+            </div>
+          )}
+          {data.cooldownRemainingMs > 0 && (
+            <div className="text-blue-400">
+              冷却中 ({Math.ceil(data.cooldownRemainingMs / 1000)}s)
+            </div>
+          )}
+          {data.actionHint && (
+            <div className="text-amber-300 break-words line-clamp-2">
+              提示：{data.actionHint}
+            </div>
+          )}
+        </div>
+      )}
+
+      {(data.status === 'blocked' || data.status === 'waiting_manual' || data.status === 'retryable') && (
+        <div className="mt-2 flex">
+          <span className={`px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-300`}>
+            {getWorkflowNodeAction(data.id, data.status).label}
+          </span>
+        </div>
+      )}
+
+      <Handle type="source" position={Position.Right} id="out" style={{ background: '#3b82f6', width: 8, height: 8 }} />
     </div>
   );
 };
@@ -249,6 +430,10 @@ const ProductionNode = ({ id, data }) => {
     <button
       type="button"
       className={`production-node production-node-${tone}`}
+      onPointerDown={(event) => {
+        event.stopPropagation();
+        data.onSelect?.();
+      }}
       onClick={data.onSelect}
     >
       <Handle type="target" position={Position.Left} id="in" />
@@ -258,6 +443,7 @@ const ProductionNode = ({ id, data }) => {
       </div>
       <div className="production-node-title">{label}</div>
       {data.description && <div className="production-node-description">{data.description}</div>}
+
       {progress && (
         <div className="workflow-node-progress" aria-label={progressLabel || 'workflow progress'}>
           <div className="workflow-node-progress-bar">
@@ -266,6 +452,27 @@ const ProductionNode = ({ id, data }) => {
           {progressLabel && <div className="workflow-node-progress-label">{progressLabel}</div>}
         </div>
       )}
+
+      {(data.blocker || data.actionHint || data.cooldownRemainingMs > 0) && (
+        <div className="mt-2 text-[10px] space-y-1 p-1.5 rounded bg-slate-950/60 border border-slate-800 text-slate-300">
+          {data.blocker && (
+            <div className="text-rose-400 font-semibold truncate">
+              阻塞：{data.blocker}
+            </div>
+          )}
+          {data.cooldownRemainingMs > 0 && (
+            <div className="text-blue-400">
+              冷却中 ({Math.ceil(data.cooldownRemainingMs / 1000)}s)
+            </div>
+          )}
+          {data.actionHint && (
+            <div className="text-amber-300 break-words line-clamp-2 text-left">
+              提示：{data.actionHint}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className={`production-node-action production-node-action-${action.tone}`}>{action.label}</div>
       <Handle type="source" position={Position.Right} id="out" />
     </button>
@@ -358,6 +565,12 @@ const normalizeCanvasNode = (node, selectNode) => {
       output: node.data?.output || null,
       error: node.data?.error || null,
       progress: node.data?.progress || null,
+      blocker: node.data?.blocker || null,
+      actionHint: node.data?.actionHint || null,
+      platformStatus: node.data?.platformStatus || null,
+      durationMs: node.data?.durationMs || null,
+      outputSummary: node.data?.outputSummary || null,
+      cooldownRemainingMs: node.data?.cooldownRemainingMs || 0,
       onSelect: () => selectNode(node.id)
     }
   };
@@ -745,7 +958,13 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
                   status: state.status,
                   output: state.output,
                   error: state.error,
-                  progress: state.progress || null
+                  progress: state.progress || null,
+                  blocker: state.blocker || null,
+                  actionHint: state.actionHint || null,
+                  platformStatus: state.platformStatus || null,
+                  durationMs: state.durationMs || null,
+                  outputSummary: state.outputSummary || null,
+                  cooldownRemainingMs: state.cooldownRemainingMs || 0
                 }
               };
             }
@@ -812,6 +1031,12 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
               output: state.output,
               error: state.error,
               progress: state.progress || null,
+              blocker: state.blocker || null,
+              actionHint: state.actionHint || null,
+              platformStatus: state.platformStatus || null,
+              durationMs: state.durationMs || null,
+              outputSummary: state.outputSummary || null,
+              cooldownRemainingMs: state.cooldownRemainingMs || 0,
               onSelect: () => setSelectedNodeId(node.id)
             }
           };
@@ -847,7 +1072,13 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
               status: state.status || 'idle',
               output: state.output || null,
               error: state.error || null,
-              progress: state.progress || null
+              progress: state.progress || null,
+              blocker: state.blocker || null,
+              actionHint: state.actionHint || null,
+              platformStatus: state.platformStatus || null,
+              durationMs: state.durationMs || null,
+              outputSummary: state.outputSummary || null,
+              cooldownRemainingMs: state.cooldownRemainingMs || 0
             }
           }, setSelectedNodeId);
         }));
@@ -1282,6 +1513,7 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
             <div className="workflow-canvas-surface">
             {mode === MODE_MONITOR ? (
               <ReactFlow
+                key="workflow-monitor-flow"
                 nodes={monitorNodes}
                 edges={MONITOR_EDGES}
                 onNodeClick={(event, node) => setSelectedMonitorNodeId(node.id)}
@@ -1290,6 +1522,7 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
                 fitViewOptions={{ padding: 0.18, includeHiddenNodes: false, minZoom: 0.6, maxZoom: 0.95 }}
                 minZoom={0.35}
                 maxZoom={1.2}
+                style={{ width: '100%', height: '100%' }}
                 nodesDraggable={false}
                 nodesConnectable={false}
                 edgesReconnectable={false}
@@ -1300,6 +1533,7 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
               </ReactFlow>
             ) : (
               <ReactFlow
+                key="workflow-experiment-flow"
                 nodes={nodes}
                 edges={edges}
                 onNodesChange={onNodesChange}
@@ -1307,10 +1541,10 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
                 onConnect={onConnect}
                 onNodeClick={onNodeClick}
                 nodeTypes={nodeTypes}
-                fitView
-                fitViewOptions={{ padding: 0.12, includeHiddenNodes: false, minZoom: 0.42, maxZoom: 0.9 }}
+                defaultViewport={{ x: 0, y: 0, zoom: 0.82 }}
                 minZoom={0.5}
                 maxZoom={1.5}
+                style={{ width: '100%', height: '100%' }}
               >
                 <Background color="#334155" gap={20} size={1} />
                 <Controls className="bg-slate-900 border border-slate-800 text-slate-100 rounded" />
@@ -1485,6 +1719,54 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
                 {selectedNode.id} ({selectedNode.data?.originalType || selectedNode.type})
               </div>
             </div>
+
+            {selectedNode.data?.status && (
+              <div className="border-t border-slate-800/80 pt-4">
+                <span className="text-[10px] uppercase font-bold tracking-widest text-slate-500 block mb-1.5">
+                  运行状态与指标
+                </span>
+                <div className="space-y-2 text-xs">
+                  <div className="flex justify-between items-center bg-slate-950/50 p-2 rounded border border-slate-800">
+                    <span className="text-slate-400">当前状态</span>
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                      selectedNode.data.status === 'completed' ? 'bg-emerald-950 border border-emerald-800 text-emerald-300' :
+                      selectedNode.data.status === 'running' ? 'bg-blue-950 border border-blue-800 text-blue-300' :
+                      selectedNode.data.status === 'failed' ? 'bg-rose-950 border border-rose-800 text-rose-300' :
+                      selectedNode.data.status === 'blocked' ? 'bg-red-950 border border-red-800 text-red-300' :
+                      selectedNode.data.status === 'waiting_manual' ? 'bg-amber-950 border border-amber-800 text-amber-300' :
+                      selectedNode.data.status === 'retryable' ? 'bg-orange-950 border border-orange-800 text-orange-300' :
+                      'bg-slate-950 border border-slate-800 text-slate-400'
+                    }`}>
+                      {labelPipelineStatus(selectedNode.data.status)}
+                    </span>
+                  </div>
+                  {selectedNode.data.durationMs !== undefined && selectedNode.data.durationMs !== null && (
+                    <div className="flex justify-between items-center bg-slate-950/50 p-2 rounded border border-slate-800">
+                      <span className="text-slate-400">耗时</span>
+                      <span className="text-slate-200">{(selectedNode.data.durationMs / 1000).toFixed(2)} 秒</span>
+                    </div>
+                  )}
+                  {selectedNode.data.blocker && (
+                    <div className="bg-rose-950/30 p-2.5 rounded border border-rose-900/50 text-rose-300">
+                      <div className="font-semibold text-rose-400 mb-0.5">阻塞原因:</div>
+                      <div className="text-[11px] font-mono">{selectedNode.data.blocker}</div>
+                    </div>
+                  )}
+                  {selectedNode.data.cooldownRemainingMs > 0 && (
+                    <div className="bg-blue-950/30 p-2.5 rounded border border-blue-900/50 text-blue-300">
+                      <div className="font-semibold text-blue-400 mb-0.5">冷却时间:</div>
+                      <div className="text-[11px]">还剩 {Math.ceil(selectedNode.data.cooldownRemainingMs / 1000)} 秒</div>
+                    </div>
+                  )}
+                  {selectedNode.data.actionHint && (
+                    <div className="bg-amber-950/30 p-2.5 rounded border border-amber-900/50 text-amber-300">
+                      <div className="font-semibold text-amber-400 mb-0.5">提示建议:</div>
+                      <div className="text-[11px]">{selectedNode.data.actionHint}</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             <ArtifactPanel state={artifactState} />
 

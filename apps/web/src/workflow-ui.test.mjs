@@ -123,6 +123,9 @@ test('getCanvasNodeTone maps workflow node states to UI tones', () => {
   assert.equal(getCanvasNodeTone('running'), 'active');
   assert.equal(getCanvasNodeTone('needs_review'), 'warn');
   assert.equal(getCanvasNodeTone('waiting_confirmation'), 'warn');
+  assert.equal(getCanvasNodeTone('waiting_manual'), 'warn');
+  assert.equal(getCanvasNodeTone('retryable'), 'warn');
+  assert.equal(getCanvasNodeTone('paused'), 'warn');
   assert.equal(getCanvasNodeTone('blocked'), 'danger');
   assert.equal(getCanvasNodeTone('failed'), 'danger');
   assert.equal(getCanvasNodeTone('idle'), 'muted');
@@ -154,6 +157,16 @@ test('getWorkflowNodeAction maps review and terminal states to node actions', ()
     label: '查看产物',
     action: 'artifact',
     tone: 'success'
+  });
+  assert.deepEqual(getWorkflowNodeAction('mine', 'waiting_manual'), {
+    label: '去人工处理',
+    action: 'manual',
+    tone: 'warn'
+  });
+  assert.deepEqual(getWorkflowNodeAction('generate', 'retryable'), {
+    label: '立即重试',
+    action: 'retry',
+    tone: 'warn'
   });
   assert.deepEqual(getWorkflowNodeAction('mine', 'idle'), {
     label: '查看节点',

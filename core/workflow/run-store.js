@@ -40,12 +40,18 @@ function createRun(workflow) {
       initialNodeStates[node.id] = {
         id: node.id,
         type: node.type,
-        status: 'idle', // 'idle' | 'running' | 'completed' | 'failed'
+        status: 'idle', // 'idle' | 'running' | 'completed' | 'failed' | 'cancelled' | 'paused' | 'blocked' | 'waiting_manual' | 'retryable'
         input: null,
         output: null,
         error: null,
         startedAt: null,
-        completedAt: null
+        completedAt: null,
+        progress: { status: 'idle', current: 0, total: 0, percent: 0, message: '' },
+        blocker: null,
+        actionHint: null,
+        platformStatus: null,
+        durationMs: null,
+        outputSummary: null
       };
     });
   }

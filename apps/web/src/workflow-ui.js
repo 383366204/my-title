@@ -36,7 +36,15 @@ export function getCanvasNodeTone(state) {
   const normalized = String(state || '').toLowerCase();
   if (normalized === 'completed') return 'success';
   if (normalized === 'running') return 'active';
-  if (normalized === 'needs_review' || normalized === 'waiting_confirmation') return 'warn';
+  if (
+    normalized === 'needs_review' ||
+    normalized === 'waiting_confirmation' ||
+    normalized === 'waiting_manual' ||
+    normalized === 'paused' ||
+    normalized === 'retryable'
+  ) {
+    return 'warn';
+  }
   if (normalized === 'blocked' || normalized === 'failed') return 'danger';
   return 'muted';
 }
@@ -52,6 +60,12 @@ export function getWorkflowNodeAction(nodeId, state) {
   const normalizedState = String(state || '').toLowerCase();
   if (normalizedNodeId === 'review' && (normalizedState === 'needs_review' || normalizedState === 'waiting_confirmation')) {
     return { label: '处理复核', action: 'review', tone: 'warn' };
+  }
+  if (normalizedState === 'waiting_manual') {
+    return { label: '去人工处理', action: 'manual', tone: 'warn' };
+  }
+  if (normalizedState === 'retryable') {
+    return { label: '立即重试', action: 'retry', tone: 'warn' };
   }
   if (normalizedState === 'blocked' || normalizedState === 'failed') {
     return { label: '查看阻塞', action: 'blocked', tone: 'danger' };

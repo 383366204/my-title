@@ -3,6 +3,7 @@
 const { getRun, updateRun, addRunLog } = require('./run-store');
 const { emitRunEvent } = require('./events');
 const { getNodeDefinition } = require('./registry');
+const { normalizeNodeProgress, normalizePlatformError } = require('./state-helper');
 
 // 用于存储当前正在执行的 promise，便于取消或者跟踪
 const activeRuns = new Map();
@@ -47,8 +48,13 @@ async function startWorkflow(runId) {
       await executeWorkflowGraph(runId, logger);
     } catch (err) {
       logger.error(`❌ 工作流运行异常终止: ${err.message}`);
-      updateRun(runId, { status: 'failed', error: err.message });
-      emitRunEvent(runId, 'status_change', { status: 'failed', error: err.message });
+      const isPlatformError = err.name === 'PlatformAccessError' ||
+        err.status !== undefined ||
+        err.cooldownRemainingMs !== undefined ||
+        err.platform !== undefined;
+      const runStatus = isPlatformError ? normalizePlatformError(err).status : 'failed';
+      updateRun(runId, { status: runStatus, error: err.message });
+      emitRunEvent(runId, 'status_change', { status: runStatus, error: err.message });
     } finally {
       activeRuns.delete(runId);
     }
@@ -149,9 +155,16 @@ async function executeWorkflowGraph(runId, logger) {
     // 节点自身的 params
     const params = node.data || {};
 
-    // 更新节点状态为 running
+    // 更新节点状态为 running，并重置相关的可观测状态
     nodeStates[nodeId].status = 'running';
     nodeStates[nodeId].startedAt = new Date().toISOString();
+    nodeStates[nodeId].error = null;
+    nodeStates[nodeId].progress = normalizeNodeProgress({ status: 'running', percent: 0, message: '开始执行' });
+    nodeStates[nodeId].blocker = null;
+    nodeStates[nodeId].actionHint = null;
+    nodeStates[nodeId].platformStatus = null;
+    nodeStates[nodeId].durationMs = null;
+    nodeStates[nodeId].outputSummary = null;
     updateRun(runId, { nodeStates });
     emitRunEvent(runId, 'node_change', { nodeId, state: nodeStates[nodeId] });
 
@@ -176,6 +189,28 @@ async function executeWorkflowGraph(runId, logger) {
       nodeStates[nodeId].status = 'completed';
       nodeStates[nodeId].output = output;
       nodeStates[nodeId].completedAt = new Date().toISOString();
+      const durationMs = nodeStates[nodeId].startedAt ? (Date.now() - Date.parse(nodeStates[nodeId].startedAt)) : null;
+      nodeStates[nodeId].durationMs = durationMs;
+      nodeStates[nodeId].progress = normalizeNodeProgress({ status: 'completed', percent: 100, message: '执行完成' });
+
+      let summaryStr = null;
+      if (output) {
+        if (typeof output === 'object') {
+          const keys = Object.keys(output);
+          if (keys.length === 1 && Array.isArray(output[keys[0]])) {
+            summaryStr = `${keys[0]} ${output[keys[0]].length} 条`;
+          } else {
+            summaryStr = JSON.stringify(output);
+            if (summaryStr.length > 60) {
+              summaryStr = summaryStr.substring(0, 57) + '...';
+            }
+          }
+        } else {
+          summaryStr = String(output);
+        }
+      }
+      nodeStates[nodeId].outputSummary = summaryStr;
+
       updateRun(runId, { nodeStates });
       emitRunEvent(runId, 'node_change', { nodeId, state: nodeStates[nodeId] });
 
@@ -194,9 +229,35 @@ async function executeWorkflowGraph(runId, logger) {
 
     } catch (nodeErr) {
       logger.error(`❌ 节点执行错误 [${params.label || node.type}]: ${nodeErr.message}`);
-      nodeStates[nodeId].status = 'failed';
+
+      const isPlatformError = nodeErr.name === 'PlatformAccessError' ||
+        nodeErr.status !== undefined ||
+        nodeErr.cooldownRemainingMs !== undefined ||
+        nodeErr.platform !== undefined;
+
+      if (isPlatformError) {
+        const norm = normalizePlatformError(nodeErr);
+        nodeStates[nodeId].status = norm.status;
+        nodeStates[nodeId].blocker = norm.blocker;
+        nodeStates[nodeId].actionHint = norm.actionHint;
+        nodeStates[nodeId].platformStatus = norm.platformStatus;
+        if (norm.cooldownRemainingMs) {
+          nodeStates[nodeId].cooldownRemainingMs = norm.cooldownRemainingMs;
+        }
+      } else {
+        nodeStates[nodeId].status = 'failed';
+      }
+
       nodeStates[nodeId].error = nodeErr.message;
       nodeStates[nodeId].completedAt = new Date().toISOString();
+      const durationMs = nodeStates[nodeId].startedAt ? (Date.now() - Date.parse(nodeStates[nodeId].startedAt)) : null;
+      nodeStates[nodeId].durationMs = durationMs;
+      nodeStates[nodeId].progress = normalizeNodeProgress({
+        status: nodeStates[nodeId].status,
+        percent: 100,
+        message: nodeStates[nodeId].status === 'retryable' ? '等待重试' : '执行中断'
+      });
+
       updateRun(runId, { nodeStates });
       emitRunEvent(runId, 'node_change', { nodeId, state: nodeStates[nodeId] });
       throw nodeErr; // 抛出错误以终止整个工作流

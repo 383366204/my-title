@@ -26,6 +26,11 @@ export const PIPELINE_STATUS_LABEL = {
   permission_required: '权限不足',
   sycm_feature_required: '生意参谋权限不足',
   transient_failure: '临时失败',
+  idle: '等待中',
+  completed: '已完成',
+  waiting_manual: '等待人工',
+  retryable: '待重试',
+  paused: '已暂停',
   unknown: '未知'
 };
 

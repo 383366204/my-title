@@ -126,13 +126,13 @@ function workflowNodes(mode = 'daily') {
         pages: 1
       };
   return [
-    { id: WORKFLOW_NODE_IDS.start, type: 'production-start', data: startData, position: { x: 0, y: 40 } },
-    { id: WORKFLOW_NODE_IDS.mine, type: 'pipeline-mine', data: { label: '选词挖掘' }, position: { x: 340, y: 40 } },
-    { id: WORKFLOW_NODE_IDS.verify, type: 'pipeline-verify', data: { label: '生意参谋校验' }, position: { x: 680, y: 40 } },
-    { id: WORKFLOW_NODE_IDS.generate, type: 'pipeline-generate', data: { label: '标题生成' }, position: { x: 680, y: 260 } },
-    { id: WORKFLOW_NODE_IDS.export, type: 'pipeline-export', data: { label: '导出清单' }, position: { x: 340, y: 260 } },
-    { id: WORKFLOW_NODE_IDS.review, type: 'pipeline-review', data: { label: '人工复核' }, position: { x: 0, y: 260 } },
-    { id: WORKFLOW_NODE_IDS.end, type: 'production-end', data: { label: '完成' }, position: { x: 0, y: 480 } }
+    { id: WORKFLOW_NODE_IDS.start, type: 'production-start', data: startData, position: { x: 220, y: 40 } },
+    { id: WORKFLOW_NODE_IDS.mine, type: 'pipeline-mine', data: { label: '选词挖掘' }, position: { x: 560, y: 40 } },
+    { id: WORKFLOW_NODE_IDS.verify, type: 'pipeline-verify', data: { label: '生意参谋校验' }, position: { x: 900, y: 40 } },
+    { id: WORKFLOW_NODE_IDS.generate, type: 'pipeline-generate', data: { label: '标题生成' }, position: { x: 900, y: 260 } },
+    { id: WORKFLOW_NODE_IDS.export, type: 'pipeline-export', data: { label: '导出清单' }, position: { x: 560, y: 260 } },
+    { id: WORKFLOW_NODE_IDS.review, type: 'pipeline-review', data: { label: '人工复核' }, position: { x: 220, y: 260 } },
+    { id: WORKFLOW_NODE_IDS.end, type: 'production-end', data: { label: '完成' }, position: { x: 220, y: 480 } }
   ];
 }
 
@@ -367,15 +367,28 @@ function resolveProductionWorkflowLaunch(body = {}) {
 
 function nodeState(id, type, status, output = null, summary = {}) {
   const timestamp = summary.updatedAt || summary.startedAt || null;
+  const runNodeState = summary.runtime?.nodeStates?.[id] || {};
   return {
     id,
     type,
     status,
     input: null,
-    output,
-    error: null,
-    startedAt: status === 'idle' ? null : (summary.startedAt || timestamp),
-    completedAt: status === 'completed' || status === 'failed' ? timestamp : null
+    output: output || runNodeState.output || null,
+    error: runNodeState.error || null,
+    startedAt: status === 'idle' ? null : (runNodeState.startedAt || summary.startedAt || timestamp),
+    completedAt: status === 'completed' || status === 'failed' ? (runNodeState.completedAt || timestamp) : null,
+    progress: runNodeState.progress && typeof runNodeState.progress === 'object'
+      ? runNodeState.progress
+      : normalizeNodeProgress({
+          status,
+          percent: status === 'completed' ? 100 : 0,
+          message: status === 'completed' ? '执行完成' : ''
+        }),
+    blocker: runNodeState.blocker || null,
+    actionHint: runNodeState.actionHint || null,
+    platformStatus: runNodeState.platformStatus || null,
+    durationMs: runNodeState.durationMs || null,
+    outputSummary: runNodeState.outputSummary || null
   };
 }
 
@@ -403,6 +416,9 @@ function nodeStatusFromRuntimeProgress(progress) {
   if (status === 'cancelled') return 'cancelled';
   if (status === 'failed') return 'failed';
   if (status === 'blocked') return 'blocked';
+  if (status === 'waiting_manual') return 'waiting_manual';
+  if (status === 'retryable') return 'retryable';
+  if (status === 'paused') return 'paused';
   if (status === 'needs_review') return 'needs_review';
   if (status === 'waiting_confirmation') return 'waiting_confirmation';
   if (status === 'completed') return 'completed';
@@ -531,13 +547,19 @@ function buildNodeStates(summary) {
   }, {});
   Object.entries(runtimeProgress).forEach(([nodeId, progress]) => {
     if (!states[nodeId]) return;
-    const normalizedProgress = normalizeNodeProgress(progress);
+    const progressDetails = progress && typeof progress === 'object' ? progress : {};
+    const normalizedProgress = normalizeNodeProgress(progressDetails);
     const runtimeStatus = nodeStatusFromRuntimeProgress(normalizedProgress);
     states[nodeId] = {
       ...states[nodeId],
       status: runtimeStatus || states[nodeId].status,
       output: states[nodeId].output || outputForNode(nodeId, summary),
-      progress: normalizedProgress
+      progress: normalizedProgress,
+      blocker: progressDetails.blocker || states[nodeId].blocker || null,
+      actionHint: progressDetails.actionHint || states[nodeId].actionHint || null,
+      platformStatus: progressDetails.platformStatus || states[nodeId].platformStatus || null,
+      durationMs: progressDetails.durationMs || states[nodeId].durationMs || null,
+      outputSummary: progressDetails.outputSummary || states[nodeId].outputSummary || null
     };
   });
   if (runtime && runtime.activeStep && states[runtime.activeStep] && !states[runtime.activeStep].progress) {
@@ -545,7 +567,12 @@ function buildNodeStates(summary) {
       ...states[runtime.activeStep],
       status: runtime.status === 'cancelled' ? 'cancelled' : 'running',
       output: states[runtime.activeStep].output || outputForNode(runtime.activeStep, summary),
-      progress: normalizeNodeProgress({ status: runtime.status === 'cancelled' ? 'cancelled' : 'running' })
+      progress: normalizeNodeProgress({ status: runtime.status === 'cancelled' ? 'cancelled' : 'running' }),
+      blocker: runtime.blocker || states[runtime.activeStep].blocker || null,
+      actionHint: runtime.actionHint || states[runtime.activeStep].actionHint || null,
+      platformStatus: runtime.platformStatus || states[runtime.activeStep].platformStatus || null,
+      durationMs: runtime.durationMs || states[runtime.activeStep].durationMs || null,
+      outputSummary: runtime.outputSummary || states[runtime.activeStep].outputSummary || null
     };
   }
   return states;
