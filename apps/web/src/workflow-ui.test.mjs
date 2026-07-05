@@ -10,12 +10,15 @@ import {
   normalizeCandidateForTitle,
   buildReviewProduct,
   formatWorkflowProgressLabel,
+  getPipelineMonitorNodeStatus,
+  getPipelineSummaryVisualState,
   normalizeWorkflowProgressEvent,
   getStartNodeParams,
   getWorkflowLaunchBlocker,
   getWorkflowNodeViewModel,
   getWorkflowNodeDetailRows,
-  getWorkflowOperationMessage
+  getWorkflowOperationMessage,
+  labelWorkflowNodeStatus
 } from './workflow-ui.js';
 import {
   labelPipelineStatus,
@@ -121,6 +124,33 @@ test('getWorkflowAction recommends the next business action', () => {
   });
 });
 
+test('pipeline monitor visual state treats empty verification as user action instead of running', () => {
+  assert.equal(getPipelineSummaryVisualState({
+    status: 'verified_empty',
+    stage: 'verified'
+  }), 'paused');
+  assert.equal(getPipelineMonitorNodeStatus({ stageIndex: 2 }, {
+    status: 'verified_empty',
+    stage: 'verified',
+    stageIndex: 2
+  }), 'paused');
+  assert.equal(getPipelineMonitorNodeStatus({ stageIndex: 1 }, {
+    status: 'verified_empty',
+    stage: 'verified',
+    stageIndex: 2
+  }), 'completed');
+});
+
+test('pipeline monitor visual state keeps generated and ready stages distinct', () => {
+  assert.equal(getPipelineSummaryVisualState({ status: 'generated', stage: 'generated' }), 'running');
+  assert.equal(getPipelineSummaryVisualState({ status: 'ready_to_distribute', stage: 'ready' }), 'ready');
+  assert.equal(getPipelineMonitorNodeStatus({ stageIndex: 5 }, {
+    status: 'ready_to_distribute',
+    stage: 'ready',
+    stageIndex: 5
+  }), 'ready');
+});
+
 test('getCanvasNodeTone maps workflow node states to UI tones', () => {
   assert.equal(getCanvasNodeTone('completed'), 'success');
   assert.equal(getCanvasNodeTone('running'), 'active');
@@ -133,6 +163,12 @@ test('getCanvasNodeTone maps workflow node states to UI tones', () => {
   assert.equal(getCanvasNodeTone('failed'), 'danger');
   assert.equal(getCanvasNodeTone('idle'), 'muted');
   assert.equal(getCanvasNodeTone('unknown'), 'muted');
+});
+
+test('labelWorkflowNodeStatus localizes idle and paused statuses', () => {
+  assert.equal(labelWorkflowNodeStatus('idle'), '未开始');
+  assert.equal(labelWorkflowNodeStatus('paused'), '已暂停');
+  assert.equal(labelWorkflowNodeStatus('unknown_new_state'), '未知状态');
 });
 
 test('getWorkflowNodeAction maps review and terminal states to node actions', () => {

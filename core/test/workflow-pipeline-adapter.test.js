@@ -430,6 +430,41 @@ describe('workflow pipeline adapter', () => {
     assert.equal(run.status, 'paused');
   });
 
+  it('surfaces summary blocker guidance when runtime only reports a blocked step', () => {
+    const dataDir = tempPipelineDir();
+    const runId = 'verified_empty_runtime_run';
+    const runDir = path.join(dataDir, 'runs', runId);
+    writeJson(path.join(runDir, 'run.json'), {
+      runId,
+      status: 'verified_empty',
+      startedAt: '2026-06-29T04:00:00.000Z',
+      updatedAt: '2026-06-29T04:01:00.000Z',
+      counts: {
+        candidates: 1,
+        sycmVerified: 0,
+        sycmRejected: 1
+      },
+      files: {}
+    });
+    writeJson(path.join(runDir, 'runtime.json'), {
+      status: 'blocked',
+      activeStep: WORKFLOW_NODE_IDS.verify,
+      steps: ['mine', 'verify', 'generate', 'export', 'review'],
+      progress: {
+        mine: { status: 'completed', current: 1, total: 1, percent: 100, message: '完成' },
+        verify: { status: 'completed', current: 1, total: 1, percent: 100, message: '完成' }
+      }
+    });
+
+    const run = getWorkflowRun({ dataDir, runId });
+
+    assert.equal(run.status, 'blocked');
+    assert.equal(run.nodeStates.verify.status, 'blocked');
+    assert.equal(run.nodeStates.verify.blocker, 'verified_empty');
+    assert.match(run.nodeStates.verify.actionHint, /验真没有通过词/);
+    assert.match(run.nodeStates.verify.actionHint, /重新挖词/);
+  });
+
   it('maps explicit pipeline statuses to production node states', () => {
     const cases = [
       {

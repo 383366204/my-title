@@ -453,6 +453,49 @@ function outputForNode(id, summary) {
   return null;
 }
 
+function summaryInterventionForNode(summary, nodeId) {
+  const status = summary.status || 'unknown';
+  if (nodeId === WORKFLOW_NODE_IDS.verify) {
+    if (status === 'verified_empty') {
+      return {
+        blocker: 'verified_empty',
+        actionHint: '生意参谋验真没有通过词。请更换候选词、降低蓝海阈值，或重新挖词后再继续。'
+      };
+    }
+    if (status === 'manual_action_required') {
+      return {
+        blocker: 'sycm_manual_action_required',
+        actionHint: '生意参谋需要人工处理。请确认登录、滑块、权限或功能入口后继续流程。'
+      };
+    }
+    if (status === 'verified_partial_manual_required') {
+      return {
+        blocker: 'sycm_partial_manual_required',
+        actionHint: '部分关键词已验真，但生意参谋仍需要人工处理。可先继续使用已通过词，或处理登录、滑块、权限后继续验真。'
+      };
+    }
+  }
+  if (nodeId === WORKFLOW_NODE_IDS.generate && status === 'generate_failed') {
+    return {
+      blocker: 'generate_failed',
+      actionHint: '标题生成失败。请检查 GLM 配置、关键词数据和运行日志后重试。'
+    };
+  }
+  if (nodeId === WORKFLOW_NODE_IDS.export && status === 'export_empty') {
+    return {
+      blocker: 'export_empty',
+      actionHint: '没有可导出的铺货商品。请返回标题生成结果，补充可铺货商品后再导出。'
+    };
+  }
+  if (nodeId === WORKFLOW_NODE_IDS.review && status === 'needs_review') {
+    return {
+      blocker: 'review_rejected_rows',
+      actionHint: '导出前需要人工复核。请打开复核报告，处理风险项后再继续提交。'
+    };
+  }
+  return null;
+}
+
 function completeBefore(states, nodeId) {
   const stopIndex = NODE_ORDER.indexOf(nodeId);
   NODE_ORDER.forEach((id, index) => {
@@ -545,7 +588,13 @@ function buildNodeStates(summary) {
   const runtimeProgress = runtime && runtime.progress && typeof runtime.progress === 'object' ? runtime.progress : {};
   const states = NODE_ORDER.reduce((memo, nodeId, index) => {
     const nodeStatus = plannedStates[nodeId] || 'idle';
-    memo[nodeId] = nodeState(nodeId, `pipeline-${nodeId}`, nodeStatus, nodeStatus === 'idle' ? null : outputForNode(nodeId, summary), summary);
+    const intervention = summaryInterventionForNode(summary, nodeId);
+    const initialState = nodeState(nodeId, `pipeline-${nodeId}`, nodeStatus, nodeStatus === 'idle' ? null : outputForNode(nodeId, summary), summary);
+    memo[nodeId] = {
+      ...initialState,
+      blocker: intervention?.blocker || initialState.blocker || null,
+      actionHint: intervention?.actionHint || initialState.actionHint || null
+    };
     return memo;
   }, {});
   Object.entries(runtimeProgress).forEach(([nodeId, progress]) => {

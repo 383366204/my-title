@@ -31,12 +31,15 @@ import '@xyflow/react/dist/style.css';
 import './App.css';
 import {
   formatWorkflowProgressLabel,
+  getPipelineMonitorNodeStatus,
+  getPipelineSummaryVisualState,
   getStartNodeParams,
   getWorkflowLaunchBlocker,
   getWorkflowNodeDetailRows,
   getWorkflowNodeViewModel,
   getWorkflowOperationMessage,
   isWorkflowInputNodeType,
+  labelWorkflowNodeStatus,
   normalizeWorkflowProgressEvent,
   summarizeWorkflowArtifact
 } from './workflow-ui.js';
@@ -508,22 +511,8 @@ const ArtifactPanel = ({ state }) => {
   );
 };
 
-const isFailedSummary = (summary) => {
-  if (!summary) return false;
-  return summary.ok === false || String(summary.status || '').toLowerCase().includes('failed');
-};
-
 const getSummaryVisualState = (summary) => {
-  if (!summary) return 'idle';
-  const status = String(summary.status || '').toLowerCase();
-  const stage = String(summary.stage || '').toLowerCase();
-  const activeStatuses = new Set(['created', 'started', 'running', 'in_progress', 'processing', 'mined', 'verified', 'generated', 'needs_review', 'awaiting_user_confirmation']);
-  if (isFailedSummary(summary)) return 'failed';
-  if (status === 'workflow_complete' || status === 'submitted' || stage === 'submitted') return 'completed';
-  if (status === 'ready_to_distribute' || status === 'ready' || stage === 'ready') return 'ready';
-  if (summary.requiresUserAction) return 'paused';
-  if (activeStatuses.has(status)) return 'running';
-  return 'idle';
+  return getPipelineSummaryVisualState(summary);
 };
 
 const resolveSummaryStageIndex = (summary) => {
@@ -533,17 +522,10 @@ const resolveSummaryStageIndex = (summary) => {
 };
 
 const getMonitorNodeStatus = (stage, summary) => {
-  if (!summary) return 'idle';
-  if (isFailedSummary(summary) && stage.stageIndex === resolveSummaryStageIndex(summary)) return 'failed';
-  const currentStageIndex = resolveSummaryStageIndex(summary);
-  if (stage.stageIndex < currentStageIndex) return 'completed';
-  if (stage.stageIndex === currentStageIndex) {
-    const visualState = getSummaryVisualState(summary);
-    if (visualState === 'completed') return 'completed';
-    if (visualState === 'ready') return 'ready';
-    return visualState === 'idle' ? 'running' : visualState;
-  }
-  return 'idle';
+  return getPipelineMonitorNodeStatus(stage, {
+    ...(summary || {}),
+    stageIndex: resolveSummaryStageIndex(summary)
+  });
 };
 
 const formatDateTime = (value) => {
@@ -1363,7 +1345,7 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
                       run.status === 'failed' ? 'bg-rose-500/10 text-rose-400' :
                       run.status === 'cancelled' ? 'bg-amber-500/10 text-amber-400' : 'bg-blue-500/10 text-blue-400'
                     }`}>
-                      {run.status.toUpperCase()}
+                      {labelPipelineStatus(run.status)}
                     </span>
                   </div>
                   <div className="font-semibold text-slate-200 truncate">
@@ -1390,7 +1372,7 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
               当前状态:
               {mode === MODE_MONITOR ? (
                 <span className={`monitor-status-pill monitor-status-${getSummaryVisualState(activeMonitorSummary)}`}>
-                  {activeMonitorSummary?.status || 'no_runs'}
+                  {activeMonitorSummary ? labelPipelineStatus(activeMonitorSummary.status) : '暂无批次'}
                 </span>
               ) : (
                 <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
@@ -1400,7 +1382,7 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
                   runStatus === 'cancelled' ? 'bg-amber-500/10 text-amber-400' :
                   runStatus === 'running' ? 'bg-blue-500/10 text-blue-400 animate-pulse' : 'bg-slate-800 text-slate-400'
                 }`}>
-                  {runStatus}
+                  {labelWorkflowNodeStatus(runStatus)}
                 </span>
               )}
             </span>
@@ -1652,7 +1634,7 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
                     {selectedMonitorStage.stage} · 阶段 {selectedMonitorStage.stageIndex + 1}
                   </div>
                   <div className={`monitor-stage-state monitor-stage-state-${getMonitorNodeStatus(selectedMonitorStage, activeMonitorSummary)}`}>
-                    {getMonitorNodeStatus(selectedMonitorStage, activeMonitorSummary)}
+                    {labelWorkflowNodeStatus(getMonitorNodeStatus(selectedMonitorStage, activeMonitorSummary))}
                   </div>
                 </div>
 

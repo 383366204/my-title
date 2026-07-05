@@ -27,6 +27,60 @@ export function getWorkflowAction(run = {}) {
   return { label: '查看已提交', targetTab: 'dashboard', tone: 'default' };
 }
 
+export function getPipelineSummaryVisualState(summary = null) {
+  if (!summary) return 'idle';
+  const status = String(summary.status || '').toLowerCase();
+  const stage = String(summary.stage || '').toLowerCase();
+  const activeStatuses = new Set([
+    'created',
+    'started',
+    'running',
+    'in_progress',
+    'processing',
+    'mined',
+    'verified',
+    'generated',
+    'needs_review',
+    'awaiting_user_confirmation'
+  ]);
+  const pausedStatuses = new Set([
+    'manual_action_required',
+    'verified_partial_manual_required',
+    'verified_empty',
+    'platform_cooling_down',
+    'platform_queued',
+    'rate_limited',
+    'slider_required',
+    'login_required',
+    'permission_required',
+    'sycm_feature_required'
+  ]);
+  if (summary.ok === false || status.includes('failed')) return 'failed';
+  if (status === 'workflow_complete' || status === 'submitted' || stage === 'submitted') return 'completed';
+  if (status === 'ready_to_distribute' || status === 'ready' || stage === 'ready') return 'ready';
+  if (summary.requiresUserAction || pausedStatuses.has(status)) return 'paused';
+  if (activeStatuses.has(status)) return 'running';
+  return 'idle';
+}
+
+export function getPipelineMonitorNodeStatus(stage = {}, summary = null) {
+  if (!summary) return 'idle';
+  const currentStageIndex = Number.isFinite(Number(summary.stageIndex))
+    ? Number(summary.stageIndex)
+    : -1;
+  if ((summary.ok === false || String(summary.status || '').toLowerCase().includes('failed')) && stage.stageIndex === currentStageIndex) {
+    return 'failed';
+  }
+  if (stage.stageIndex < currentStageIndex) return 'completed';
+  if (stage.stageIndex === currentStageIndex) {
+    const visualState = getPipelineSummaryVisualState(summary);
+    if (visualState === 'completed') return 'completed';
+    if (visualState === 'ready') return 'ready';
+    return visualState === 'idle' ? 'paused' : visualState;
+  }
+  return 'idle';
+}
+
 /**
  * 将工作流节点状态映射到画布展示 tone。
  * @param {string} state 节点状态。
