@@ -124,14 +124,55 @@ function updateRuntimeState({ dataDir, runId, patch = {} }) {
  * @returns {object} Runtime control state.
  */
 function requestRuntimeCancel({ dataDir, runId, reason = 'user_cancelled' }) {
-  const control = {
-    requestedAction: 'cancel',
-    reason,
+  return writeRuntimeControl({
+    dataDir,
+    runId,
+    control: { requestedAction: 'cancel', reason }
+  });
+}
+
+function writeRuntimeControl({ dataDir, runId, control = {} }) {
+  const next = {
+    requestedAction: control.requestedAction || null,
     updatedAt: new Date().toISOString()
   };
+  if (control.reason) next.reason = control.reason;
+  if (control.step) next.step = control.step;
+  writeJson(controlFile(dataDir, runId), next);
+  return next;
+}
 
-  writeJson(controlFile(dataDir, runId), control);
-  return control;
+function requestRuntimePause({ dataDir, runId, reason = 'user_paused' }) {
+  return writeRuntimeControl({
+    dataDir,
+    runId,
+    control: { requestedAction: 'pause', reason }
+  });
+}
+
+function requestRuntimeResume({ dataDir, runId, reason = 'user_resumed' }) {
+  return writeRuntimeControl({
+    dataDir,
+    runId,
+    control: { requestedAction: 'resume', reason }
+  });
+}
+
+function requestRuntimeRetryStep({ dataDir, runId, step, reason = 'user_retry_step' }) {
+  if (!step) throw new Error('retry step is required');
+  return writeRuntimeControl({
+    dataDir,
+    runId,
+    control: { requestedAction: 'retry-step', step, reason }
+  });
+}
+
+function clearRuntimeControl({ dataDir, runId }) {
+  return writeRuntimeControl({
+    dataDir,
+    runId,
+    control: { requestedAction: null }
+  });
 }
 
 /**
@@ -197,6 +238,10 @@ module.exports = {
   readRuntimeState,
   updateRuntimeState,
   requestRuntimeCancel,
+  requestRuntimePause,
+  requestRuntimeResume,
+  requestRuntimeRetryStep,
+  clearRuntimeControl,
   readRuntimeControl,
   appendRuntimeEvent,
   readRuntimeEvents,

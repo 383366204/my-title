@@ -11,6 +11,10 @@ const {
   readRuntimeState,
   updateRuntimeState,
   requestRuntimeCancel,
+  requestRuntimePause,
+  requestRuntimeResume,
+  requestRuntimeRetryStep,
+  clearRuntimeControl,
   readRuntimeControl,
   appendRuntimeEvent,
   readRuntimeEvents,
@@ -61,6 +65,28 @@ describe('pipeline runtime store', () => {
     const control = readRuntimeControl({ dataDir, runId: 'run_2' });
     assert.equal(control.requestedAction, 'cancel');
     assert.equal(control.reason, 'user_cancelled');
+  });
+
+  it('persists pause resume and retry-step control requests', () => {
+    const dataDir = tempDataDir();
+    initRuntimeState({ dataDir, runId: 'run_control', steps: ['mine', 'verify', 'generate'] });
+
+    const pause = requestRuntimePause({ dataDir, runId: 'run_control', reason: 'user_pause' });
+    assert.equal(pause.requestedAction, 'pause');
+    assert.equal(pause.reason, 'user_pause');
+    assert.ok(pause.updatedAt);
+
+    const resume = requestRuntimeResume({ dataDir, runId: 'run_control' });
+    assert.equal(resume.requestedAction, 'resume');
+
+    const retry = requestRuntimeRetryStep({ dataDir, runId: 'run_control', step: 'verify', reason: 'manual_retry' });
+    assert.equal(retry.requestedAction, 'retry-step');
+    assert.equal(retry.step, 'verify');
+    assert.equal(retry.reason, 'manual_retry');
+
+    const cleared = clearRuntimeControl({ dataDir, runId: 'run_control' });
+    assert.equal(cleared.requestedAction, null);
+    assert.equal(readRuntimeControl({ dataDir, runId: 'run_control' }).requestedAction, null);
   });
 
   it('appends and reads ordered runtime events', () => {
