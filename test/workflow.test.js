@@ -179,3 +179,70 @@ test('Workflow Validator - rejects missing required params and isolated processo
   assert.ok(result.errors.some(error => error.code === 'missing_required_param' && error.nodeId === 'input_1'));
   assert.ok(result.errors.some(error => error.code === 'isolated_node' && error.nodeId === 'title_1'));
 });
+
+test('Workflow Run Store - can pause and reset a failed node for retry', () => {
+  const workflow = {
+    nodes: [
+      { id: 'start', type: 'keyword-input', data: { keyword: '银耳环' } },
+      { id: 'mine', type: 'keyword-mining', data: { count: 2 } },
+      { id: 'title', type: 'title-generator', data: {} }
+    ],
+    edges: [
+      { id: 'e1', source: 'start', target: 'mine' },
+      { id: 'e2', source: 'mine', target: 'title' }
+    ]
+  };
+
+  const run = createRun(workflow);
+  updateRun(run.runId, {
+    status: 'failed',
+    nodeStates: {
+      ...run.nodeStates,
+      start: {
+        ...run.nodeStates.start,
+        status: 'completed',
+        output: { keyword: '银耳环' }
+      },
+      mine: {
+        ...run.nodeStates.mine,
+        status: 'retryable',
+        output: { keywords: ['银耳环女'] },
+        error: 'temporary network error',
+        blocker: 'network_transient_failure',
+        actionHint: '可以重试',
+        progress: { status: 'retryable', current: 0, total: 0, percent: 100, message: '等待重试' }
+      },
+      title: {
+        ...run.nodeStates.title,
+        status: 'completed',
+        output: { titles: ['旧标题'] }
+      }
+    }
+  });
+
+  const { markRunPaused, resetRunNodeForRetry } = require('../core/workflow');
+  const paused = markRunPaused(run.runId);
+  assert.strictEqual(paused.status, 'paused');
+
+  const reset = resetRunNodeForRetry(run.runId, 'mine');
+  assert.strictEqual(reset.status, 'pending');
+  assert.strictEqual(reset.nodeStates.start.status, 'completed');
+  assert.strictEqual(reset.nodeStates.mine.status, 'idle');
+  assert.strictEqual(reset.nodeStates.mine.output, null);
+  assert.strictEqual(reset.nodeStates.mine.error, null);
+  assert.strictEqual(reset.nodeStates.mine.blocker, null);
+  assert.strictEqual(reset.nodeStates.title.status, 'idle');
+  assert.strictEqual(reset.nodeStates.title.output, null);
+  assert.deepStrictEqual(reset.nodeStates.mine.progress, {
+    status: 'idle',
+    current: 0,
+    total: 0,
+    percent: 0,
+    message: ''
+  });
+
+  const runFile = path.join(workflowDataDir, `${run.runId}.json`);
+  const logFile = path.join(workflowDataDir, `${run.runId}.log`);
+  if (fs.existsSync(runFile)) fs.unlinkSync(runFile);
+  if (fs.existsSync(logFile)) fs.unlinkSync(logFile);
+});

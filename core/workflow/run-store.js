@@ -200,10 +200,92 @@ function listRuns() {
   }
 }
 
+function idleProgress() {
+  return { status: 'idle', current: 0, total: 0, percent: 0, message: '' };
+}
+
+function resetNodeStateForRetry(state) {
+  return {
+    ...state,
+    status: 'idle',
+    input: null,
+    output: null,
+    error: null,
+    startedAt: null,
+    completedAt: null,
+    progress: idleProgress(),
+    blocker: null,
+    actionHint: null,
+    platformStatus: null,
+    durationMs: null,
+    outputSummary: null,
+    cooldownRemainingMs: 0
+  };
+}
+
+function downstreamNodeIds(workflow, nodeId) {
+  const edges = Array.isArray(workflow?.edges) ? workflow.edges : [];
+  const queue = [nodeId];
+  const seen = new Set();
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    for (const edge of edges) {
+      if (edge.source !== current || seen.has(edge.target)) continue;
+      seen.add(edge.target);
+      queue.push(edge.target);
+    }
+  }
+
+  return [...seen];
+}
+
+function mutateRun(runId, mutator) {
+  const runObj = getRun(runId);
+  if (!runObj) return null;
+  const next = mutator(runObj) || runObj;
+  next.updatedAt = new Date().toISOString();
+  saveRun(next);
+  return next;
+}
+
+function markRunPaused(runId) {
+  return mutateRun(runId, (runObj) => ({
+    ...runObj,
+    status: 'paused',
+    error: null
+  }));
+}
+
+function resetRunNodeForRetry(runId, nodeId) {
+  return mutateRun(runId, (runObj) => {
+    if (!runObj.nodeStates || !runObj.nodeStates[nodeId]) {
+      throw new Error(`找不到可重试节点: ${nodeId}`);
+    }
+
+    const resetIds = new Set([nodeId, ...downstreamNodeIds(runObj.workflow, nodeId)]);
+    const nextNodeStates = { ...runObj.nodeStates };
+    for (const id of resetIds) {
+      if (!nextNodeStates[id]) continue;
+      nextNodeStates[id] = resetNodeStateForRetry(nextNodeStates[id]);
+    }
+
+    return {
+      ...runObj,
+      status: 'pending',
+      error: null,
+      nodeStates: nextNodeStates
+    };
+  });
+}
+
 module.exports = {
   createRun,
   getRun,
   updateRun,
+  mutateRun,
+  markRunPaused,
+  resetRunNodeForRetry,
   addRunLog,
   listRuns
 };
