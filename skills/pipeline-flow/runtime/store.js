@@ -61,14 +61,18 @@ function createProgress(steps = []) {
  * @param {string} [options.dataDir] Pipeline data directory.
  * @param {string} options.runId Runtime run id.
  * @param {string[]} options.steps Ordered runtime steps.
+ * @param {string} [options.mode] Runtime mode.
+ * @param {object} [options.params] Runtime step parameters.
  * @returns {object} Runtime state.
  */
-function initRuntimeState({ dataDir, runId, steps = [] }) {
+function initRuntimeState({ dataDir, runId, steps = [], mode = '', params = {} }) {
   const now = new Date().toISOString();
   const runtime = {
     status: 'running',
     activeStep: steps[0] || '',
     requestedAction: null,
+    mode,
+    params: params && typeof params === 'object' ? { ...params } : {},
     steps,
     progress: createProgress(steps),
     startedAt: now,

@@ -223,6 +223,8 @@ test('workflow recovery APIs - pause, resume, and retry', async (t) => {
       initRuntimeState({
         dataDir: pipelineDataDir,
         runId,
+        mode: 'daily',
+        params: { mine: 11, verify: 7, generate: 3, productsPerKeyword: 2 },
         steps: ['mine', 'verify', 'generate', 'export', 'review']
       });
       updateRuntimeState({
@@ -273,7 +275,9 @@ test('workflow recovery APIs - pause, resume, and retry', async (t) => {
         assert.ok(runtime);
         assert.strictEqual(runnerCalls.length, 2);
         assert.strictEqual(runnerCalls[0].retryStep, 'verify');
+        assert.deepStrictEqual(runnerCalls[0].params, { mine: 11, verify: 7, generate: 3, productsPerKeyword: 2 });
         assert.strictEqual(runnerCalls[1].resumeFromStep, 'verify');
+        assert.deepStrictEqual(runnerCalls[1].params, { mine: 11, verify: 7, generate: 3, productsPerKeyword: 2 });
       } finally {
         app.locals.pipelineRuntimeRunner = originalRunner;
         fs.rmSync(runDir, { recursive: true, force: true });

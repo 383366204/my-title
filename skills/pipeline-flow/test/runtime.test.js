@@ -32,11 +32,15 @@ describe('pipeline runtime store', () => {
     const runtime = initRuntimeState({
       dataDir,
       runId: 'run_1',
-      steps: ['mine', 'verify']
+      steps: ['mine', 'verify'],
+      mode: 'daily',
+      params: { mine: 9, verify: 3 }
     });
 
     assert.equal(runtime.status, 'running');
     assert.equal(runtime.activeStep, 'mine');
+    assert.equal(runtime.mode, 'daily');
+    assert.deepEqual(runtime.params, { mine: 9, verify: 3 });
     assert.equal(runtime.progress.mine.status, 'idle');
 
     updateRuntimeState({
@@ -263,7 +267,7 @@ describe('pipeline runtime runner', () => {
       dataDir,
       runId: 'resume_run',
       mode: 'daily',
-      params: {},
+      params: { mine: 1, verify: 7, generate: 3, marker: 'keep-me' },
       steps: ['mine', 'verify', 'generate'],
       stepFns: {
         mine: async ({ reportProgress, runId }) => {
@@ -288,7 +292,6 @@ describe('pipeline runtime runner', () => {
       dataDir,
       runId: 'resume_run',
       mode: 'daily',
-      params: {},
       preserveRuntime: true,
       resumeFromStep: 'verify',
       steps: ['mine', 'verify', 'generate'],
@@ -297,13 +300,17 @@ describe('pipeline runtime runner', () => {
           secondCalls.push('mine');
           throw new Error('mine should not rerun on resume');
         },
-        verify: async ({ reportProgress }) => {
+        verify: async ({ reportProgress, params }) => {
           secondCalls.push('verify');
+          assert.equal(params.verify, 7);
+          assert.equal(params.marker, 'keep-me');
           reportProgress({ current: 1, total: 1, message: 'verify done' });
           return { status: 'verified' };
         },
-        generate: async ({ reportProgress }) => {
+        generate: async ({ reportProgress, params }) => {
           secondCalls.push('generate');
+          assert.equal(params.generate, 3);
+          assert.equal(params.marker, 'keep-me');
           reportProgress({ current: 1, total: 1, message: 'generate done' });
           return { status: 'generated' };
         }
@@ -315,6 +322,9 @@ describe('pipeline runtime runner', () => {
     assert.equal(result.runtimeStatus, 'completed');
     const runtime = readRuntimeState({ dataDir, runId: 'resume_run' });
     assert.equal(runtime.status, 'completed');
+    assert.equal(runtime.mode, 'daily');
+    assert.equal(runtime.params.verify, 7);
+    assert.equal(runtime.params.marker, 'keep-me');
     assert.equal(runtime.progress.mine.status, 'completed');
     assert.equal(runtime.progress.verify.status, 'completed');
     assert.equal(runtime.progress.generate.status, 'completed');
@@ -326,7 +336,7 @@ describe('pipeline runtime runner', () => {
       dataDir,
       runId: 'retry_step_run',
       mode: 'daily',
-      params: {},
+      params: { mine: 1, verify: 5, generate: 2, marker: 'retry-params' },
       steps: ['mine', 'verify', 'generate'],
       stepFns: {
         mine: async () => ({ status: 'mined' }),
@@ -340,7 +350,6 @@ describe('pipeline runtime runner', () => {
       dataDir,
       runId: 'retry_step_run',
       mode: 'daily',
-      params: {},
       preserveRuntime: true,
       retryStep: 'verify',
       steps: ['mine', 'verify', 'generate'],
@@ -349,13 +358,17 @@ describe('pipeline runtime runner', () => {
           calls.push('mine');
           throw new Error('mine should not rerun when retrying verify');
         },
-        verify: async ({ reportProgress }) => {
+        verify: async ({ reportProgress, params }) => {
           calls.push('verify');
+          assert.equal(params.verify, 5);
+          assert.equal(params.marker, 'retry-params');
           reportProgress({ current: 1, total: 1, message: 'verify retried' });
           return { status: 'verified' };
         },
-        generate: async ({ reportProgress }) => {
+        generate: async ({ reportProgress, params }) => {
           calls.push('generate');
+          assert.equal(params.generate, 2);
+          assert.equal(params.marker, 'retry-params');
           reportProgress({ current: 1, total: 1, message: 'generate rerun' });
           return { status: 'generated' };
         }
@@ -366,6 +379,8 @@ describe('pipeline runtime runner', () => {
     assert.equal(result.runtimeStatus, 'completed');
     const runtime = readRuntimeState({ dataDir, runId: 'retry_step_run' });
     assert.equal(runtime.status, 'completed');
+    assert.equal(runtime.params.verify, 5);
+    assert.equal(runtime.params.marker, 'retry-params');
     assert.equal(runtime.progress.mine.status, 'completed');
     assert.equal(runtime.progress.verify.status, 'completed');
     assert.equal(runtime.progress.generate.status, 'completed');

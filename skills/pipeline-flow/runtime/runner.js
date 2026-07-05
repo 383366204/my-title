@@ -179,18 +179,18 @@ function runtimeStatusForPipelineStatus(pipelineStatus) {
  */
 async function runPipelineRuntime(options = {}) {
   const dataDir = options.dataDir || DEFAULT_FLOW_DIR;
-  const params = options.params || {};
-  const mode = options.mode || 'daily';
   const injectedStepFns = options.stepFns || null;
   let runId = options.runId || createRunId();
   let runDir = runtimeRunDir(dataDir, runId);
+  const existingRuntime = options.preserveRuntime
+    ? readRuntimeState({ dataDir, runId })
+    : null;
+  const params = options.params == null ? (existingRuntime?.params || {}) : options.params;
+  const mode = options.mode || existingRuntime?.mode || 'daily';
   const steps = mode === 'keyword' && !injectedStepFns
     ? ['keyword']
     : (options.steps || DEFAULT_STEPS);
   const stepFns = injectedStepFns || createDefaultStepFns({ dataDir, runId, params });
-  const existingRuntime = options.preserveRuntime
-    ? readRuntimeState({ dataDir, runId })
-    : null;
   const startStep = options.retryStep || options.resumeFromStep || existingRuntime?.activeStep || steps[0];
   const startIndex = Math.max(0, steps.indexOf(startStep));
   const stepsToRun = steps.slice(startIndex);
@@ -207,11 +207,13 @@ async function runPipelineRuntime(options = {}) {
         status: options.retryStep ? 'retrying' : 'resuming',
         activeStep: startStep,
         requestedAction: null,
+        mode,
+        params,
         progress
       }
     });
   } else {
-    initRuntimeState({ dataDir, runId, steps });
+    initRuntimeState({ dataDir, runId, steps, mode, params });
   }
   appendRuntimeEvent({
     dataDir,

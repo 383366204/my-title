@@ -453,7 +453,8 @@ app.post('/api/pipeline/runs/:runId/resume', async (req, res) => {
     const control = requestRuntimeResume({ runId });
     const promise = getPipelineRuntimeRunner()({
       runId,
-      mode: runtime.steps?.includes('keyword') ? 'keyword' : 'daily',
+      mode: runtime.mode || (runtime.steps?.includes('keyword') ? 'keyword' : 'daily'),
+      params: runtime.params || {},
       preserveRuntime: true,
       resumeFromStep: runtime.activeStep,
       steps: runtime.steps
@@ -491,7 +492,8 @@ app.post('/api/pipeline/runs/:runId/:step/retry', async (req, res) => {
     const control = requestRuntimeRetryStep({ runId, step });
     const promise = getPipelineRuntimeRunner()({
       runId,
-      mode: runtime.steps?.includes('keyword') ? 'keyword' : 'daily',
+      mode: runtime.mode || (runtime.steps?.includes('keyword') ? 'keyword' : 'daily'),
+      params: runtime.params || {},
       preserveRuntime: true,
       retryStep: step,
       steps: runtime.steps
