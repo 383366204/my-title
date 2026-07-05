@@ -31,6 +31,12 @@ const {
   readWorkflowNodeArtifact
 } = require('../core/workflow/pipeline-adapter');
 const {
+  resumeWorkflow,
+  retryWorkflowNode,
+  markRunPaused,
+  getRun
+} = require('../core/workflow');
+const {
   createRunId,
   flowMine,
   flowVerify,
@@ -881,11 +887,42 @@ app.post('/api/workflows/runs/:runId/cancel', (req, res) => {
   }
 });
 
-// 7. POST /api/workflows/runs/:runId/retry-node - pipeline retry 暂未实现
-app.post('/api/workflows/runs/:runId/retry-node', sendWorkflowNotImplemented('retry-node'));
+// 7. POST /api/workflows/runs/:runId/retry-node - 重试某个特定节点
+app.post('/api/workflows/runs/:runId/retry-node', async (req, res) => {
+  try {
+    const nodeId = String(req.body?.nodeId || '').trim();
+    if (!nodeId) {
+      return res.status(400).json({ ok: false, error: 'nodeId is required' });
+    }
+    await retryWorkflowNode(req.params.runId, nodeId);
+    return res.json({ ok: true, run: getRun(req.params.runId) });
+  } catch (err) {
+    return res.status(400).json({ ok: false, error: err.message });
+  }
+});
 
-// 8. POST /api/workflows/runs/:runId/resume - pipeline resume 暂未实现
-app.post('/api/workflows/runs/:runId/resume', sendWorkflowNotImplemented('resume'));
+// 8. POST /api/workflows/runs/:runId/resume - 继续执行工作流
+app.post('/api/workflows/runs/:runId/resume', async (req, res) => {
+  try {
+    await resumeWorkflow(req.params.runId);
+    return res.json({ ok: true, run: getRun(req.params.runId) });
+  } catch (err) {
+    return res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+// 8.5. POST /api/workflows/runs/:runId/pause - 暂停执行工作流
+app.post('/api/workflows/runs/:runId/pause', (req, res) => {
+  try {
+    const run = markRunPaused(req.params.runId);
+    if (!run) {
+      return res.status(404).json({ ok: false, error: '工作流运行不存在' });
+    }
+    return res.json({ ok: true, run });
+  } catch (err) {
+    return res.status(400).json({ ok: false, error: err.message });
+  }
+});
 
 // 9. GET /api/workflows/runs/:runId/events - 轮询真实 pipeline 状态并以 SSE 推送
 app.get('/api/workflows/runs/:runId/events', (req, res) => {
