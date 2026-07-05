@@ -250,11 +250,28 @@ function mutateRun(runId, mutator) {
 }
 
 function markRunPaused(runId) {
-  return mutateRun(runId, (runObj) => ({
-    ...runObj,
-    status: 'paused',
-    error: null
-  }));
+  return mutateRun(runId, (runObj) => {
+    const nextNodeStates = { ...(runObj.nodeStates || {}) };
+    for (const [nodeId, state] of Object.entries(nextNodeStates)) {
+      if (state.status !== 'running') continue;
+      nextNodeStates[nodeId] = {
+        ...state,
+        status: 'paused',
+        progress: {
+          ...(state.progress || idleProgress()),
+          status: 'paused',
+          message: state.progress?.message || '已暂停'
+        }
+      };
+    }
+
+    return {
+      ...runObj,
+      status: 'paused',
+      error: null,
+      nodeStates: nextNodeStates
+    };
+  });
 }
 
 function resetRunNodeForRetry(runId, nodeId) {

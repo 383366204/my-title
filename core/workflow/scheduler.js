@@ -8,25 +8,8 @@ const { normalizeNodeProgress, normalizePlatformError } = require('./state-helpe
 // 用于存储当前正在执行的 promise，便于取消或者跟踪
 const activeRuns = new Map();
 
-/**
- * 启动工作流运行
- * @param {string} runId 工作流运行 ID
- */
-async function startWorkflow(runId) {
-  const runObj = getRun(runId);
-  if (!runObj) {
-    throw new Error(`找不到工作流运行记录: ${runId}`);
-  }
-
-  if (runObj.status !== 'pending') {
-    throw new Error(`工作流当前状态不能启动: ${runObj.status}`);
-  }
-
-  // 更新为 running 状态
-  updateRun(runId, { status: 'running', startedAt: new Date().toISOString() });
-  emitRunEvent(runId, 'status_change', { status: 'running' });
-
-  const logger = {
+function createLogger(runId) {
+  return {
     info: (msg) => {
       addRunLog(runId, 'info', msg);
       emitRunEvent(runId, 'log', { level: 'info', message: msg });
@@ -40,8 +23,18 @@ async function startWorkflow(runId) {
       emitRunEvent(runId, 'log', { level: 'error', message: msg });
     }
   };
+}
 
-  logger.info(`✨ 工作流启动成功 [RunId: ${runId}]`);
+async function runWorkflowExecution(runId, startMessage) {
+  if (activeRuns.has(runId)) {
+    throw new Error(`工作流正在运行: ${runId}`);
+  }
+
+  updateRun(runId, { status: 'running', startedAt: new Date().toISOString(), error: null });
+  emitRunEvent(runId, 'status_change', { status: 'running' });
+
+  const logger = createLogger(runId);
+  logger.info(startMessage);
 
   const executionPromise = (async () => {
     try {
@@ -63,6 +56,24 @@ async function startWorkflow(runId) {
   activeRuns.set(runId, executionPromise);
   return executionPromise;
 }
+
+/**
+ * 启动工作流运行
+ * @param {string} runId 工作流运行 ID
+ */
+async function startWorkflow(runId) {
+  const runObj = getRun(runId);
+  if (!runObj) {
+    throw new Error(`找不到工作流运行记录: ${runId}`);
+  }
+
+  if (runObj.status !== 'pending') {
+    throw new Error(`工作流当前状态不能启动: ${runObj.status}`);
+  }
+
+  return runWorkflowExecution(runId, `✨ 工作流启动成功 [RunId: ${runId}]`);
+}
+
 
 /**
  * 取消正在运行的工作流
@@ -118,8 +129,16 @@ async function executeWorkflowGraph(runId, logger) {
   // 记录节点的执行状态
   const nodeStates = runObj.nodeStates;
 
-  // 待执行节点队列。初始时，入度为 0 且状态为 idle 的节点
-  const queue = nodes.filter(n => inEdges[n.id].length === 0).map(n => n.id);
+  // 待执行节点队列。继续执行时跳过 completed 节点，从父节点均 completed 的 idle/retryable/waiting_manual/blocked/failed 节点开始。
+  const runnableStatuses = new Set(['idle', 'paused', 'retryable', 'waiting_manual', 'blocked', 'failed']);
+  const queue = nodes
+    .filter((node) => runnableStatuses.has(nodeStates[node.id]?.status || 'idle'))
+    .filter((node) => {
+      const parents = inEdges[node.id] || [];
+      return parents.every((parentId) => nodeStates[parentId]?.status === 'completed');
+    })
+    .map((node) => node.id);
+
 
   while (queue.length > 0) {
     // 每次开始前检查工作流是否被取消
@@ -270,7 +289,30 @@ async function executeWorkflowGraph(runId, logger) {
   logger.info(`🎉 工作流全部节点执行完毕！[RunId: ${runId}]`);
 }
 
+async function resumeWorkflow(runId) {
+  const runObj = getRun(runId);
+  if (!runObj) {
+    throw new Error(`找不到工作流运行记录: ${runId}`);
+  }
+  if (!['paused', 'blocked', 'waiting_manual', 'retryable', 'failed', 'pending'].includes(runObj.status)) {
+    throw new Error(`工作流当前状态不能继续: ${runObj.status}`);
+  }
+  return runWorkflowExecution(runId, `工作流继续执行 [RunId: ${runId}]`);
+}
+
+async function retryWorkflowNode(runId, nodeId) {
+  const { resetRunNodeForRetry } = require('./run-store');
+  const reset = resetRunNodeForRetry(runId, nodeId);
+  if (!reset) {
+    throw new Error(`找不到工作流运行记录: ${runId}`);
+  }
+  emitRunEvent(runId, 'node_change', { nodeId, state: reset.nodeStates[nodeId] });
+  return runWorkflowExecution(runId, `重试节点 ${nodeId} [RunId: ${runId}]`);
+}
+
 module.exports = {
   startWorkflow,
+  resumeWorkflow,
+  retryWorkflowNode,
   cancelWorkflow
 };

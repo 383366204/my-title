@@ -221,8 +221,26 @@ test('Workflow Run Store - can pause and reset a failed node for retry', () => {
   });
 
   const { markRunPaused, resetRunNodeForRetry } = require('../core/workflow');
+  updateRun(run.runId, {
+    nodeStates: {
+      ...getRun(run.runId).nodeStates,
+      mine: {
+        ...getRun(run.runId).nodeStates.mine,
+        status: 'running',
+        progress: { status: 'running', current: 0, total: 0, percent: 25, message: '执行中' }
+      }
+    }
+  });
   const paused = markRunPaused(run.runId);
   assert.strictEqual(paused.status, 'paused');
+  assert.strictEqual(paused.nodeStates.mine.status, 'paused');
+  assert.deepStrictEqual(paused.nodeStates.mine.progress, {
+    status: 'paused',
+    current: 0,
+    total: 0,
+    percent: 25,
+    message: '执行中'
+  });
 
   const reset = resetRunNodeForRetry(run.runId, 'mine');
   assert.strictEqual(reset.status, 'pending');
@@ -240,6 +258,57 @@ test('Workflow Run Store - can pause and reset a failed node for retry', () => {
     percent: 0,
     message: ''
   });
+
+  const runFile = path.join(workflowDataDir, `${run.runId}.json`);
+  const logFile = path.join(workflowDataDir, `${run.runId}.log`);
+  if (fs.existsSync(runFile)) fs.unlinkSync(runFile);
+  if (fs.existsSync(logFile)) fs.unlinkSync(logFile);
+});
+
+test('Workflow Scheduler - resumes from first non-completed node after retry reset', async () => {
+  let failingCalls = 0;
+  const { registerNode, retryWorkflowNode } = require('../core/workflow');
+  registerNode('test-flaky-recovery-node', {
+    execute: async (inputs) => {
+      failingCalls += 1;
+      if (failingCalls === 1) {
+        const err = new Error('temporary timeout');
+        err.status = 'transient_failure';
+        err.retryable = true;
+        throw err;
+      }
+      return { ...inputs, recovered: true };
+    }
+  });
+
+  const workflow = {
+    nodes: [
+      { id: 'start', type: 'keyword-input', data: { keyword: '珍珠耳环' } },
+      { id: 'flaky', type: 'test-flaky-recovery-node', data: { label: '临时失败节点' } },
+      { id: 'title', type: 'title-generator', data: { label: '标题节点' } }
+    ],
+    edges: [
+      { id: 'e1', source: 'start', target: 'flaky' },
+      { id: 'e2', source: 'flaky', target: 'title' }
+    ]
+  };
+
+  const run = createRun(workflow);
+  await startWorkflow(run.runId);
+
+  let failed = getRun(run.runId);
+  assert.strictEqual(failed.status, 'retryable');
+  assert.strictEqual(failed.nodeStates.start.status, 'completed');
+  assert.strictEqual(failed.nodeStates.flaky.status, 'retryable');
+
+  await retryWorkflowNode(run.runId, 'flaky');
+
+  const finalRun = getRun(run.runId);
+  assert.strictEqual(finalRun.status, 'completed');
+  assert.strictEqual(finalRun.nodeStates.start.status, 'completed');
+  assert.strictEqual(finalRun.nodeStates.flaky.status, 'completed');
+  assert.strictEqual(finalRun.nodeStates.title.status, 'completed');
+  assert.strictEqual(failingCalls, 2);
 
   const runFile = path.join(workflowDataDir, `${run.runId}.json`);
   const logFile = path.join(workflowDataDir, `${run.runId}.log`);
