@@ -96,6 +96,7 @@ export function labelWorkflowNodeStatus(status) {
     waiting_confirmation: '等待确认',
     needs_review: '等待复核',
     retryable: '待重试',
+    ready: '待铺货',
     blocked: '已阻塞',
     failed: '失败',
     cancelled: '已取消'

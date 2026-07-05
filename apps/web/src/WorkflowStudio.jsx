@@ -307,14 +307,8 @@ const TitleGeneratorNode = ({ data }) => {
 
 // 4. Monitor Node (只读日常流程节点)
 const MonitorStageNode = ({ data }) => {
-  const statusLabel = {
-    completed: '已完成',
-    ready: '待铺货',
-    running: '运行中',
-    paused: '待处理',
-    failed: '失败',
-    idle: '等待中'
-  }[data.status || 'idle'];
+  const view = getWorkflowNodeViewModel(data.id, data);
+  const statusLabel = view.statusLabel;
 
   return (
     <button
@@ -1592,6 +1586,29 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
                   <div className="font-mono text-xs text-slate-300 break-all">{activeMonitorSummary.runId}</div>
                   <div className="text-[11px] text-slate-500 mt-2">
                     更新于 {formatDateTime(activeMonitorSummary.updatedAt || activeMonitorSummary.startedAt)}
+                  </div>
+                </div>
+
+                <div className="workflow-detail-card">
+                  <div className="workflow-detail-card-head">
+                    <span>{activeMonitorSummary.runId}</span>
+                    <b>{labelPipelineStatus(activeMonitorSummary.status)}</b>
+                  </div>
+                  <div className="workflow-detail-rows">
+                    <div className="workflow-detail-row">
+                      <span>阶段</span>
+                      <strong>{labelPipelineStage(activeMonitorSummary.stage)}</strong>
+                    </div>
+                    <div className="workflow-detail-row">
+                      <span>更新时间</span>
+                      <strong>{formatDateTime(activeMonitorSummary.updatedAt || activeMonitorSummary.startedAt)}</strong>
+                    </div>
+                    {activeMonitorSummary.nextAction?.label && (
+                      <div className="workflow-detail-row">
+                        <span>下一步</span>
+                        <strong>{activeMonitorSummary.nextAction.label}</strong>
+                      </div>
+                    )}
                   </div>
                 </div>
 

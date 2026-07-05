@@ -85,6 +85,8 @@ React Flow 页面现在分为两个视图：
 - `流程监控`：默认视图，读取 `/api/workbench/runs` 和 `/api/workbench/runs/:runId`，展示 `种子/启动 -> 挖词 -> 多指标验真 -> 标题货源 -> 人工复核 -> 待铺货批次 -> 已提交`。
 - `节点实验`：保留原来的可编辑 demo 画布，仍使用 `/api/workflows/*` 和 SSE 日志。
 
+流程画布会直接展示节点进度、阻塞原因、暂停/继续/重试入口和节点产物摘要，避免再跳转到独立监控页。
+
 真实每日流程的数据源是 `skills/pipeline-flow` 写入的 `data/pipeline/runs/<runId>/` 文件。浏览器 IndexedDB 只作为本机操作历史，不是后端 canonical 状态。
 
 开发模式：
