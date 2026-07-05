@@ -8,17 +8,22 @@ const os = require('os');
 
 const workflowDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-observability-test-'));
 process.env.ECOM_WORKFLOW_DATA_DIR = workflowDataDir;
+process.env.ECOM_PLATFORM_GUARD_DIR = path.join(workflowDataDir, 'platform-access');
 
 const {
   createRun,
   getRun,
+  resumeWorkflow,
   startWorkflow,
   normalizeNodeStatus,
   normalizePlatformError,
   registerNode
 } = require('../core/workflow');
 
-const { PlatformAccessError } = require('../core/platform-access-guard');
+const {
+  PlatformAccessError,
+  reportPlatformBlocker
+} = require('../core/platform-access-guard');
 
 test('Workflow Observability - Run Store Initialization Fields', (t) => {
   const mockWorkflow = {
@@ -43,6 +48,7 @@ test('Workflow Observability - Run Store Initialization Fields', (t) => {
   });
   assert.strictEqual(nodeState.blocker, null);
   assert.strictEqual(nodeState.actionHint, null);
+  assert.strictEqual(nodeState.platform, null);
   assert.strictEqual(nodeState.platformStatus, null);
   assert.strictEqual(nodeState.durationMs, null);
   assert.strictEqual(nodeState.outputSummary, null);
@@ -68,6 +74,7 @@ test('Workflow Observability - State Normalization Helper', (t) => {
   const normLogin = normalizePlatformError(errLogin);
   assert.strictEqual(normLogin.status, 'waiting_manual');
   assert.strictEqual(normLogin.blocker, 'login_required');
+  assert.strictEqual(normLogin.platform, 'taobao');
   assert.match(normLogin.actionHint, /需要人工登录/);
 
   // Rate limit
@@ -75,6 +82,7 @@ test('Workflow Observability - State Normalization Helper', (t) => {
   const normRate = normalizePlatformError(errRate);
   assert.strictEqual(normRate.status, 'blocked');
   assert.strictEqual(normRate.blocker, 'platform_cooldown');
+  assert.strictEqual(normRate.platform, '1688');
   assert.match(normRate.actionHint, /访问受限/);
   assert.strictEqual(normRate.cooldownRemainingMs, 30000);
 });
@@ -114,12 +122,57 @@ test('Workflow Observability - Scheduler Platform Blocker Mapping & Failed Node 
   assert.strictEqual(blockedNodeState.status, 'waiting_manual');
   assert.strictEqual(blockedNodeState.blocker, 'captcha_required');
   assert.match(blockedNodeState.actionHint, /完成 SYCM 的验证码/);
+  assert.strictEqual(blockedNodeState.platform, 'sycm');
   assert.strictEqual(blockedNodeState.error, 'Slide required');
   assert.ok(blockedNodeState.durationMs >= 0);
   assert.strictEqual(blockedNodeState.progress.status, 'waiting_manual');
   assert.strictEqual(blockedNodeState.progress.percent, 100);
 
   // Clean up
+  const runFile = path.join(workflowDataDir, `${run.runId}.json`);
+  const logFile = path.join(workflowDataDir, `${run.runId}.log`);
+  if (fs.existsSync(runFile)) fs.unlinkSync(runFile);
+  if (fs.existsSync(logFile)) fs.unlinkSync(logFile);
+});
+
+test('Workflow Recovery - resume keeps manual node blocked when platform is unavailable', async (t) => {
+  registerNode('test-manual-platform-node', {
+    execute: async () => {
+      throw new PlatformAccessError('Need login again', {
+        status: 'login_required',
+        platform: 'taobao'
+      });
+    }
+  });
+
+  const run = createRun({
+    nodes: [{ id: 'manual', type: 'test-manual-platform-node', data: {} }],
+    edges: []
+  });
+
+  await startWorkflow(run.runId);
+  const blocked = getRun(run.runId);
+  assert.strictEqual(blocked.status, 'waiting_manual');
+  assert.strictEqual(blocked.nodeStates.manual.status, 'waiting_manual');
+  assert.strictEqual(blocked.nodeStates.manual.platform, 'taobao');
+  assert.strictEqual(blocked.nodeStates.manual.platformStatus, 'login_required');
+
+  reportPlatformBlocker('taobao', {
+    status: 'login_required',
+    userMessage: '请先重新登录淘宝账号',
+    cooldownMs: 60_000
+  });
+
+  await resumeWorkflow(run.runId);
+  const resumed = getRun(run.runId);
+  assert.strictEqual(resumed.status, 'waiting_manual');
+  assert.strictEqual(resumed.nodeStates.manual.status, 'waiting_manual');
+  assert.strictEqual(resumed.nodeStates.manual.platform, 'taobao');
+  assert.strictEqual(resumed.nodeStates.manual.platformStatus, 'login_required');
+  assert.strictEqual(resumed.nodeStates.manual.blocker, 'login_required');
+  assert.match(resumed.nodeStates.manual.actionHint, /重新登录淘宝/);
+  assert.ok(resumed.nodeStates.manual.cooldownRemainingMs > 0);
+
   const runFile = path.join(workflowDataDir, `${run.runId}.json`);
   const logFile = path.join(workflowDataDir, `${run.runId}.log`);
   if (fs.existsSync(runFile)) fs.unlinkSync(runFile);

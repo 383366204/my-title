@@ -4,6 +4,10 @@ const { getRun, updateRun, addRunLog } = require('./run-store');
 const { emitRunEvent } = require('./events');
 const { getNodeDefinition } = require('./registry');
 const { normalizeNodeProgress, normalizePlatformError } = require('./state-helper');
+const {
+  getPlatformAccessStatus,
+  PlatformAccessError
+} = require('../platform-access-guard');
 
 // 用于存储当前正在执行的 promise，便于取消或者跟踪
 const activeRuns = new Map();
@@ -22,6 +26,16 @@ function createLogger(runId) {
       addRunLog(runId, 'error', msg);
       emitRunEvent(runId, 'log', { level: 'error', message: msg });
     }
+  };
+}
+
+function platformReadyForNode(state) {
+  const platform = state?.platform || '';
+  if (!platform) return { ready: true, status: null };
+  const status = getPlatformAccessStatus(platform);
+  return {
+    ready: status.available,
+    status
   };
 }
 
@@ -174,6 +188,31 @@ async function executeWorkflowGraph(runId, logger) {
     // 节点自身的 params
     const params = node.data || {};
 
+    const currentState = nodeStates[nodeId];
+    if (['waiting_manual', 'blocked'].includes(currentState?.status)) {
+      const readiness = platformReadyForNode(currentState);
+      if (!readiness.ready) {
+        const platformStatus = readiness.status?.status || currentState.platformStatus || 'blocked';
+        currentState.blocker = platformStatus;
+        currentState.actionHint = readiness.status?.manualAction?.userMessage || currentState.actionHint || '平台仍需人工处理，完成后再继续。';
+        currentState.platformStatus = platformStatus;
+        currentState.cooldownRemainingMs = readiness.status?.cooldownRemainingMs || 0;
+        currentState.progress = normalizeNodeProgress({
+          ...(currentState.progress || {}),
+          status: currentState.status,
+          percent: 100,
+          message: currentState.actionHint
+        });
+        updateRun(runId, { nodeStates });
+        emitRunEvent(runId, 'node_change', { nodeId, state: currentState });
+        throw new PlatformAccessError(currentState.actionHint, {
+          platform: currentState.platform,
+          status: platformStatus,
+          cooldownRemainingMs: currentState.cooldownRemainingMs
+        });
+      }
+    }
+
     // 更新节点状态为 running，并重置相关的可观测状态
     nodeStates[nodeId].status = 'running';
     nodeStates[nodeId].startedAt = new Date().toISOString();
@@ -181,6 +220,7 @@ async function executeWorkflowGraph(runId, logger) {
     nodeStates[nodeId].progress = normalizeNodeProgress({ status: 'running', percent: 0, message: '开始执行' });
     nodeStates[nodeId].blocker = null;
     nodeStates[nodeId].actionHint = null;
+    nodeStates[nodeId].platform = null;
     nodeStates[nodeId].platformStatus = null;
     nodeStates[nodeId].durationMs = null;
     nodeStates[nodeId].outputSummary = null;
@@ -259,6 +299,7 @@ async function executeWorkflowGraph(runId, logger) {
         nodeStates[nodeId].status = norm.status;
         nodeStates[nodeId].blocker = norm.blocker;
         nodeStates[nodeId].actionHint = norm.actionHint;
+        nodeStates[nodeId].platform = norm.platform;
         nodeStates[nodeId].platformStatus = norm.platformStatus;
         if (norm.cooldownRemainingMs) {
           nodeStates[nodeId].cooldownRemainingMs = norm.cooldownRemainingMs;

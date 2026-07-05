@@ -49,6 +49,7 @@ function createRun(workflow) {
         progress: { status: 'idle', current: 0, total: 0, percent: 0, message: '' },
         blocker: null,
         actionHint: null,
+        platform: null,
         platformStatus: null,
         durationMs: null,
         outputSummary: null
@@ -216,6 +217,7 @@ function resetNodeStateForRetry(state) {
     progress: idleProgress(),
     blocker: null,
     actionHint: null,
+    platform: null,
     platformStatus: null,
     durationMs: null,
     outputSummary: null,

@@ -51,6 +51,7 @@ function normalizePlatformError(err) {
       status: 'failed',
       blocker: null,
       actionHint: null,
+      platform: null,
       platformStatus: null,
       cooldownRemainingMs: 0
     };
@@ -71,6 +72,7 @@ function normalizePlatformError(err) {
       status: 'waiting_manual',
       blocker: 'login_required',
       actionHint: `需要人工登录: 请在网页端重新登录 ${displayPlatform}`,
+      platform: platform || null,
       platformStatus: rawStatus || 'login_required',
       cooldownRemainingMs: 0
     };
@@ -81,6 +83,7 @@ function normalizePlatformError(err) {
       status: 'waiting_manual',
       blocker: 'captcha_required',
       actionHint: `需要人工干预: 请在网页端完成 ${displayPlatform} 的验证码/滑块验证`,
+      platform: platform || null,
       platformStatus: rawStatus || 'captcha_required',
       cooldownRemainingMs: 0
     };
@@ -93,6 +96,7 @@ function normalizePlatformError(err) {
       status: 'blocked',
       blocker: 'platform_cooldown',
       actionHint: `访问受限: 触发 ${displayPlatform} 防护，需等待冷却 ${waitSec} 秒后重试`,
+      platform: platform || null,
       platformStatus: rawStatus || 'rate_limited',
       cooldownRemainingMs
     };
@@ -104,6 +108,7 @@ function normalizePlatformError(err) {
       status: 'blocked',
       blocker: 'permission_required',
       actionHint: `无访问权限: ${displayPlatform} 相关服务未订购或功能未开通`,
+      platform: platform || null,
       platformStatus: rawStatus || 'permission_required',
       cooldownRemainingMs: 0
     };
@@ -115,6 +120,7 @@ function normalizePlatformError(err) {
       status: 'retryable',
       blocker: 'network_transient_failure',
       actionHint: `网络或接口临时故障，可以尝试重试`,
+      platform: platform || null,
       platformStatus: rawStatus || 'transient_failure',
       cooldownRemainingMs: 0
     };
@@ -125,6 +131,7 @@ function normalizePlatformError(err) {
     status: 'failed',
     blocker: 'execution_error',
     actionHint: `执行出错: ${err.message || '未知错误'}`,
+    platform: platform || null,
     platformStatus: rawStatus || 'error',
     cooldownRemainingMs: 0
   };
