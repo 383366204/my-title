@@ -14,6 +14,7 @@ const {
 const {
   assertRuntimeRunId,
   initRuntimeState,
+  readRuntimeState,
   updateRuntimeState,
   readRuntimeControl,
   clearRuntimeControl,
@@ -73,6 +74,15 @@ function idleProgress() {
 
 function completedProgress(message = '完成') {
   return { status: 'completed', current: 1, total: 1, percent: 100, message };
+}
+
+function resetProgressFromStep(progress, steps, startStep) {
+  const startIndex = steps.indexOf(startStep);
+  if (startIndex < 0) return progress || {};
+  return steps.reduce((memo, step, index) => {
+    memo[step] = index >= startIndex ? idleProgress() : (progress?.[step] || completedProgress());
+    return memo;
+  }, {});
 }
 
 function createReporter({ dataDir, getRunId, step }) {
@@ -178,17 +188,40 @@ async function runPipelineRuntime(options = {}) {
     ? ['keyword']
     : (options.steps || DEFAULT_STEPS);
   const stepFns = injectedStepFns || createDefaultStepFns({ dataDir, runId, params });
+  const existingRuntime = options.preserveRuntime
+    ? readRuntimeState({ dataDir, runId })
+    : null;
+  const startStep = options.retryStep || options.resumeFromStep || existingRuntime?.activeStep || steps[0];
+  const startIndex = Math.max(0, steps.indexOf(startStep));
+  const stepsToRun = steps.slice(startIndex);
 
-  initRuntimeState({ dataDir, runId, steps });
+  if (existingRuntime) {
+    clearRuntimeControl({ dataDir, runId });
+    const progress = options.retryStep
+      ? resetProgressFromStep(existingRuntime.progress || {}, steps, options.retryStep)
+      : (existingRuntime.progress || {});
+    updateRuntimeState({
+      dataDir,
+      runId,
+      patch: {
+        status: options.retryStep ? 'retrying' : 'resuming',
+        activeStep: startStep,
+        requestedAction: null,
+        progress
+      }
+    });
+  } else {
+    initRuntimeState({ dataDir, runId, steps });
+  }
   appendRuntimeEvent({
     dataDir,
     runId,
-    event: { event: 'status', status: 'running', step: steps[0] || '' }
+    event: { event: 'status', status: existingRuntime ? (options.retryStep ? 'retrying' : 'resuming') : 'running', step: startStep || '' }
   });
 
   let lastResult = { runId, runDir, status: 'running' };
   try {
-    for (const step of steps) {
+    for (const step of stepsToRun) {
       updateRuntimeState({
         dataDir,
         runId,

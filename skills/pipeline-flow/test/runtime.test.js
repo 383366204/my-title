@@ -256,6 +256,121 @@ describe('pipeline runtime runner', () => {
     }));
   });
 
+  it('resumes a paused run from the stored active step without rerunning completed steps', async () => {
+    const dataDir = tempDataDir();
+    const firstCalls = [];
+    await runPipelineRuntime({
+      dataDir,
+      runId: 'resume_run',
+      mode: 'daily',
+      params: {},
+      steps: ['mine', 'verify', 'generate'],
+      stepFns: {
+        mine: async ({ reportProgress, runId }) => {
+          firstCalls.push('mine');
+          reportProgress({ current: 1, total: 1, message: 'mine done' });
+          requestRuntimePause({ dataDir, runId, reason: 'pause_before_verify' });
+          return { runId, runDir: path.join(dataDir, 'runs', runId), status: 'mined' };
+        },
+        verify: async () => {
+          firstCalls.push('verify');
+          throw new Error('verify should not run before resume');
+        },
+        generate: async () => {
+          firstCalls.push('generate');
+          throw new Error('generate should not run before resume');
+        }
+      }
+    });
+
+    const secondCalls = [];
+    const result = await runPipelineRuntime({
+      dataDir,
+      runId: 'resume_run',
+      mode: 'daily',
+      params: {},
+      preserveRuntime: true,
+      resumeFromStep: 'verify',
+      steps: ['mine', 'verify', 'generate'],
+      stepFns: {
+        mine: async () => {
+          secondCalls.push('mine');
+          throw new Error('mine should not rerun on resume');
+        },
+        verify: async ({ reportProgress }) => {
+          secondCalls.push('verify');
+          reportProgress({ current: 1, total: 1, message: 'verify done' });
+          return { status: 'verified' };
+        },
+        generate: async ({ reportProgress }) => {
+          secondCalls.push('generate');
+          reportProgress({ current: 1, total: 1, message: 'generate done' });
+          return { status: 'generated' };
+        }
+      }
+    });
+
+    assert.deepEqual(firstCalls, ['mine']);
+    assert.deepEqual(secondCalls, ['verify', 'generate']);
+    assert.equal(result.runtimeStatus, 'completed');
+    const runtime = readRuntimeState({ dataDir, runId: 'resume_run' });
+    assert.equal(runtime.status, 'completed');
+    assert.equal(runtime.progress.mine.status, 'completed');
+    assert.equal(runtime.progress.verify.status, 'completed');
+    assert.equal(runtime.progress.generate.status, 'completed');
+  });
+
+  it('retries a selected step and resets downstream progress', async () => {
+    const dataDir = tempDataDir();
+    await runPipelineRuntime({
+      dataDir,
+      runId: 'retry_step_run',
+      mode: 'daily',
+      params: {},
+      steps: ['mine', 'verify', 'generate'],
+      stepFns: {
+        mine: async () => ({ status: 'mined' }),
+        verify: async () => ({ status: 'verified' }),
+        generate: async () => ({ status: 'generated' })
+      }
+    });
+
+    const calls = [];
+    const result = await runPipelineRuntime({
+      dataDir,
+      runId: 'retry_step_run',
+      mode: 'daily',
+      params: {},
+      preserveRuntime: true,
+      retryStep: 'verify',
+      steps: ['mine', 'verify', 'generate'],
+      stepFns: {
+        mine: async () => {
+          calls.push('mine');
+          throw new Error('mine should not rerun when retrying verify');
+        },
+        verify: async ({ reportProgress }) => {
+          calls.push('verify');
+          reportProgress({ current: 1, total: 1, message: 'verify retried' });
+          return { status: 'verified' };
+        },
+        generate: async ({ reportProgress }) => {
+          calls.push('generate');
+          reportProgress({ current: 1, total: 1, message: 'generate rerun' });
+          return { status: 'generated' };
+        }
+      }
+    });
+
+    assert.deepEqual(calls, ['verify', 'generate']);
+    assert.equal(result.runtimeStatus, 'completed');
+    const runtime = readRuntimeState({ dataDir, runId: 'retry_step_run' });
+    assert.equal(runtime.status, 'completed');
+    assert.equal(runtime.progress.mine.status, 'completed');
+    assert.equal(runtime.progress.verify.status, 'completed');
+    assert.equal(runtime.progress.generate.status, 'completed');
+  });
+
   it('preserves generate_failed pipeline status and marks runtime failed', async () => {
     const dataDir = tempDataDir();
     const result = await runPipelineRuntime({
