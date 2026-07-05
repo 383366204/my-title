@@ -16,6 +16,7 @@ const {
   initRuntimeState,
   updateRuntimeState,
   readRuntimeControl,
+  clearRuntimeControl,
   appendRuntimeEvent
 } = require('./store');
 
@@ -64,6 +65,14 @@ function normalizeProgress(progress = {}) {
     percent: clampPercent(current, total),
     message: progress.message || ''
   };
+}
+
+function idleProgress() {
+  return { status: 'idle', current: 0, total: 0, percent: 0, message: '' };
+}
+
+function completedProgress(message = '完成') {
+  return { status: 'completed', current: 1, total: 1, percent: 100, message };
 }
 
 function createReporter({ dataDir, getRunId, step }) {
@@ -140,6 +149,7 @@ function nextStepAfter(steps, step) {
 
 function runtimeStatusForPipelineStatus(pipelineStatus) {
   if (pipelineStatus === 'cancelled') return 'cancelled';
+  if (pipelineStatus === 'paused') return 'paused';
   if (FAILED_PIPELINE_STATUSES.has(pipelineStatus)) return 'failed';
   if (BLOCKED_PIPELINE_STATUSES.has(pipelineStatus)) return 'blocked';
   if (REVIEW_PIPELINE_STATUSES.has(pipelineStatus)) return 'needs_review';
@@ -219,7 +229,7 @@ async function runPipelineRuntime(options = {}) {
         runId,
         patch: {
           progress: {
-            [step]: { status: 'completed', current: 1, total: 1, percent: 100, message: '完成' }
+            [step]: completedProgress()
           }
         }
       });
@@ -230,6 +240,7 @@ async function runPipelineRuntime(options = {}) {
       });
 
       const control = readRuntimeControl({ dataDir, runId });
+      const nextStep = nextStepAfter(steps, step);
       if (control.requestedAction === 'cancel') {
         updateRuntimeState({
           dataDir,
@@ -237,7 +248,7 @@ async function runPipelineRuntime(options = {}) {
           patch: {
             status: 'cancelled',
             requestedAction: 'cancel',
-            activeStep: nextStepAfter(steps, step)
+            activeStep: nextStep
           }
         });
         appendRuntimeEvent({
@@ -246,6 +257,25 @@ async function runPipelineRuntime(options = {}) {
           event: { event: 'status', status: 'cancelled', reason: control.reason || '' }
         });
         return { runId, runDir, status: 'cancelled', runtimeStatus: 'cancelled' };
+      }
+
+      if (control.requestedAction === 'pause') {
+        clearRuntimeControl({ dataDir, runId });
+        updateRuntimeState({
+          dataDir,
+          runId,
+          patch: {
+            status: 'paused',
+            requestedAction: 'pause',
+            activeStep: nextStep
+          }
+        });
+        appendRuntimeEvent({
+          dataDir,
+          runId,
+          event: { event: 'status', status: 'paused', reason: control.reason || '' }
+        });
+        return { runId, runDir, status: 'paused', runtimeStatus: 'paused' };
       }
 
       if (lastResult.status && STOP_STATUSES.has(lastResult.status)) break;

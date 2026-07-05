@@ -216,6 +216,46 @@ describe('pipeline runtime runner', () => {
     assert.equal(runtime.activeStep, 'verify');
   });
 
+  it('pauses between safe step boundaries and records the next active step', async () => {
+    const dataDir = tempDataDir();
+    const calls = [];
+    const result = await runPipelineRuntime({
+      dataDir,
+      runId: 'pause_boundary_run',
+      mode: 'daily',
+      params: {},
+      steps: ['mine', 'verify', 'generate'],
+      stepFns: {
+        mine: async ({ reportProgress, runId }) => {
+          calls.push('mine');
+          reportProgress({ current: 1, total: 1, message: 'mine done' });
+          requestRuntimePause({ dataDir, runId, reason: 'user_pause' });
+          return { runId, runDir: path.join(dataDir, 'runs', runId), status: 'mined' };
+        },
+        verify: async () => {
+          calls.push('verify');
+          throw new Error('verify should not run after pause');
+        },
+        generate: async () => {
+          calls.push('generate');
+          throw new Error('generate should not run after pause');
+        }
+      }
+    });
+
+    assert.deepEqual(calls, ['mine']);
+    assert.equal(result.status, 'paused');
+    assert.equal(result.runtimeStatus, 'paused');
+    const runtime = readRuntimeState({ dataDir, runId: 'pause_boundary_run' });
+    assert.equal(runtime.status, 'paused');
+    assert.equal(runtime.activeStep, 'verify');
+    assert.equal(runtime.progress.mine.status, 'completed');
+    assert.equal(runtime.progress.verify.status, 'idle');
+    assert.ok(readRuntimeEvents({ dataDir, runId: 'pause_boundary_run' }).some(event => {
+      return event.event === 'status' && event.status === 'paused';
+    }));
+  });
+
   it('preserves generate_failed pipeline status and marks runtime failed', async () => {
     const dataDir = tempDataDir();
     const result = await runPipelineRuntime({
