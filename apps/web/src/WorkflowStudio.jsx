@@ -893,7 +893,7 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
   const activeMonitorAction = getPipelineActionView(activeMonitorSummary);
   const isRunActive = runStatus === 'running' || runStatus === 'pending';
   const canCancelRun = Boolean(currentRunId) && isRunActive;
-  const canPauseRun = Boolean(currentRunId) && isRunActive && isLegacyWorkflowRun(currentRunId);
+  const canPauseRun = Boolean(currentRunId) && runStatus === 'running';
   const selectedNodeCanRecover = Boolean(currentRunId && selectedNode) && (
     isLegacyWorkflowRun(currentRunId)
     || isPipelineRecoverableNode(selectedNode.id)
@@ -1249,11 +1249,17 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
     const shouldUsePipelineStep = (action === 'retry-node' || action === 'resume')
       && isPipelineRecoverableNode(targetNodeId)
       && !isLegacyWorkflowRun(currentRunId);
-    const endpoint = shouldUsePipelineStep
-      ? `/api/pipeline/runs/${currentRunId}/${targetNodeId}`
-      : (action === 'retry-node'
-          ? `/api/workflows/runs/${currentRunId}/retry-node`
-          : `/api/workflows/runs/${currentRunId}/${action}`);
+    const endpoint = action === 'pause' && !isLegacyWorkflowRun(currentRunId)
+      ? `/api/pipeline/runs/${currentRunId}/pause`
+      : action === 'resume' && !isLegacyWorkflowRun(currentRunId)
+        ? `/api/pipeline/runs/${currentRunId}/resume`
+        : shouldUsePipelineStep && action === 'retry-node'
+          ? `/api/pipeline/runs/${currentRunId}/${targetNodeId}/retry`
+          : shouldUsePipelineStep
+            ? `/api/pipeline/runs/${currentRunId}/resume`
+            : (action === 'retry-node'
+                ? `/api/workflows/runs/${currentRunId}/retry-node`
+                : `/api/workflows/runs/${currentRunId}/${action}`);
 
     try {
       const res = await fetch(endpoint, {
@@ -1817,9 +1823,9 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
                       <div className="text-[11px]">{selectedNode.data.actionHint}</div>
                     </div>
                   )}
-                  {['waiting_manual', 'retryable', 'paused', 'blocked'].includes(selectedNode.data.status) && selectedNodeCanRecover && (
+                  {['waiting_manual', 'retryable', 'paused', 'blocked', 'failed'].includes(selectedNode.data.status) && selectedNodeCanRecover && (
                     <div className="flex gap-2 pt-1">
-                      {selectedNode.data.status === 'retryable' && (
+                      {['retryable', 'failed'].includes(selectedNode.data.status) && (
                         <button
                           type="button"
                           className="secondary-button px-3 py-1.5 text-xs font-semibold w-full"

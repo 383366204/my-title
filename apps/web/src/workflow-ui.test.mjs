@@ -144,9 +144,9 @@ test('getWorkflowNodeAction maps review and terminal states to node actions', ()
     tone: 'warn'
   });
   assert.deepEqual(getWorkflowNodeAction('generate', 'failed'), {
-    label: '查看阻塞',
-    action: 'blocked',
-    tone: 'danger'
+    label: '重试节点',
+    action: 'retry-node',
+    tone: 'warn'
   });
   assert.deepEqual(getWorkflowNodeAction('export', 'blocked'), {
     label: '查看阻塞',
@@ -159,6 +159,11 @@ test('getWorkflowNodeAction maps review and terminal states to node actions', ()
     tone: 'success'
   });
   assert.deepEqual(getWorkflowNodeAction('mine', 'waiting_manual'), {
+    label: '继续流程',
+    action: 'resume',
+    tone: 'warn'
+  });
+  assert.deepEqual(getWorkflowNodeAction('verify', 'paused'), {
     label: '继续流程',
     action: 'resume',
     tone: 'warn'

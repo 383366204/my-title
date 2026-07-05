@@ -64,10 +64,16 @@ export function getWorkflowNodeAction(nodeId, state) {
   if (normalizedState === 'waiting_manual') {
     return { label: '继续流程', action: 'resume', tone: 'warn' };
   }
+  if (normalizedState === 'paused') {
+    return { label: '继续流程', action: 'resume', tone: 'warn' };
+  }
   if (normalizedState === 'retryable') {
     return { label: '重试节点', action: 'retry-node', tone: 'warn' };
   }
-  if (normalizedState === 'blocked' || normalizedState === 'failed') {
+  if (normalizedState === 'failed') {
+    return { label: '重试节点', action: 'retry-node', tone: 'warn' };
+  }
+  if (normalizedState === 'blocked') {
     return { label: '查看阻塞', action: 'blocked', tone: 'danger' };
   }
   if (normalizedState === 'completed') {

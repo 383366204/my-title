@@ -402,6 +402,34 @@ describe('workflow pipeline adapter', () => {
     assert.equal(run.nodeStates.generate.status, 'idle');
   });
 
+  it('maps paused runtime state to the active pipeline node', () => {
+    const dataDir = tempPipelineDir();
+    const runId = 'paused_runtime_run';
+    const runDir = path.join(dataDir, 'runs', runId);
+    writeJson(path.join(runDir, 'run.json'), {
+      runId,
+      status: 'mined',
+      startedAt: '2026-06-29T04:00:00.000Z',
+      updatedAt: '2026-06-29T04:01:00.000Z',
+      counts: {},
+      files: {}
+    });
+    writeJson(path.join(runDir, 'runtime.json'), {
+      status: 'paused',
+      activeStep: WORKFLOW_NODE_IDS.verify,
+      steps: ['mine', 'verify', 'generate', 'export', 'review'],
+      progress: {
+        mine: { status: 'completed', current: 1, total: 1, percent: 100, message: '完成' }
+      }
+    });
+
+    const run = getWorkflowRun({ dataDir, runId });
+
+    assert.equal(run.nodeStates.verify.status, 'paused');
+    assert.equal(run.nodeStates.verify.progress.status, 'paused');
+    assert.equal(run.status, 'paused');
+  });
+
   it('maps explicit pipeline statuses to production node states', () => {
     const cases = [
       {

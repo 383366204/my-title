@@ -386,7 +386,9 @@ function nodeState(id, type, status, output = null, summary = {}) {
         }),
     blocker: runNodeState.blocker || null,
     actionHint: runNodeState.actionHint || null,
+    platform: runNodeState.platform || null,
     platformStatus: runNodeState.platformStatus || null,
+    manualAction: runNodeState.manualAction || null,
     durationMs: runNodeState.durationMs || null,
     outputSummary: runNodeState.outputSummary || null
   };
@@ -419,6 +421,7 @@ function nodeStatusFromRuntimeProgress(progress) {
   if (status === 'waiting_manual') return 'waiting_manual';
   if (status === 'retryable') return 'retryable';
   if (status === 'paused') return 'paused';
+  if (status === 'resuming' || status === 'retrying') return 'running';
   if (status === 'needs_review') return 'needs_review';
   if (status === 'waiting_confirmation') return 'waiting_confirmation';
   if (status === 'completed') return 'completed';
@@ -557,20 +560,30 @@ function buildNodeStates(summary) {
       progress: normalizedProgress,
       blocker: progressDetails.blocker || states[nodeId].blocker || null,
       actionHint: progressDetails.actionHint || states[nodeId].actionHint || null,
+      platform: progressDetails.platform || states[nodeId].platform || null,
       platformStatus: progressDetails.platformStatus || states[nodeId].platformStatus || null,
+      manualAction: progressDetails.manualAction || states[nodeId].manualAction || null,
       durationMs: progressDetails.durationMs || states[nodeId].durationMs || null,
       outputSummary: progressDetails.outputSummary || states[nodeId].outputSummary || null
     };
   });
-  if (runtime && runtime.activeStep && states[runtime.activeStep] && !states[runtime.activeStep].progress) {
+  if (runtime && runtime.activeStep && states[runtime.activeStep]) {
+    const runtimeStatus = nodeStatusFromRuntimeProgress({ status: runtime.status }) || 'running';
+    const activeProgress = states[runtime.activeStep].progress || {};
     states[runtime.activeStep] = {
       ...states[runtime.activeStep],
-      status: runtime.status === 'cancelled' ? 'cancelled' : 'running',
+      status: runtimeStatus,
       output: states[runtime.activeStep].output || outputForNode(runtime.activeStep, summary),
-      progress: normalizeNodeProgress({ status: runtime.status === 'cancelled' ? 'cancelled' : 'running' }),
+      progress: normalizeNodeProgress({
+        ...activeProgress,
+        status: runtimeStatus,
+        message: activeProgress.message || (runtimeStatus === 'paused' ? '已暂停' : '')
+      }),
       blocker: runtime.blocker || states[runtime.activeStep].blocker || null,
       actionHint: runtime.actionHint || states[runtime.activeStep].actionHint || null,
+      platform: runtime.platform || states[runtime.activeStep].platform || null,
       platformStatus: runtime.platformStatus || states[runtime.activeStep].platformStatus || null,
+      manualAction: runtime.manualAction || states[runtime.activeStep].manualAction || null,
       durationMs: runtime.durationMs || states[runtime.activeStep].durationMs || null,
       outputSummary: runtime.outputSummary || states[runtime.activeStep].outputSummary || null
     };
