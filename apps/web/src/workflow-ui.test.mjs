@@ -12,7 +12,8 @@ import {
   formatWorkflowProgressLabel,
   normalizeWorkflowProgressEvent,
   getStartNodeParams,
-  getWorkflowLaunchBlocker
+  getWorkflowLaunchBlocker,
+  getWorkflowNodeViewModel
 } from './workflow-ui.js';
 import {
   labelPipelineStatus,
@@ -178,6 +179,42 @@ test('getWorkflowNodeAction maps review and terminal states to node actions', ()
     action: 'inspect',
     tone: 'muted'
   });
+});
+
+test('getWorkflowNodeViewModel returns Chinese status, progress, blocker, and action metadata', () => {
+  const view = getWorkflowNodeViewModel('verify', {
+    status: 'waiting_manual',
+    progress: { current: 2, total: 5, percent: 40, message: '等待生意参谋登录' },
+    blocker: 'sycm_login_required',
+    actionHint: '请登录生意参谋后继续',
+    cooldownRemainingMs: 0
+  });
+
+  assert.equal(view.statusLabel, '等待人工处理');
+  assert.equal(view.tone, 'warn');
+  assert.equal(view.progressLabel, '等待生意参谋登录 · 2/5 · 40%');
+  assert.equal(view.primaryAction.action, 'resume');
+  assert.equal(view.primaryAction.label, '继续流程');
+  assert.equal(view.blockerTitle, '需要人工处理');
+  assert.match(view.blockerMessage, /生意参谋/);
+});
+
+test('getWorkflowNodeViewModel describes rate cooldown and retryable failures', () => {
+  const cooldown = getWorkflowNodeViewModel('mine', {
+    status: 'running',
+    progress: { percent: 30, message: '1688 请求冷却中' },
+    cooldownRemainingMs: 65000
+  });
+  assert.equal(cooldown.blockerTitle, '请求冷却中');
+  assert.match(cooldown.blockerMessage, /65 秒/);
+
+  const retryable = getWorkflowNodeViewModel('generate', {
+    status: 'retryable',
+    error: 'LLM timeout'
+  });
+  assert.equal(retryable.primaryAction.action, 'retry-node');
+  assert.equal(retryable.blockerTitle, '可以重试');
+  assert.match(retryable.blockerMessage, /LLM timeout/);
 });
 
 test('summarizeWorkflowArtifact describes jsonl, markdown, text, and empty artifacts', () => {

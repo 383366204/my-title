@@ -82,6 +82,84 @@ export function getWorkflowNodeAction(nodeId, state) {
   return { label: '查看节点', action: 'inspect', tone: getCanvasNodeTone(normalizedState) };
 }
 
+export function labelWorkflowNodeStatus(status) {
+  const normalized = String(status || '').toLowerCase();
+  const labels = {
+    idle: '未开始',
+    pending: '等待启动',
+    running: '运行中',
+    resuming: '继续中',
+    retrying: '重试中',
+    completed: '已完成',
+    paused: '已暂停',
+    waiting_manual: '等待人工处理',
+    waiting_confirmation: '等待确认',
+    needs_review: '等待复核',
+    retryable: '待重试',
+    blocked: '已阻塞',
+    failed: '失败',
+    cancelled: '已取消'
+  };
+  return labels[normalized] || '未知状态';
+}
+
+export function getWorkflowBlockerView(state = {}) {
+  const status = String(state.status || '').toLowerCase();
+  const blocker = String(state.blocker || '').toLowerCase();
+  const error = String(state.error || '').trim();
+  const actionHint = String(state.actionHint || '').trim();
+  const cooldown = Number(state.cooldownRemainingMs || 0);
+
+  if (cooldown > 0) {
+    return {
+      title: '请求冷却中',
+      message: `平台请求频率受限，约 ${Math.ceil(cooldown / 1000)} 秒后可继续。`
+    };
+  }
+  if (status === 'waiting_manual' || /login|slider|captcha|manual|sycm|taobao|1688/.test(blocker)) {
+    return {
+      title: '需要人工处理',
+      message: actionHint || error || '请处理平台登录、滑块或授权后继续流程。'
+    };
+  }
+  if (status === 'retryable') {
+    return {
+      title: '可以重试',
+      message: error || actionHint || '该节点失败但可以从当前节点重试。'
+    };
+  }
+  if (status === 'blocked' || status === 'failed') {
+    return {
+      title: status === 'failed' ? '执行失败' : '流程阻塞',
+      message: error || actionHint || state.blocker || '请查看节点详情后处理。'
+    };
+  }
+  return null;
+}
+
+export function getWorkflowNodeViewModel(nodeId, state = {}) {
+  const status = state.status || state.state || 'idle';
+  const progress = state.progress || null;
+  const blocker = getWorkflowBlockerView(state);
+  return {
+    nodeId,
+    status,
+    statusLabel: labelWorkflowNodeStatus(status),
+    tone: getCanvasNodeTone(status),
+    progress,
+    progressLabel: formatWorkflowProgressLabel(progress),
+    progressPercent: progress && Number.isFinite(Number(progress.percent))
+      ? Math.max(0, Math.min(100, Number(progress.percent)))
+      : 0,
+    primaryAction: getWorkflowNodeAction(nodeId, status),
+    blockerTitle: blocker?.title || '',
+    blockerMessage: blocker?.message || '',
+    hasBlocker: Boolean(blocker),
+    durationMs: Number.isFinite(Number(state.durationMs)) ? Number(state.durationMs) : null,
+    outputSummary: state.outputSummary || ''
+  };
+}
+
 /**
  * 汇总 workflow 节点产物的前端展示文案。
  * @param {object|null} artifact 节点产物。
