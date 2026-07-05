@@ -520,6 +520,7 @@ const NODE_LAYOUT = {
   'keyword-mining': { x: 520, y: 160 },
   'title-generator': { x: 980, y: 160 }
 };
+const PIPELINE_RECOVERABLE_NODE_IDS = new Set(['mine', 'verify', 'generate', 'export']);
 const NODE_ROW_GAP = 190;
 const DAILY_START_FIELDS = [
   { key: 'mine', label: '挖掘候选词', min: 1, max: 200 },
@@ -532,6 +533,10 @@ const DAILY_START_FIELDS = [
 ];
 
 const unwrapApiData = (payload) => payload?.data || payload || {};
+
+const isPipelineRecoverableNode = (nodeId) => PIPELINE_RECOVERABLE_NODE_IDS.has(String(nodeId || ''));
+
+const isLegacyWorkflowRun = (runId) => String(runId || '').startsWith('run_');
 
 const normalizeTemplateList = (payload) => {
   const data = unwrapApiData(payload);
@@ -888,6 +893,11 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
   const activeMonitorAction = getPipelineActionView(activeMonitorSummary);
   const isRunActive = runStatus === 'running' || runStatus === 'pending';
   const canCancelRun = Boolean(currentRunId) && isRunActive;
+  const canPauseRun = Boolean(currentRunId) && isRunActive && isLegacyWorkflowRun(currentRunId);
+  const selectedNodeCanRecover = Boolean(currentRunId && selectedNode) && (
+    isLegacyWorkflowRun(currentRunId)
+    || isPipelineRecoverableNode(selectedNode.id)
+  );
   const selectedMonitorStage = MONITOR_STAGES.find((stage) => stage.id === selectedMonitorNodeId) || MONITOR_STAGES[0];
   const monitorNodes = useMemo(() => {
     return MONITOR_STAGES.map((stage, index) => ({
@@ -1232,6 +1242,38 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
     }
   };
 
+  // 运行工作流恢复与操作
+  const runWorkflowOperation = async (action, nodeId = null) => {
+    if (!currentRunId) return;
+    const targetNodeId = nodeId || selectedNodeId;
+    const shouldUsePipelineStep = (action === 'retry-node' || action === 'resume')
+      && isPipelineRecoverableNode(targetNodeId)
+      && !isLegacyWorkflowRun(currentRunId);
+    const endpoint = shouldUsePipelineStep
+      ? `/api/pipeline/runs/${currentRunId}/${targetNodeId}`
+      : (action === 'retry-node'
+          ? `/api/workflows/runs/${currentRunId}/retry-node`
+          : `/api/workflows/runs/${currentRunId}/${action}`);
+
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: action === 'retry-node' && !shouldUsePipelineStep
+          ? JSON.stringify({ nodeId: targetNodeId })
+          : '{}'
+      });
+      const payload = await res.json();
+      if (!res.ok || payload.ok === false) {
+        throw new Error(payload.error || '工作流操作失败');
+      }
+      await loadHistoryRun(currentRunId);
+    } catch (err) {
+      alert(`操作失败: ${err.message}`);
+      console.error(err);
+    }
+  };
+
   // 画布添加新节点
   const handleAddNode = (type) => {
     const labels = {
@@ -1484,13 +1526,24 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
             )}
 
             {isRunActive ? (
-              <button
-                onClick={handleCancelWorkflow}
-                disabled={!canCancelRun}
-                className="px-4 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold rounded-md flex items-center gap-1.5 shadow-lg shadow-amber-900/20 transition-all"
-              >
-                <Square size={13} fill="currentColor" /> 取消运行
-              </button>
+              <>
+                {canPauseRun && (
+                  <button
+                    type="button"
+                    className="secondary-button px-3 py-1.5 text-xs font-semibold"
+                    onClick={() => runWorkflowOperation('pause')}
+                  >
+                    暂停
+                  </button>
+                )}
+                <button
+                  onClick={handleCancelWorkflow}
+                  disabled={!canCancelRun}
+                  className="px-4 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold rounded-md flex items-center gap-1.5 shadow-lg shadow-amber-900/20 transition-all"
+                >
+                  <Square size={13} fill="currentColor" /> 取消运行
+                </button>
+              </>
             ) : (
               <button
                 onClick={handleRunWorkflow}
@@ -1762,6 +1815,28 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
                     <div className="bg-amber-950/30 p-2.5 rounded border border-amber-900/50 text-amber-300">
                       <div className="font-semibold text-amber-400 mb-0.5">提示建议:</div>
                       <div className="text-[11px]">{selectedNode.data.actionHint}</div>
+                    </div>
+                  )}
+                  {['waiting_manual', 'retryable', 'paused', 'blocked'].includes(selectedNode.data.status) && selectedNodeCanRecover && (
+                    <div className="flex gap-2 pt-1">
+                      {selectedNode.data.status === 'retryable' && (
+                        <button
+                          type="button"
+                          className="secondary-button px-3 py-1.5 text-xs font-semibold w-full"
+                          onClick={() => runWorkflowOperation('retry-node', selectedNode.id)}
+                        >
+                          重试节点
+                        </button>
+                      )}
+                      {['waiting_manual', 'paused', 'blocked'].includes(selectedNode.data.status) && (
+                        <button
+                          type="button"
+                          className="secondary-button px-3 py-1.5 text-xs font-semibold w-full"
+                          onClick={() => runWorkflowOperation('resume', selectedNode.id)}
+                        >
+                          继续流程
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>

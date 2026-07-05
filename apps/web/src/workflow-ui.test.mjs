@@ -159,13 +159,13 @@ test('getWorkflowNodeAction maps review and terminal states to node actions', ()
     tone: 'success'
   });
   assert.deepEqual(getWorkflowNodeAction('mine', 'waiting_manual'), {
-    label: '去人工处理',
-    action: 'manual',
+    label: '继续流程',
+    action: 'resume',
     tone: 'warn'
   });
   assert.deepEqual(getWorkflowNodeAction('generate', 'retryable'), {
-    label: '立即重试',
-    action: 'retry',
+    label: '重试节点',
+    action: 'retry-node',
     tone: 'warn'
   });
   assert.deepEqual(getWorkflowNodeAction('mine', 'idle'), {

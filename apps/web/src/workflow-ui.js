@@ -62,10 +62,10 @@ export function getWorkflowNodeAction(nodeId, state) {
     return { label: '处理复核', action: 'review', tone: 'warn' };
   }
   if (normalizedState === 'waiting_manual') {
-    return { label: '去人工处理', action: 'manual', tone: 'warn' };
+    return { label: '继续流程', action: 'resume', tone: 'warn' };
   }
   if (normalizedState === 'retryable') {
-    return { label: '立即重试', action: 'retry', tone: 'warn' };
+    return { label: '重试节点', action: 'retry-node', tone: 'warn' };
   }
   if (normalizedState === 'blocked' || normalizedState === 'failed') {
     return { label: '查看阻塞', action: 'blocked', tone: 'danger' };
