@@ -200,6 +200,86 @@ test('workflow recovery APIs - pause, resume, and retry', async (t) => {
       assert.strictEqual(payloadNonExistent.ok, false);
     });
 
+    await t.test('production pipeline pause resume and retry endpoints', async () => {
+      const runId = 'api_pipeline_recovery_run';
+      const baseUrl = `http://127.0.0.1:${port}`;
+      const {
+        initRuntimeState,
+        readRuntimeState,
+        updateRuntimeState
+      } = require('../skills/pipeline-flow/runtime/store');
+      const pipelineDataDir = path.join(process.cwd(), 'data', 'pipeline');
+      const runDir = path.join(pipelineDataDir, 'runs', runId);
+      fs.rmSync(runDir, { recursive: true, force: true });
+      fs.mkdirSync(runDir, { recursive: true });
+      fs.writeFileSync(path.join(runDir, 'run.json'), JSON.stringify({
+        runId,
+        status: 'mined',
+        startedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        counts: {},
+        files: {}
+      }, null, 2), 'utf8');
+      initRuntimeState({
+        dataDir: pipelineDataDir,
+        runId,
+        steps: ['mine', 'verify', 'generate', 'export', 'review']
+      });
+      updateRuntimeState({
+        dataDir: pipelineDataDir,
+        runId,
+        patch: {
+          activeStep: 'verify'
+        }
+      });
+      const originalRunner = app.locals.pipelineRuntimeRunner;
+      const runnerCalls = [];
+      app.locals.pipelineRuntimeRunner = async (options) => {
+        runnerCalls.push(options);
+        updateRuntimeState({
+          dataDir: pipelineDataDir,
+          runId: options.runId,
+          patch: {
+            status: 'completed',
+            activeStep: options.retryStep || options.resumeFromStep || 'mine'
+          }
+        });
+        return { runId: options.runId, status: 'completed', runtimeStatus: 'completed' };
+      };
+
+      try {
+        const pauseRes = await fetch(`${baseUrl}/api/pipeline/runs/${runId}/pause`, { method: 'POST' });
+        const pausePayload = await pauseRes.json();
+        assert.strictEqual(pauseRes.status, 200);
+        assert.strictEqual(pausePayload.ok, true);
+        assert.strictEqual(pausePayload.data.control.requestedAction, 'pause');
+
+        const retryRes = await fetch(`${baseUrl}/api/pipeline/runs/${runId}/verify/retry`, { method: 'POST' });
+        const retryPayload = await retryRes.json();
+        assert.strictEqual(retryRes.status, 200);
+        assert.strictEqual(retryPayload.ok, true);
+        assert.strictEqual(retryPayload.data.control.requestedAction, 'retry-step');
+        assert.strictEqual(retryPayload.data.control.step, 'verify');
+
+        await new Promise((resolve) => setImmediate(resolve));
+
+        const resumeRes = await fetch(`${baseUrl}/api/pipeline/runs/${runId}/resume`, { method: 'POST' });
+        const resumePayload = await resumeRes.json();
+        assert.strictEqual(resumeRes.status, 200);
+        assert.strictEqual(resumePayload.ok, true);
+        assert.strictEqual(resumePayload.data.control.requestedAction, 'resume');
+
+        const runtime = readRuntimeState({ dataDir: pipelineDataDir, runId });
+        assert.ok(runtime);
+        assert.strictEqual(runnerCalls.length, 2);
+        assert.strictEqual(runnerCalls[0].retryStep, 'verify');
+        assert.strictEqual(runnerCalls[1].resumeFromStep, 'verify');
+      } finally {
+        app.locals.pipelineRuntimeRunner = originalRunner;
+        fs.rmSync(runDir, { recursive: true, force: true });
+      }
+    });
+
   } finally {
     await new Promise((resolve) => server.close(resolve));
     // clean up temporary files in directory

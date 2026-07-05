@@ -50,6 +50,9 @@ const {
 const {
   readRuntimeState,
   requestRuntimeCancel,
+  requestRuntimePause,
+  requestRuntimeResume,
+  requestRuntimeRetryStep,
   readRuntimeEvents
 } = require('../skills/pipeline-flow/runtime/store');
 
@@ -418,6 +421,96 @@ app.post('/api/pipeline/runs/:runId/candidates', async (req, res) => {
   }
 });
 
+app.post('/api/pipeline/runs/:runId/pause', (req, res) => {
+  const runId = req.params.runId;
+  if (!isValidWorkflowRunIdParam(runId)) {
+    return res.status(400).json({ ok: false, error: '无效的运行 ID。' });
+  }
+  try {
+    const runtime = readRuntimeState({ runId });
+    if (!runtime) return res.status(404).json({ ok: false, error: '未找到该流程运行记录' });
+    const control = requestRuntimePause({
+      runId,
+      reason: req.body?.reason || 'user_paused'
+    });
+    res.json({ ok: true, data: pipelineRunResponse(runId, { control }) });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post('/api/pipeline/runs/:runId/resume', async (req, res) => {
+  const runId = req.params.runId;
+  if (!isValidWorkflowRunIdParam(runId)) {
+    return res.status(400).json({ ok: false, error: '无效的运行 ID。' });
+  }
+  if (activeWorkbenchProcess) {
+    return res.status(409).json({ ok: false, error: '已有工作流正在运行，请等待完成后再继续。' });
+  }
+  try {
+    const runtime = readRuntimeState({ runId });
+    if (!runtime) return res.status(404).json({ ok: false, error: '未找到该流程运行记录' });
+    const control = requestRuntimeResume({ runId });
+    const promise = getPipelineRuntimeRunner()({
+      runId,
+      mode: runtime.steps?.includes('keyword') ? 'keyword' : 'daily',
+      preserveRuntime: true,
+      resumeFromStep: runtime.activeStep,
+      steps: runtime.steps
+    });
+    const runState = { runId, mode: 'resume', promise };
+    activeWorkbenchProcess = runState;
+    promise.then(result => {
+      originalLog(`[Pipeline Resume] runtime 完成，runId=${result.runId}, status=${result.runtimeStatus || result.status}`);
+    }).catch(err => {
+      originalError(`[Pipeline Resume] runtime 失败，runId=${runId}:`, err.message);
+    }).finally(() => {
+      if (activeWorkbenchProcess === runState) activeWorkbenchProcess = null;
+    });
+    res.json({ ok: true, data: pipelineRunResponse(runId, { control }) });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post('/api/pipeline/runs/:runId/:step/retry', async (req, res) => {
+  const runId = req.params.runId;
+  const step = String(req.params.step || '');
+  if (!isValidWorkflowRunIdParam(runId)) {
+    return res.status(400).json({ ok: false, error: '无效的运行 ID。' });
+  }
+  if (!['mine', 'verify', 'generate', 'export'].includes(step)) {
+    return res.status(400).json({ ok: false, error: '不支持的流程步骤。' });
+  }
+  if (activeWorkbenchProcess) {
+    return res.status(409).json({ ok: false, error: '已有工作流正在运行，请等待完成后再重试。' });
+  }
+  try {
+    const runtime = readRuntimeState({ runId });
+    if (!runtime) return res.status(404).json({ ok: false, error: '未找到该流程运行记录' });
+    const control = requestRuntimeRetryStep({ runId, step });
+    const promise = getPipelineRuntimeRunner()({
+      runId,
+      mode: runtime.steps?.includes('keyword') ? 'keyword' : 'daily',
+      preserveRuntime: true,
+      retryStep: step,
+      steps: runtime.steps
+    });
+    const runState = { runId, mode: 'retry-step', promise };
+    activeWorkbenchProcess = runState;
+    promise.then(result => {
+      originalLog(`[Pipeline Retry] runtime 完成，runId=${result.runId}, status=${result.runtimeStatus || result.status}`);
+    }).catch(err => {
+      originalError(`[Pipeline Retry] runtime 失败，runId=${runId}, step=${step}:`, err.message);
+    }).finally(() => {
+      if (activeWorkbenchProcess === runState) activeWorkbenchProcess = null;
+    });
+    res.json({ ok: true, data: pipelineRunResponse(runId, { control }) });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 app.post('/api/pipeline/runs/:runId/:step', async (req, res) => {
   const runId = req.params.runId;
   const step = String(req.params.step || '');
@@ -440,6 +533,19 @@ app.post('/api/pipeline/runs/:runId/:step', async (req, res) => {
     res.status(500).json({ ok: false, error: err.message });
   }
 });
+
+function getPipelineRuntimeRunner() {
+  return app.locals.pipelineRuntimeRunner || runPipelineRuntime;
+}
+
+function pipelineRunResponse(runId, extra = {}) {
+  return {
+    ...extra,
+    runId,
+    runtime: readRuntimeState({ runId }),
+    currentRun: withPipelineRuntimeFields(summarizePipelineRun({ runId }))
+  };
+}
 
 function withPipelineRuntimeFields(summary) {
   if (!summary || !summary.runId) return summary || null;
