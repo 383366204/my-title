@@ -160,6 +160,22 @@ export function getWorkflowNodeViewModel(nodeId, state = {}) {
   };
 }
 
+export function getWorkflowNodeDetailRows(node = {}) {
+  const data = node.data || {};
+  const view = getWorkflowNodeViewModel(node.id, data);
+  const rows = [
+    { label: '状态', value: view.statusLabel }
+  ];
+  if (view.progressLabel) rows.push({ label: '进度', value: view.progressLabel });
+  if (data.keyword) rows.push({ label: '关键词', value: data.keyword });
+  if (data.count) rows.push({ label: '数量', value: `${data.count}` });
+  if (data.maxLength) rows.push({ label: '标题长度', value: `${data.maxLength}` });
+  if (view.outputSummary) rows.push({ label: '输出摘要', value: view.outputSummary });
+  if (data.error) rows.push({ label: '错误', value: data.error });
+  if (view.blockerMessage && !data.error) rows.push({ label: view.blockerTitle || '提示', value: view.blockerMessage });
+  return rows.filter((row) => row.value !== null && row.value !== undefined && String(row.value).trim() !== '');
+}
+
 /**
  * 汇总 workflow 节点产物的前端展示文案。
  * @param {object|null} artifact 节点产物。

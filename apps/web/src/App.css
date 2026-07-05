@@ -557,6 +557,60 @@ code, pre {
   padding: 12px;
 }
 
+.workflow-detail-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.62);
+}
+
+.workflow-detail-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.workflow-detail-card-head span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.workflow-detail-card-head b {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.workflow-detail-rows {
+  display: grid;
+  gap: 7px;
+}
+
+.workflow-detail-row {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  font-size: 12px;
+}
+
+.workflow-detail-row span {
+  color: var(--text-muted);
+}
+
+.workflow-detail-row strong {
+  min-width: 0;
+  color: var(--text-secondary);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
 .workflow-artifact-head {
   display: flex;
   align-items: center;

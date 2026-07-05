@@ -13,7 +13,8 @@ import {
   normalizeWorkflowProgressEvent,
   getStartNodeParams,
   getWorkflowLaunchBlocker,
-  getWorkflowNodeViewModel
+  getWorkflowNodeViewModel,
+  getWorkflowNodeDetailRows
 } from './workflow-ui.js';
 import {
   labelPipelineStatus,
@@ -215,6 +216,23 @@ test('getWorkflowNodeViewModel describes rate cooldown and retryable failures', 
   assert.equal(retryable.primaryAction.action, 'retry-node');
   assert.equal(retryable.blockerTitle, '可以重试');
   assert.match(retryable.blockerMessage, /LLM timeout/);
+});
+
+test('getWorkflowNodeDetailRows summarizes inputs, progress, output, and error', () => {
+  const rows = getWorkflowNodeDetailRows({
+    id: 'generate',
+    data: {
+      keyword: '纯银项链',
+      status: 'failed',
+      progress: { current: 1, total: 3, percent: 33, message: '生成标题失败' },
+      error: 'LLM timeout',
+      outputSummary: '生成 2 个标题'
+    }
+  });
+
+  assert.deepEqual(rows.map((row) => row.label), ['状态', '进度', '关键词', '输出摘要', '错误']);
+  assert.equal(rows.find((row) => row.label === '状态').value, '失败');
+  assert.match(rows.find((row) => row.label === '进度').value, /生成标题失败/);
 });
 
 test('summarizeWorkflowArtifact describes jsonl, markdown, text, and empty artifacts', () => {

@@ -33,6 +33,7 @@ import {
   formatWorkflowProgressLabel,
   getStartNodeParams,
   getWorkflowLaunchBlocker,
+  getWorkflowNodeDetailRows,
   getWorkflowNodeViewModel,
   isWorkflowInputNodeType,
   normalizeWorkflowProgressEvent,
@@ -1658,82 +1659,45 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
           </div>
         ) : selectedNode ? (
           <div className="p-5 flex-1 overflow-y-auto space-y-6">
-            <div>
-              <span className="text-[10px] uppercase font-bold tracking-widest text-slate-500 block mb-1">
-                节点 ID & 类型
-              </span>
-              <div className="font-mono text-xs text-slate-400 bg-slate-950/50 p-2 rounded border border-slate-800 break-all">
-                {selectedNode.id} ({selectedNode.data?.originalType || selectedNode.type})
+            <div className="workflow-detail-card">
+              <div className="workflow-detail-card-head">
+                <span>{selectedNode.data?.label || selectedNode.id}</span>
+                <b>{getWorkflowNodeViewModel(selectedNode.id, selectedNode.data).statusLabel}</b>
+              </div>
+              <div className="workflow-detail-rows">
+                <div className="workflow-detail-row">
+                  <span>节点</span>
+                  <strong>{selectedNode.id} ({selectedNode.data?.originalType || selectedNode.type})</strong>
+                </div>
+                {getWorkflowNodeDetailRows(selectedNode).map((row) => (
+                  <div className="workflow-detail-row" key={row.label}>
+                    <span>{row.label}</span>
+                    <strong>{row.value}</strong>
+                  </div>
+                ))}
               </div>
             </div>
 
-            {selectedNode.data?.status && (
-              <div className="border-t border-slate-800/80 pt-4">
-                <span className="text-[10px] uppercase font-bold tracking-widest text-slate-500 block mb-1.5">
-                  运行状态与指标
-                </span>
-                <div className="space-y-2 text-xs">
-                  <div className="flex justify-between items-center bg-slate-950/50 p-2 rounded border border-slate-800">
-                    <span className="text-slate-400">当前状态</span>
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                      selectedNode.data.status === 'completed' ? 'bg-emerald-950 border border-emerald-800 text-emerald-300' :
-                      selectedNode.data.status === 'running' ? 'bg-blue-950 border border-blue-800 text-blue-300' :
-                      selectedNode.data.status === 'failed' ? 'bg-rose-950 border border-rose-800 text-rose-300' :
-                      selectedNode.data.status === 'blocked' ? 'bg-red-950 border border-red-800 text-red-300' :
-                      selectedNode.data.status === 'waiting_manual' ? 'bg-amber-950 border border-amber-800 text-amber-300' :
-                      selectedNode.data.status === 'retryable' ? 'bg-orange-950 border border-orange-800 text-orange-300' :
-                      'bg-slate-950 border border-slate-800 text-slate-400'
-                    }`}>
-                      {labelPipelineStatus(selectedNode.data.status)}
-                    </span>
-                  </div>
-                  {selectedNode.data.durationMs !== undefined && selectedNode.data.durationMs !== null && (
-                    <div className="flex justify-between items-center bg-slate-950/50 p-2 rounded border border-slate-800">
-                      <span className="text-slate-400">耗时</span>
-                      <span className="text-slate-200">{(selectedNode.data.durationMs / 1000).toFixed(2)} 秒</span>
-                    </div>
-                  )}
-                  {selectedNode.data.blocker && (
-                    <div className="bg-rose-950/30 p-2.5 rounded border border-rose-900/50 text-rose-300">
-                      <div className="font-semibold text-rose-400 mb-0.5">阻塞原因:</div>
-                      <div className="text-[11px] font-mono">{selectedNode.data.blocker}</div>
-                    </div>
-                  )}
-                  {selectedNode.data.cooldownRemainingMs > 0 && (
-                    <div className="bg-blue-950/30 p-2.5 rounded border border-blue-900/50 text-blue-300">
-                      <div className="font-semibold text-blue-400 mb-0.5">冷却时间:</div>
-                      <div className="text-[11px]">还剩 {Math.ceil(selectedNode.data.cooldownRemainingMs / 1000)} 秒</div>
-                    </div>
-                  )}
-                  {selectedNode.data.actionHint && (
-                    <div className="bg-amber-950/30 p-2.5 rounded border border-amber-900/50 text-amber-300">
-                      <div className="font-semibold text-amber-400 mb-0.5">提示建议:</div>
-                      <div className="text-[11px]">{selectedNode.data.actionHint}</div>
-                    </div>
-                  )}
-                  {['waiting_manual', 'retryable', 'paused', 'blocked', 'failed'].includes(selectedNode.data.status) && selectedNodeCanRecover && (
-                    <div className="flex gap-2 pt-1">
-                      {['retryable', 'failed'].includes(selectedNode.data.status) && (
-                        <button
-                          type="button"
-                          className="secondary-button px-3 py-1.5 text-xs font-semibold w-full"
-                          onClick={() => runWorkflowOperation('retry-node', selectedNode.id)}
-                        >
-                          重试节点
-                        </button>
-                      )}
-                      {['waiting_manual', 'paused', 'blocked'].includes(selectedNode.data.status) && (
-                        <button
-                          type="button"
-                          className="secondary-button px-3 py-1.5 text-xs font-semibold w-full"
-                          onClick={() => runWorkflowOperation('resume', selectedNode.id)}
-                        >
-                          继续流程
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
+            {selectedNode.data?.status && ['waiting_manual', 'retryable', 'paused', 'blocked', 'failed'].includes(selectedNode.data.status) && selectedNodeCanRecover && (
+              <div className="flex gap-2">
+                {['retryable', 'failed'].includes(selectedNode.data.status) && (
+                  <button
+                    type="button"
+                    className="secondary-button px-3 py-1.5 text-xs font-semibold w-full"
+                    onClick={() => runWorkflowOperation('retry-node', selectedNode.id)}
+                  >
+                    重试节点
+                  </button>
+                )}
+                {['waiting_manual', 'paused', 'blocked'].includes(selectedNode.data.status) && (
+                  <button
+                    type="button"
+                    className="secondary-button px-3 py-1.5 text-xs font-semibold w-full"
+                    onClick={() => runWorkflowOperation('resume', selectedNode.id)}
+                  >
+                    继续流程
+                  </button>
+                )}
               </div>
             )}
 
