@@ -65,11 +65,7 @@ const { getPlatformAccessStatus } = require('../core/platform-access-guard');
 const app = express();
 app.use(express.json());
 
-const legacyWebPath = path.join(__dirname, '../web');
 const reactWebPath = path.join(__dirname, '../apps/web/dist');
-
-// Keep the old native UI as a rollback-only fallback while React owns the main entry.
-app.use('/legacy', express.static(legacyWebPath));
 
 // AsyncLocalStorage for concurrent SSE log routing
 const logStorage = new AsyncLocalStorage();

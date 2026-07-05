@@ -737,7 +737,6 @@ code, pre {
 }
 
 .nav-button,
-.legacy-link,
 .icon-button,
 .primary-button,
 .secondary-button {
@@ -752,7 +751,6 @@ code, pre {
 }
 
 .nav-button,
-.legacy-link,
 .primary-button,
 .secondary-button {
   display: inline-flex;
@@ -769,7 +767,6 @@ code, pre {
 }
 
 .nav-button:hover,
-.legacy-link:hover,
 .icon-button:hover,
 .secondary-button:hover {
   border-color: #475569;
@@ -781,14 +778,6 @@ code, pre {
   border-color: #14b8a6;
   background: rgba(20, 184, 166, 0.12);
   color: #99f6e4;
-}
-
-.legacy-link {
-  margin-top: auto;
-  padding: 8px 10px;
-  color: #94a3b8;
-  font-size: 12px;
-  text-decoration: none;
 }
 
 .app-main {
@@ -1728,11 +1717,6 @@ textarea:focus {
   box-shadow: 0 4px 12px rgba(139, 92, 246, 0.1);
 }
 
-.legacy-link {
-  border-color: var(--card-border);
-  background: rgba(255, 255, 255, 0.04);
-}
-
 .sidebar-tools {
   margin-top: auto;
   display: grid;
@@ -1847,8 +1831,7 @@ textarea:focus {
 }
 
 .secondary-button:hover,
-.icon-button:hover,
-.legacy-link:hover {
+.icon-button:hover {
   border-color: rgba(139, 92, 246, 0.34);
   background: rgba(139, 92, 246, 0.1);
   color: #fff;

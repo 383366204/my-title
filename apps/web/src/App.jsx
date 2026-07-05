@@ -148,7 +148,6 @@ function AppShell({ activeTab, setActiveTab, children }) {
           {showDeveloperTools && (
             <div className="sidebar-tool-menu">
               <button type="button" onClick={() => setActiveTab('workflow')}>流程画布</button>
-              <a href="/legacy/">旧版备份</a>
             </div>
           )}
         </div>

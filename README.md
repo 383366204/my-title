@@ -73,12 +73,12 @@ npm run ui:react
 http://localhost:3000/
 ```
 
-Web UI 的主操作入口是旧版浏览器工作台：
+Web UI 的主操作入口是 React 浏览器工作台：
 
 - `工作台`：每日流程启动、最新 run 状态、阻断原因、铺货复核批次。
 - `挖词选品`：种子词管理、候选词挖掘、去重与验真状态。
 - `标题生成`：单词/候选词标题与货源生成。
-- `流程监控`：同一 tab 打开 `/workflow/`，默认展示真实 `data/pipeline/runs/*` 的只读流程图。
+- `流程监控`：在同一 React 应用内展示真实 `data/pipeline/runs/*` 的流程图。
 
 React Flow 页面现在分为两个视图：
 
@@ -93,7 +93,7 @@ React Flow 页面现在分为两个视图：
 npm run web:dev
 ```
 
-Web UI 位于 `web/` 和 `apps/web/`，后端 API 入口位于 `bin/server.js`。生产运行时 `npm run ui:react` 会先构建 React 流程监控，再启动 Express 服务。
+Web UI 位于 `apps/web/`，后端 API 入口位于 `bin/server.js`。生产运行时 `npm run ui:react` 会先构建 React 工作台，再启动 Express 服务。
 
 ## MCP Server
 
