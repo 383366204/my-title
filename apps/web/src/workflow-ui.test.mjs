@@ -14,7 +14,8 @@ import {
   getStartNodeParams,
   getWorkflowLaunchBlocker,
   getWorkflowNodeViewModel,
-  getWorkflowNodeDetailRows
+  getWorkflowNodeDetailRows,
+  getWorkflowOperationMessage
 } from './workflow-ui.js';
 import {
   labelPipelineStatus,
@@ -233,6 +234,13 @@ test('getWorkflowNodeDetailRows summarizes inputs, progress, output, and error',
   assert.deepEqual(rows.map((row) => row.label), ['状态', '进度', '关键词', '输出摘要', '错误']);
   assert.equal(rows.find((row) => row.label === '状态').value, '失败');
   assert.match(rows.find((row) => row.label === '进度').value, /生成标题失败/);
+});
+
+test('getWorkflowOperationMessage returns clear Chinese feedback', () => {
+  assert.equal(getWorkflowOperationMessage('pause', 'success'), '已请求暂停，当前步骤会在安全边界停止。');
+  assert.equal(getWorkflowOperationMessage('resume', 'success'), '已请求继续，流程会从当前节点恢复。');
+  assert.equal(getWorkflowOperationMessage('retry-node', 'success'), '已请求重试，当前节点及下游步骤会重新执行。');
+  assert.match(getWorkflowOperationMessage('retry-node', 'error', 'network'), /network/);
 });
 
 test('summarizeWorkflowArtifact describes jsonl, markdown, text, and empty artifacts', () => {

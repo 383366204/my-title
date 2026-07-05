@@ -176,6 +176,23 @@ export function getWorkflowNodeDetailRows(node = {}) {
   return rows.filter((row) => row.value !== null && row.value !== undefined && String(row.value).trim() !== '');
 }
 
+export function getWorkflowOperationMessage(action, result, error = '') {
+  if (result === 'error') {
+    const prefix = action === 'pause'
+      ? '暂停请求失败'
+      : action === 'resume'
+        ? '继续请求失败'
+        : action === 'retry-node'
+          ? '重试请求失败'
+          : '操作失败';
+    return `${prefix}: ${error || '未知错误'}`;
+  }
+  if (action === 'pause') return '已请求暂停，当前步骤会在安全边界停止。';
+  if (action === 'resume') return '已请求继续，流程会从当前节点恢复。';
+  if (action === 'retry-node') return '已请求重试，当前节点及下游步骤会重新执行。';
+  return '操作已提交。';
+}
+
 /**
  * 汇总 workflow 节点产物的前端展示文案。
  * @param {object|null} artifact 节点产物。

@@ -35,6 +35,7 @@ import {
   getWorkflowLaunchBlocker,
   getWorkflowNodeDetailRows,
   getWorkflowNodeViewModel,
+  getWorkflowOperationMessage,
   isWorkflowInputNodeType,
   normalizeWorkflowProgressEvent,
   summarizeWorkflowArtifact
@@ -1162,9 +1163,20 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
       if (!res.ok || payload.ok === false) {
         throw new Error(payload.error || '工作流操作失败');
       }
+      setLogs((prev) => [...prev, {
+        timestamp: new Date().toISOString(),
+        level: 'info',
+        message: getWorkflowOperationMessage(action, 'success')
+      }]);
       await loadHistoryRun(currentRunId);
     } catch (err) {
-      alert(`操作失败: ${err.message}`);
+      const message = getWorkflowOperationMessage(action, 'error', err.message);
+      setLogs((prev) => [...prev, {
+        timestamp: new Date().toISOString(),
+        level: 'error',
+        message
+      }]);
+      alert(message);
       console.error(err);
     }
   };
