@@ -21,6 +21,7 @@ import {
 import WorkflowStudio from './WorkflowStudio.jsx';
 import {
   BUSINESS_FUNNEL,
+  getMiningRecoveryAction,
   getMiningRecoveryHint,
   getWorkflowAction,
   mapPipelineStageToFunnel,
@@ -416,7 +417,7 @@ function WorkbenchLauncher({ onStart }) {
   );
 }
 
-function MiningView({ onSendToTitle, historyService, pipeline }) {
+function MiningView({ onSendToTitle, onNavigate, historyService, pipeline }) {
   const [seeds, setSeeds] = useState([]);
   const [seedForm, setSeedForm] = useState({ keyword: '', category: '', priority: 5, type: 'manual' });
   const [config, setConfig] = useState({ count: 50, source: 'hybrid', minSearchPopularity: 50, sycmPrecheck: true, autoSeedHighTier: false });
@@ -429,12 +430,18 @@ function MiningView({ onSendToTitle, historyService, pipeline }) {
   const [minerBusy, setMinerBusy] = useState(false);
   const [pipelineBusy, setPipelineBusy] = useState('');
   const [pipelineMessage, setPipelineMessage] = useState('');
+  const [recoveryAddedCount, setRecoveryAddedCount] = useState(0);
   const [recoveryMessage, setRecoveryMessage] = useState('');
   const [seedSearch, setSeedSearch] = useState('');
   const eventSourceRef = useRef(null);
   const pipelineAction = getPipelineActionView(pipeline.currentRun);
   const pipelineSummary = getPipelineSummaryText(pipeline.currentRun);
   const miningRecoveryHint = getMiningRecoveryHint(pipeline.currentRun);
+  const miningRecoveryAction = getMiningRecoveryAction(pipeline.currentRun, recoveryAddedCount);
+
+  useEffect(() => {
+    if (pipeline.currentRun?.status !== 'verified_empty') setRecoveryAddedCount(0);
+  }, [pipeline.currentRun?.runId, pipeline.currentRun?.status]);
 
   const filteredSeeds = useMemo(() => {
     const query = seedSearch.trim().toLowerCase();
@@ -578,6 +585,24 @@ function MiningView({ onSendToTitle, historyService, pipeline }) {
     }
   };
 
+  const retryPipelineVerify = async () => {
+    if (!miningRecoveryAction.canRetryVerify) {
+      setPipelineMessage(miningRecoveryAction.message || '请先补充新的候选词。');
+      return;
+    }
+    setPipelineBusy('retry-verify');
+    setPipelineMessage('');
+    try {
+      const result = await pipeline.retryStep('verify');
+      setRecoveryAddedCount(0);
+      setPipelineMessage(`已提交重跑验真，通过 ${result.currentRun?.counts?.sycmVerified ?? 0} 个。`);
+    } catch (err) {
+      setPipelineMessage(err.message);
+    } finally {
+      setPipelineBusy('');
+    }
+  };
+
   const appendCurrentCandidates = async (items = candidates) => {
     const rows = Array.isArray(items) ? items : [];
     if (rows.length === 0) return;
@@ -585,7 +610,15 @@ function MiningView({ onSendToTitle, historyService, pipeline }) {
     setPipelineMessage('');
     try {
       const result = await pipeline.appendCandidates(rows);
-      setPipelineMessage(`已加入当前流程 ${result.result?.added || 0} 个，跳过重复 ${result.result?.skipped || 0} 个。`);
+      const added = Number(result.result?.added || 0);
+      const skipped = Number(result.result?.skipped || 0);
+      if (added > 0) setRecoveryAddedCount((current) => current + added);
+      const suffix = added > 0 && pipeline.currentRun?.status === 'verified_empty'
+        ? '可以重跑生意参谋校验。'
+        : added === 0 && pipeline.currentRun?.status === 'verified_empty'
+          ? '没有新增候选词，请先换一批词。'
+          : '';
+      setPipelineMessage(`已加入当前流程 ${added} 个，跳过重复 ${skipped} 个。${suffix}`);
     } catch (err) {
       setPipelineMessage(err.message);
     } finally {
@@ -629,6 +662,7 @@ function MiningView({ onSendToTitle, historyService, pipeline }) {
           </p>
           {pipeline.currentRun && <small>{pipelineAction.description}</small>}
           {miningRecoveryHint && <small className="pipeline-recovery-hint">{miningRecoveryHint}</small>}
+          {miningRecoveryAction.visible && <small className="pipeline-recovery-hint">{miningRecoveryAction.message}</small>}
         </div>
         <div className="context-actions">
           <button className="secondary-button" type="button" onClick={pipeline.refreshRun} disabled={pipeline.loading}>
@@ -642,6 +676,23 @@ function MiningView({ onSendToTitle, historyService, pipeline }) {
             {pipelineBusy === 'verify' ? <RefreshCw size={15} className="spin" /> : <CheckCircle2 size={15} />}
             执行大盘验真
           </button>
+          {miningRecoveryAction.visible && (
+            <>
+              <button className="secondary-button" type="button" onClick={() => onNavigate?.('workflow')} disabled={Boolean(pipelineBusy)}>
+                <FlaskConical size={15} /> 回到流程画布
+              </button>
+              <button
+                className="primary-button"
+                type="button"
+                onClick={retryPipelineVerify}
+                disabled={!miningRecoveryAction.canRetryVerify || Boolean(pipelineBusy)}
+                title={miningRecoveryAction.canRetryVerify ? miningRecoveryAction.message : '请先补充新的候选词'}
+              >
+                {pipelineBusy === 'retry-verify' ? <RefreshCw size={15} className="spin" /> : <CheckCircle2 size={15} />}
+                {miningRecoveryAction.label}
+              </button>
+            </>
+          )}
         </div>
       </section>
       {pipelineMessage && <div className="form-message">{pipelineMessage}</div>}
@@ -1070,7 +1121,7 @@ export default function App() {
           onClearReviewProduct={(id) => setReviewProducts((current) => current.filter((item) => item.id !== id))}
         />
       )}
-      {activeTab === 'mine' && <MiningView onSendToTitle={sendToTitle} historyService={historyService} pipeline={pipeline} />}
+      {activeTab === 'mine' && <MiningView onSendToTitle={sendToTitle} onNavigate={setActiveTab} historyService={historyService} pipeline={pipeline} />}
       {activeTab === 'title' && (
         <TitleView
           sourceCandidate={sourceCandidate}

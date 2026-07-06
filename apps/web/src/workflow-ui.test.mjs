@@ -17,6 +17,7 @@ import {
   getWorkflowLaunchBlocker,
   getWorkflowBlockerActions,
   getMiningRecoveryHint,
+  getMiningRecoveryAction,
   getWorkflowNodeViewModel,
   getWorkflowNodeDetailRows,
   getWorkflowOperationMessage,
@@ -278,6 +279,35 @@ test('getMiningRecoveryHint explains how to recover a verified-empty run', () =>
     status: 'verified_empty',
     counts: { candidates: 1, sycmVerified: 0, sycmRejected: 1 }
   }), '当前流程验真无结果。补充候选词后，回到流程画布重跑“生意参谋校验”。');
+});
+
+test('getMiningRecoveryAction only allows verify retry after new candidates are added', () => {
+  assert.deepEqual(getMiningRecoveryAction({
+    status: 'verified_empty',
+    counts: { candidates: 1, sycmVerified: 0, sycmRejected: 1 }
+  }, 0), {
+    visible: true,
+    canRetryVerify: false,
+    label: '重跑生意参谋校验',
+    message: '请先补充新的候选词，重复词不会触发重跑验真。'
+  });
+
+  assert.deepEqual(getMiningRecoveryAction({
+    status: 'verified_empty',
+    counts: { candidates: 3, sycmVerified: 0, sycmRejected: 1 }
+  }, 2), {
+    visible: true,
+    canRetryVerify: true,
+    label: '重跑生意参谋校验',
+    message: '已补充 2 个候选词，可以从生意参谋校验节点重跑。'
+  });
+
+  assert.deepEqual(getMiningRecoveryAction({ status: 'mined' }, 2), {
+    visible: false,
+    canRetryVerify: false,
+    label: '',
+    message: ''
+  });
 });
 
 test('getWorkflowNodeDetailRows summarizes inputs, progress, output, and error', () => {

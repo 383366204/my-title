@@ -244,6 +244,27 @@ export function getMiningRecoveryHint(run = null) {
   return '';
 }
 
+export function getMiningRecoveryAction(run = null, addedCandidateCount = 0) {
+  if (!run || run.status !== 'verified_empty') {
+    return { visible: false, canRetryVerify: false, label: '', message: '' };
+  }
+  const added = Number.isFinite(Number(addedCandidateCount)) ? Math.max(0, Number(addedCandidateCount)) : 0;
+  if (added <= 0) {
+    return {
+      visible: true,
+      canRetryVerify: false,
+      label: '重跑生意参谋校验',
+      message: '请先补充新的候选词，重复词不会触发重跑验真。'
+    };
+  }
+  return {
+    visible: true,
+    canRetryVerify: true,
+    label: '重跑生意参谋校验',
+    message: `已补充 ${added} 个候选词，可以从生意参谋校验节点重跑。`
+  };
+}
+
 export function getWorkflowNodeViewModel(nodeId, state = {}) {
   const status = state.status || state.state || 'idle';
   const progress = state.progress || null;
