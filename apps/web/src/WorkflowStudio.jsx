@@ -34,6 +34,7 @@ import {
   getPipelineMonitorNodeStatus,
   getPipelineSummaryVisualState,
   getStartNodeParams,
+  getWorkflowBlockerActions,
   getWorkflowLaunchBlocker,
   getWorkflowNodeDetailRows,
   getWorkflowNodeViewModel,
@@ -535,7 +536,7 @@ const formatDateTime = (value) => {
   return date.toLocaleString();
 };
 
-export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
+export default function WorkflowStudio({ initialMode = MODE_MONITOR, onNavigate }) {
   const [mode, setMode] = useState(initialMode);
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
@@ -764,6 +765,10 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
     isLegacyWorkflowRun(currentRunId)
     || isPipelineRecoverableNode(selectedNode.id)
   );
+  const selectedNodeBlockerActions = useMemo(() => {
+    if (!selectedNode?.data?.status || !selectedNodeCanRecover) return [];
+    return getWorkflowBlockerActions(selectedNode.id, selectedNode.data);
+  }, [selectedNode, selectedNodeCanRecover]);
   const selectedMonitorStage = MONITOR_STAGES.find((stage) => stage.id === selectedMonitorNodeId) || MONITOR_STAGES[0];
   const monitorNodes = useMemo(() => {
     return MONITOR_STAGES.map((stage, index) => ({
@@ -1154,6 +1159,27 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
       }]);
       alert(message);
       console.error(err);
+    }
+  };
+
+  const runBlockerAction = async (action, nodeId) => {
+    if (action === 'mine-more') {
+      onNavigate?.('mine');
+      const message = '已切到挖词选品页。补充候选词后回到流程画布重跑验真。';
+      setOperationMessage(message);
+      setLogs((prev) => [...prev, {
+        timestamp: new Date().toISOString(),
+        level: 'info',
+        message
+      }]);
+      return;
+    }
+    if (action === 'retry-node') {
+      await runWorkflowOperation('retry-node', nodeId);
+      return;
+    }
+    if (action === 'resume' || action === 'resume-after-manual' || action === 'continue-or-fix-sycm') {
+      await runWorkflowOperation('resume', nodeId);
     }
   };
 
@@ -1689,26 +1715,19 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR }) {
               </div>
             </div>
 
-            {selectedNode.data?.status && ['waiting_manual', 'retryable', 'paused', 'blocked', 'failed'].includes(selectedNode.data.status) && selectedNodeCanRecover && (
-              <div className="flex gap-2">
-                {['retryable', 'failed'].includes(selectedNode.data.status) && (
+            {selectedNodeBlockerActions.length > 0 && (
+              <div className="workflow-blocker-actions">
+                {selectedNodeBlockerActions.map((action) => (
                   <button
                     type="button"
-                    className="secondary-button px-3 py-1.5 text-xs font-semibold w-full"
-                    onClick={() => runWorkflowOperation('retry-node', selectedNode.id)}
+                    className="workflow-blocker-action"
+                    key={`${action.action}-${action.label}`}
+                    onClick={() => runBlockerAction(action.action, selectedNode.id)}
                   >
-                    重试节点
+                    <span>{action.label}</span>
+                    {action.description && <small>{action.description}</small>}
                   </button>
-                )}
-                {['waiting_manual', 'paused', 'blocked'].includes(selectedNode.data.status) && (
-                  <button
-                    type="button"
-                    className="secondary-button px-3 py-1.5 text-xs font-semibold w-full"
-                    onClick={() => runWorkflowOperation('resume', selectedNode.id)}
-                  >
-                    继续流程
-                  </button>
-                )}
+                ))}
               </div>
             )}
 

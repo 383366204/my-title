@@ -1046,7 +1046,7 @@ export default function App() {
     return (
       <AppShell activeTab={activeTab} setActiveTab={setActiveTab}>
         <div className="studio-host">
-          <WorkflowStudio key={activeTab} initialMode="monitor" />
+          <WorkflowStudio key={activeTab} initialMode="monitor" onNavigate={setActiveTab} />
         </div>
       </AppShell>
     );
