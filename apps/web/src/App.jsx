@@ -21,6 +21,7 @@ import {
 import WorkflowStudio from './WorkflowStudio.jsx';
 import {
   BUSINESS_FUNNEL,
+  getMiningRecoveryHint,
   getWorkflowAction,
   mapPipelineStageToFunnel,
   normalizeCandidateForTitle,
@@ -433,6 +434,7 @@ function MiningView({ onSendToTitle, historyService, pipeline }) {
   const eventSourceRef = useRef(null);
   const pipelineAction = getPipelineActionView(pipeline.currentRun);
   const pipelineSummary = getPipelineSummaryText(pipeline.currentRun);
+  const miningRecoveryHint = getMiningRecoveryHint(pipeline.currentRun);
 
   const filteredSeeds = useMemo(() => {
     const query = seedSearch.trim().toLowerCase();
@@ -626,6 +628,7 @@ function MiningView({ onSendToTitle, historyService, pipeline }) {
             {pipeline.currentRun ? pipelineSummary : pipelineAction.description}
           </p>
           {pipeline.currentRun && <small>{pipelineAction.description}</small>}
+          {miningRecoveryHint && <small className="pipeline-recovery-hint">{miningRecoveryHint}</small>}
         </div>
         <div className="context-actions">
           <button className="secondary-button" type="button" onClick={pipeline.refreshRun} disabled={pipeline.loading}>

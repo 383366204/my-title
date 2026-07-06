@@ -233,6 +233,17 @@ export function getWorkflowBlockerActions(nodeId, state = {}) {
   ));
 }
 
+export function getMiningRecoveryHint(run = null) {
+  if (!run) return '';
+  if (run.status === 'verified_empty') {
+    return '当前流程验真无结果。补充候选词后，回到流程画布重跑“生意参谋校验”。';
+  }
+  if (run.status === 'manual_action_required' || run.status === 'verified_partial_manual_required') {
+    return '当前流程需要处理生意参谋状态。处理完成后，回到流程画布继续或重跑验真。';
+  }
+  return '';
+}
+
 export function getWorkflowNodeViewModel(nodeId, state = {}) {
   const status = state.status || state.state || 'idle';
   const progress = state.progress || null;

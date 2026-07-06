@@ -16,6 +16,7 @@ import {
   getStartNodeParams,
   getWorkflowLaunchBlocker,
   getWorkflowBlockerActions,
+  getMiningRecoveryHint,
   getWorkflowNodeViewModel,
   getWorkflowNodeDetailRows,
   getWorkflowOperationMessage,
@@ -270,6 +271,13 @@ test('getWorkflowBlockerActions maps verified-empty blockers to useful next acti
   assert.deepEqual(actions.map(action => action.action), ['mine-more', 'retry-node']);
   assert.equal(actions[0].label, '补充候选词');
   assert.equal(actions[1].label, '重跑验真');
+});
+
+test('getMiningRecoveryHint explains how to recover a verified-empty run', () => {
+  assert.equal(getMiningRecoveryHint({
+    status: 'verified_empty',
+    counts: { candidates: 1, sycmVerified: 0, sycmRejected: 1 }
+  }), '当前流程验真无结果。补充候选词后，回到流程画布重跑“生意参谋校验”。');
 });
 
 test('getWorkflowNodeDetailRows summarizes inputs, progress, output, and error', () => {
