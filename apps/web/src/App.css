@@ -676,6 +676,45 @@ code, pre {
   overflow-y: auto;
 }
 
+.artifact-candidate-list {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.artifact-candidate-row {
+  min-width: 0;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.58);
+  padding: 10px;
+}
+
+.artifact-candidate-row strong {
+  display: block;
+  color: #e2e8f0;
+  font-size: 13px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.artifact-candidate-row span {
+  display: block;
+  margin-top: 4px;
+  color: #93c5fd;
+  font-size: 11px;
+}
+
+.artifact-candidate-row p {
+  margin: 5px 0 0;
+  color: #94a3b8;
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
 .artifact-list pre,
 .artifact-text {
   min-width: 0;

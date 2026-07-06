@@ -562,6 +562,7 @@ describe('workflow pipeline adapter', () => {
     const listed = listWorkflowRuns({ dataDir });
     const run = getWorkflowRun({ dataDir, runId });
     const legacyRun = getWorkflowRun(runId, { dataDir });
+    const startArtifact = readWorkflowNodeArtifact({ dataDir, runId, nodeId: WORKFLOW_NODE_IDS.start });
     const mineArtifact = readWorkflowNodeArtifact({ dataDir, runId, nodeId: WORKFLOW_NODE_IDS.mine });
     const generateArtifact = readWorkflowNodeArtifact({ dataDir, runId, nodeId: WORKFLOW_NODE_IDS.generate });
 
@@ -569,6 +570,7 @@ describe('workflow pipeline adapter', () => {
     assert.equal(legacyRun.runId, runId);
     assert.equal(run.nodeStates.generate.status, 'completed');
     assert.equal(run.nodeStates.export.status, 'running');
+    assert.equal(startArtifact, null);
     assert.deepEqual(mineArtifact.rows.map(row => row.keyword), ['项链', '耳环']);
     assert.deepEqual(generateArtifact.rows, [{ title: '纯银项链' }]);
     assert.equal(readWorkflowNodeArtifact({ dataDir, runId, nodeId: WORKFLOW_NODE_IDS.end }), null);

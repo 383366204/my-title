@@ -18,6 +18,7 @@ import {
   getWorkflowBlockerActions,
   getMiningRecoveryHint,
   getMiningRecoveryAction,
+  getWorkflowArtifactView,
   getWorkflowNodeViewModel,
   getWorkflowNodeDetailRows,
   getWorkflowOperationMessage,
@@ -327,6 +328,20 @@ test('getWorkflowNodeDetailRows summarizes inputs, progress, output, and error',
   assert.match(rows.find((row) => row.label === '进度').value, /生成标题失败/);
 });
 
+test('getWorkflowNodeDetailRows lists blocker reason and action hint separately', () => {
+  const rows = getWorkflowNodeDetailRows({
+    id: 'verify',
+    data: {
+      status: 'blocked',
+      blocker: 'verified_empty',
+      actionHint: '生意参谋验真没有通过词。请更换候选词、降低蓝海阈值，或重新挖词后再继续。'
+    }
+  });
+
+  assert.equal(rows.find((row) => row.label === '阻塞原因').value, '验真无结果');
+  assert.match(rows.find((row) => row.label === '处理建议').value, /验真没有通过词/);
+});
+
 test('getWorkflowOperationMessage returns clear Chinese feedback', () => {
   assert.equal(getWorkflowOperationMessage('pause', 'success'), '已请求暂停，当前步骤会在安全边界停止。');
   assert.equal(getWorkflowOperationMessage('resume', 'success'), '已请求继续，流程会从当前节点恢复。');
@@ -342,6 +357,31 @@ test('summarizeWorkflowArtifact describes jsonl, markdown, text, and empty artif
   assert.equal(summarizeWorkflowArtifact({ type: 'text', text: '第一行\n第二行\n' }), '2 行文本');
   assert.equal(summarizeWorkflowArtifact(null), '暂无产物');
   assert.equal(summarizeWorkflowArtifact({ type: 'text', text: '' }), '暂无产物');
+});
+
+test('getWorkflowArtifactView formats mining artifacts as readable candidate rows', () => {
+  const view = getWorkflowArtifactView({
+    nodeId: 'mine',
+    type: 'jsonl',
+    rows: [
+      { keyword: '纯银项链', localScore: 82, reason: '搜索人气高', source: 'hybrid' },
+      { word: '珍珠耳环', score: 71, reason: '竞争较低' }
+    ]
+  });
+
+  assert.equal(view.kind, 'candidate-list');
+  assert.equal(view.emptyText, '暂无候选词');
+  assert.deepEqual(view.rows.map((row) => row.title), ['纯银项链', '珍珠耳环']);
+  assert.match(view.rows[0].meta, /评分 82/);
+  assert.match(view.rows[0].meta, /hybrid/);
+  assert.equal(view.rows[0].description, '搜索人气高');
+});
+
+test('getWorkflowArtifactView treats start nodes as no-artifact nodes', () => {
+  const view = getWorkflowArtifactView(null, 'start');
+
+  assert.equal(view.kind, 'none');
+  assert.equal(view.emptyText, '开始节点没有产物。');
 });
 
 test('normalizeCandidateForTitle carries mining metrics into title context', () => {

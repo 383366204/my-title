@@ -35,6 +35,7 @@ import {
   getPipelineSummaryVisualState,
   getStartNodeParams,
   getWorkflowBlockerActions,
+  getWorkflowArtifactView,
   getWorkflowLaunchBlocker,
   getWorkflowNodeDetailRows,
   getWorkflowNodeViewModel,
@@ -472,13 +473,7 @@ const normalizeCanvasNode = (node, selectNode) => {
 
 const ArtifactPanel = ({ state }) => {
   const artifact = state.artifact;
-  const type = String(artifact?.type || '').toLowerCase();
-  const items = Array.isArray(artifact?.items) ? artifact.items : artifact?.rows;
-  const text = typeof artifact?.text === 'string'
-    ? artifact.text
-    : typeof artifact?.content === 'string'
-      ? artifact.content
-      : '';
+  const view = getWorkflowArtifactView(artifact, state.nodeId);
 
   return (
     <div className="workflow-artifact-panel">
@@ -493,20 +488,33 @@ const ArtifactPanel = ({ state }) => {
         <div className="artifact-error">{state.error || '节点产物加载失败'}</div>
       )}
       {state.status === 'empty' && (
-        <div className="artifact-empty">{state.error || '运行完成后显示产物，请到运行监控查看。'}</div>
+        <div className="artifact-empty">{state.error || view.emptyText}</div>
       )}
-      {state.status === 'ready' && artifact && Array.isArray(items) && (
+      {state.status === 'ready' && artifact && view.kind === 'candidate-list' && (
+        <div className="artifact-candidate-list">
+          {view.rows.length === 0 ? (
+            <div className="artifact-empty">{view.emptyText}</div>
+          ) : view.rows.map((item, index) => (
+            <div className="artifact-candidate-row" key={`${item.title}-${index}`}>
+              <strong>{item.title}</strong>
+              {item.meta && <span>{item.meta}</span>}
+              {item.description && <p>{item.description}</p>}
+            </div>
+          ))}
+        </div>
+      )}
+      {state.status === 'ready' && artifact && view.kind === 'json-list' && (
         <div className="artifact-list">
-          {items.length === 0 ? (
-            <div className="artifact-empty">暂无 JSON 数据项</div>
-          ) : items.map((item, index) => (
+          {view.rows.length === 0 ? (
+            <div className="artifact-empty">{view.emptyText}</div>
+          ) : view.rows.map((item, index) => (
             <pre key={index}>{JSON.stringify(item, null, 2)}</pre>
           ))}
         </div>
       )}
-      {state.status === 'ready' && artifact && !Array.isArray(items) && (
+      {state.status === 'ready' && artifact && (view.kind === 'text' || view.kind === 'json-text') && (
         <pre className="artifact-text">
-          {text || (type === 'json' ? JSON.stringify(artifact, null, 2) : '暂无文本产物')}
+          {view.text || view.emptyText}
         </pre>
       )}
     </div>
@@ -730,6 +738,7 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR, onNavigate 
     fetch(`/api/workflows/runs/${currentRunId}/artifacts/${selectedNodeId}`)
       .then(async (res) => {
         const payload = await res.json();
+        if (res.status === 404) return null;
         if (payload.ok === false || !res.ok) {
           throw new Error(payload.error || '节点产物加载失败');
         }

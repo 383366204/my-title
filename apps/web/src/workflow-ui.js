@@ -288,6 +288,19 @@ export function getWorkflowNodeViewModel(nodeId, state = {}) {
   };
 }
 
+export function labelWorkflowBlockerReason(blocker) {
+  const normalized = String(blocker || '').toLowerCase();
+  const labels = {
+    verified_empty: '验真无结果',
+    sycm_manual_action_required: '生意参谋需要人工处理',
+    sycm_partial_manual_required: '生意参谋部分阻塞',
+    generate_failed: '标题生成失败',
+    export_empty: '导出无结果',
+    review_rejected_rows: '需要人工复核'
+  };
+  return labels[normalized] || String(blocker || '');
+}
+
 export function getWorkflowNodeDetailRows(node = {}) {
   const data = node.data || {};
   const view = getWorkflowNodeViewModel(node.id, data);
@@ -300,7 +313,9 @@ export function getWorkflowNodeDetailRows(node = {}) {
   if (data.maxLength) rows.push({ label: '标题长度', value: `${data.maxLength}` });
   if (view.outputSummary) rows.push({ label: '输出摘要', value: view.outputSummary });
   if (data.error) rows.push({ label: '错误', value: data.error });
-  if (view.blockerMessage && !data.error) rows.push({ label: view.blockerTitle || '提示', value: view.blockerMessage });
+  if (data.blocker && !data.error) rows.push({ label: '阻塞原因', value: labelWorkflowBlockerReason(data.blocker) });
+  if (data.actionHint && !data.error) rows.push({ label: '处理建议', value: data.actionHint });
+  if (view.blockerMessage && !data.error && !data.actionHint) rows.push({ label: view.blockerTitle || '提示', value: view.blockerMessage });
   return rows.filter((row) => row.value !== null && row.value !== undefined && String(row.value).trim() !== '');
 }
 
@@ -339,6 +354,65 @@ export function summarizeWorkflowArtifact(artifact) {
   if (type === 'markdown' || file.endsWith('.md')) return '复核报告';
   const lines = text.split(/\r?\n/).filter(line => line.length > 0);
   return `${lines.length} 行文本`;
+}
+
+function candidateTitle(row = {}) {
+  return String(row.keyword || row.word || row.title || row.query || row.name || '').trim() || '未命名候选词';
+}
+
+function candidateScore(row = {}) {
+  const value = row.localScore ?? row.score ?? row.sycmScore?.score ?? row.metrics?.score;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.round(numeric) : null;
+}
+
+function candidateMeta(row = {}) {
+  const parts = [];
+  const score = candidateScore(row);
+  if (score !== null) parts.push(`评分 ${score}`);
+  if (row.source) parts.push(String(row.source));
+  if (row.searchPopularity) parts.push(`搜索人气 ${row.searchPopularity}`);
+  if (row.competition) parts.push(`竞争 ${row.competition}`);
+  return parts.join(' · ');
+}
+
+export function getWorkflowArtifactView(artifact, nodeId = '') {
+  const effectiveNodeId = nodeId || artifact?.nodeId || '';
+  if (effectiveNodeId === 'start') {
+    return { kind: 'none', emptyText: '开始节点没有产物。', rows: [], text: '' };
+  }
+  if (!artifact) {
+    return { kind: 'empty', emptyText: '运行完成后显示产物，请到运行监控查看。', rows: [], text: '' };
+  }
+  const type = String(artifact.type || '').toLowerCase();
+  const items = Array.isArray(artifact.items) ? artifact.items : artifact.rows;
+  if (effectiveNodeId === 'mine' && Array.isArray(items)) {
+    return {
+      kind: 'candidate-list',
+      emptyText: '暂无候选词',
+      rows: items.map((item) => ({
+        title: candidateTitle(item),
+        meta: candidateMeta(item),
+        description: String(item.reason || item.keywordOpportunity || item.nextAction || '').trim(),
+        raw: item
+      })),
+      text: ''
+    };
+  }
+  if (Array.isArray(items)) {
+    return { kind: 'json-list', emptyText: '暂无数据项', rows: items, text: '' };
+  }
+  const text = typeof artifact.text === 'string'
+    ? artifact.text
+    : typeof artifact.content === 'string'
+      ? artifact.content
+      : '';
+  return {
+    kind: type === 'json' ? 'json-text' : 'text',
+    emptyText: '暂无文本产物',
+    rows: [],
+    text: text || (type === 'json' ? JSON.stringify(artifact, null, 2) : '')
+  };
 }
 
 export function normalizeCandidateForTitle(candidate = {}) {
