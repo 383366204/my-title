@@ -37,3 +37,27 @@ export function appendPipelineCandidates(runId, candidates, payload = {}) {
     })
   });
 }
+
+export function pausePipelineRun(runId, payload = {}) {
+  return fetchPipelineJson(`/api/pipeline/runs/${encodeURIComponent(runId)}/pause`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload || {})
+  });
+}
+
+export function resumePipelineRun(runId, payload = {}) {
+  return fetchPipelineJson(`/api/pipeline/runs/${encodeURIComponent(runId)}/resume`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload || {})
+  });
+}
+
+export function retryPipelineStep(runId, step, payload = {}) {
+  return fetchPipelineJson(`/api/pipeline/runs/${encodeURIComponent(runId)}/${encodeURIComponent(step)}/retry`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload || {})
+  });
+}
