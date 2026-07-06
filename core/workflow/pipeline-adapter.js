@@ -459,19 +459,34 @@ function summaryInterventionForNode(summary, nodeId) {
     if (status === 'verified_empty') {
       return {
         blocker: 'verified_empty',
-        actionHint: '生意参谋验真没有通过词。请更换候选词、降低蓝海阈值，或重新挖词后再继续。'
+        actionHint: '生意参谋验真没有通过词。请更换候选词、降低蓝海阈值，或重新挖词后再继续。',
+        nextRecommendedAction: {
+          action: 'mine-more',
+          label: '补充候选词',
+          description: '当前没有通过生意参谋验真的词，先补充候选词再重跑验真。'
+        }
       };
     }
     if (status === 'manual_action_required') {
       return {
         blocker: 'sycm_manual_action_required',
-        actionHint: '生意参谋需要人工处理。请确认登录、滑块、权限或功能入口后继续流程。'
+        actionHint: '生意参谋需要人工处理。请确认登录、滑块、权限或功能入口后继续流程。',
+        nextRecommendedAction: {
+          action: 'resume-after-manual',
+          label: '我已处理，继续流程',
+          description: '处理登录、滑块、权限或功能入口后，从当前节点继续。'
+        }
       };
     }
     if (status === 'verified_partial_manual_required') {
       return {
         blocker: 'sycm_partial_manual_required',
-        actionHint: '部分关键词已验真，但生意参谋仍需要人工处理。可先继续使用已通过词，或处理登录、滑块、权限后继续验真。'
+        actionHint: '部分关键词已验真，但生意参谋仍需要人工处理。可先继续使用已通过词，或处理登录、滑块、权限后继续验真。',
+        nextRecommendedAction: {
+          action: 'continue-or-fix-sycm',
+          label: '继续使用已通过词',
+          description: '已有部分关键词通过，可继续生成；也可以先处理生意参谋后重试验真。'
+        }
       };
     }
   }
@@ -593,7 +608,8 @@ function buildNodeStates(summary) {
     memo[nodeId] = {
       ...initialState,
       blocker: intervention?.blocker || initialState.blocker || null,
-      actionHint: intervention?.actionHint || initialState.actionHint || null
+      actionHint: intervention?.actionHint || initialState.actionHint || null,
+      nextRecommendedAction: intervention?.nextRecommendedAction || initialState.nextRecommendedAction || null
     };
     return memo;
   }, {});
@@ -609,6 +625,7 @@ function buildNodeStates(summary) {
       progress: normalizedProgress,
       blocker: progressDetails.blocker || states[nodeId].blocker || null,
       actionHint: progressDetails.actionHint || states[nodeId].actionHint || null,
+      nextRecommendedAction: progressDetails.nextRecommendedAction || states[nodeId].nextRecommendedAction || null,
       platform: progressDetails.platform || states[nodeId].platform || null,
       platformStatus: progressDetails.platformStatus || states[nodeId].platformStatus || null,
       manualAction: progressDetails.manualAction || states[nodeId].manualAction || null,
@@ -630,6 +647,7 @@ function buildNodeStates(summary) {
       }),
       blocker: runtime.blocker || states[runtime.activeStep].blocker || null,
       actionHint: runtime.actionHint || states[runtime.activeStep].actionHint || null,
+      nextRecommendedAction: runtime.nextRecommendedAction || states[runtime.activeStep].nextRecommendedAction || null,
       platform: runtime.platform || states[runtime.activeStep].platform || null,
       platformStatus: runtime.platformStatus || states[runtime.activeStep].platformStatus || null,
       manualAction: runtime.manualAction || states[runtime.activeStep].manualAction || null,

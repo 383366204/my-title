@@ -463,6 +463,11 @@ describe('workflow pipeline adapter', () => {
     assert.equal(run.nodeStates.verify.blocker, 'verified_empty');
     assert.match(run.nodeStates.verify.actionHint, /验真没有通过词/);
     assert.match(run.nodeStates.verify.actionHint, /重新挖词/);
+    assert.deepEqual(run.nodeStates.verify.nextRecommendedAction, {
+      action: 'mine-more',
+      label: '补充候选词',
+      description: '当前没有通过生意参谋验真的词，先补充候选词再重跑验真。'
+    });
   });
 
   it('maps explicit pipeline statuses to production node states', () => {

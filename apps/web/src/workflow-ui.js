@@ -192,6 +192,47 @@ export function getWorkflowBlockerView(state = {}) {
   return null;
 }
 
+export function getWorkflowBlockerActions(nodeId, state = {}) {
+  const status = String(state.status || '').toLowerCase();
+  const blocker = String(state.blocker || '').toLowerCase();
+  const recommended = state.nextRecommendedAction || null;
+  const actions = [];
+
+  if (recommended && recommended.action) {
+    actions.push({
+      action: recommended.action,
+      label: recommended.label || '处理阻塞',
+      description: recommended.description || ''
+    });
+  }
+
+  if (nodeId === 'verify' && blocker === 'verified_empty') {
+    actions.push({
+      action: 'retry-node',
+      label: '重跑验真',
+      description: '补充候选词或调整参数后，从生意参谋校验节点重新执行。'
+    });
+  } else if (['waiting_manual', 'paused', 'blocked'].includes(status)) {
+    actions.push({
+      action: 'resume',
+      label: '继续流程',
+      description: '确认阻塞已处理后，从当前节点继续执行。'
+    });
+  }
+
+  if (['retryable', 'failed'].includes(status)) {
+    actions.push({
+      action: 'retry-node',
+      label: '重试节点',
+      description: '当前节点及下游步骤会重新执行。'
+    });
+  }
+
+  return actions.filter((action, index, list) => (
+    list.findIndex(item => item.action === action.action && item.label === action.label) === index
+  ));
+}
+
 export function getWorkflowNodeViewModel(nodeId, state = {}) {
   const status = state.status || state.state || 'idle';
   const progress = state.progress || null;

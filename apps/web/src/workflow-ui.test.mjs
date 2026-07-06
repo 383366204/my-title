@@ -15,6 +15,7 @@ import {
   normalizeWorkflowProgressEvent,
   getStartNodeParams,
   getWorkflowLaunchBlocker,
+  getWorkflowBlockerActions,
   getWorkflowNodeViewModel,
   getWorkflowNodeDetailRows,
   getWorkflowOperationMessage,
@@ -253,6 +254,22 @@ test('getWorkflowNodeViewModel describes rate cooldown and retryable failures', 
   assert.equal(retryable.primaryAction.action, 'retry-node');
   assert.equal(retryable.blockerTitle, '可以重试');
   assert.match(retryable.blockerMessage, /LLM timeout/);
+});
+
+test('getWorkflowBlockerActions maps verified-empty blockers to useful next actions', () => {
+  const actions = getWorkflowBlockerActions('verify', {
+    status: 'blocked',
+    blocker: 'verified_empty',
+    nextRecommendedAction: {
+      action: 'mine-more',
+      label: '补充候选词',
+      description: '当前没有通过生意参谋验真的词，先补充候选词再重跑验真。'
+    }
+  });
+
+  assert.deepEqual(actions.map(action => action.action), ['mine-more', 'retry-node']);
+  assert.equal(actions[0].label, '补充候选词');
+  assert.equal(actions[1].label, '重跑验真');
 });
 
 test('getWorkflowNodeDetailRows summarizes inputs, progress, output, and error', () => {
