@@ -294,6 +294,12 @@ export function labelWorkflowBlockerReason(blocker) {
     verified_empty: '验真无结果',
     sycm_manual_action_required: '生意参谋需要人工处理',
     sycm_partial_manual_required: '生意参谋部分阻塞',
+    sycm_login_required: '生意参谋需要登录',
+    slider_required: '需要滑块验证',
+    captcha_required: '需要验证码',
+    login_required: '需要登录',
+    permission_required: '权限不足',
+    platform_cooldown: '平台请求冷却',
     generate_failed: '标题生成失败',
     export_empty: '导出无结果',
     review_rejected_rows: '需要人工复核'
@@ -304,6 +310,11 @@ export function labelWorkflowBlockerReason(blocker) {
 export function getWorkflowNodeDetailRows(node = {}) {
   const data = node.data || {};
   const view = getWorkflowNodeViewModel(node.id, data);
+  const manualAction = data.manualAction && typeof data.manualAction === 'object' ? data.manualAction : null;
+  const platformStatus = data.platformStatus || manualAction?.status || '';
+  const actionHint = data.actionHint || manualAction?.userMessage || '';
+  const status = String(data.status || data.state || '').toLowerCase();
+  const inferredVerifyBlocked = node.id === 'verify' && status === 'blocked' && !data.blocker && !data.error;
   const rows = [
     { label: '状态', value: view.statusLabel }
   ];
@@ -314,9 +325,29 @@ export function getWorkflowNodeDetailRows(node = {}) {
   if (view.outputSummary) rows.push({ label: '输出摘要', value: view.outputSummary });
   if (data.error) rows.push({ label: '错误', value: data.error });
   if (data.blocker && !data.error) rows.push({ label: '阻塞原因', value: labelWorkflowBlockerReason(data.blocker) });
-  if (data.actionHint && !data.error) rows.push({ label: '处理建议', value: data.actionHint });
-  if (view.blockerMessage && !data.error && !data.actionHint) rows.push({ label: view.blockerTitle || '提示', value: view.blockerMessage });
+  if (inferredVerifyBlocked) rows.push({ label: '阻塞原因', value: '生意参谋校验阻塞' });
+  if (platformStatus && !data.error) rows.push({ label: '平台状态', value: labelWorkflowBlockerReason(platformStatus) });
+  if (actionHint && !data.error) rows.push({ label: '处理建议', value: actionHint });
+  if (inferredVerifyBlocked && !actionHint) {
+    rows.push({ label: '处理建议', value: '请检查生意参谋登录、滑块、权限或验真结果为空，再继续或重跑校验。' });
+  }
+  if (view.blockerMessage && !data.error && !actionHint && !inferredVerifyBlocked) rows.push({ label: view.blockerTitle || '提示', value: view.blockerMessage });
   return rows.filter((row) => row.value !== null && row.value !== undefined && String(row.value).trim() !== '');
+}
+
+export function getWorkflowRuntimeActions({ runStatus = '', nodeId = '', state = {} } = {}) {
+  const normalizedRunStatus = String(runStatus || '').toLowerCase();
+  const normalizedNodeStatus = String(state.status || state.state || '').toLowerCase();
+  const activeRunStatuses = new Set(['pending', 'running', 'created', 'mined', 'verified', 'generated', 'resuming', 'retrying']);
+  const activeNodeStatuses = new Set(['running', 'resuming', 'retrying']);
+  if (!nodeId || !activeRunStatuses.has(normalizedRunStatus) || !activeNodeStatuses.has(normalizedNodeStatus)) {
+    return [];
+  }
+  return [{
+    action: 'pause',
+    label: '暂停当前流程',
+    description: '当前步骤会在安全边界停止，之后可以继续执行。'
+  }];
 }
 
 export function getWorkflowOperationMessage(action, result, error = '') {

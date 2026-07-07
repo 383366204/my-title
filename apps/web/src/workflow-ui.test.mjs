@@ -22,6 +22,7 @@ import {
   getWorkflowNodeViewModel,
   getWorkflowNodeDetailRows,
   getWorkflowOperationMessage,
+  getWorkflowRuntimeActions,
   buildWorkflowOperationRequest,
   labelWorkflowNodeStatus,
   getWorkflowRunActiveNodeId,
@@ -343,6 +344,56 @@ test('getWorkflowNodeDetailRows lists blocker reason and action hint separately'
 
   assert.equal(rows.find((row) => row.label === '阻塞原因').value, '验真无结果');
   assert.match(rows.find((row) => row.label === '处理建议').value, /验真没有通过词/);
+});
+
+test('getWorkflowNodeDetailRows surfaces platform manual-action blocker details', () => {
+  const rows = getWorkflowNodeDetailRows({
+    id: 'verify',
+    data: {
+      status: 'blocked',
+      blocker: 'sycm_manual_action_required',
+      platformStatus: 'slider_required',
+      manualAction: {
+        status: 'slider_required',
+        userMessage: '生意参谋需要完成滑块验证后才能继续。'
+      }
+    }
+  });
+
+  assert.equal(rows.find((row) => row.label === '阻塞原因').value, '生意参谋需要人工处理');
+  assert.equal(rows.find((row) => row.label === '平台状态').value, '需要滑块验证');
+  assert.match(rows.find((row) => row.label === '处理建议').value, /滑块验证/);
+});
+
+test('getWorkflowNodeDetailRows infers verify blocker details when runtime omits a reason', () => {
+  const rows = getWorkflowNodeDetailRows({
+    id: 'verify',
+    data: {
+      status: 'blocked',
+      progress: { current: 1, total: 1, percent: 100, message: '完成' }
+    }
+  });
+
+  assert.equal(rows.find((row) => row.label === '阻塞原因').value, '生意参谋校验阻塞');
+  assert.match(rows.find((row) => row.label === '处理建议').value, /登录、滑块、权限/);
+});
+
+test('getWorkflowRuntimeActions exposes pause while a selected node is running', () => {
+  assert.deepEqual(getWorkflowRuntimeActions({
+    runStatus: 'created',
+    nodeId: 'verify',
+    state: { status: 'running' }
+  }), [{
+    action: 'pause',
+    label: '暂停当前流程',
+    description: '当前步骤会在安全边界停止，之后可以继续执行。'
+  }]);
+
+  assert.deepEqual(getWorkflowRuntimeActions({
+    runStatus: 'blocked',
+    nodeId: 'verify',
+    state: { status: 'blocked' }
+  }), []);
 });
 
 test('getWorkflowOperationMessage returns clear Chinese feedback', () => {

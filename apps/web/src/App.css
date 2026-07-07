@@ -460,6 +460,16 @@ code, pre {
   background: rgba(30, 41, 59, 0.82);
 }
 
+.workflow-runtime-action {
+  border-color: rgba(245, 158, 11, 0.34);
+  background: rgba(120, 53, 15, 0.18);
+}
+
+.workflow-runtime-action:hover {
+  border-color: rgba(245, 158, 11, 0.58);
+  background: rgba(146, 64, 14, 0.24);
+}
+
 .workflow-blocker-action span {
   display: block;
   font-size: 13px;

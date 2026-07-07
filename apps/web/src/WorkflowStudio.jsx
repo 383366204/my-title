@@ -32,6 +32,7 @@ import {
   getWorkflowBlockerActions,
   getWorkflowArtifactView,
   buildWorkflowOperationRequest,
+  getWorkflowRuntimeActions,
   getWorkflowLaunchBlocker,
   getWorkflowNodeDetailRows,
   getWorkflowNodeViewModel,
@@ -354,6 +355,7 @@ const nodeTypes = {
 
 const isInputNodeType = isWorkflowInputNodeType;
 const DEFAULT_WORKFLOW_MODE = 'daily';
+const ACTIVE_RUN_STATUSES = new Set(['pending', 'running', 'created', 'mined', 'verified', 'generated', 'resuming', 'retrying']);
 const DAILY_START_FIELDS = [
   { key: 'mine', label: '挖掘候选词', min: 1, max: 200 },
   { key: 'verify', label: '生意参谋校验', min: 1, max: 200 },
@@ -402,6 +404,7 @@ const normalizeCanvasNode = (node, selectNode) => {
       actionHint: node.data?.actionHint || null,
       nextRecommendedAction: node.data?.nextRecommendedAction || null,
       platformStatus: node.data?.platformStatus || null,
+      manualAction: node.data?.manualAction || null,
       durationMs: node.data?.durationMs || null,
       outputSummary: node.data?.outputSummary || null,
       cooldownRemainingMs: node.data?.cooldownRemainingMs || 0,
@@ -618,15 +621,23 @@ export default function WorkflowStudio({ initialMode: _initialMode, onNavigate }
     return nodes.find(n => n.id === selectedNodeId) || null;
   }, [nodes, selectedNodeId]);
 
-  const isRunActive = runStatus === 'running' || runStatus === 'pending';
+  const isRunActive = ACTIVE_RUN_STATUSES.has(String(runStatus || '').toLowerCase());
   const isViewingRun = Boolean(currentRunId);
   const canCancelRun = Boolean(currentRunId) && isRunActive;
-  const canPauseRun = Boolean(currentRunId) && runStatus === 'running';
+  const canPauseRun = Boolean(currentRunId) && isRunActive;
   const selectedNodeCanRecover = Boolean(currentRunId && selectedNode);
   const selectedNodeBlockerActions = useMemo(() => {
     if (!selectedNode?.data?.status || !selectedNodeCanRecover) return [];
     return getWorkflowBlockerActions(selectedNode.id, selectedNode.data);
   }, [selectedNode, selectedNodeCanRecover]);
+  const selectedNodeRuntimeActions = useMemo(() => {
+    if (!currentRunId || !selectedNode) return [];
+    return getWorkflowRuntimeActions({
+      runStatus,
+      nodeId: selectedNode.id,
+      state: selectedNode.data
+    });
+  }, [currentRunId, runStatus, selectedNode]);
 
   // 修改节点配置参数
   const updateNodeData = (nodeId, field, value) => {
@@ -685,6 +696,7 @@ export default function WorkflowStudio({ initialMode: _initialMode, onNavigate }
                   actionHint: state.actionHint || null,
                   nextRecommendedAction: state.nextRecommendedAction || null,
                   platformStatus: state.platformStatus || null,
+                  manualAction: state.manualAction || null,
                   durationMs: state.durationMs || null,
                   outputSummary: state.outputSummary || null,
                   cooldownRemainingMs: state.cooldownRemainingMs || 0
@@ -716,7 +728,13 @@ export default function WorkflowStudio({ initialMode: _initialMode, onNavigate }
                 data: {
                   ...node.data,
                   status: progress.status || node.data.status,
-                  progress
+                  progress,
+                  blocker: progress.blocker || node.data.blocker || null,
+                  actionHint: progress.actionHint || node.data.actionHint || null,
+                  nextRecommendedAction: progress.nextRecommendedAction || node.data.nextRecommendedAction || null,
+                  platformStatus: progress.platformStatus || node.data.platformStatus || null,
+                  manualAction: progress.manualAction || node.data.manualAction || null,
+                  cooldownRemainingMs: progress.cooldownRemainingMs || node.data.cooldownRemainingMs || 0
                 }
               };
             })
@@ -766,6 +784,7 @@ export default function WorkflowStudio({ initialMode: _initialMode, onNavigate }
               actionHint: state.actionHint || null,
               nextRecommendedAction: state.nextRecommendedAction || null,
               platformStatus: state.platformStatus || null,
+              manualAction: state.manualAction || null,
               durationMs: state.durationMs || null,
               outputSummary: state.outputSummary || null,
               cooldownRemainingMs: state.cooldownRemainingMs || 0,
@@ -812,6 +831,7 @@ export default function WorkflowStudio({ initialMode: _initialMode, onNavigate }
             actionHint: state.actionHint || null,
             nextRecommendedAction: state.nextRecommendedAction || null,
             platformStatus: state.platformStatus || null,
+            manualAction: state.manualAction || null,
             durationMs: state.durationMs || null,
             outputSummary: state.outputSummary || null,
             cooldownRemainingMs: state.cooldownRemainingMs || 0
@@ -1031,6 +1051,10 @@ export default function WorkflowStudio({ initialMode: _initialMode, onNavigate }
     }
     if (action === 'retry-node') {
       await runWorkflowOperation('retry-node', nodeId);
+      return;
+    }
+    if (action === 'pause') {
+      await runWorkflowOperation('pause', nodeId);
       return;
     }
     if (action === 'resume' || action === 'resume-after-manual' || action === 'continue-or-fix-sycm') {
@@ -1303,8 +1327,19 @@ export default function WorkflowStudio({ initialMode: _initialMode, onNavigate }
               </div>
             </div>
 
-            {selectedNodeBlockerActions.length > 0 && (
+            {(selectedNodeRuntimeActions.length > 0 || selectedNodeBlockerActions.length > 0) && (
               <div className="workflow-blocker-actions">
+                {selectedNodeRuntimeActions.map((action) => (
+                  <button
+                    type="button"
+                    className="workflow-blocker-action workflow-runtime-action"
+                    key={`${action.action}-${action.label}`}
+                    onClick={() => runBlockerAction(action.action, selectedNode.id)}
+                  >
+                    <span>{action.label}</span>
+                    {action.description && <small>{action.description}</small>}
+                  </button>
+                ))}
                 {selectedNodeBlockerActions.map((action) => (
                   <button
                     type="button"
