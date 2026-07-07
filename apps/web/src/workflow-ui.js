@@ -314,7 +314,14 @@ export function getWorkflowNodeDetailRows(node = {}) {
   const platformStatus = data.platformStatus || manualAction?.status || '';
   const actionHint = data.actionHint || manualAction?.userMessage || '';
   const status = String(data.status || data.state || '').toLowerCase();
-  const inferredVerifyBlocked = node.id === 'verify' && status === 'blocked' && !data.blocker && !data.error;
+  const verifyOutput = data.output && typeof data.output === 'object' ? data.output : {};
+  const inferredVerifiedEmpty = node.id === 'verify'
+    && status === 'blocked'
+    && !data.blocker
+    && !data.error
+    && Number(verifyOutput.verified || 0) === 0
+    && Number(verifyOutput.rejected || 0) > 0;
+  const inferredVerifyBlocked = node.id === 'verify' && status === 'blocked' && !data.blocker && !data.error && !inferredVerifiedEmpty;
   const rows = [
     { label: '状态', value: view.statusLabel }
   ];
@@ -325,9 +332,13 @@ export function getWorkflowNodeDetailRows(node = {}) {
   if (view.outputSummary) rows.push({ label: '输出摘要', value: view.outputSummary });
   if (data.error) rows.push({ label: '错误', value: data.error });
   if (data.blocker && !data.error) rows.push({ label: '阻塞原因', value: labelWorkflowBlockerReason(data.blocker) });
+  if (inferredVerifiedEmpty) rows.push({ label: '阻塞原因', value: '验真无结果' });
   if (inferredVerifyBlocked) rows.push({ label: '阻塞原因', value: '生意参谋校验阻塞' });
   if (platformStatus && !data.error) rows.push({ label: '平台状态', value: labelWorkflowBlockerReason(platformStatus) });
   if (actionHint && !data.error) rows.push({ label: '处理建议', value: actionHint });
+  if (inferredVerifiedEmpty && !actionHint) {
+    rows.push({ label: '处理建议', value: '生意参谋验真没有通过词。请更换候选词、降低蓝海阈值，或重新挖词后再继续。' });
+  }
   if (inferredVerifyBlocked && !actionHint) {
     rows.push({ label: '处理建议', value: '请检查生意参谋登录、滑块、权限或验真结果为空，再继续或重跑校验。' });
   }

@@ -365,17 +365,18 @@ test('getWorkflowNodeDetailRows surfaces platform manual-action blocker details'
   assert.match(rows.find((row) => row.label === '处理建议').value, /滑块验证/);
 });
 
-test('getWorkflowNodeDetailRows infers verify blocker details when runtime omits a reason', () => {
+test('getWorkflowNodeDetailRows infers verified-empty blocker details from verify output', () => {
   const rows = getWorkflowNodeDetailRows({
     id: 'verify',
     data: {
       status: 'blocked',
+      output: { verified: 0, rejected: 5 },
       progress: { current: 1, total: 1, percent: 100, message: '完成' }
     }
   });
 
-  assert.equal(rows.find((row) => row.label === '阻塞原因').value, '生意参谋校验阻塞');
-  assert.match(rows.find((row) => row.label === '处理建议').value, /登录、滑块、权限/);
+  assert.equal(rows.find((row) => row.label === '阻塞原因').value, '验真无结果');
+  assert.match(rows.find((row) => row.label === '处理建议').value, /生意参谋验真没有通过词/);
 });
 
 test('getWorkflowRuntimeActions exposes pause while a selected node is running', () => {
