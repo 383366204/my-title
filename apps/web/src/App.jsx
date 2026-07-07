@@ -49,7 +49,7 @@ const NAV_ITEMS = [
   { id: 'dashboard', label: '工作台', icon: LayoutDashboard },
   { id: 'mine', label: '挖词选品', icon: Search },
   { id: 'title', label: '标题生成', icon: PenLine },
-  { id: 'workflow', label: '流程画布', icon: FlaskConical }
+  { id: 'workflow', label: '选品流水线', icon: FlaskConical }
 ];
 
 const MINER_TABS = [
@@ -149,7 +149,7 @@ function AppShell({ activeTab, setActiveTab, children }) {
           </button>
           {showDeveloperTools && (
             <div className="sidebar-tool-menu">
-              <button type="button" onClick={() => setActiveTab('workflow')}>流程画布</button>
+              <button type="button" onClick={() => setActiveTab('workflow')}>选品流水线</button>
             </div>
           )}
         </div>
@@ -334,7 +334,7 @@ function FlowStatusPanel({ run, onNavigate }) {
           <PenLine size={15} /> 标题
         </button>
         <button className="secondary-button muted" type="button" onClick={() => onNavigate('workflow')}>
-          <FlaskConical size={15} /> 流程画布
+          <FlaskConical size={15} /> 选品流水线
         </button>
       </div>
     </div>
@@ -679,7 +679,7 @@ function MiningView({ onSendToTitle, onNavigate, historyService, pipeline }) {
           {miningRecoveryAction.visible && (
             <>
               <button className="secondary-button" type="button" onClick={() => onNavigate?.('workflow')} disabled={Boolean(pipelineBusy)}>
-                <FlaskConical size={15} /> 回到流程画布
+                <FlaskConical size={15} /> 回到选品流水线
               </button>
               <button
                 className="primary-button"

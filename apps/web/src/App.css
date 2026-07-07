@@ -506,7 +506,8 @@ code, pre {
   overflow-y: auto;
 }
 
-.artifact-candidate-list {
+.artifact-candidate-list,
+.artifact-business-list {
   display: grid;
   gap: 8px;
   min-width: 0;
@@ -514,7 +515,8 @@ code, pre {
   overflow-y: auto;
 }
 
-.artifact-candidate-row {
+.artifact-candidate-row,
+.artifact-business-row {
   min-width: 0;
   border: 1px solid rgba(148, 163, 184, 0.16);
   border-radius: 8px;
@@ -522,7 +524,8 @@ code, pre {
   padding: 10px;
 }
 
-.artifact-candidate-row strong {
+.artifact-candidate-row strong,
+.artifact-business-row strong {
   display: block;
   color: #e2e8f0;
   font-size: 13px;
@@ -530,14 +533,36 @@ code, pre {
   overflow-wrap: anywhere;
 }
 
-.artifact-candidate-row span {
+.artifact-candidate-row span,
+.artifact-business-row span {
   display: block;
   margin-top: 4px;
   color: #93c5fd;
   font-size: 11px;
 }
 
-.artifact-candidate-row p {
+.artifact-business-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 7px;
+}
+
+.artifact-business-metrics em {
+  display: inline-flex;
+  min-width: 0;
+  border: 1px solid rgba(20, 184, 166, 0.22);
+  border-radius: 999px;
+  background: rgba(15, 118, 110, 0.16);
+  color: #99f6e4;
+  font-style: normal;
+  font-size: 10px;
+  line-height: 1;
+  padding: 4px 6px;
+}
+
+.artifact-candidate-row p,
+.artifact-business-row p {
   margin: 5px 0 0;
   color: #94a3b8;
   font-size: 11px;

@@ -413,11 +413,12 @@ const normalizeCanvasNode = (node, selectNode) => {
 const ArtifactPanel = ({ state }) => {
   const artifact = state.artifact;
   const view = getWorkflowArtifactView(artifact, state.nodeId);
+  const businessRows = view.kind === 'business-list' || view.kind === 'candidate-list';
 
   return (
     <div className="workflow-artifact-panel">
       <div className="workflow-artifact-head">
-        <span>节点产物</span>
+        <span>{view.title || '节点产物'}</span>
         {artifact && <b>{summarizeWorkflowArtifact(artifact)}</b>}
       </div>
       {state.status === 'loading' && (
@@ -429,14 +430,19 @@ const ArtifactPanel = ({ state }) => {
       {state.status === 'empty' && (
         <div className="artifact-empty">{state.error || view.emptyText}</div>
       )}
-      {state.status === 'ready' && artifact && view.kind === 'candidate-list' && (
-        <div className="artifact-candidate-list">
+      {state.status === 'ready' && artifact && businessRows && (
+        <div className="artifact-business-list">
           {view.rows.length === 0 ? (
             <div className="artifact-empty">{view.emptyText}</div>
           ) : view.rows.map((item, index) => (
-            <div className="artifact-candidate-row" key={`${item.title}-${index}`}>
+            <div className="artifact-business-row" key={`${item.title}-${index}`}>
               <strong>{item.title}</strong>
               {item.meta && <span>{item.meta}</span>}
+              {Array.isArray(item.metrics) && item.metrics.length > 0 && (
+                <div className="artifact-business-metrics">
+                  {item.metrics.map((metric) => <em key={metric}>{metric}</em>)}
+                </div>
+              )}
               {item.description && <p>{item.description}</p>}
             </div>
           ))}
@@ -1015,7 +1021,7 @@ export default function WorkflowStudio({ initialMode: _initialMode, onNavigate }
   const runBlockerAction = async (action, nodeId) => {
     if (action === 'mine-more') {
       onNavigate?.('mine');
-      const message = '已切到挖词选品页。补充候选词后回到流程画布重跑验真。';
+      const message = '已切到挖词选品页。补充候选词后回到选品流水线重跑验真。';
       setLogs((prev) => [...prev, {
         timestamp: new Date().toISOString(),
         level: 'info',
@@ -1045,7 +1051,7 @@ export default function WorkflowStudio({ initialMode: _initialMode, onNavigate }
           <div className="flex items-center gap-2">
             <Layers className="text-blue-500" size={20} />
             <h1 className="font-bold text-sm tracking-wider text-slate-200">
-              工作流中心
+              选品流水线
             </h1>
           </div>
           <div className="text-[11px] leading-relaxed text-slate-400">

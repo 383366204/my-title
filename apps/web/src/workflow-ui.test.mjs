@@ -282,7 +282,7 @@ test('getMiningRecoveryHint explains how to recover a verified-empty run', () =>
   assert.equal(getMiningRecoveryHint({
     status: 'verified_empty',
     counts: { candidates: 1, sycmVerified: 0, sycmRejected: 1 }
-  }), '当前流程验真无结果。补充候选词后，回到流程画布重跑“生意参谋校验”。');
+  }), '当前流程验真无结果。补充候选词后，回到选品流水线重跑“生意参谋校验”。');
 });
 
 test('getMiningRecoveryAction only allows verify retry after new candidates are added', () => {
@@ -468,6 +468,68 @@ test('getWorkflowArtifactView formats mining artifacts as readable candidate row
   assert.match(view.rows[0].meta, /评分 82/);
   assert.match(view.rows[0].meta, /hybrid/);
   assert.equal(view.rows[0].description, '搜索人气高');
+});
+
+test('getWorkflowArtifactView formats verified keyword artifacts as metric rows', () => {
+  const view = getWorkflowArtifactView({
+    nodeId: 'verify',
+    type: 'jsonl',
+    rows: [
+      {
+        keyword: '纯银项链',
+        score: 88,
+        status: 'verified',
+        sycmData: { searchPopularity: 3200, demandSupplyRatio: 2.4, clickRate: 0.18 }
+      }
+    ]
+  });
+
+  assert.equal(view.kind, 'business-list');
+  assert.equal(view.title, '验真通过词');
+  assert.equal(view.rows[0].title, '纯银项链');
+  assert.match(view.rows[0].meta, /评分 88/);
+  assert.match(view.rows[0].metrics.join(' · '), /搜索人气 3200/);
+  assert.match(view.rows[0].metrics.join(' · '), /供需比 2.4/);
+});
+
+test('getWorkflowArtifactView formats generated products as product rows', () => {
+  const view = getWorkflowArtifactView({
+    nodeId: 'generate',
+    type: 'jsonl',
+    rows: [
+      {
+        keyword: '纯银项链',
+        title: '纯银项链女轻奢高级感',
+        productTitle: 'S925纯银项链女',
+        price: '18.8',
+        sales: 1200,
+        reason: '价格带合适'
+      }
+    ]
+  });
+
+  assert.equal(view.kind, 'business-list');
+  assert.equal(view.title, '标题货源');
+  assert.equal(view.rows[0].title, '纯银项链女轻奢高级感');
+  assert.match(view.rows[0].meta, /纯银项链/);
+  assert.match(view.rows[0].metrics.join(' · '), /价格 18.8/);
+  assert.match(view.rows[0].metrics.join(' · '), /销量 1200/);
+});
+
+test('getWorkflowArtifactView formats distribution batches as submit rows', () => {
+  const view = getWorkflowArtifactView({
+    nodeId: 'export',
+    type: 'text',
+    text: [
+      'https://detail.1688.com/offer/1.html\t纯银项链女轻奢高级感\t18.8',
+      'https://detail.1688.com/offer/2.html\t珍珠耳环女高级感\t12.5'
+    ].join('\n')
+  });
+
+  assert.equal(view.kind, 'business-list');
+  assert.equal(view.title, '待确认铺货清单');
+  assert.deepEqual(view.rows.map((row) => row.title), ['纯银项链女轻奢高级感', '珍珠耳环女高级感']);
+  assert.match(view.rows[0].description, /offer\/1/);
 });
 
 test('getWorkflowArtifactView treats start nodes as no-artifact nodes', () => {

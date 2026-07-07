@@ -236,10 +236,10 @@ export function getWorkflowBlockerActions(nodeId, state = {}) {
 export function getMiningRecoveryHint(run = null) {
   if (!run) return '';
   if (run.status === 'verified_empty') {
-    return '当前流程验真无结果。补充候选词后，回到流程画布重跑“生意参谋校验”。';
+    return '当前流程验真无结果。补充候选词后，回到选品流水线重跑“生意参谋校验”。';
   }
   if (run.status === 'manual_action_required' || run.status === 'verified_partial_manual_required') {
-    return '当前流程需要处理生意参谋状态。处理完成后，回到流程画布继续或重跑验真。';
+    return '当前流程需要处理生意参谋状态。处理完成后，回到选品流水线继续或重跑验真。';
   }
   return '';
 }
@@ -472,6 +472,113 @@ function candidateMeta(row = {}) {
   return parts.join(' · ');
 }
 
+function metricValue(row = {}, keys = []) {
+  for (const key of keys) {
+    const value = key.split('.').reduce((memo, part) => (memo && memo[part] !== undefined ? memo[part] : undefined), row);
+    if (value !== null && value !== undefined && value !== '') return value;
+  }
+  return null;
+}
+
+function compactMetric(label, value) {
+  if (value === null || value === undefined || value === '') return '';
+  return `${label} ${value}`;
+}
+
+function businessRowTitle(row = {}) {
+  return String(
+    row.title
+    || row['铺货标题']
+    || row.keyword
+    || row.word
+    || row.productTitle
+    || row['链接原标题']
+    || row.name
+    || ''
+  ).trim() || '未命名结果';
+}
+
+function businessRowMeta(row = {}, nodeId = '') {
+  const parts = [];
+  if (nodeId === 'verify') {
+    const score = candidateScore(row);
+    if (score !== null) parts.push(`评分 ${score}`);
+    if (row.status) parts.push(String(row.status));
+    if (row.source) parts.push(String(row.source));
+  } else if (nodeId === 'generate') {
+    if (row.keyword) parts.push(String(row.keyword));
+    if (row.productTitle || row['链接原标题']) parts.push(String(row.productTitle || row['链接原标题']));
+  } else if (nodeId === 'export') {
+    if (row.keyword) parts.push(String(row.keyword));
+    if (row.status) parts.push(String(row.status));
+  }
+  return parts.join(' · ');
+}
+
+function businessMetrics(row = {}, nodeId = '') {
+  if (nodeId === 'verify') {
+    return [
+      compactMetric('搜索人气', metricValue(row, ['searchPopularity', 'sycmData.searchPopularity', 'marketMetrics.searchPopularity'])),
+      compactMetric('供需比', metricValue(row, ['demandSupplyRatio', 'sycmData.demandSupplyRatio', 'marketMetrics.demandSupplyRatio'])),
+      compactMetric('点击率', metricValue(row, ['clickRate', 'sycmData.clickRate', 'marketMetrics.clickRate'])),
+      compactMetric('转化率', metricValue(row, ['conversionRate', 'sycmData.conversionRate', 'marketMetrics.conversionRate']))
+    ].filter(Boolean);
+  }
+  if (nodeId === 'generate' || nodeId === 'export') {
+    return [
+      compactMetric('价格', metricValue(row, ['price', '商品原价', 'minPrice'])),
+      compactMetric('销量', metricValue(row, ['sales', '30天销量', 'monthlySales'])),
+      compactMetric('好评率', metricValue(row, ['positiveRate', '好评率'])),
+      compactMetric('复购率', metricValue(row, ['repurchaseRate', '复购率']))
+    ].filter(Boolean);
+  }
+  return [];
+}
+
+function businessDescription(row = {}) {
+  return String(
+    row.reason
+    || row.选品理由
+    || row.gateReason
+    || row.risk
+    || row.riskReason
+    || row.nextAction
+    || row.productUrl
+    || row['产品链接']
+    || ''
+  ).trim();
+}
+
+function mapBusinessRows(items = [], nodeId = '') {
+  return items.map((item) => ({
+    title: businessRowTitle(item),
+    meta: businessRowMeta(item, nodeId),
+    metrics: businessMetrics(item, nodeId),
+    description: businessDescription(item),
+    raw: item
+  }));
+}
+
+function parseDistributionBatch(text = '') {
+  return String(text || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const parts = line.split(/\t|,/).map((part) => part.trim()).filter(Boolean);
+      const url = parts.find((part) => /^https?:\/\//.test(part)) || '';
+      const title = parts.find((part) => part && part !== url && !/^\d+(\.\d+)?$/.test(part)) || line;
+      const price = parts.find((part) => /^\d+(\.\d+)?$/.test(part)) || '';
+      return {
+        title,
+        meta: price ? `价格 ${price}` : '',
+        metrics: [],
+        description: url,
+        raw: { line, url, price }
+      };
+    });
+}
+
 export function getWorkflowArtifactView(artifact, nodeId = '') {
   const effectiveNodeId = nodeId || artifact?.nodeId || '';
   if (effectiveNodeId === 'start') {
@@ -495,14 +602,50 @@ export function getWorkflowArtifactView(artifact, nodeId = '') {
       text: ''
     };
   }
-  if (Array.isArray(items)) {
-    return { kind: 'json-list', emptyText: '暂无数据项', rows: items, text: '' };
+  if (effectiveNodeId === 'verify' && Array.isArray(items)) {
+    return {
+      kind: 'business-list',
+      title: '验真通过词',
+      emptyText: '暂无验真通过词',
+      rows: mapBusinessRows(items, effectiveNodeId),
+      text: ''
+    };
+  }
+  if (effectiveNodeId === 'generate' && Array.isArray(items)) {
+    return {
+      kind: 'business-list',
+      title: '标题货源',
+      emptyText: '暂无标题货源',
+      rows: mapBusinessRows(items, effectiveNodeId),
+      text: ''
+    };
+  }
+  if (effectiveNodeId === 'export' && Array.isArray(items)) {
+    return {
+      kind: 'business-list',
+      title: '待确认铺货清单',
+      emptyText: '暂无铺货清单',
+      rows: mapBusinessRows(items, effectiveNodeId),
+      text: ''
+    };
   }
   const text = typeof artifact.text === 'string'
     ? artifact.text
     : typeof artifact.content === 'string'
       ? artifact.content
       : '';
+  if (effectiveNodeId === 'export' && text.trim()) {
+    return {
+      kind: 'business-list',
+      title: '待确认铺货清单',
+      emptyText: '暂无铺货清单',
+      rows: parseDistributionBatch(text),
+      text: ''
+    };
+  }
+  if (Array.isArray(items)) {
+    return { kind: 'json-list', emptyText: '暂无数据项', rows: items, text: '' };
+  }
   return {
     kind: type === 'json' ? 'json-text' : 'text',
     emptyText: '暂无文本产物',
