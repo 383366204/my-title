@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   ReactFlow,
   MiniMap,
@@ -31,8 +31,6 @@ import '@xyflow/react/dist/style.css';
 import './App.css';
 import {
   formatWorkflowProgressLabel,
-  getPipelineMonitorNodeStatus,
-  getPipelineSummaryVisualState,
   getStartNodeParams,
   getWorkflowBlockerActions,
   getWorkflowArtifactView,
@@ -40,18 +38,16 @@ import {
   getWorkflowNodeDetailRows,
   getWorkflowNodeViewModel,
   getWorkflowOperationMessage,
+  getWorkflowRunActiveNodeId,
+  getUnifiedWorkflowHistoryItem,
   isWorkflowInputNodeType,
   labelWorkflowNodeStatus,
   normalizeWorkflowProgressEvent,
   summarizeWorkflowArtifact
 } from './workflow-ui.js';
 import {
-  labelPipelineStatus,
-  labelPipelineStage
+  labelPipelineStatus
 } from './pipeline-labels.js';
-import {
-  getPipelineActionView
-} from './pipeline-action-view.js';
 
 // ==================== Custom Flow Nodes ====================
 
@@ -310,32 +306,6 @@ const TitleGeneratorNode = ({ data }) => {
   );
 };
 
-// 4. Monitor Node (只读日常流程节点)
-const MonitorStageNode = ({ data }) => {
-  const view = getWorkflowNodeViewModel(data.id, data);
-  const statusLabel = view.statusLabel;
-
-  return (
-    <button
-      type="button"
-      className={`monitor-node monitor-node-${data.status || 'idle'}`}
-      onClick={data.onSelect}
-    >
-      {data.hasTarget && <Handle type="target" position={Position.Left} id="in" />}
-      <div className="monitor-node-index">{data.stageIndex + 1}</div>
-      <div className="monitor-node-body">
-        <div className="monitor-node-label">{data.label}</div>
-        <div className="monitor-node-stage">{data.stage}</div>
-      </div>
-      <span className="monitor-node-status">{statusLabel}</span>
-      {data.manualAction?.userMessage && (
-        <div className="monitor-node-hint">{data.manualAction.userMessage}</div>
-      )}
-      {data.hasSource && <Handle type="source" position={Position.Right} id="out" />}
-    </button>
-  );
-};
-
 const ProductionNode = ({ id, data }) => {
   const status = data.status || data.state || 'idle';
   const view = getWorkflowNodeViewModel(id, data);
@@ -374,7 +344,6 @@ const nodeTypes = {
   'input': ProductionNode,
   'keyword-mining': MiningNode,
   'title-generator': TitleGeneratorNode,
-  'monitor-stage': MonitorStageNode,
   'start': ProductionNode,
   'task': ProductionNode,
   'agent': ProductionNode,
@@ -386,24 +355,7 @@ const nodeTypes = {
 };
 
 const isInputNodeType = isWorkflowInputNodeType;
-const MODE_MONITOR = 'monitor';
-const MODE_EXPERIMENT = 'experiment';
-const MONITOR_STAGES = [
-  { id: 'seed', label: '种子/启动', stage: 'seed', stageIndex: 0, position: { x: 40, y: 180 } },
-  { id: 'mined', label: '挖词', stage: 'mined', stageIndex: 1, position: { x: 300, y: 180 } },
-  { id: 'verified', label: '多指标验真', stage: 'verified', stageIndex: 2, position: { x: 560, y: 180 } },
-  { id: 'generated', label: '标题货源', stage: 'generated', stageIndex: 3, position: { x: 820, y: 180 } },
-  { id: 'review', label: '人工复核', stage: 'review', stageIndex: 4, position: { x: 1080, y: 180 } },
-  { id: 'ready', label: '待铺货批次', stage: 'ready', stageIndex: 5, position: { x: 1340, y: 180 } },
-  { id: 'submitted', label: '已提交', stage: 'submitted', stageIndex: 6, position: { x: 1600, y: 180 } }
-];
-const MONITOR_EDGES = MONITOR_STAGES.slice(0, -1).map((stage, index) => ({
-  id: `monitor-${stage.id}-${MONITOR_STAGES[index + 1].id}`,
-  source: stage.id,
-  target: MONITOR_STAGES[index + 1].id,
-  markerEnd: { type: MarkerType.ArrowClosed, color: '#475569' },
-  style: { stroke: '#475569', strokeWidth: 2 }
-}));
+const DEFAULT_WORKFLOW_MODE = 'daily';
 const NODE_LAYOUT = {
   'keyword-input': { x: 80, y: 160 },
   'keyword-mining': { x: 520, y: 160 },
@@ -445,7 +397,7 @@ const normalizeRunList = (payload) => {
   return Array.isArray(rawRuns) ? rawRuns : [];
 };
 
-const getTemplateMode = (template) => template?.mode || template?.workflow?.mode || MODE_EXPERIMENT;
+const getTemplateMode = (template) => template?.mode || template?.workflow?.mode || DEFAULT_WORKFLOW_MODE;
 
 const normalizeCanvasNode = (node, selectNode) => {
   const renderType = nodeTypes[node.type] ? node.type : 'task';
@@ -521,23 +473,6 @@ const ArtifactPanel = ({ state }) => {
   );
 };
 
-const getSummaryVisualState = (summary) => {
-  return getPipelineSummaryVisualState(summary);
-};
-
-const resolveSummaryStageIndex = (summary) => {
-  if (!summary) return -1;
-  if (Number.isFinite(summary.stageIndex)) return summary.stageIndex;
-  return MONITOR_STAGES.findIndex((stage) => stage.stage === summary.stage);
-};
-
-const getMonitorNodeStatus = (stage, summary) => {
-  return getPipelineMonitorNodeStatus(stage, {
-    ...(summary || {}),
-    stageIndex: resolveSummaryStageIndex(summary)
-  });
-};
-
 const formatDateTime = (value) => {
   if (!value) return '未知时间';
   const date = new Date(value);
@@ -545,12 +480,11 @@ const formatDateTime = (value) => {
   return date.toLocaleString();
 };
 
-export default function WorkflowStudio({ initialMode = MODE_MONITOR, onNavigate }) {
-  const [mode, setMode] = useState(initialMode);
+export default function WorkflowStudio({ initialMode: _initialMode, onNavigate }) {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [selectedNodeId, setSelectedNodeId] = useState(null);
-  const [selectedMonitorNodeId, setSelectedMonitorNodeId] = useState('seed');
+  const runEventSourceRef = useRef(null);
 
   // 工作流执行状态
   const [currentRunId, setCurrentRunId] = useState(null);
@@ -559,13 +493,9 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR, onNavigate 
   const [historyRuns, setHistoryRuns] = useState([]);
   const [templates, setTemplates] = useState([]);
   const [activeTemplateId, setActiveTemplateId] = useState(null);
-  const [activeTemplateMode, setActiveTemplateMode] = useState(MODE_EXPERIMENT);
-  const [monitorRuns, setMonitorRuns] = useState([]);
-  const [monitorLatestRun, setMonitorLatestRun] = useState(null);
-  const [selectedMonitorRunId, setSelectedMonitorRunId] = useState(null);
-  const [selectedMonitorRun, setSelectedMonitorRun] = useState(null);
-  const [monitorLoading, setMonitorLoading] = useState(false);
-  const [monitorError, setMonitorError] = useState('');
+  const [activeTemplateMode, setActiveTemplateMode] = useState(DEFAULT_WORKFLOW_MODE);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState('');
   const [artifactState, setArtifactState] = useState({
     status: 'empty',
     nodeId: null,
@@ -593,6 +523,8 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR, onNavigate 
 
   // 2. 获取历史运行记录
   const fetchHistoryRuns = async () => {
+    setHistoryLoading(true);
+    setHistoryError('');
     try {
       const res = await fetch('/api/workflows/runs');
       const payload = await res.json();
@@ -600,85 +532,23 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR, onNavigate 
       setHistoryRuns(normalizeRunList(payload));
     } catch (err) {
       console.error('获取运行历史失败', err);
+      setHistoryError(err.message);
       setHistoryRuns([]);
-    }
-  };
-
-  const loadWorkbenchRuns = async () => {
-    setMonitorLoading(true);
-    setMonitorError('');
-    try {
-      const res = await fetch('/api/pipeline/current?limit=20');
-      const payload = await res.json();
-      if (payload.ok === false) throw new Error(payload.error || '加载流程监控失败');
-      const data = unwrapApiData(payload);
-      const runs = Array.isArray(data.runs) ? data.runs : [];
-      const latest = data.latest || runs[0] || null;
-      const selectedFreshRun = selectedMonitorRunId
-        ? runs.find((run) => run.runId === selectedMonitorRunId) || null
-        : null;
-      setMonitorRuns(runs);
-      setMonitorLatestRun(latest);
-      if (selectedFreshRun) {
-        setSelectedMonitorRun(selectedFreshRun);
-        loadWorkbenchRunDetail(selectedFreshRun.runId);
-      } else if (latest?.runId) {
-        setSelectedMonitorRunId(latest.runId);
-        setSelectedMonitorRun(latest);
-      } else {
-        setSelectedMonitorRunId(null);
-        setSelectedMonitorRun(null);
-      }
-    } catch (err) {
-      setMonitorError(err.message);
     } finally {
-      setMonitorLoading(false);
-    }
-  };
-
-  const loadWorkbenchRunDetail = async (runId) => {
-    if (!runId) return;
-    setMonitorLoading(true);
-    setMonitorError('');
-    try {
-      const res = await fetch(`/api/pipeline/runs/${runId}`);
-      const payload = await res.json();
-      if (payload.ok === false) throw new Error(payload.error || '加载流程详情失败');
-      setSelectedMonitorRun(unwrapApiData(payload));
-    } catch (err) {
-      setMonitorError(err.message);
-      setSelectedMonitorRun((current) => (
-        selectedMonitorRunId === runId || current?.runId === runId ? null : current
-      ));
-    } finally {
-      setMonitorLoading(false);
+      setHistoryLoading(false);
     }
   };
 
   useEffect(() => {
-    if (mode === MODE_MONITOR) {
-      loadWorkbenchRuns();
-    }
+    fetchTemplates();
+    fetchHistoryRuns();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode]);
-
-  useEffect(() => {
-    if (mode === MODE_EXPERIMENT) {
-      fetchTemplates();
-      fetchHistoryRuns();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode]);
-
-  useEffect(() => {
-    if (mode === MODE_MONITOR && selectedMonitorRunId) {
-      loadWorkbenchRunDetail(selectedMonitorRunId);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, selectedMonitorRunId]);
+  }, []);
 
   // 加载工作流模板
   const loadTemplate = (template) => {
+    runEventSourceRef.current?.close();
+    runEventSourceRef.current = null;
     const defaultWorkflow = template?.workflow || { nodes: [], edges: [] };
     // 重置节点状态为 idle
     const formattedNodes = (defaultWorkflow.nodes || []).map(n => normalizeCanvasNode({
@@ -722,13 +592,13 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR, onNavigate 
   }, []);
 
   useEffect(() => {
-    if (mode !== MODE_EXPERIMENT || !selectedNodeId) return;
+    if (!selectedNodeId) return;
     if (!currentRunId) {
       setArtifactState({
         status: 'empty',
         nodeId: selectedNodeId,
         artifact: null,
-        error: '运行完成后显示产物，请到运行监控查看。'
+        error: ''
       });
       return;
     }
@@ -759,16 +629,15 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR, onNavigate 
     return () => {
       cancelled = true;
     };
-  }, [mode, selectedNodeId, currentRunId]);
+  }, [selectedNodeId, currentRunId]);
 
   // 选中节点对象
   const selectedNode = useMemo(() => {
     return nodes.find(n => n.id === selectedNodeId) || null;
   }, [nodes, selectedNodeId]);
 
-  const activeMonitorSummary = selectedMonitorRun || monitorLatestRun;
-  const activeMonitorAction = getPipelineActionView(activeMonitorSummary);
   const isRunActive = runStatus === 'running' || runStatus === 'pending';
+  const isViewingRun = Boolean(currentRunId);
   const canCancelRun = Boolean(currentRunId) && isRunActive;
   const canPauseRun = Boolean(currentRunId) && runStatus === 'running';
   const selectedNodeCanRecover = Boolean(currentRunId && selectedNode) && (
@@ -779,26 +648,6 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR, onNavigate 
     if (!selectedNode?.data?.status || !selectedNodeCanRecover) return [];
     return getWorkflowBlockerActions(selectedNode.id, selectedNode.data);
   }, [selectedNode, selectedNodeCanRecover]);
-  const selectedMonitorStage = MONITOR_STAGES.find((stage) => stage.id === selectedMonitorNodeId) || MONITOR_STAGES[0];
-  const monitorNodes = useMemo(() => {
-    return MONITOR_STAGES.map((stage, index) => ({
-      id: stage.id,
-      type: 'monitor-stage',
-      position: stage.position,
-      draggable: false,
-      selectable: true,
-      data: {
-        ...stage,
-        status: getMonitorNodeStatus(stage, activeMonitorSummary),
-        hasTarget: index > 0,
-        hasSource: index < MONITOR_STAGES.length - 1,
-        onSelect: () => setSelectedMonitorNodeId(stage.id),
-        manualAction: (stage.stageIndex === resolveSummaryStageIndex(activeMonitorSummary))
-          ? (activeMonitorSummary?.manualAction || activeMonitorSummary?.runtime?.manualAction)
-          : null
-      }
-    }));
-  }, [activeMonitorSummary]);
 
   // 修改节点配置参数
   const updateNodeData = (nodeId, field, value) => {
@@ -820,7 +669,9 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR, onNavigate 
 
   // SSE 实时更新订阅
   const listenToRunEvents = (runId) => {
+    runEventSourceRef.current?.close();
     const eventSource = new EventSource(`/api/workflows/runs/${runId}/events`);
+    runEventSourceRef.current = eventSource;
 
     eventSource.onmessage = (event) => {
       const data = JSON.parse(event.data);
@@ -835,6 +686,7 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR, onNavigate 
         setRunStatus(status);
         if (status === 'completed' || status === 'failed' || status === 'cancelled') {
           eventSource.close();
+          if (runEventSourceRef.current === eventSource) runEventSourceRef.current = null;
           fetchHistoryRuns();
         }
       } else if (data.event === 'node_change') {
@@ -904,10 +756,18 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR, onNavigate 
 
     eventSource.onerror = () => {
       eventSource.close();
+      if (runEventSourceRef.current === eventSource) runEventSourceRef.current = null;
     };
 
     return eventSource;
   };
+
+  useEffect(() => {
+    return () => {
+      runEventSourceRef.current?.close();
+      runEventSourceRef.current = null;
+    };
+  }, []);
 
   // 同步工作流节点状态到前端组件
   const syncNodeStates = (nodeStates) => {
@@ -942,61 +802,71 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR, onNavigate 
   // 加载指定历史运行记录的详情和日志
   const loadHistoryRun = async (runId) => {
     try {
+      runEventSourceRef.current?.close();
+      runEventSourceRef.current = null;
       setSelectedNodeId(null);
       setLogs([]);
-      setCurrentRunId(runId);
-      setRunStatus('running');
+      setHistoryError('');
+      setRunStatus('pending');
 
       const res = await fetch(`/api/workflows/runs/${runId}`);
       const data = await res.json();
 
-      if (data.ok) {
-        const run = unwrapApiData(data);
-        // 把工作流图载入画布
-        const defaultWorkflow = run.workflow || { nodes: [], edges: [] };
+      if (!res.ok || data.ok === false) {
+        throw new Error(data.error || '加载运行详情失败');
+      }
 
-        // 载入节点和边，附带运行时状态
-        setNodes((defaultWorkflow.nodes || []).map(n => {
-          const state = run.nodeStates?.[n.id] || {};
-          return normalizeCanvasNode({
-            ...n,
-            data: {
-              ...n.data,
-              status: state.status || 'idle',
-              output: state.output || null,
-              error: state.error || null,
-              progress: state.progress || null,
-              blocker: state.blocker || null,
-              actionHint: state.actionHint || null,
-              nextRecommendedAction: state.nextRecommendedAction || null,
-              platformStatus: state.platformStatus || null,
-              durationMs: state.durationMs || null,
-              outputSummary: state.outputSummary || null,
-              cooldownRemainingMs: state.cooldownRemainingMs || 0
-            }
-          }, setSelectedNodeId);
-        }));
+      const run = unwrapApiData(data);
+      const defaultWorkflow = run.workflow || { nodes: [], edges: [] };
 
-        setEdges((defaultWorkflow.edges || []).map(e => ({
-          ...e,
-          markerEnd: { type: MarkerType.ArrowClosed, color: '#3b82f6' },
-          style: { stroke: '#3b82f6', strokeWidth: 2 }
-        })));
-
-        setRunStatus(run.status);
-
-        // 开启 SSE 监听这个运行的实时变动（如果它是未完成的）或者直接拉日志
-        if (run.status === 'running' || run.status === 'pending') {
-          listenToRunEvents(runId);
-        } else {
-          // 直接把历史日志塞入 logs 状态中
-          if (run.logs) {
-            setLogs(run.logs);
+      setNodes((defaultWorkflow.nodes || []).map(n => {
+        const state = run.nodeStates?.[n.id] || {};
+        return normalizeCanvasNode({
+          ...n,
+          data: {
+            ...n.data,
+            status: state.status || 'idle',
+            output: state.output || null,
+            error: state.error || null,
+            progress: state.progress || null,
+            blocker: state.blocker || null,
+            actionHint: state.actionHint || null,
+            nextRecommendedAction: state.nextRecommendedAction || null,
+            platformStatus: state.platformStatus || null,
+            durationMs: state.durationMs || null,
+            outputSummary: state.outputSummary || null,
+            cooldownRemainingMs: state.cooldownRemainingMs || 0
           }
-        }
+        }, setSelectedNodeId);
+      }));
+
+      setEdges((defaultWorkflow.edges || []).map(e => ({
+        ...e,
+        markerEnd: { type: MarkerType.ArrowClosed, color: '#3b82f6' },
+        style: { stroke: '#3b82f6', strokeWidth: 2 }
+      })));
+
+      setCurrentRunId(runId);
+      setRunStatus(run.status);
+      setActiveTemplateId(defaultWorkflow.id || run.workflow?.id || null);
+      setActiveTemplateMode(run.workflow?.mode || run.mode || activeTemplateMode);
+      setSelectedNodeId(getWorkflowRunActiveNodeId(run));
+
+      if (run.status === 'running' || run.status === 'pending') {
+        listenToRunEvents(runId);
+      } else if (run.logs) {
+        setLogs(run.logs);
       }
     } catch (err) {
       console.error('加载历史记录失败', err);
+      setCurrentRunId(null);
+      setRunStatus('failed');
+      setHistoryError(err.message);
+      setLogs([{
+        timestamp: new Date().toISOString(),
+        level: 'error',
+        message: `加载历史记录失败: ${err.message}`
+      }]);
     }
   };
 
@@ -1061,7 +931,7 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR, onNavigate 
         })));
       }
 
-      const res = await fetch('/api/pipeline/start', {
+      const res = await fetch('/api/workflows/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1088,7 +958,7 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR, onNavigate 
           listenToRunEvents(runId);
         } else {
           setRunStatus('completed');
-          await Promise.allSettled([loadWorkbenchRuns(), fetchHistoryRuns()]);
+          await fetchHistoryRuns();
         }
       } else {
         alert(`启动失败: ${payload.error}`);
@@ -1179,7 +1049,6 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR, onNavigate 
     if (action === 'mine-more') {
       onNavigate?.('mine');
       const message = '已切到挖词选品页。补充候选词后回到流程画布重跑验真。';
-      setOperationMessage(message);
       setLogs((prev) => [...prev, {
         timestamp: new Date().toISOString(),
         level: 'info',
@@ -1242,27 +1111,15 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR, onNavigate 
           <div className="flex items-center gap-2">
             <Layers className="text-blue-500" size={20} />
             <h1 className="font-bold text-sm tracking-wider text-slate-200">
-              流程画布
+              工作流中心
             </h1>
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              onClick={() => setMode(MODE_MONITOR)}
-              className={`mode-toggle ${mode === MODE_MONITOR ? 'mode-toggle-active' : ''}`}
-            >
-              运行监控
-            </button>
-            <button
-              onClick={() => setMode(MODE_EXPERIMENT)}
-              className={`mode-toggle ${mode === MODE_EXPERIMENT ? 'mode-toggle-active' : ''}`}
-            >
-              流程编排
-            </button>
+          <div className="text-[11px] leading-relaxed text-slate-400">
+            同一张真实流程图里查看运行、处理阻塞和调整参数。
           </div>
         </div>
 
         {/* 节点库 */}
-        {mode === MODE_EXPERIMENT && (
         <div className="p-4 border-b border-slate-800 space-y-3 bg-slate-900/40">
           <h2 className="text-xs font-bold tracking-wider text-slate-400">节点库</h2>
           <div className="grid grid-cols-1 gap-2">
@@ -1289,10 +1146,9 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR, onNavigate 
             </button>
           </div>
         </div>
-        )}
 
         {/* 模板加载 */}
-        {mode === MODE_EXPERIMENT && templates.length > 0 && (
+        {templates.length > 0 && (
           <div className="p-4 border-b border-slate-800 bg-slate-900/20">
             <h2 className="text-xs font-bold tracking-wider text-slate-400 mb-2">流程模板</h2>
             <div className="space-y-2">
@@ -1320,81 +1176,47 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR, onNavigate 
         {/* 历史运行列表 */}
         <div className="flex-1 overflow-y-auto p-4 space-y-2">
           <h2 className="text-xs font-bold tracking-wider text-slate-400 uppercase flex items-center gap-1.5">
-            <Clock size={12} /> {mode === MODE_MONITOR ? '流程批次历史' : '运行历史'}
+            <Clock size={12} /> 运行历史
           </h2>
-          {mode === MODE_MONITOR ? (
-            <div className="space-y-2">
-              <button
-                onClick={loadWorkbenchRuns}
-                className="w-full py-2 rounded border border-slate-700 bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 font-semibold flex items-center justify-center gap-1.5"
-              >
-                <RefreshCw size={13} className={monitorLoading ? 'animate-spin' : ''} /> 刷新批次
-              </button>
-              {monitorError && (
-                <div className="monitor-alert monitor-alert-error">{monitorError}</div>
-              )}
-              {monitorRuns.length === 0 ? (
-                <div className="text-xs text-slate-500 italic p-2">暂无真实流程运行记录</div>
-              ) : (
-                <div className="space-y-1.5">
-                  {monitorRuns.map((run) => (
-                    <button
-                      key={run.runId}
-                      onClick={() => {
-                        setSelectedMonitorRun(run);
-                        setSelectedMonitorRunId(run.runId);
-                      }}
-                      className={`monitor-run-card ${selectedMonitorRunId === run.runId ? 'monitor-run-card-active' : ''}`}
-                    >
-                      <div className="flex justify-between items-center font-mono text-[10px] text-slate-400 mb-1">
-                        <span className="truncate w-36">{run.runId}</span>
-                        <span className={`monitor-status-pill monitor-status-${getSummaryVisualState(run)}`}>
-                          {labelPipelineStatus(run.status)}
-                        </span>
-                      </div>
-                      <div className="font-semibold text-slate-200 truncate">
-                        {labelPipelineStage(run.stage)} · 第 {(resolveSummaryStageIndex(run) + 1) || 0} 阶段
-                      </div>
-                      <div className="text-[10px] text-slate-500 mt-1">
-                        {formatDateTime(run.updatedAt || run.startedAt)}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          ) : historyRuns.length === 0 ? (
+          <button
+            onClick={fetchHistoryRuns}
+            className="w-full py-2 rounded border border-slate-700 bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 font-semibold flex items-center justify-center gap-1.5"
+          >
+            <RefreshCw size={13} className={historyLoading ? 'animate-spin' : ''} /> 刷新历史
+          </button>
+          {historyError && (
+            <div className="monitor-alert monitor-alert-error">{historyError}</div>
+          )}
+          {historyRuns.length === 0 ? (
             <div className="text-xs text-slate-500 italic p-2">暂无历史执行记录</div>
           ) : (
             <div className="space-y-1.5">
-              {historyRuns.map((run) => (
+              {historyRuns.map((run) => {
+                const item = getUnifiedWorkflowHistoryItem(run);
+                return (
                 <button
-                  key={run.runId}
-                  onClick={() => loadHistoryRun(run.runId)}
-                  className={`w-full text-left p-2.5 rounded text-xs border transition-all ${
-                    currentRunId === run.runId
-                      ? 'bg-blue-950/40 border-blue-500 text-blue-100'
-                      : 'bg-slate-800/40 border-slate-800/80 hover:bg-slate-800/90 text-slate-300'
-                  }`}
+                  key={item.runId}
+                  onClick={() => loadHistoryRun(item.runId)}
+                  className={`monitor-run-card ${currentRunId === item.runId ? 'monitor-run-card-active' : ''}`}
                 >
                   <div className="flex justify-between items-center font-mono text-[10px] text-slate-400 mb-1">
-                    <span className="truncate w-32">{run.runId}</span>
-                    <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold ${
-                      run.status === 'completed' ? 'bg-emerald-500/10 text-emerald-400' :
-                      run.status === 'failed' ? 'bg-rose-500/10 text-rose-400' :
-                      run.status === 'cancelled' ? 'bg-amber-500/10 text-amber-400' : 'bg-blue-500/10 text-blue-400'
-                    }`}>
-                      {labelPipelineStatus(run.status)}
+                    <span className="truncate w-36">{item.runId}</span>
+                    <span className={`monitor-status-pill monitor-status-${item.visualState}`}>
+                      {item.statusLabel}
                     </span>
                   </div>
                   <div className="font-semibold text-slate-200 truncate">
-                    词: {run.keyword || <span className="italic text-slate-500">未命名图</span>}
+                    {item.title}
+                  </div>
+                  <div className="text-[11px] text-slate-500 mt-1">
+                    {item.subtitle}
                   </div>
                   <div className="text-[10px] text-slate-500 mt-1">
-                    {new Date(run.startedAt).toLocaleString()}
+                    {formatDateTime(item.updatedAt)}
                   </div>
                 </button>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -1409,36 +1231,23 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR, onNavigate 
           <div className="flex items-center gap-4">
             <span className="text-xs text-slate-400 flex items-center gap-2">
               当前状态:
-              {mode === MODE_MONITOR ? (
-                <span className={`monitor-status-pill monitor-status-${getSummaryVisualState(activeMonitorSummary)}`}>
-                  {activeMonitorSummary ? labelPipelineStatus(activeMonitorSummary.status) : '暂无批次'}
-                </span>
-              ) : (
-                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                  runStatus === 'completed' ? 'bg-emerald-500/10 text-emerald-400' :
-                  runStatus === 'failed' ? 'bg-rose-500/10 text-rose-400' :
-                  runStatus === 'blocked' ? 'bg-amber-500/10 text-amber-300' :
-                  runStatus === 'cancelled' ? 'bg-amber-500/10 text-amber-400' :
-                  runStatus === 'running' ? 'bg-blue-500/10 text-blue-400 animate-pulse' : 'bg-slate-800 text-slate-400'
-                }`}>
-                  {labelWorkflowNodeStatus(runStatus)}
-                </span>
-              )}
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                runStatus === 'completed' ? 'bg-emerald-500/10 text-emerald-400' :
+                runStatus === 'failed' ? 'bg-rose-500/10 text-rose-400' :
+                runStatus === 'blocked' ? 'bg-amber-500/10 text-amber-300' :
+                runStatus === 'cancelled' ? 'bg-amber-500/10 text-amber-400' :
+                runStatus === 'running' ? 'bg-blue-500/10 text-blue-400 animate-pulse' : 'bg-slate-800 text-slate-400'
+              }`}>
+                {labelWorkflowNodeStatus(runStatus)}
+              </span>
             </span>
-            {mode === MODE_MONITOR && activeMonitorSummary?.runId && (
-              <span className="text-xs font-mono text-slate-500">RunId: {activeMonitorSummary.runId}</span>
-            )}
-            {mode === MODE_EXPERIMENT && currentRunId && (
+            {currentRunId && (
               <span className="text-xs font-mono text-slate-500">RunId: {currentRunId}</span>
             )}
           </div>
 
           <div className="flex items-center gap-2">
-            {mode === MODE_MONITOR ? (
-              <div className="text-xs text-slate-500">只读监控 · 点击节点查看阶段详情</div>
-            ) : (
-              <>
-            {selectedNodeId && (
+            {selectedNodeId && !isViewingRun && (
               <button
                 onClick={handleDeleteSelected}
                 className="px-3 py-1.5 bg-rose-950/20 hover:bg-rose-950/40 text-rose-300 border border-rose-500/30 hover:border-rose-500 text-xs font-semibold rounded-md flex items-center gap-1 transition-all"
@@ -1469,13 +1278,11 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR, onNavigate 
             ) : (
               <button
                 onClick={handleRunWorkflow}
-                disabled={nodes.length === 0}
+                disabled={nodes.length === 0 || isViewingRun}
                 className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-bold rounded-md flex items-center gap-1.5 shadow-lg shadow-blue-900/20 transition-all"
               >
-                <Play size={13} fill="currentColor" /> 运行工作流
+                <Play size={13} fill="currentColor" /> {isViewingRun ? '历史运行只读' : '运行工作流'}
               </button>
-            )}
-              </>
             )}
           </div>
         </div>
@@ -1486,29 +1293,8 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR, onNavigate 
           {/* 画布 */}
           <div className="workflow-canvas-scroll">
             <div className="workflow-canvas-surface">
-            {mode === MODE_MONITOR ? (
               <ReactFlow
-                key="workflow-monitor-flow"
-                nodes={monitorNodes}
-                edges={MONITOR_EDGES}
-                onNodeClick={(event, node) => setSelectedMonitorNodeId(node.id)}
-                nodeTypes={nodeTypes}
-                fitView
-                fitViewOptions={{ padding: 0.18, includeHiddenNodes: false, minZoom: 0.6, maxZoom: 0.95 }}
-                minZoom={0.35}
-                maxZoom={1.2}
-                style={{ width: '100%', height: '100%' }}
-                nodesDraggable={false}
-                nodesConnectable={false}
-                edgesReconnectable={false}
-                deleteKeyCode={null}
-              >
-                <Background color="#334155" gap={24} size={1} />
-                <Controls className="bg-slate-900 border border-slate-800 text-slate-100 rounded" showInteractive={false} />
-              </ReactFlow>
-            ) : (
-              <ReactFlow
-                key="workflow-experiment-flow"
+                key="workflow-flow"
                 nodes={nodes}
                 edges={edges}
                 onNodesChange={onNodesChange}
@@ -1520,6 +1306,9 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR, onNavigate 
                 minZoom={0.5}
                 maxZoom={1.5}
                 style={{ width: '100%', height: '100%' }}
+                nodesDraggable={!isViewingRun}
+                nodesConnectable={!isViewingRun}
+                edgesReconnectable={!isViewingRun}
               >
                 <Background color="#334155" gap={20} size={1} />
                 <Controls className="bg-slate-900 border border-slate-800 text-slate-100 rounded" />
@@ -1534,12 +1323,10 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR, onNavigate 
                   maskColor="rgba(15, 23, 42, 0.6)"
                 />
               </ReactFlow>
-            )}
             </div>
           </div>
 
           {/* 底部控制台日志面板 */}
-          {mode === MODE_EXPERIMENT && (
           <div className="h-64 border-t border-slate-800 bg-slate-900/80 flex flex-col shrink-0">
             <div className="h-9 border-b border-slate-800 bg-slate-900 flex items-center justify-between px-4">
               <span className="text-xs font-bold tracking-wider text-slate-400 flex items-center gap-1.5">
@@ -1579,7 +1366,6 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR, onNavigate 
               )}
             </div>
           </div>
-          )}
 
         </div>
 
@@ -1590,124 +1376,11 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR, onNavigate 
         <div className="p-4 border-b border-slate-800 bg-slate-900 flex items-center gap-2">
           <Settings className="text-slate-400" size={18} />
           <h2 className="font-bold text-sm tracking-wider text-slate-200">
-            {mode === MODE_MONITOR ? '流程详情' : '属性配置面板'}
+            节点详情
           </h2>
         </div>
 
-        {mode === MODE_MONITOR ? (
-          <div className="p-5 flex-1 overflow-y-auto space-y-5">
-            {!activeMonitorSummary ? (
-              <div className="p-4 rounded border border-slate-800 bg-slate-950/50 text-xs text-slate-500 italic">
-                暂无可展示的流程批次。新的 daily pipeline 运行完成阶段写入后会出现在这里。
-              </div>
-            ) : (
-              <>
-                <div className="monitor-detail-block">
-                  <span className="monitor-detail-label">当前批次</span>
-                  <div className="font-mono text-xs text-slate-300 break-all">{activeMonitorSummary.runId}</div>
-                  <div className="text-[11px] text-slate-500 mt-2">
-                    更新于 {formatDateTime(activeMonitorSummary.updatedAt || activeMonitorSummary.startedAt)}
-                  </div>
-                </div>
-
-                <div className="workflow-detail-card">
-                  <div className="workflow-detail-card-head">
-                    <span>{activeMonitorSummary.runId}</span>
-                    <b>{labelPipelineStatus(activeMonitorSummary.status)}</b>
-                  </div>
-                  <div className="workflow-detail-rows">
-                    <div className="workflow-detail-row">
-                      <span>阶段</span>
-                      <strong>{labelPipelineStage(activeMonitorSummary.stage)}</strong>
-                    </div>
-                    <div className="workflow-detail-row">
-                      <span>更新时间</span>
-                      <strong>{formatDateTime(activeMonitorSummary.updatedAt || activeMonitorSummary.startedAt)}</strong>
-                    </div>
-                    {activeMonitorSummary.nextAction?.label && (
-                      <div className="workflow-detail-row">
-                        <span>下一步</span>
-                        <strong>{activeMonitorSummary.nextAction.label}</strong>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="monitor-detail-grid">
-                  <div>
-                    <span className="monitor-detail-label">状态</span>
-                    <span className={`monitor-status-pill monitor-status-${getSummaryVisualState(activeMonitorSummary)}`}>
-                      {labelPipelineStatus(activeMonitorSummary.status)}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="monitor-detail-label">阶段</span>
-                    <div className="text-sm font-semibold text-slate-200">{labelPipelineStage(activeMonitorSummary.stage)}</div>
-                  </div>
-                </div>
-
-                <div className={`monitor-alert ${activeMonitorAction.tone === 'warn' ? 'monitor-alert-warning' : ''}`}>
-                  <div className="font-bold mb-1">{activeMonitorAction.label}</div>
-                  <div>{activeMonitorAction.description}</div>
-                </div>
-
-                {activeMonitorSummary.requiresUserAction && (
-                  <div className="monitor-alert monitor-alert-warning">
-                    <div className="font-bold text-amber-200 mb-1">{activeMonitorSummary.nextActionCode || '需要人工处理'}</div>
-                    <div>{activeMonitorSummary.userMessage || '请检查流程输出并继续下一步。'}</div>
-                    {(activeMonitorSummary.blockers || []).length > 0 && (
-                      <div className="mt-2 font-mono text-[10px] text-amber-100/80">
-                        {activeMonitorSummary.blockers.join(', ')}
-                      </div>
-                    )}
-                    {activeMonitorSummary.nextCommand && (
-                      <div className="monitor-command mt-2">{activeMonitorSummary.nextCommand}</div>
-                    )}
-                  </div>
-                )}
-
-                <div className="monitor-detail-block">
-                  <span className="monitor-detail-label">选中节点</span>
-                  <div className="text-sm font-semibold text-slate-200">{selectedMonitorStage.label}</div>
-                  <div className="text-[11px] text-slate-500 mt-1">
-                    {selectedMonitorStage.stage} · 阶段 {selectedMonitorStage.stageIndex + 1}
-                  </div>
-                  <div className={`monitor-stage-state monitor-stage-state-${getMonitorNodeStatus(selectedMonitorStage, activeMonitorSummary)}`}>
-                    {labelWorkflowNodeStatus(getMonitorNodeStatus(selectedMonitorStage, activeMonitorSummary))}
-                  </div>
-                </div>
-
-                <div className="monitor-detail-block">
-                  <span className="monitor-detail-label">关键计数</span>
-                  <div className="monitor-count-list">
-                    {Object.entries(activeMonitorSummary.counts || {}).slice(0, 8).map(([key, value]) => (
-                      <div key={key} className="monitor-count-row">
-                        <span>{key}</span>
-                        <b>{value}</b>
-                      </div>
-                    ))}
-                    {Object.keys(activeMonitorSummary.counts || {}).length === 0 && (
-                      <div className="text-xs text-slate-500 italic">暂无计数数据</div>
-                    )}
-                  </div>
-                </div>
-
-                {activeMonitorSummary.previews?.generatedProducts?.length > 0 && (
-                  <div className="monitor-detail-block">
-                    <span className="monitor-detail-label">标题货源预览</span>
-                    <div className="space-y-2">
-                      {activeMonitorSummary.previews.generatedProducts.slice(0, 3).map((item, index) => (
-                        <div key={index} className="monitor-preview-row">
-                          {item.title || item.铺货标题 || item.keyword || JSON.stringify(item).slice(0, 80)}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        ) : selectedNode ? (
+        {selectedNode ? (
           <div className="p-5 flex-1 overflow-y-auto space-y-6">
             <div className="workflow-detail-card">
               <div className="workflow-detail-card-head">
@@ -1746,7 +1419,13 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR, onNavigate 
 
             <ArtifactPanel state={artifactState} />
 
-            {selectedNode.id === 'start' && activeTemplateMode === 'keyword' && (
+            {isViewingRun && (
+              <div className="p-3 rounded border border-slate-800 bg-slate-950/50 text-[11px] leading-relaxed text-slate-400">
+                当前正在查看历史运行。节点状态、产物和恢复动作可以查看，参数编辑请先从左侧选择流程模板。
+              </div>
+            )}
+
+            {!isViewingRun && selectedNode.id === 'start' && activeTemplateMode === 'keyword' && (
               <div className="space-y-4">
                 <div className="border-t border-slate-800/80 pt-4">
                   <label className="text-xs font-bold text-slate-300 block mb-2">搜索核心关键词</label>
@@ -1762,7 +1441,7 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR, onNavigate 
               </div>
             )}
 
-            {selectedNode.id === 'start' && activeTemplateMode === 'daily' && (
+            {!isViewingRun && selectedNode.id === 'start' && activeTemplateMode === 'daily' && (
               <div className="space-y-4 border-t border-slate-800/80 pt-4">
                 <div className="text-xs font-bold text-slate-300">每日流水线参数</div>
                 <div className="grid grid-cols-2 gap-3">
@@ -1784,7 +1463,7 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR, onNavigate 
             )}
 
             {/* 输入节点独有参数 */}
-            {isInputNodeType(selectedNode.type) && (
+            {!isViewingRun && isInputNodeType(selectedNode.type) && (
               <div className="space-y-4">
                 <div className="border-t border-slate-800/80 pt-4">
                   <label className="text-xs font-bold text-slate-300 block mb-2">搜索核心关键词</label>
@@ -1814,7 +1493,7 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR, onNavigate 
             )}
 
             {/* 关键词挖掘节点参数 */}
-            {selectedNode.type === 'keyword-mining' && (
+            {!isViewingRun && selectedNode.type === 'keyword-mining' && (
               <div className="space-y-4 border-t border-slate-800/80 pt-4">
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-slate-300 block">最大挖掘候选词数量</label>
@@ -1832,7 +1511,7 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR, onNavigate 
             )}
 
             {/* 标题生成器节点参数 */}
-            {selectedNode.type === 'title-generator' && (
+            {!isViewingRun && selectedNode.type === 'title-generator' && (
               <div className="space-y-4 border-t border-slate-800/80 pt-4 text-xs text-slate-400 leading-relaxed">
                 <div>此节点将接收上一节点的关键词挖掘结果，合并淘宝与1688竞品数据，通过 GLM 大模型自动编排生成最符合 SEO 权重的高点击率标题。</div>
                 <div className="p-3 bg-slate-950/40 rounded border border-emerald-950/40 text-emerald-400/90 text-[11px]">
@@ -1842,6 +1521,7 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR, onNavigate 
             )}
 
             {/* 重置标签 */}
+            {!isViewingRun && (
             <div className="border-t border-slate-800/80 pt-4">
               <label className="text-xs font-bold text-slate-300 block mb-2">画布节点标签</label>
               <input
@@ -1851,6 +1531,7 @@ export default function WorkflowStudio({ initialMode = MODE_MONITOR, onNavigate 
                 className="w-full p-2.5 rounded-lg border border-slate-700 bg-slate-950 focus:border-blue-500 focus:outline-none text-slate-100 text-xs transition-all"
               />
             </div>
+            )}
           </div>
         ) : (
           <div className="p-5 flex-grow flex flex-col justify-center items-center text-slate-500 text-xs italic text-center">

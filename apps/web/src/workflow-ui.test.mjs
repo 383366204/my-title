@@ -22,7 +22,9 @@ import {
   getWorkflowNodeViewModel,
   getWorkflowNodeDetailRows,
   getWorkflowOperationMessage,
-  labelWorkflowNodeStatus
+  labelWorkflowNodeStatus,
+  getWorkflowRunActiveNodeId,
+  getUnifiedWorkflowHistoryItem
 } from './workflow-ui.js';
 import {
   labelPipelineStatus,
@@ -347,6 +349,81 @@ test('getWorkflowOperationMessage returns clear Chinese feedback', () => {
   assert.equal(getWorkflowOperationMessage('resume', 'success'), '已请求继续，流程会从当前节点恢复。');
   assert.equal(getWorkflowOperationMessage('retry-node', 'success'), '已请求重试，当前节点及下游步骤会重新执行。');
   assert.match(getWorkflowOperationMessage('retry-node', 'error', 'network'), /network/);
+});
+
+test('getWorkflowRunActiveNodeId prefers blocked or running workflow nodes', () => {
+  assert.equal(getWorkflowRunActiveNodeId({
+    nodeStates: {
+      start: { status: 'completed' },
+      mine: { status: 'completed' },
+      verify: { status: 'blocked' },
+      generate: { status: 'idle' }
+    }
+  }), 'verify');
+
+  assert.equal(getWorkflowRunActiveNodeId({
+    nodeStates: {
+      start: { status: 'completed' },
+      mine: { status: 'running' },
+      verify: { status: 'idle' }
+    }
+  }), 'mine');
+
+  assert.equal(getWorkflowRunActiveNodeId({
+    workflow: {
+      nodes: [
+        { id: 'start', data: { status: 'completed' } },
+        { id: 'mine', data: { status: 'completed' } }
+      ]
+    }
+  }), 'mine');
+});
+
+test('getUnifiedWorkflowHistoryItem normalizes pipeline and workflow runs for one history list', () => {
+  assert.deepEqual(getUnifiedWorkflowHistoryItem({
+    runId: '2026-07-06-005614',
+    status: 'verified_empty',
+    stage: 'verified',
+    keyword: '纯银项链',
+    updatedAt: '2026-07-06T00:56:14.000Z'
+  }), {
+    runId: '2026-07-06-005614',
+    title: '纯银项链',
+    subtitle: '大盘验真',
+    statusLabel: '验真无结果',
+    visualState: 'paused',
+    updatedAt: '2026-07-06T00:56:14.000Z'
+  });
+
+  assert.deepEqual(getUnifiedWorkflowHistoryItem({
+    runId: 'run_1',
+    status: 'running',
+    workflow: {
+      nodes: [
+        { id: 'start', data: { keyword: '珍珠耳环' } }
+      ]
+    },
+    startedAt: '2026-07-06T01:00:00.000Z'
+  }), {
+    runId: 'run_1',
+    title: '珍珠耳环',
+    subtitle: '工作流运行',
+    statusLabel: '运行中',
+    visualState: 'running',
+    updatedAt: '2026-07-06T01:00:00.000Z'
+  });
+
+  assert.equal(getUnifiedWorkflowHistoryItem({
+    runId: '2026-07-06-005614',
+    status: 'blocked',
+    workflow: { id: 'daily-selection-v1', mode: 'daily', nodes: [{ id: 'start', data: { label: '开始' } }] }
+  }).title, '每日蓝海选品流水线');
+
+  assert.equal(getUnifiedWorkflowHistoryItem({
+    runId: '2026-07-06-005614',
+    status: 'blocked',
+    workflow: { id: 'daily-selection-v1', mode: 'daily' }
+  }).visualState, 'paused');
 });
 
 test('summarizeWorkflowArtifact describes jsonl, markdown, text, and empty artifacts', () => {

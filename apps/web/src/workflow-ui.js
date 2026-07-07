@@ -336,6 +336,82 @@ export function getWorkflowOperationMessage(action, result, error = '') {
   return '操作已提交。';
 }
 
+export function getWorkflowRunActiveNodeId(run = {}) {
+  const priority = ['blocked', 'failed', 'retryable', 'waiting_manual', 'paused', 'needs_review', 'waiting_confirmation', 'running', 'resuming', 'retrying'];
+  const nodeStates = run.nodeStates && typeof run.nodeStates === 'object'
+    ? Object.entries(run.nodeStates).map(([id, state]) => ({ id, state: state || {} }))
+    : Array.isArray(run.workflow?.nodes)
+      ? run.workflow.nodes.map((node) => ({ id: node.id, state: node.data || {} }))
+      : [];
+
+  for (const status of priority) {
+    const found = nodeStates.find(({ state }) => String(state.status || state.state || '').toLowerCase() === status);
+    if (found?.id) return found.id;
+  }
+
+  const lastCompleted = [...nodeStates].reverse().find(({ state }) => (
+    String(state.status || state.state || '').toLowerCase() === 'completed'
+  ));
+  return lastCompleted?.id || nodeStates[0]?.id || null;
+}
+
+function inferRunTitle(run = {}) {
+  const explicit = String(run.keyword || run.title || run.name || '').trim();
+  if (explicit) return explicit;
+  const workflowId = String(run.workflow?.id || run.templateId || '').toLowerCase();
+  const workflowMode = String(run.workflow?.mode || run.mode || '').toLowerCase();
+  if (workflowId === 'daily-selection-v1' || workflowMode === 'daily') return '每日蓝海选品流水线';
+  if (workflowId === 'exact-keyword-v1' || workflowMode === 'keyword') return '精确关键词选品流水线';
+  const nodes = Array.isArray(run.workflow?.nodes) ? run.workflow.nodes : [];
+  const start = nodes.find((node) => node.id === 'start') || nodes[0] || {};
+  return String(start.data?.keyword || start.data?.label || run.runId || '未命名流程').trim();
+}
+
+function labelUnifiedRunStage(run = {}) {
+  const stage = String(run.stage || '').toLowerCase();
+  const labels = {
+    seed: '种子启动',
+    mined: '选词挖掘',
+    verified: '大盘验真',
+    generated: '标题货源',
+    review: '人工复核',
+    ready: '待铺货',
+    submitted: '已提交'
+  };
+  return labels[stage] || '工作流运行';
+}
+
+function labelUnifiedRunStatus(status) {
+  const normalized = String(status || '').toLowerCase();
+  const labels = {
+    verified_empty: '验真无结果',
+    ready_to_distribute: '待确认铺货',
+    manual_action_required: '需要人工处理',
+    verified_partial_manual_required: '部分需要人工处理',
+    workflow_complete: '流程完成',
+    submitted: '已提交'
+  };
+  return labels[normalized] || labelWorkflowNodeStatus(normalized);
+}
+
+function getUnifiedRunVisualState(run = {}) {
+  const status = String(run.status || '').toLowerCase();
+  if (status === 'failed') return 'failed';
+  if (['blocked', 'retryable', 'waiting_manual', 'paused', 'manual_action_required'].includes(status)) return 'paused';
+  return getPipelineSummaryVisualState(run);
+}
+
+export function getUnifiedWorkflowHistoryItem(run = {}) {
+  return {
+    runId: run.runId || run.id || '',
+    title: inferRunTitle(run),
+    subtitle: labelUnifiedRunStage(run),
+    statusLabel: labelUnifiedRunStatus(run.status),
+    visualState: getUnifiedRunVisualState(run),
+    updatedAt: run.updatedAt || run.startedAt || run.createdAt || ''
+  };
+}
+
 /**
  * 汇总 workflow 节点产物的前端展示文案。
  * @param {object|null} artifact 节点产物。
@@ -382,7 +458,7 @@ export function getWorkflowArtifactView(artifact, nodeId = '') {
     return { kind: 'none', emptyText: '开始节点没有产物。', rows: [], text: '' };
   }
   if (!artifact) {
-    return { kind: 'empty', emptyText: '运行完成后显示产物，请到运行监控查看。', rows: [], text: '' };
+    return { kind: 'empty', emptyText: '选择运行记录后，节点完成产物会在这里展示。', rows: [], text: '' };
   }
   const type = String(artifact.type || '').toLowerCase();
   const items = Array.isArray(artifact.items) ? artifact.items : artifact.rows;
