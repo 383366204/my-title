@@ -639,4 +639,38 @@ describe('workflow pipeline adapter', () => {
       { type: 'viewport_changed', zoom: 0.8 }
     ]);
   });
+
+  it('attaches review node actions for review and distribution confirmation states', () => {
+    const reviewRun = pipelineSummaryToWorkflowRun({
+      runId: 'needs_review_action_run',
+      status: 'needs_review',
+      stage: 'review',
+      startedAt: '2026-06-29T04:00:00.000Z',
+      updatedAt: '2026-06-29T04:10:00.000Z',
+      counts: { readyToDistribute: 1 },
+      files: {}
+    });
+
+    assert.deepEqual(reviewRun.nodeStates.review.nextRecommendedAction, {
+      action: 'open-review',
+      label: '查看复核报告',
+      description: '先检查风险项和待处理商品，再决定是否补充信息或重新导出。'
+    });
+
+    const readyRun = pipelineSummaryToWorkflowRun({
+      runId: 'ready_confirm_action_run',
+      status: 'ready_to_distribute',
+      stage: 'ready',
+      startedAt: '2026-06-29T04:00:00.000Z',
+      updatedAt: '2026-06-29T04:10:00.000Z',
+      counts: { readyToDistribute: 2 },
+      files: {}
+    });
+
+    assert.deepEqual(readyRun.nodeStates.review.nextRecommendedAction, {
+      action: 'confirm-distribution',
+      label: '确认铺货清单',
+      description: '铺货前必须人工确认具体商品清单，确认后再进入提交动作。'
+    });
+  });
 });

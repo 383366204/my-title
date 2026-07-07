@@ -22,6 +22,7 @@ import {
   getWorkflowNodeViewModel,
   getWorkflowNodeDetailRows,
   getWorkflowOperationMessage,
+  buildWorkflowOperationRequest,
   labelWorkflowNodeStatus,
   getWorkflowRunActiveNodeId,
   getUnifiedWorkflowHistoryItem
@@ -349,6 +350,21 @@ test('getWorkflowOperationMessage returns clear Chinese feedback', () => {
   assert.equal(getWorkflowOperationMessage('resume', 'success'), '已请求继续，流程会从当前节点恢复。');
   assert.equal(getWorkflowOperationMessage('retry-node', 'success'), '已请求重试，当前节点及下游步骤会重新执行。');
   assert.match(getWorkflowOperationMessage('retry-node', 'error', 'network'), /network/);
+});
+
+test('buildWorkflowOperationRequest keeps production controls behind workflow endpoints', () => {
+  assert.deepEqual(buildWorkflowOperationRequest('run-20260707-120000', 'pause'), {
+    endpoint: '/api/workflows/runs/run-20260707-120000/pause',
+    body: {}
+  });
+  assert.deepEqual(buildWorkflowOperationRequest('run-20260707-120000', 'resume', 'verify'), {
+    endpoint: '/api/workflows/runs/run-20260707-120000/resume',
+    body: {}
+  });
+  assert.deepEqual(buildWorkflowOperationRequest('run-20260707-120000', 'retry-node', 'generate'), {
+    endpoint: '/api/workflows/runs/run-20260707-120000/retry-node',
+    body: { nodeId: 'generate' }
+  });
 });
 
 test('getWorkflowRunActiveNodeId prefers blocked or running workflow nodes', () => {

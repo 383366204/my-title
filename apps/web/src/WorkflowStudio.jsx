@@ -6,7 +6,6 @@ import {
   Background,
   useNodesState,
   useEdgesState,
-  addEdge,
   Handle,
   Position,
   MarkerType
@@ -15,8 +14,6 @@ import {
   Play,
   Square,
   RefreshCw,
-  Plus,
-  Trash2,
   FileText,
   Clock,
   Sparkles,
@@ -34,6 +31,7 @@ import {
   getStartNodeParams,
   getWorkflowBlockerActions,
   getWorkflowArtifactView,
+  buildWorkflowOperationRequest,
   getWorkflowLaunchBlocker,
   getWorkflowNodeDetailRows,
   getWorkflowNodeViewModel,
@@ -356,13 +354,6 @@ const nodeTypes = {
 
 const isInputNodeType = isWorkflowInputNodeType;
 const DEFAULT_WORKFLOW_MODE = 'daily';
-const NODE_LAYOUT = {
-  'keyword-input': { x: 80, y: 160 },
-  'keyword-mining': { x: 520, y: 160 },
-  'title-generator': { x: 980, y: 160 }
-};
-const PIPELINE_RECOVERABLE_NODE_IDS = new Set(['mine', 'verify', 'generate', 'export']);
-const NODE_ROW_GAP = 190;
 const DAILY_START_FIELDS = [
   { key: 'mine', label: '挖掘候选词', min: 1, max: 200 },
   { key: 'verify', label: '生意参谋校验', min: 1, max: 200 },
@@ -374,10 +365,6 @@ const DAILY_START_FIELDS = [
 ];
 
 const unwrapApiData = (payload) => payload?.data || payload || {};
-
-const isPipelineRecoverableNode = (nodeId) => PIPELINE_RECOVERABLE_NODE_IDS.has(String(nodeId || ''));
-
-const isLegacyWorkflowRun = (runId) => String(runId || '').startsWith('run_');
 
 const normalizeTemplateList = (payload) => {
   const data = unwrapApiData(payload);
@@ -575,17 +562,6 @@ export default function WorkflowStudio({ initialMode: _initialMode, onNavigate }
     setArtifactState({ status: 'empty', nodeId: null, artifact: null, error: '' });
   };
 
-  // 添加新连接
-  const onConnect = useCallback((params) => {
-    const newEdge = {
-      ...params,
-      id: `e_${Date.now()}`,
-      markerEnd: { type: MarkerType.ArrowClosed, color: '#3b82f6' },
-      style: { stroke: '#3b82f6', strokeWidth: 2 }
-    };
-    setEdges((eds) => addEdge(newEdge, eds));
-  }, [setEdges]);
-
   // 点击节点事件
   const onNodeClick = useCallback((event, node) => {
     setSelectedNodeId(node.id);
@@ -640,10 +616,7 @@ export default function WorkflowStudio({ initialMode: _initialMode, onNavigate }
   const isViewingRun = Boolean(currentRunId);
   const canCancelRun = Boolean(currentRunId) && isRunActive;
   const canPauseRun = Boolean(currentRunId) && runStatus === 'running';
-  const selectedNodeCanRecover = Boolean(currentRunId && selectedNode) && (
-    isLegacyWorkflowRun(currentRunId)
-    || isPipelineRecoverableNode(selectedNode.id)
-  );
+  const selectedNodeCanRecover = Boolean(currentRunId && selectedNode);
   const selectedNodeBlockerActions = useMemo(() => {
     if (!selectedNode?.data?.status || !selectedNodeCanRecover) return [];
     return getWorkflowBlockerActions(selectedNode.id, selectedNode.data);
@@ -1000,28 +973,22 @@ export default function WorkflowStudio({ initialMode: _initialMode, onNavigate }
   const runWorkflowOperation = async (action, nodeId = null) => {
     if (!currentRunId) return;
     const targetNodeId = nodeId || selectedNodeId;
-    const shouldUsePipelineStep = (action === 'retry-node' || action === 'resume')
-      && isPipelineRecoverableNode(targetNodeId)
-      && !isLegacyWorkflowRun(currentRunId);
-    const endpoint = action === 'pause' && !isLegacyWorkflowRun(currentRunId)
-      ? `/api/pipeline/runs/${currentRunId}/pause`
-      : action === 'resume' && !isLegacyWorkflowRun(currentRunId)
-        ? `/api/pipeline/runs/${currentRunId}/resume`
-        : shouldUsePipelineStep && action === 'retry-node'
-          ? `/api/pipeline/runs/${currentRunId}/${targetNodeId}/retry`
-          : shouldUsePipelineStep
-            ? `/api/pipeline/runs/${currentRunId}/resume`
-            : (action === 'retry-node'
-                ? `/api/workflows/runs/${currentRunId}/retry-node`
-                : `/api/workflows/runs/${currentRunId}/${action}`);
+    if (action === 'open-review' || action === 'confirm-distribution') {
+      if (targetNodeId) setSelectedNodeId(targetNodeId);
+      setLogs((prev) => [...prev, {
+        timestamp: new Date().toISOString(),
+        level: action === 'confirm-distribution' ? 'warn' : 'info',
+        message: getWorkflowOperationMessage(action, 'success')
+      }]);
+      return;
+    }
+    const { endpoint, body } = buildWorkflowOperationRequest(currentRunId, action, targetNodeId);
 
     try {
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: action === 'retry-node' && !shouldUsePipelineStep
-          ? JSON.stringify({ nodeId: targetNodeId })
-          : '{}'
+        body: JSON.stringify(body)
       });
       const payload = await res.json();
       if (!res.ok || payload.ok === false) {
@@ -1062,50 +1029,17 @@ export default function WorkflowStudio({ initialMode: _initialMode, onNavigate }
     }
     if (action === 'resume' || action === 'resume-after-manual' || action === 'continue-or-fix-sycm') {
       await runWorkflowOperation('resume', nodeId);
+      return;
     }
-  };
-
-  // 画布添加新节点
-  const handleAddNode = (type) => {
-    const labels = {
-      'keyword-input': '输入参数',
-      'keyword-mining': '长尾词挖掘',
-      'title-generator': '标题生成器'
-    };
-    const basePosition = NODE_LAYOUT[type] || { x: 120, y: 160 };
-    const sameTypeCount = nodes.filter((node) => node.type === type).length;
-
-    const newId = `${type}_${Date.now()}`;
-    const newNode = {
-      id: newId,
-      type,
-      position: {
-        x: basePosition.x,
-        y: basePosition.y + sameTypeCount * NODE_ROW_GAP
-      },
-      data: {
-        label: labels[type],
-        status: 'idle',
-        keyword: type === 'keyword-input' ? '纯银项链' : '',
-        count: type === 'keyword-mining' ? 5 : undefined,
-        maxLength: type === 'keyword-input' ? 60 : undefined
-      }
-    };
-    setNodes((nds) => nds.concat(newNode));
-  };
-
-  // 删除选中节点或连接
-  const handleDeleteSelected = () => {
-    if (!selectedNodeId) return;
-    setNodes((nds) => nds.filter((n) => n.id !== selectedNodeId));
-    setEdges((eds) => eds.filter((e) => e.source !== selectedNodeId && e.target !== selectedNodeId));
-    setSelectedNodeId(null);
+    if (action === 'open-review' || action === 'confirm-distribution') {
+      await runWorkflowOperation(action, nodeId);
+    }
   };
 
   return (
     <div className="flex min-h-screen w-full min-w-0 bg-slate-950 font-sans text-slate-100">
 
-      {/* 1. Left Sidebar: History and Node library */}
+      {/* 1. Left Sidebar: History and templates */}
       <div className="w-80 border-r border-slate-800 bg-slate-900/60 flex flex-col h-full shrink-0">
         <div className="p-4 border-b border-slate-800 bg-slate-900 space-y-3">
           <div className="flex items-center gap-2">
@@ -1116,34 +1050,6 @@ export default function WorkflowStudio({ initialMode: _initialMode, onNavigate }
           </div>
           <div className="text-[11px] leading-relaxed text-slate-400">
             同一张真实流程图里查看运行、处理阻塞和调整参数。
-          </div>
-        </div>
-
-        {/* 节点库 */}
-        <div className="p-4 border-b border-slate-800 space-y-3 bg-slate-900/40">
-          <h2 className="text-xs font-bold tracking-wider text-slate-400">节点库</h2>
-          <div className="grid grid-cols-1 gap-2">
-            <button
-              onClick={() => handleAddNode('keyword-input')}
-              className="flex items-center justify-between p-2.5 rounded-lg border border-blue-500/30 hover:border-blue-500 bg-blue-950/20 hover:bg-blue-950/40 text-blue-300 text-xs font-semibold transition-all"
-            >
-              <span className="flex items-center gap-2"><Plus size={14} /> 输入节点</span>
-              <span className="text-[10px] text-blue-500/60">Input</span>
-            </button>
-            <button
-              onClick={() => handleAddNode('keyword-mining')}
-              className="flex items-center justify-between p-2.5 rounded-lg border border-indigo-500/30 hover:border-indigo-500 bg-indigo-950/20 hover:bg-indigo-950/40 text-indigo-300 text-xs font-semibold transition-all"
-            >
-              <span className="flex items-center gap-2"><Plus size={14} /> 关键词挖掘</span>
-              <span className="text-[10px] text-indigo-500/60">Mining</span>
-            </button>
-            <button
-              onClick={() => handleAddNode('title-generator')}
-              className="flex items-center justify-between p-2.5 rounded-lg border border-emerald-500/30 hover:border-emerald-500 bg-emerald-950/20 hover:bg-emerald-950/40 text-emerald-300 text-xs font-semibold transition-all"
-            >
-              <span className="flex items-center gap-2"><Plus size={14} /> 标题生成器</span>
-              <span className="text-[10px] text-emerald-500/60">Generator</span>
-            </button>
           </div>
         </div>
 
@@ -1247,15 +1153,6 @@ export default function WorkflowStudio({ initialMode: _initialMode, onNavigate }
           </div>
 
           <div className="flex items-center gap-2">
-            {selectedNodeId && !isViewingRun && (
-              <button
-                onClick={handleDeleteSelected}
-                className="px-3 py-1.5 bg-rose-950/20 hover:bg-rose-950/40 text-rose-300 border border-rose-500/30 hover:border-rose-500 text-xs font-semibold rounded-md flex items-center gap-1 transition-all"
-              >
-                <Trash2 size={13} /> 删除选中
-              </button>
-            )}
-
             {isRunActive ? (
               <>
                 {canPauseRun && (
@@ -1299,16 +1196,15 @@ export default function WorkflowStudio({ initialMode: _initialMode, onNavigate }
                 edges={edges}
                 onNodesChange={onNodesChange}
                 onEdgesChange={onEdgesChange}
-                onConnect={onConnect}
                 onNodeClick={onNodeClick}
                 nodeTypes={nodeTypes}
                 defaultViewport={{ x: 0, y: 0, zoom: 0.82 }}
                 minZoom={0.5}
                 maxZoom={1.5}
                 style={{ width: '100%', height: '100%' }}
-                nodesDraggable={!isViewingRun}
-                nodesConnectable={!isViewingRun}
-                edgesReconnectable={!isViewingRun}
+                nodesDraggable={false}
+                nodesConnectable={false}
+                edgesReconnectable={false}
               >
                 <Background color="#334155" gap={20} size={1} />
                 <Controls className="bg-slate-900 border border-slate-800 text-slate-100 rounded" />
@@ -1536,7 +1432,7 @@ export default function WorkflowStudio({ initialMode: _initialMode, onNavigate }
         ) : (
           <div className="p-5 flex-grow flex flex-col justify-center items-center text-slate-500 text-xs italic text-center">
             <Settings size={28} className="text-slate-700 mb-2 animate-pulse" />
-            在左侧添加节点，或在中间画布中选中一个节点以展示其高级属性配置。
+            在画布中选中一个节点后，这里会显示状态、产物和恢复动作。
           </div>
         )}
       </div>

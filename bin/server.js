@@ -993,13 +993,42 @@ app.post('/api/workflows/runs/:runId/cancel', (req, res) => {
 
 // 7. POST /api/workflows/runs/:runId/retry-node - 重试某个特定节点
 app.post('/api/workflows/runs/:runId/retry-node', async (req, res) => {
+  const runId = req.params.runId;
   try {
     const nodeId = String(req.body?.nodeId || '').trim();
     if (!nodeId) {
       return res.status(400).json({ ok: false, error: 'nodeId is required' });
     }
-    await retryWorkflowNode(req.params.runId, nodeId);
-    return res.json({ ok: true, run: getRun(req.params.runId) });
+    const runtime = readRuntimeState({ runId });
+    if (runtime) {
+      if (!['mine', 'verify', 'generate', 'export'].includes(nodeId)) {
+        return res.status(400).json({ ok: false, error: '不支持的流程步骤。' });
+      }
+      if (activeWorkbenchProcess) {
+        return res.status(409).json({ ok: false, error: '已有工作流正在运行，请等待完成后再重试。' });
+      }
+      const control = requestRuntimeRetryStep({ runId, step: nodeId });
+      const promise = getPipelineRuntimeRunner()({
+        runId,
+        mode: runtime.mode || (runtime.steps?.includes('keyword') ? 'keyword' : 'daily'),
+        params: runtime.params || {},
+        preserveRuntime: true,
+        retryStep: nodeId,
+        steps: runtime.steps
+      });
+      const runState = { runId, mode: 'workflow-retry-step', promise };
+      activeWorkbenchProcess = runState;
+      promise.then(result => {
+        originalLog(`[Workflow Retry] runtime 完成，runId=${result.runId}, status=${result.runtimeStatus || result.status}`);
+      }).catch(err => {
+        originalError(`[Workflow Retry] runtime 失败，runId=${runId}, step=${nodeId}:`, err.message);
+      }).finally(() => {
+        if (activeWorkbenchProcess === runState) activeWorkbenchProcess = null;
+      });
+      return res.json({ ok: true, data: pipelineRunResponse(runId, { control }) });
+    }
+    await retryWorkflowNode(runId, nodeId);
+    return res.json({ ok: true, run: getRun(runId) });
   } catch (err) {
     return res.status(400).json({ ok: false, error: err.message });
   }
@@ -1007,9 +1036,35 @@ app.post('/api/workflows/runs/:runId/retry-node', async (req, res) => {
 
 // 8. POST /api/workflows/runs/:runId/resume - 继续执行工作流
 app.post('/api/workflows/runs/:runId/resume', async (req, res) => {
+  const runId = req.params.runId;
   try {
-    await resumeWorkflow(req.params.runId);
-    return res.json({ ok: true, run: getRun(req.params.runId) });
+    const runtime = readRuntimeState({ runId });
+    if (runtime) {
+      if (activeWorkbenchProcess) {
+        return res.status(409).json({ ok: false, error: '已有工作流正在运行，请等待完成后再继续。' });
+      }
+      const control = requestRuntimeResume({ runId });
+      const promise = getPipelineRuntimeRunner()({
+        runId,
+        mode: runtime.mode || (runtime.steps?.includes('keyword') ? 'keyword' : 'daily'),
+        params: runtime.params || {},
+        preserveRuntime: true,
+        resumeFromStep: runtime.activeStep,
+        steps: runtime.steps
+      });
+      const runState = { runId, mode: 'workflow-resume', promise };
+      activeWorkbenchProcess = runState;
+      promise.then(result => {
+        originalLog(`[Workflow Resume] runtime 完成，runId=${result.runId}, status=${result.runtimeStatus || result.status}`);
+      }).catch(err => {
+        originalError(`[Workflow Resume] runtime 失败，runId=${runId}:`, err.message);
+      }).finally(() => {
+        if (activeWorkbenchProcess === runState) activeWorkbenchProcess = null;
+      });
+      return res.json({ ok: true, data: pipelineRunResponse(runId, { control }) });
+    }
+    await resumeWorkflow(runId);
+    return res.json({ ok: true, run: getRun(runId) });
   } catch (err) {
     return res.status(400).json({ ok: false, error: err.message });
   }
@@ -1017,8 +1072,17 @@ app.post('/api/workflows/runs/:runId/resume', async (req, res) => {
 
 // 8.5. POST /api/workflows/runs/:runId/pause - 暂停执行工作流
 app.post('/api/workflows/runs/:runId/pause', (req, res) => {
+  const runId = req.params.runId;
   try {
-    const run = markRunPaused(req.params.runId);
+    const runtime = readRuntimeState({ runId });
+    if (runtime) {
+      const control = requestRuntimePause({
+        runId,
+        reason: req.body?.reason || 'user_paused'
+      });
+      return res.json({ ok: true, data: pipelineRunResponse(runId, { control }) });
+    }
+    const run = markRunPaused(runId);
     if (!run) {
       return res.status(404).json({ ok: false, error: '工作流运行不存在' });
     }

@@ -327,13 +327,33 @@ export function getWorkflowOperationMessage(action, result, error = '') {
         ? '继续请求失败'
         : action === 'retry-node'
           ? '重试请求失败'
+          : action === 'open-review'
+            ? '复核报告打开失败'
+            : action === 'confirm-distribution'
+              ? '确认铺货失败'
           : '操作失败';
     return `${prefix}: ${error || '未知错误'}`;
   }
   if (action === 'pause') return '已请求暂停，当前步骤会在安全边界停止。';
   if (action === 'resume') return '已请求继续，流程会从当前节点恢复。';
   if (action === 'retry-node') return '已请求重试，当前节点及下游步骤会重新执行。';
+  if (action === 'open-review') return '复核报告已在节点产物中展示。';
+  if (action === 'confirm-distribution') return '请先人工确认铺货清单，确认后再执行提交动作。';
   return '操作已提交。';
+}
+
+export function buildWorkflowOperationRequest(runId, action, nodeId = '') {
+  const encodedRunId = encodeURIComponent(String(runId || ''));
+  if (action === 'retry-node') {
+    return {
+      endpoint: `/api/workflows/runs/${encodedRunId}/retry-node`,
+      body: { nodeId }
+    };
+  }
+  return {
+    endpoint: `/api/workflows/runs/${encodedRunId}/${action}`,
+    body: {}
+  };
 }
 
 export function getWorkflowRunActiveNodeId(run = {}) {

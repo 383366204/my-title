@@ -284,6 +284,108 @@ test('workflow recovery APIs - pause, resume, and retry', async (t) => {
       }
     });
 
+    await t.test('workflow endpoints proxy production runtime pause resume and retry', async () => {
+      const runId = 'api_workflow_runtime_proxy_run';
+      const baseUrl = `http://127.0.0.1:${port}`;
+      const {
+        initRuntimeState,
+        readRuntimeState,
+        updateRuntimeState
+      } = require('../skills/pipeline-flow/runtime/store');
+      const pipelineDataDir = path.join(process.cwd(), 'data', 'pipeline');
+      const runDir = path.join(pipelineDataDir, 'runs', runId);
+      fs.rmSync(runDir, { recursive: true, force: true });
+      fs.mkdirSync(runDir, { recursive: true });
+      fs.writeFileSync(path.join(runDir, 'run.json'), JSON.stringify({
+        runId,
+        status: 'mined',
+        startedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        counts: {},
+        files: {}
+      }, null, 2), 'utf8');
+      initRuntimeState({
+        dataDir: pipelineDataDir,
+        runId,
+        mode: 'daily',
+        params: { mine: 13, verify: 8, generate: 5, productsPerKeyword: 3 },
+        steps: ['mine', 'verify', 'generate', 'export', 'review']
+      });
+      updateRuntimeState({
+        dataDir: pipelineDataDir,
+        runId,
+        patch: {
+          activeStep: 'generate'
+        }
+      });
+      const originalRunner = app.locals.pipelineRuntimeRunner;
+      const runnerCalls = [];
+      app.locals.pipelineRuntimeRunner = async (options) => {
+        runnerCalls.push(options);
+        updateRuntimeState({
+          dataDir: pipelineDataDir,
+          runId: options.runId,
+          patch: {
+            status: 'completed',
+            activeStep: options.retryStep || options.resumeFromStep || 'mine'
+          }
+        });
+        return { runId: options.runId, status: 'completed', runtimeStatus: 'completed' };
+      };
+
+      try {
+        const pauseRes = await fetch(`${baseUrl}/api/workflows/runs/${runId}/pause`, { method: 'POST' });
+        const pausePayload = await pauseRes.json();
+        assert.strictEqual(pauseRes.status, 200);
+        assert.strictEqual(pausePayload.ok, true);
+        assert.strictEqual(pausePayload.data.control.requestedAction, 'pause');
+
+        const retryRes = await fetch(`${baseUrl}/api/workflows/runs/${runId}/retry-node`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nodeId: 'generate' })
+        });
+        const retryPayload = await retryRes.json();
+        assert.strictEqual(retryRes.status, 200);
+        assert.strictEqual(retryPayload.ok, true);
+        assert.strictEqual(retryPayload.data.control.requestedAction, 'retry-step');
+        assert.strictEqual(retryPayload.data.control.step, 'generate');
+
+        await new Promise((resolve) => setImmediate(resolve));
+
+        updateRuntimeState({
+          dataDir: pipelineDataDir,
+          runId,
+          patch: {
+            activeStep: 'verify'
+          }
+        });
+        const resumeRes = await fetch(`${baseUrl}/api/workflows/runs/${runId}/resume`, { method: 'POST' });
+        const resumePayload = await resumeRes.json();
+        assert.strictEqual(resumeRes.status, 200);
+        assert.strictEqual(resumePayload.ok, true);
+        assert.strictEqual(resumePayload.data.control.requestedAction, 'resume');
+
+        const unsupportedRes = await fetch(`${baseUrl}/api/workflows/runs/${runId}/retry-node`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nodeId: 'review' })
+        });
+        assert.strictEqual(unsupportedRes.status, 400);
+
+        const runtime = readRuntimeState({ dataDir: pipelineDataDir, runId });
+        assert.ok(runtime);
+        assert.strictEqual(runnerCalls.length, 2);
+        assert.strictEqual(runnerCalls[0].retryStep, 'generate');
+        assert.deepStrictEqual(runnerCalls[0].params, { mine: 13, verify: 8, generate: 5, productsPerKeyword: 3 });
+        assert.strictEqual(runnerCalls[1].resumeFromStep, 'verify');
+        assert.deepStrictEqual(runnerCalls[1].params, { mine: 13, verify: 8, generate: 5, productsPerKeyword: 3 });
+      } finally {
+        app.locals.pipelineRuntimeRunner = originalRunner;
+        fs.rmSync(runDir, { recursive: true, force: true });
+      }
+    });
+
   } finally {
     await new Promise((resolve) => server.close(resolve));
     // clean up temporary files in directory

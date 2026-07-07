@@ -505,7 +505,21 @@ function summaryInterventionForNode(summary, nodeId) {
   if (nodeId === WORKFLOW_NODE_IDS.review && status === 'needs_review') {
     return {
       blocker: 'review_rejected_rows',
-      actionHint: '导出前需要人工复核。请打开复核报告，处理风险项后再继续提交。'
+      actionHint: '导出前需要人工复核。请打开复核报告，处理风险项后再继续提交。',
+      nextRecommendedAction: {
+        action: 'open-review',
+        label: '查看复核报告',
+        description: '先检查风险项和待处理商品，再决定是否补充信息或重新导出。'
+      }
+    };
+  }
+  if (nodeId === WORKFLOW_NODE_IDS.review && (status === 'ready_to_distribute' || status === 'awaiting_user_confirmation')) {
+    return {
+      nextRecommendedAction: {
+        action: 'confirm-distribution',
+        label: '确认铺货清单',
+        description: '铺货前必须人工确认具体商品清单，确认后再进入提交动作。'
+      }
     };
   }
   return null;
