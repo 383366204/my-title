@@ -20,6 +20,7 @@ const {
   classifySeed,
   gateCandidate
 } = require('..');
+const { extractShortRoot, selectShortRoots } = require('../src/root-keywords');
 const { extractSearchPopularityFromSycmJson, extractSycmMetricsFromJson } = require('../src/sycm-precheck');
 
 function tempDataDir() {
@@ -27,6 +28,21 @@ function tempDataDir() {
 }
 
 describe('keyword-mining', () => {
+  test('short root extraction keeps concrete product roots and rejects broad roots', () => {
+    assert.equal(extractShortRoot({ keyword: '纯银项链女高级感' }).root, '项链');
+    assert.equal(extractShortRoot({ keyword: '女装爆款' }), null);
+  });
+
+  test('short root rotation skips roots checked within cooldown', () => {
+    const dataDir = tempDataDir();
+    fs.writeFileSync(path.join(dataDir, 'root-history.jsonl'), JSON.stringify({ root: '项链', checkedAt: new Date().toISOString() }) + '\n');
+    const roots = selectShortRoots([
+      { keyword: '纯银项链女' },
+      { keyword: '和田玉吊坠女' }
+    ], { dataDir, limit: 2, cooldownDays: 7 });
+    assert.deepEqual(roots.map(item => item.root), ['吊坠']);
+  });
+
   test('addSeed stores and sorts seeds', () => {
     const dataDir = tempDataDir();
     addSeed('戒指', { category: '饰品', priority: 10, reason: 'test', dataDir });
@@ -36,6 +52,19 @@ describe('keyword-mining', () => {
     assert.strictEqual(seeds.length, 2);
     assert.strictEqual(seeds[0].keyword, '戒指');
     assert.strictEqual(seeds[0].priorityScore, 10);
+  });
+
+  test('listSeeds only returns active lifecycle seeds to daily mining by default', () => {
+    const dataDir = tempDataDir();
+    fs.writeFileSync(path.join(dataDir, 'seeds.json'), JSON.stringify([
+      { keyword: '活跃词', status: 'active', priority: 5 },
+      { keyword: '观察词', status: 'observing', priority: 9 },
+      { keyword: '探索词', status: 'explore', priority: 9 },
+      { keyword: '冷却词', status: 'cooling', priority: 9 }
+    ]));
+
+    assert.deepStrictEqual(listSeeds({ dataDir }).map(seed => seed.keyword), ['活跃词']);
+    assert.strictEqual(listSeeds({ dataDir, includePaused: true }).length, 4);
   });
 
   test('expandSeed creates specific candidates', () => {
@@ -194,6 +223,54 @@ describe('keyword-mining', () => {
     assert.ok(result.candidates.every(item => item.gateStatus));
     assert.ok(result.candidates.every(item => item.canDistribute === false));
     assert.strictEqual(fs.existsSync(path.join(dataDir, 'candidates.jsonl')), false);
+  });
+
+  test('mineKeywords skips recently seen candidates when daily dedupe is enabled', async () => {
+    const dataDir = tempDataDir();
+    addSeed('戒指', { category: '饰品', priority: 10, dataDir });
+    addSeed('宠物玩具', { category: '宠物', priority: 9, dataDir });
+
+    const first = await mineKeywords({
+      dataDir,
+      count: 3,
+      persist: false,
+      excludeSeen: true,
+      recordSeen: true
+    });
+    const second = await mineKeywords({
+      dataDir,
+      count: 3,
+      persist: false,
+      excludeSeen: true,
+      recordSeen: false
+    });
+
+    const firstWords = new Set(first.candidates.map(item => item.keyword));
+    const secondWords = second.candidates.map(item => item.keyword);
+    assert.ok(firstWords.size > 0);
+    assert.ok(secondWords.length > 0);
+    assert.ok(secondWords.every(word => !firstWords.has(word)));
+    assert.ok(second.stats.seenFiltered >= first.candidates.length);
+  });
+
+  test('mineKeywords reports progress for visible mining stages', async () => {
+    const dataDir = tempDataDir();
+    addSeed('戒指', { category: '饰品', priority: 10, dataDir });
+    addSeed('宠物玩具', { category: '宠物', priority: 9, dataDir });
+    const progress = [];
+
+    const result = await mineKeywords({
+      dataDir,
+      count: 10,
+      persist: false,
+      onProgress: (event) => progress.push(event)
+    });
+
+    assert.strictEqual(result.ok, true);
+    assert.ok(progress.some(event => event.stage === 'load-seeds' && event.message === '读取种子池'));
+    assert.ok(progress.some(event => event.stage === 'expand' && event.message.includes('扩展候选词')));
+    assert.ok(progress.some(event => event.stage === 'rank' && event.message.includes('排序筛选')));
+    assert.ok(progress.some(event => event.stage === 'complete' && event.message === `挖词完成 ${result.candidates.length} 个`));
   });
 
   test('mineKeywords default seed pool produces candidates', async () => {

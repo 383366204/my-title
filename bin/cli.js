@@ -785,7 +785,10 @@ program
   .option('--sycm-precheck', '启用SYCM预检过滤（查询搜索人气，低于阈值的词直接丢弃）')
   .option('--min-popularity <number>', 'SYCM搜索人气最低阈值', '50')
   .option('--mode <mode>', '本地筛选强度: strict / balanced / explore', 'balanced')
-  .option('--source <source>', '挖词来源: local / ai / hybrid', 'local')
+  .option('--source <source>', '挖词来源: local / ai / hybrid / sycm_hot / sycm_blue', 'local')
+  .option('--root-mode <mode>', '生意参谋词根模式: auto / seed', 'auto')
+  .option('--root-limit <number>', '每次生意参谋最多查询的词根数量', '5')
+  .option('--root-cooldown-days <number>', '词根重复查询冷却天数', '7')
   .option('--ai-candidates <number>', 'AI 生成候选词数量（仅 --source ai/hybrid 生效）', '80')
   .option('--ai-batch-size <number>', 'AI 每批生成候选词数量，降低 JSON 截断风险', '20')
   .option('--include-direct-seeds', '把 direct 类型种子也混入候选词输出（默认只单独提示，不参与挖词排序）')
@@ -810,6 +813,9 @@ program
         includeDirect: !!options.includeDirectSeeds,
         mode: options.mode || 'balanced',
         source: options.source || 'local',
+        rootMode: options.rootMode || 'auto',
+        rootLimit: parseInt(options.rootLimit, 10) || 5,
+        rootCooldownDays: parseInt(options.rootCooldownDays, 10) || 7,
         aiCandidates: parseInt(options.aiCandidates, 10) || 80,
         aiBatchSize: parseInt(options.aiBatchSize, 10) || 20
       });
@@ -981,7 +987,7 @@ program
 
 const flowCommand = program
   .command('flow')
-  .description('每日蓝海选品流水线：选词 → 生意参谋校验 → 标题生成 → 导出铺货清单');
+  .description('每日蓝海选品流水线：选词 → 生意参谋校验 → 货源选品 → 标题生成 → 导出铺货清单');
 
 flowCommand
   .command('daily')
@@ -996,6 +1002,11 @@ flowCommand
   .option('--pages <number>', '生意参谋最大提取页数', '1')
   .option('--min-blue-rows <number>', '蓝海词少于该数量时降级查热搜词', '1')
   .option('--no-hot-fallback', '蓝海词不足时不降级查热搜词')
+  .option('--auto-review', '兼容旧参数：每日流程默认自动通过候选词初筛')
+  .option('--manual-review', '停在人工筛词节点，不自动继续')
+  .option('--verify-reserve <number>', '严格机会词为空时，额外补验的备用词数量', '8')
+  .option('--no-auto-expand-verify', '严格机会词为空时，不补验备用词')
+  .option('--no-auto-continue-review-keywords', '严格机会词为空时，不继续少量可复核词')
   .option('--json', '纯 JSON 输出模式')
   .action(async function(options, command) {
     const mainOpts = command.parent && command.parent.parent ? command.parent.parent.opts() : {};
@@ -1012,7 +1023,11 @@ flowCommand
         port: parseInt(options.port, 10) || 9222,
         pages: parseInt(options.pages, 10) || 1,
         minBlueRows: parseInt(options.minBlueRows, 10) || 1,
-        fallbackHot: options.hotFallback !== false
+        fallbackHot: options.hotFallback !== false,
+        reviewMode: options.manualReview ? 'wait' : 'auto',
+        autoExpandVerify: options.autoExpandVerify !== false,
+        verifyReserve: Math.max(0, parseInt(options.verifyReserve, 10) || 8),
+        autoAllowReviewKeywords: options.autoContinueReviewKeywords !== false
       });
       if (jsonMode) {
         writeAsciiJson(result);
@@ -1021,7 +1036,7 @@ flowCommand
       console.log('\n✅ 每日流水线完成');
       console.log(`Run: ${result.runId}`);
       console.log(`状态: ${result.status}`);
-      console.log(`候选 ${result.steps.mined} | 验证通过 ${result.steps.verified} | 拒绝 ${result.steps.rejected} | 生成商品 ${result.steps.generated} | 导出 ${result.steps.exported}`);
+      console.log(`候选 ${result.steps.mined} | 人工筛词 ${result.steps.reviewed || 0} | 验证通过 ${result.steps.verified} | 货源选品 ${result.steps.selected || 0} | 拒绝 ${result.steps.rejected} | 生成商品 ${result.steps.generated} | 导出 ${result.steps.exported}`);
       console.log(`铺货清单: ${result.files.distributionBatch}`);
     } catch (error) {
       if (jsonMode) writeAsciiJson({ ok: false, error: error.message });
@@ -1040,7 +1055,11 @@ flowCommand
     const jsonMode = !!options.json || !!mainOpts.json;
     try {
       const { flowMine } = require('../skills/pipeline-flow');
-      const result = await flowMine({ limit: parseInt(options.limit, 10) || 50 });
+      const result = await flowMine({
+        limit: parseInt(options.limit, 10) || 50,
+        excludeSeen: true,
+        recordSeen: true
+      });
       if (jsonMode) {
         writeAsciiJson(withAgentResponseFields({
           ok: true,
@@ -1055,6 +1074,41 @@ flowCommand
         return;
       }
       console.log(`✅ 已生成候选词: ${result.candidates.length}`);
+      console.log(`Run: ${result.runId}`);
+      console.log(`Next: ${result.nextCommand}`);
+    } catch (error) {
+      if (jsonMode) writeAsciiJson({ ok: false, error: error.message });
+      else console.error('\n❌ 错误:', error.message);
+      process.exit(1);
+    }
+  });
+
+flowCommand
+  .command('review')
+  .description('人工筛选候选词，筛选后才进入生意参谋校验')
+  .option('--run <id>', '指定 runId，默认 latest')
+  .option('--approve-all', '通过所有候选词')
+  .option('--approve <keywords>', '逗号分隔的通过关键词')
+  .option('--reject <keywords>', '逗号分隔的拒绝关键词')
+  .option('--json', '纯 JSON 输出模式')
+  .action(async function(options, command) {
+    const mainOpts = command.parent && command.parent.parent ? command.parent.parent.opts() : {};
+    const jsonMode = !!options.json || !!mainOpts.json;
+    const splitKeywords = value => String(value || '').split(',').map(item => item.trim()).filter(Boolean);
+    try {
+      const { flowReviewCandidates } = require('../skills/pipeline-flow');
+      const result = flowReviewCandidates({
+        runId: options.run,
+        approveAll: !!options.approveAll,
+        approvedKeywords: splitKeywords(options.approve),
+        rejectedKeywords: splitKeywords(options.reject)
+      });
+      if (jsonMode) {
+        writeAsciiJson(withAgentResponseFields(result));
+        return;
+      }
+      console.log(`✅ 人工筛词状态: ${result.status}`);
+      console.log(`通过: ${result.approved ? result.approved.length : 0}，拒绝: ${result.rejected ? result.rejected.length : 0}`);
       console.log(`Run: ${result.runId}`);
       console.log(`Next: ${result.nextCommand}`);
     } catch (error) {
@@ -1111,8 +1165,48 @@ flowCommand
   });
 
 flowCommand
+  .command('select')
+  .description('对验真通过词执行 1688 货源选品')
+  .option('--run <id>', '指定 runId，默认 latest')
+  .option('--limit <number>', '选品关键词数量', '10')
+  .option('--products-per-keyword <number>', '每个关键词最多保留货源数', '12')
+  .option('--json', '纯 JSON 输出模式')
+  .action(async function(options, command) {
+    const mainOpts = command.parent && command.parent.parent ? command.parent.parent.opts() : {};
+    const jsonMode = !!options.json || !!mainOpts.json;
+    try {
+      const { flowSelectProducts } = require('../skills/pipeline-flow');
+      const result = await flowSelectProducts({
+        runId: options.run,
+        limit: parseInt(options.limit, 10) || 10,
+        productsPerKeyword: parseInt(options.productsPerKeyword, 10) || 12
+      });
+      const selected = result.selected.filter(row => row.status === 'selected').length;
+      if (jsonMode) {
+        writeAsciiJson(withAgentResponseFields({
+          ok: true,
+          runId: result.runId,
+          status: result.status,
+          selected,
+          blockers: result.blockers,
+          allowedCommands: result.allowedCommands,
+          nextCommand: result.nextCommand
+        }));
+        return;
+      }
+      console.log(`✅ 货源选品完成: 选中 ${selected} 条`);
+      console.log(`Run: ${result.runId}`);
+      console.log(`Next: ${result.nextCommand}`);
+    } catch (error) {
+      if (jsonMode) writeAsciiJson({ ok: false, error: error.message });
+      else console.error('\n❌ 错误:', error.message);
+      process.exit(1);
+    }
+  });
+
+flowCommand
   .command('generate')
-  .description('对验证通过词执行 1688 选品和标题生成')
+  .description('对已选货源执行标题生成')
   .option('--run <id>', '指定 runId，默认 latest')
   .option('--limit <number>', '生成关键词数量', '10')
   .option('--products-per-keyword <number>', '每个关键词最多导出商品数', '12')

@@ -95,6 +95,17 @@ function getSeedScore(seed, now = new Date()) {
 }
 
 /**
+ * Normalize a seed lifecycle status while keeping legacy seed records compatible.
+ * @param {string} status Raw status.
+ * @returns {string} Normalized lifecycle status.
+ */
+function normalizeSeedStatus(status) {
+  const value = String(status || '').trim().toLowerCase();
+  if (['active', 'observing', 'explore', 'cooling', 'paused', 'disabled'].includes(value)) return value;
+  return 'active';
+}
+
+/**
  * List active seeds sorted by dynamic score.
  * @param {object} [options] 选项
  * @param {string} [options.dataDir] 数据目录
@@ -103,7 +114,8 @@ function getSeedScore(seed, now = new Date()) {
  */
 function listSeeds({ dataDir = DEFAULT_DATA_DIR, includePaused = false } = {}) {
   return loadSeeds(dataDir)
-    .filter(seed => includePaused || seed.status !== 'paused')
+    .map(seed => ({ ...seed, status: normalizeSeedStatus(seed.status) }))
+    .filter(seed => includePaused || seed.status === 'active')
     .map(seed => ({ ...seed, normalized: normalizeKeyword(seed.keyword), priorityScore: getSeedScore(seed) }))
     .sort((a, b) => b.priorityScore - a.priorityScore || String(a.keyword).localeCompare(String(b.keyword), 'zh-CN'));
 }
@@ -164,6 +176,7 @@ module.exports = {
   saveSeeds,
   recordSeedEvent,
   getSeedScore,
+  normalizeSeedStatus,
   listSeeds,
   addSeed
 };

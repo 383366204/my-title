@@ -27,26 +27,43 @@ function evaluateMarketMetrics(sycmData, { minSearchPopularity = 50 } = {}) {
   const clickRate = parseMetricNumber(metricValue(sycmData, ['clickRate', 'clickRatio']));
   const conversionRate = parseMetricNumber(metricValue(sycmData, ['conversionRate', 'payConversionRate', 'payConversion']));
   const buyerCount = parseMetricNumber(metricValue(sycmData, ['buyerCount', 'payBuyerCount', 'payBuyers']));
-  const score = Math.round(
-    Math.min(30, demandSupplyRatio * 15) +
-    Math.min(25, searchPopularity / 20) +
-    Math.min(20, clickRate * 1.2) +
-    Math.min(15, conversionRate * 4) +
-    Math.min(10, buyerCount / 5)
-  );
+  const onlineProductCount = parseMetricNumber(metricValue(sycmData, ['onlineProductCount', '商品数', 'productCount', 'competitionCount']));
+  const trend = parseMetricNumber(metricValue(sycmData, ['trend', 'trendRate', 'searchTrend', 'growthRate']));
+  const breakdown = {
+    demand: Math.min(30, demandSupplyRatio * 15),
+    search: Math.min(25, searchPopularity / 20),
+    click: Math.min(20, clickRate * 1.2),
+    conversion: Math.min(15, conversionRate * 4),
+    buyers: Math.min(10, buyerCount / 5)
+  };
+  const score = Math.round(Object.values(breakdown).reduce((sum, value) => sum + value, 0));
   const evidence = [];
+  const missing = [];
   if (demandSupplyRatio >= 0.5) evidence.push('供需比达标');
+  else missing.push('供需比不足');
   if (clickRate >= 5) evidence.push('点击率达标');
+  else missing.push('点击率不足');
   if (conversionRate >= 1) evidence.push('转化率达标');
+  else missing.push('转化率不足');
   if (buyerCount >= 1) evidence.push('买家数达标');
+  else missing.push('支付买家数不足');
+  if (!searchPopularity) missing.push('缺少搜索人气');
+  const availableMetrics = [searchPopularity, demandSupplyRatio, clickRate, conversionRate, buyerCount]
+    .filter(value => Number(value) > 0).length;
+  const confidence = availableMetrics >= 4 ? 'high' : availableMetrics >= 2 ? 'medium' : 'low';
   return {
     searchPopularity,
     demandSupplyRatio,
     clickRate,
     conversionRate,
     buyerCount,
+    onlineProductCount,
+    trend,
     score,
+    breakdown,
     evidence,
+    missing,
+    confidence,
     passed: searchPopularity >= minSearchPopularity && evidence.length > 0 && score >= 45
   };
 }
@@ -104,7 +121,7 @@ function gateCandidate(candidate, { minSearchPopularity = 50 } = {}) {
       return {
         gateStatus: 'review',
         canDistribute: false,
-        gateReason: `搜索人气 ${market.searchPopularity} 达标，但供需/点击/转化/买家指标不足，需人工复核`,
+        gateReason: `搜索人气 ${market.searchPopularity} 达标，但${market.missing.join('、') || '综合指标不足'}，需人工复核`,
         gateFlags: ['sycm_needs_more_market_evidence'],
         marketScore: market.score,
         marketMetrics: market

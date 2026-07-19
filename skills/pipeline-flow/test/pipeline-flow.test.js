@@ -6,6 +6,7 @@ const path = require('path');
 const {
   flowDaily,
   flowMine,
+  flowReviewCandidates,
   flowVerify,
   flowGenerate,
   flowExport,
@@ -24,6 +25,20 @@ const {
 
 function tempDataDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'pipeline-flow-'));
+}
+
+function mockProduct(keyword = '测试货源', id = '123') {
+  return {
+    id,
+    subject: '宠物玩具狗狗互动耐咬训练球室内陪伴用品',
+    title: '宠物玩具狗狗互动耐咬训练球室内陪伴用品',
+    detailUrl: `https://detail.1688.com/offer/${id}.html`,
+    price: '15.8',
+    sales30days: 1200,
+    imageUrl: `https://img.example.com/${id}.jpg`,
+    shopName: '义乌宠物用品工厂店',
+    categoryListName: '宠物用品 > 狗狗玩具'
+  };
 }
 
 describe('pipeline-flow', () => {
@@ -78,6 +93,50 @@ describe('pipeline-flow', () => {
     assert.ok(result.score >= 80);
     assert.strictEqual(result.decision, 'continue');
     assert.strictEqual(result.nextAction, 'search_1688');
+    assert.ok(result.breakdown.positive.some(item => item.key === 'local_score'));
+    assert.ok(result.breakdown.positive.some(item => item.key === 'sycm_score'));
+    assert.strictEqual(result.breakdown.gapToContinue, 0);
+  });
+
+  test('scoreKeywordOpportunity lets strong hot fallback words continue with risk flags', () => {
+    const result = scoreKeywordOpportunity({
+      keyword: '纯银吊坠',
+      localScore: 80,
+      verifyMode: 'hot',
+      fallbackUsed: true,
+      sycmScore: {
+        passed: true,
+        score: 61,
+        mode: 'hot',
+        confidence: 'trend',
+        usage: 'trend_reference'
+      }
+    });
+
+    assert.strictEqual(result.decision, 'continue');
+    assert.strictEqual(result.nextAction, 'search_1688');
+    assert.ok(result.riskFlags.includes('fallback_hot'));
+    assert.strictEqual(result.breakdown.gapToContinue, 0);
+  });
+
+  test('scoreKeywordOpportunity still rejects weak hot fallback words', () => {
+    const result = scoreKeywordOpportunity({
+      keyword: '本命年吊坠',
+      localScore: 80,
+      verifyMode: 'hot',
+      fallbackUsed: true,
+      sycmScore: {
+        passed: true,
+        score: 20,
+        mode: 'hot',
+        confidence: 'trend',
+        usage: 'trend_reference'
+      }
+    });
+
+    assert.strictEqual(result.decision, 'reject');
+    assert.strictEqual(result.nextAction, 'stop');
+    assert.ok(result.breakdown.gapToContinue > 0);
   });
 
   test('scoreProductOpportunity prefers valid 1688 URLs with relevant title and sales', () => {
@@ -156,6 +215,62 @@ describe('pipeline-flow', () => {
     const rows = readJsonl(run.files.candidates);
     assert.ok(rows.some(row => row.keyword === '纯银项链女'));
     assert.equal(run.counts.candidates, rows.length);
+  });
+
+  test('flowReviewCandidates waits for manual keyword approval before SYCM verification', async () => {
+    const dataDir = tempDataDir();
+    const mined = await flowMine({
+      dataDir,
+      limit: 2,
+      fallbackCandidates: true
+    });
+
+    const waiting = flowReviewCandidates({
+      dataDir,
+      runId: mined.runId
+    });
+
+    assert.strictEqual(waiting.status, 'awaiting_keyword_review');
+    assert.ok(waiting.blockers.includes('keyword_review_required'));
+    assert.ok(waiting.nextCommand.includes('flow review'));
+
+    const approved = flowReviewCandidates({
+      dataDir,
+      runId: mined.runId,
+      approvedKeywords: [mined.candidates[0].keyword],
+      rejectedKeywords: [mined.candidates[1].keyword]
+    });
+
+    assert.strictEqual(approved.status, 'keywords_reviewed');
+    assert.strictEqual(approved.approved.length, 1);
+    assert.strictEqual(approved.rejected.length, 1);
+    assert.ok(approved.nextCommand.includes('flow verify'));
+    const { run } = getRun({ dataDir, runId: mined.runId });
+    const reviewedRows = readJsonl(run.files.reviewedCandidates);
+    assert.deepStrictEqual(reviewedRows.map(row => row.reviewStatus), ['approved', 'rejected']);
+  });
+
+  test('flowMine avoids candidates that appeared in recent pipeline runs', async () => {
+    const dataDir = tempDataDir();
+    const first = await flowMine({
+      dataDir,
+      runId: 'first_seen_run',
+      limit: 3,
+      excludeSeen: true,
+      recordSeen: false
+    });
+    const second = await flowMine({
+      dataDir,
+      runId: 'second_seen_run',
+      limit: 3,
+      excludeSeen: true,
+      recordSeen: false
+    });
+
+    const firstWords = new Set(first.candidates.map(row => row.keyword));
+    assert.ok(firstWords.size > 0);
+    assert.ok(second.candidates.length > 0);
+    assert.ok(second.candidates.every(row => !firstWords.has(row.keyword)));
   });
 
   test('flowVerify stops on SYCM slider manual action', async () => {
@@ -274,16 +389,21 @@ describe('pipeline-flow', () => {
 
     const result = await flowDaily({
       dataDir,
+      recordSeen: false,
+      reviewMode: 'auto',
       mine: 3,
       verify: 2,
       generate: 1,
       export: 1,
       sycmExtractor,
-      generator
+      generator,
+      searchProducts: async (_coreWord, blueOceanWord) => [mockProduct(blueOceanWord, '123')]
     });
 
     assert.strictEqual(result.ok, true);
+    assert.strictEqual(result.steps.reviewed, 3);
     assert.strictEqual(result.steps.verified, 2);
+    assert.strictEqual(result.steps.selected, 1);
     assert.strictEqual(result.steps.generated, 1);
     assert.strictEqual(result.steps.exported, 1);
     assert.ok(result.nextCommand.includes('1688-distribution'));
@@ -347,7 +467,8 @@ describe('pipeline-flow', () => {
             }
           ]
         };
-      }
+      },
+      searchProducts: async () => [mockProduct(exactKeyword, '1049095335543')]
     });
 
     assert.strictEqual(result.exactKeyword, exactKeyword);
@@ -355,6 +476,7 @@ describe('pipeline-flow', () => {
     assert.deepStrictEqual(generatorCalls, [exactKeyword]);
     assert.strictEqual(result.steps.mined, 1);
     assert.strictEqual(result.steps.verified, 1);
+    assert.strictEqual(result.steps.selected, 1);
     assert.strictEqual(result.steps.exported, 1);
     assert.ok(fs.readFileSync(result.files.distributionBatch, 'utf8').includes('1049095335543'));
     const candidates = readJsonl(path.join(result.runDir, 'candidates.jsonl'));
@@ -390,6 +512,46 @@ describe('pipeline-flow', () => {
     });
 
     assert.strictEqual(generated.generated.filter(row => row.status === 'generated').length, 12);
+  });
+
+  test('flowGenerate skips verified keywords that fail keyword opportunity scoring by default', async () => {
+    const dataDir = tempDataDir();
+    const mined = await flowMine({ dataDir, limit: 1 });
+    fs.writeFileSync(path.join(mined.runDir, 'verified-keywords.jsonl'), [
+      JSON.stringify({
+        keyword: '热搜观察词',
+        status: 'verified',
+        keywordOpportunity: { score: 38, decision: 'reject', nextAction: 'stop' }
+      }),
+      JSON.stringify({
+        keyword: '蓝海可生成词',
+        status: 'verified',
+        keywordOpportunity: { score: 82, decision: 'continue', nextAction: 'search_1688' }
+      })
+    ].join('\n') + '\n', 'utf8');
+
+    const calls = [];
+    const generated = await flowGenerate({
+      dataDir,
+      runId: mined.runId,
+      limit: 2,
+      generator: async (keyword) => {
+        calls.push(keyword);
+        return {
+          ok: true,
+          products: [{
+            '产品链接': 'https://detail.1688.com/offer/123456.html',
+            '铺货标题': `${keyword}标题足够长用于验证默认过滤机会分未通过关键词`,
+            '商品原价': '18.8',
+            '30天销量': 20
+          }]
+        };
+      }
+    });
+
+    assert.deepStrictEqual(calls, ['蓝海可生成词']);
+    assert.strictEqual(generated.generated.filter(row => row.status === 'generated').length, 1);
+    assert.strictEqual(generated.generated.find(row => row.status === 'generated').selectedKeyword, '蓝海可生成词');
   });
 
   test('flowExport separates recommended submit rows from manual review candidates', async () => {
@@ -542,6 +704,8 @@ describe('pipeline-flow', () => {
     const dataDir = tempDataDir();
     const result = await flowDaily({
       dataDir,
+      recordSeen: false,
+      reviewMode: 'auto',
       mine: 2,
       verify: 1,
       sycmExtractor: async keyword => ({ keyword, data: [] }),
@@ -556,17 +720,98 @@ describe('pipeline-flow', () => {
     assert.strictEqual(result.steps.exported, 0);
   });
 
+  test('flowVerify stops when verified keywords fail opportunity scoring', async () => {
+    const dataDir = tempDataDir();
+    const mined = await flowMine({ dataDir, limit: 1 });
+    fs.writeFileSync(path.join(mined.runDir, 'candidates.jsonl'), JSON.stringify({
+      keyword: '低机会验真词',
+      localScore: 0,
+      nextAction: 'sycm_verify'
+    }) + '\n', 'utf8');
+
+    const result = await flowVerify({
+      dataDir,
+      runId: mined.runId,
+      limit: 1,
+      sycmExtractor: async keyword => ({
+        keyword,
+        data: [{ keyword, demandSupplyRatio: 1, searchPopularity: 20, clickRate: 1 }]
+      })
+    });
+
+    assert.strictEqual(result.status, 'verified_no_generation_eligible');
+    assert.strictEqual(result.verified.length, 1);
+    assert.ok(result.blockers.includes('no_generation_eligible_keywords'));
+    assert.ok(result.nextCommand.includes('run.json'));
+    assert.ok(!result.nextCommand.includes('flow generate'));
+  });
+
+  test('flowVerify supplements the reserve candidate pool when the primary batch has no strict opportunity', async () => {
+    const dataDir = tempDataDir();
+    const mined = await flowMine({ dataDir, limit: 2 });
+    fs.writeFileSync(path.join(mined.runDir, 'candidates.jsonl'), [
+      JSON.stringify({ keyword: '备用测试词一', localScore: 0, nextAction: 'sycm_verify' }),
+      JSON.stringify({ keyword: '备用测试词二', localScore: 80, nextAction: 'sycm_verify' })
+    ].join('\n') + '\n', 'utf8');
+
+    const result = await flowVerify({
+      dataDir,
+      runId: mined.runId,
+      limit: 1,
+      autoExpandVerify: true,
+      verifyReserve: 1,
+      sycmExtractor: async keyword => ({
+        keyword,
+        data: [{ keyword, demandSupplyRatio: 8, searchPopularity: 500, clickRate: 80, conversionRate: 5 }]
+      })
+    });
+
+    assert.strictEqual(result.status, 'verified');
+    assert.strictEqual(result.verified.length, 2);
+    assert.strictEqual(getRun({ dataDir, runId: mined.runId }).run.counts.sycmReserveChecked, 1);
+    assert.strictEqual(getRun({ dataDir, runId: mined.runId }).run.counts.sycmGenerationEligible, 1);
+  });
+
+  test('flowVerify can continue a small observable fallback set for the daily review path', async () => {
+    const dataDir = tempDataDir();
+    const mined = await flowMine({ dataDir, limit: 1 });
+    fs.writeFileSync(path.join(mined.runDir, 'candidates.jsonl'), JSON.stringify({
+      keyword: '可复核备用词',
+      localScore: 0,
+      nextAction: 'sycm_verify'
+    }) + '\n', 'utf8');
+
+    const result = await flowVerify({
+      dataDir,
+      runId: mined.runId,
+      limit: 1,
+      autoAllowReviewKeywords: true,
+      reviewKeywordLimit: 2,
+      sycmExtractor: async keyword => ({
+        keyword,
+        data: [{ keyword, demandSupplyRatio: 8, searchPopularity: 500, clickRate: 80, conversionRate: 5 }]
+      })
+    });
+
+    assert.strictEqual(result.status, 'verified');
+    assert.strictEqual(result.verified[0].autoFallbackEligible, true);
+    assert.strictEqual(getRun({ dataDir, runId: mined.runId }).run.counts.sycmAutoFallbackEligible, 1);
+  });
+
   test('flowDaily stops when generation produces no products', async () => {
     const dataDir = tempDataDir();
     const result = await flowDaily({
       dataDir,
+      recordSeen: false,
+      reviewMode: 'auto',
       mine: 2,
       verify: 1,
       generate: 1,
       sycmExtractor: async keyword => ({
         keyword,
-        data: [{ keyword, demandSupplyRatio: 2, searchPopularity: 100, clickRate: 30 }]
+        data: [{ keyword, demandSupplyRatio: 17.75, searchPopularity: 500, clickRate: 80, conversionRate: 5 }]
       }),
+      searchProducts: async keyword => [mockProduct(keyword, '789')],
       generator: async () => ({ ok: true, products: [] })
     });
 
@@ -579,12 +824,13 @@ describe('pipeline-flow', () => {
   test('flow steps can resume from latest run', async () => {
     const dataDir = tempDataDir();
     const mined = await flowMine({ dataDir, limit: 2 });
+    const reviewed = flowReviewCandidates({ dataDir, approveAll: true });
     const verified = await flowVerify({
       dataDir,
       limit: 1,
       sycmExtractor: async keyword => ({
         keyword,
-        data: [{ keyword, demandSupplyRatio: 2, searchPopularity: 100, clickRate: 30 }]
+        data: [{ keyword, demandSupplyRatio: 17.75, searchPopularity: 500, clickRate: 80, conversionRate: 5 }]
       })
     });
     const generated = await flowGenerate({
@@ -597,11 +843,13 @@ describe('pipeline-flow', () => {
     });
     const exported = await flowExport({ dataDir, limit: 1 });
 
+    assert.strictEqual(reviewed.runId, mined.runId);
     assert.strictEqual(verified.runId, mined.runId);
     assert.strictEqual(generated.runId, mined.runId);
     assert.strictEqual(exported.runId, mined.runId);
-    assert.ok(mined.nextCommand.includes('flow verify'));
-    assert.ok(verified.nextCommand.includes('flow generate'));
+    assert.ok(mined.nextCommand.includes('flow review'));
+    assert.ok(reviewed.nextCommand.includes('flow verify'));
+    assert.ok(verified.nextCommand.includes('flow select'));
     assert.ok(generated.nextCommand.includes('flow export'));
     assert.strictEqual(readJsonl(path.join(dataDir, 'runs', mined.runId, 'verified-keywords.jsonl')).length, 1);
   });

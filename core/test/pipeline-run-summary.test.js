@@ -32,13 +32,18 @@ function writeText(file, data) {
 
 describe('pipeline run summary', () => {
   it('maps pipeline statuses to normalized stages', () => {
-    assert.deepEqual(STAGE_ORDER, ['seed', 'mined', 'verified', 'generated', 'review', 'ready', 'submitted']);
+    assert.deepEqual(STAGE_ORDER, ['seed', 'mined', 'keyword_review', 'verified', 'selected', 'generated', 'review', 'ready', 'submitted']);
     assert.equal(pipelineStatusToStage('created'), 'seed');
     assert.equal(pipelineStatusToStage('mined'), 'mined');
+    assert.equal(pipelineStatusToStage('awaiting_keyword_review'), 'keyword_review');
+    assert.equal(pipelineStatusToStage('keywords_reviewed'), 'keyword_review');
+    assert.equal(pipelineStatusToStage('keyword_review_empty'), 'keyword_review');
     assert.equal(pipelineStatusToStage('manual_action_required'), 'verified');
     assert.equal(pipelineStatusToStage('verified_partial_manual_required'), 'verified');
     assert.equal(pipelineStatusToStage('verified'), 'verified');
     assert.equal(pipelineStatusToStage('verified_empty'), 'verified');
+    assert.equal(pipelineStatusToStage('products_selected'), 'selected');
+    assert.equal(pipelineStatusToStage('select_failed'), 'selected');
     assert.equal(pipelineStatusToStage('generated'), 'generated');
     assert.equal(pipelineStatusToStage('generate_failed'), 'generated');
     assert.equal(pipelineStatusToStage('needs_review'), 'review');
@@ -89,7 +94,7 @@ describe('pipeline run summary', () => {
     assert.equal(summary.runId, runId);
     assert.equal(summary.status, 'needs_review');
     assert.equal(summary.stage, 'review');
-    assert.equal(summary.stageIndex, 4);
+    assert.equal(summary.stageIndex, 6);
     assert.deepEqual(summary.counts, {
       candidates: 2,
       sycmVerified: 1,

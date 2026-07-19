@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { mineKeywords } = require('../keyword-mining');
 const { generateTitlePipeline } = require('../title-gen');
+const { extractKeywords } = require('../title-gen/src/extract-core');
 const { searchAll } = require('../alibaba1688');
 const { extractSycmData, DEFAULT_FILTER_CONDITIONS } = require('../sycm-research');
 const { checkBannedWords } = require('../../core/banned-words');
@@ -101,6 +102,24 @@ function readJsonl(file) {
     .map(line => JSON.parse(line));
 }
 
+function readRecentPipelineCandidateKeywords({ dataDir = DEFAULT_FLOW_DIR, ttlDays = 30, excludeRunId = '' } = {}) {
+  const runsDir = path.join(dataDir, 'runs');
+  if (!fs.existsSync(runsDir)) return [];
+  const cutoff = Date.now() - Number(ttlDays || 30) * 86400000;
+  const keywords = new Set();
+  for (const runId of fs.readdirSync(runsDir)) {
+    if (runId === excludeRunId) continue;
+    const runDir = path.join(runsDir, runId);
+    const run = readJson(path.join(runDir, 'run.json'), {});
+    const timestamp = Date.parse(run.updatedAt || run.startedAt || '');
+    if (Number.isFinite(timestamp) && timestamp < cutoff) continue;
+    for (const row of readJsonl(path.join(runDir, 'candidates.jsonl'))) {
+      if (row.keyword) keywords.add(row.keyword);
+    }
+  }
+  return [...keywords];
+}
+
 function resolveRunDir({ dataDir = DEFAULT_FLOW_DIR, runId } = {}) {
   const id = runId || createRunId();
   return {
@@ -123,15 +142,20 @@ function initRun({ dataDir = DEFAULT_FLOW_DIR, runId, options = {} } = {}) {
     options,
     counts: {
       candidates: 0,
+      keywordReviewApproved: 0,
+      keywordReviewRejected: 0,
       sycmVerified: 0,
       sycmRejected: 0,
+      selectedProducts: 0,
       generatedProducts: 0,
       readyToDistribute: 0
     },
     files: {
       candidates: path.join(resolved.runDir, 'candidates.jsonl'),
+      reviewedCandidates: path.join(resolved.runDir, 'reviewed-candidates.jsonl'),
       sycmResults: path.join(resolved.runDir, 'sycm-results.jsonl'),
       verifiedKeywords: path.join(resolved.runDir, 'verified-keywords.jsonl'),
+      selectedProducts: path.join(resolved.runDir, 'selected-products.jsonl'),
       generatedProducts: path.join(resolved.runDir, 'generated-products.jsonl'),
       distributionBatch: path.join(resolved.runDir, 'distribution-batch.txt'),
       distributionReview: path.join(resolved.runDir, 'distribution-review.md')
@@ -150,8 +174,10 @@ function initRun({ dataDir = DEFAULT_FLOW_DIR, runId, options = {} } = {}) {
 function ensureRunFiles(run, runDir) {
   run.files = run.files || {};
   run.files.candidates = run.files.candidates || path.join(runDir, 'candidates.jsonl');
+  run.files.reviewedCandidates = run.files.reviewedCandidates || path.join(runDir, 'reviewed-candidates.jsonl');
   run.files.sycmResults = run.files.sycmResults || path.join(runDir, 'sycm-results.jsonl');
   run.files.verifiedKeywords = run.files.verifiedKeywords || path.join(runDir, 'verified-keywords.jsonl');
+  run.files.selectedProducts = run.files.selectedProducts || path.join(runDir, 'selected-products.jsonl');
   run.files.generatedProducts = run.files.generatedProducts || path.join(runDir, 'generated-products.jsonl');
   run.files.distributionBatch = run.files.distributionBatch || path.join(runDir, 'distribution-batch.txt');
   run.files.distributionReview = run.files.distributionReview || path.join(runDir, 'distribution-review.md');
@@ -174,6 +200,33 @@ function getRun({ dataDir = DEFAULT_FLOW_DIR, runId } = {}) {
   if (!run) throw new Error('run.json 不存在: ' + resolved.runDir);
   ensureRunFiles(run, resolved.runDir);
   return { ...resolved, run };
+}
+
+/**
+ * 将已经由铺货后台确认成功的运行标记为工作流完成。
+ * @param {object} options 完成参数。
+ * @param {string} options.runId 工作流运行 ID。
+ * @param {object} [options.distributionResult] 铺货结果摘要。
+ * @param {string} [options.dataDir] pipeline 数据目录。
+ * @returns {object} 更新后的运行记录。
+ */
+function markRunDistributionComplete({ dataDir = DEFAULT_FLOW_DIR, runId, distributionResult = {} } = {}) {
+  const resolved = getRun({ dataDir, runId });
+  const run = resolved.run;
+  run.status = 'workflow_complete';
+  run.requiresUserAction = false;
+  run.mustReview = false;
+  run.blockers = [];
+  run.nextActionCode = 'workflow_complete';
+  run.nextCommand = '';
+  run.distribution = {
+    status: 'completed',
+    completedAt: new Date().toISOString(),
+    total: Number(distributionResult.total || run.counts?.readyToDistribute || 0),
+    confirmed: Number(distributionResult.confirmed || distributionResult.total || 0)
+  };
+  writeRun(resolved.runDir, run);
+  return run;
 }
 
 function parseMetricNumber(value) {
@@ -345,11 +398,14 @@ async function fetchSycmWithFallback(keyword, options = {}) {
 }
 
 function productUrl(product) {
-  return product && (product['产品链接'] || product.url || product.link || product.productUrl || '');
+  const direct = product && (product['产品链接'] || product.detailUrl || product.productUrl || product.link || product.url || '');
+  if (direct && /detail\.1688\.com\/offer\/\d+\.html/.test(String(direct))) return direct;
+  const id = product && (product.id || product.offerId || product.productId);
+  return id ? `https://detail.1688.com/offer/${id}.html` : direct;
 }
 
 function productTitle(product) {
-  return product && (product['铺货标题'] || product.title || product.generatedTitle || product.name || '');
+  return product && (product['铺货标题'] || product.title || product.subject || product.generatedTitle || product.name || '');
 }
 
 function sycmRecommendedCategory(sycmResult) {
@@ -434,9 +490,10 @@ function validateGeneratedRow(row, context = {}) {
     reasons.push('hot_export_limit');
   }
   if (row.keywordOpportunity && row.keywordOpportunity.decision && row.keywordOpportunity.decision !== 'continue') {
-    reasons.push(`keyword_opportunity_${row.keywordOpportunity.decision}`);
+    reasons.push(`legacy_keyword_opportunity_${row.keywordOpportunity.decision}`);
   }
-  if (row.productOpportunity && row.productOpportunity.decision && row.productOpportunity.decision !== 'continue') {
+  const humanSelected = context.manualMode === true || row.manualSelectionStatus === 'approved';
+  if (!humanSelected && row.productOpportunity && row.productOpportunity.decision && row.productOpportunity.decision !== 'continue') {
     reasons.push(`product_opportunity_${row.productOpportunity.level || row.productOpportunity.decision}`);
   }
 
@@ -453,7 +510,8 @@ function validateGeneratedRow(row, context = {}) {
 function isReviewableExportReason(reason) {
   const value = String(reason || '');
   return /^product_opportunity_manual_review/.test(value)
-    || /^keyword_opportunity_(observe|review)/.test(value);
+    || /^keyword_opportunity_(observe|review)/.test(value)
+    || /^legacy_keyword_opportunity_(observe|review)/.test(value);
 }
 
 function classifyExportStatus(validation) {
@@ -474,6 +532,11 @@ function reviewLabel(row) {
   if (usage === 'title_optional') return '放宽蓝海，可作为标题辅助词';
   if (usage === 'trend_reference') return '热搜趋势，仅作趋势参考，建议小量测试或人工复核';
   return '未标记';
+}
+
+function isGenerationEligibleKeyword(row = {}) {
+  const decision = row.keywordOpportunity && row.keywordOpportunity.decision;
+  return !decision || decision === 'continue' || row.autoFallbackEligible === true;
 }
 
 function writeDistributionReview(file, rows) {
@@ -540,7 +603,9 @@ function writeDistributionReview(file, rows) {
 
 function buildFlowCommand(step, runId, options = {}) {
   const runPart = runId ? ` --run ${runId}` : '';
+  if (step === 'review') return `node bin/cli.js flow review${runPart}${options.approveAll ? ' --approve-all' : ''}`;
   if (step === 'verify') return `node bin/cli.js flow verify${runPart} --limit ${options.limit || 20}`;
+  if (step === 'select') return `node bin/cli.js flow select${runPart} --limit ${options.limit || 10}`;
   if (step === 'generate') return `node bin/cli.js flow generate${runPart} --limit ${options.limit || 10}`;
   if (step === 'export') return `node bin/cli.js flow export${runPart} --limit ${options.limit || 20}`;
   if (step === 'inspect') return `node -e "const fs=require('fs');const r=JSON.parse(fs.readFileSync('data/pipeline/runs/${runId}/run.json','utf8'));console.log(JSON.stringify(r,null,2))"`;
@@ -674,12 +739,109 @@ async function appendRunCandidates(options = {}) {
 }
 
 /**
+ * Create a run from manually entered keywords.
+ * @param {object} options Manual workflow options.
+ * @returns {object} Initialized run result.
+ */
+function flowManualStart(options = {}) {
+  const keywords = Array.isArray(options.keywords)
+    ? options.keywords.map(item => String(item || '').trim()).filter(Boolean)
+    : String(options.keywords || '').split(/\r?\n|[,，]/).map(item => item.trim()).filter(Boolean);
+  if (keywords.length === 0) throw new Error('至少输入一个关键词');
+  const { runDir, run } = initRun({
+    ...options,
+    options: { ...(options.options || {}), mode: 'manual' }
+  });
+  const candidates = [...new Set(keywords)].map(keyword => ({
+    keyword,
+    selectedKeyword: keyword,
+    status: 'candidate',
+    source: 'manual',
+    reason: '用户手动输入',
+    nextAction: 'manual_keyword_review',
+    signature: keyword,
+    addedAt: new Date().toISOString()
+  }));
+  fs.writeFileSync(run.files.candidates, '', 'utf8');
+  appendJsonl(run.files.candidates, candidates);
+  run.status = 'awaiting_keyword_review';
+  run.counts.candidates = candidates.length;
+  run.counts.keywordReviewPending = candidates.length;
+  writeRun(runDir, run);
+  return flowResponse({
+    ok: true,
+    runId: run.runId,
+    status: run.status,
+    candidates,
+    runDir,
+    blockers: ['keyword_review_required'],
+    nextActionCode: 'manual_keyword_review',
+    userMessage: `已录入 ${candidates.length} 个关键词，请人工筛选。`
+  });
+}
+
+/**
+ * Persist manual product choices and optional hand-entered products.
+ * @param {object} options Product review options.
+ * @returns {object} Reviewed product result.
+ */
+function flowReviewProducts(options = {}) {
+  const { runDir, run } = getRun(options);
+  const rows = readJsonl(run.files.selectedProducts);
+  const approvedIds = new Set((options.approvedProductIds || []).map(item => String(item || '').trim()).filter(Boolean));
+  const manualProducts = Array.isArray(options.manualProducts) ? options.manualProducts : [];
+  const identity = row => String(row.url || row.productUrl || row.product?.['产品链接'] || row.product?.url || row.offerId || '').trim();
+  if (approvedIds.size === 0 && manualProducts.length === 0 && options.approveAll !== true) {
+    run.status = 'awaiting_product_review';
+    run.counts.productReviewPending = rows.length;
+    writeRun(runDir, run);
+    return flowResponse({ ok: true, runId: run.runId, status: run.status, products: rows, blockers: ['product_review_required'], runDir });
+  }
+  const selected = rows
+    .filter(row => row.status === 'selected' && (options.approveAll === true || approvedIds.has(identity(row))))
+    .map(row => ({ ...row, manualSelectionStatus: 'approved', selectedAt: new Date().toISOString() }));
+  for (const raw of manualProducts) {
+    const url = String(raw.url || raw.productUrl || '').trim();
+    const title = String(raw.title || raw.sourceTitle || '').trim();
+    const category = String(raw.category || raw.recommendedCategory || '').trim();
+    if (!url) continue;
+    selected.push({
+      status: 'selected',
+      keyword: String(raw.keyword || options.keyword || '').trim(),
+      selectedKeyword: String(raw.keyword || options.keyword || '').trim(),
+      url,
+      title,
+      sourceTitle: title,
+      recommendedCategory: category,
+      product: { ...raw, url, title, subject: title, category },
+      manualSelectionStatus: 'approved',
+      selectedAt: new Date().toISOString()
+    });
+  }
+  const unique = [...new Map(selected.map(row => [identity(row) || `${row.keyword}:${row.title}`, row])).values()];
+  fs.writeFileSync(run.files.selectedProducts, '', 'utf8');
+  appendJsonl(run.files.selectedProducts, unique);
+  run.status = unique.length > 0 ? 'products_selected' : 'select_failed';
+  run.counts.selectedProducts = unique.length;
+  run.counts.productReviewPending = 0;
+  writeRun(runDir, run);
+  return flowResponse({ ok: unique.length > 0, runId: run.runId, status: run.status, selected: unique, runDir, blockers: unique.length > 0 ? [] : ['no_selected_products'] });
+}
+
+/**
  * Mine candidates and write them into a flow run.
  * @param {object} options Flow options.
  * @returns {object} Step result.
  */
 async function flowMine(options = {}) {
   const { runDir, run } = initRun(options);
+  const historyExcludeKeywords = options.excludeSeen === true
+    ? readRecentPipelineCandidateKeywords({
+      dataDir: options.dataDir || DEFAULT_FLOW_DIR,
+      ttlDays: options.seenTtlDays || 30,
+      excludeRunId: run.runId
+    })
+    : [];
   const result = await mineKeywords({
     count: options.limit || options.mine || 50,
     maxSeeds: options.maxSeeds || 20,
@@ -688,14 +850,33 @@ async function flowMine(options = {}) {
     outputMaxPerCategory: options.outputMaxPerCategory || 20,
     outputMaxPerPattern: options.outputMaxPerPattern || 20,
     outputMaxPerProductCore: options.outputMaxPerProductCore || 3,
-    persist: false
+    dataDir: options.keywordDataDir || path.join(process.cwd(), 'data', 'keyword-mining'),
+    source: options.source || 'local',
+    rootMode: options.rootMode || 'auto',
+    rootLimit: options.rootLimit || 5,
+    rootCooldownDays: options.rootCooldownDays || 7,
+    persist: false,
+    excludeSeen: options.excludeSeen === true,
+    excludeKeywords: [
+      ...historyExcludeKeywords,
+      ...(Array.isArray(options.excludeKeywords) ? options.excludeKeywords : [])
+    ],
+    recordSeen: options.recordSeen === true,
+    seenTtlDays: options.seenTtlDays || 30,
+    onProgress: options.onProgress
   });
   if ((!result.candidates || result.candidates.length === 0) && options.fallbackCandidates !== false) {
-    result.candidates = fallbackCandidates(options.limit || options.mine || 10);
+    const normalizedExcluded = new Set([
+      ...historyExcludeKeywords,
+      ...(Array.isArray(options.excludeKeywords) ? options.excludeKeywords : [])
+    ].map(keyword => String(keyword || '').replace(/\s+/g, '').toLowerCase()).filter(Boolean));
+    result.candidates = fallbackCandidates(DEFAULT_FALLBACK_CANDIDATES.length)
+      .filter(row => !normalizedExcluded.has(String(row.keyword || '').replace(/\s+/g, '').toLowerCase()))
+      .slice(0, Number(options.limit || options.mine || 10));
     result.stats = {
       ...(result.stats || {}),
       fallbackUsed: true,
-      fallbackReason: 'keyword_mining_empty'
+      fallbackReason: result.candidates.length > 0 ? 'keyword_mining_empty' : 'keyword_mining_and_fallback_exhausted'
     };
   }
   fs.writeFileSync(run.files.candidates, '', 'utf8');
@@ -710,8 +891,104 @@ async function flowMine(options = {}) {
     candidates: result.candidates,
     runDir,
     blockers: [],
-    allowedCommands: [buildFlowCommand('verify', run.runId, { limit: options.verify || 20 })],
-    nextCommand: buildFlowCommand('verify', run.runId, { limit: options.verify || 20 })
+    allowedCommands: [buildFlowCommand('review', run.runId)],
+    nextCommand: buildFlowCommand('review', run.runId)
+  });
+}
+
+function normalizeKeywordReviewDecision(row = {}, decision = 'approved', reason = '') {
+  return {
+    ...row,
+    reviewStatus: decision === 'approved' ? 'approved' : 'rejected',
+    status: decision === 'approved' ? 'keyword_approved' : 'keyword_rejected',
+    reviewReason: reason,
+    reviewedAt: new Date().toISOString()
+  };
+}
+
+/**
+ * Persist human keyword screening results before SYCM verification.
+ * @param {object} options Review options.
+ * @returns {object} Step result.
+ */
+function flowReviewCandidates(options = {}) {
+  const { runDir, run } = getRun(options);
+  const candidates = readJsonl(run.files.candidates);
+  const manualKeywords = [...new Set((Array.isArray(options.manualKeywords) ? options.manualKeywords : [])
+    .map(item => String(item || '').trim())
+    .filter(Boolean))];
+  const existingKeywords = new Set(candidates.map(row => String(row.keyword || '').trim()).filter(Boolean));
+  const manualCandidates = manualKeywords
+    .filter(keyword => !existingKeywords.has(keyword))
+    .map(keyword => ({
+      keyword,
+      selectedKeyword: keyword,
+      status: 'candidate',
+      source: 'manual',
+      reason: '用户手动添加',
+      signature: keyword,
+      addedAt: new Date().toISOString()
+    }));
+  const allCandidates = [...candidates, ...manualCandidates];
+  if (manualCandidates.length > 0) {
+    appendJsonl(run.files.candidates, manualCandidates);
+    run.counts.candidates = allCandidates.length;
+  }
+  const approvedSet = new Set((options.approvedKeywords || []).map(item => String(item || '').trim()).filter(Boolean));
+  const rejectedSet = new Set((options.rejectedKeywords || []).map(item => String(item || '').trim()).filter(Boolean));
+  const hasExplicitDecision = approvedSet.size > 0 || rejectedSet.size > 0 || manualKeywords.length > 0 || options.approveAll === true;
+
+  if (!hasExplicitDecision) {
+    run.status = 'awaiting_keyword_review';
+    run.counts.keywordReviewPending = allCandidates.length;
+    writeRun(runDir, run);
+    return flowResponse({
+      ok: true,
+      runId: run.runId,
+      status: run.status,
+      candidates: allCandidates,
+      reviewed: [],
+      runDir,
+      blockers: ['keyword_review_required'],
+      allowedCommands: [buildFlowCommand('review', run.runId, { approveAll: true })],
+      nextCommand: buildFlowCommand('review', run.runId, { approveAll: true })
+    });
+  }
+
+  const reviewed = allCandidates.map(row => {
+    const keyword = String(row.keyword || '').trim();
+    const rejected = rejectedSet.has(keyword);
+    const approved = options.approveAll === true || approvedSet.has(keyword) || (!rejected && approvedSet.size === 0);
+    return normalizeKeywordReviewDecision(
+      row,
+      approved && !rejected ? 'approved' : 'rejected',
+      rejected ? '人工筛除' : '人工确认通过'
+    );
+  });
+  const approvedRows = reviewed.filter(row => row.reviewStatus === 'approved');
+  const rejectedRows = reviewed.filter(row => row.reviewStatus === 'rejected');
+  fs.writeFileSync(run.files.reviewedCandidates, '', 'utf8');
+  appendJsonl(run.files.reviewedCandidates, reviewed);
+  run.status = approvedRows.length > 0 ? 'keywords_reviewed' : 'keyword_review_empty';
+  run.counts.keywordReviewApproved = approvedRows.length;
+  run.counts.keywordReviewRejected = rejectedRows.length;
+  run.counts.keywordReviewPending = 0;
+  writeRun(runDir, run);
+  return flowResponse({
+    ok: true,
+    runId: run.runId,
+    status: run.status,
+    reviewed,
+    approved: approvedRows,
+    rejected: rejectedRows,
+    runDir,
+    blockers: approvedRows.length > 0 ? [] : ['no_keyword_review_approved'],
+    allowedCommands: [approvedRows.length > 0
+      ? buildFlowCommand('verify', run.runId, { limit: options.verify || 20 })
+      : buildFlowCommand('review', run.runId)],
+    nextCommand: approvedRows.length > 0
+      ? buildFlowCommand('verify', run.runId, { limit: options.verify || 20 })
+      : buildFlowCommand('review', run.runId)
   });
 }
 
@@ -722,13 +999,19 @@ async function flowMine(options = {}) {
  */
 async function flowVerify(options = {}) {
   const { runDir, run } = getRun(options);
-  const candidates = readJsonl(run.files.candidates);
+  const reviewedCandidates = readJsonl(run.files.reviewedCandidates);
+  const approvedReviewedCandidates = reviewedCandidates.filter(row => row.reviewStatus === 'approved' || row.status === 'keyword_approved');
+  const candidates = approvedReviewedCandidates.length > 0 ? approvedReviewedCandidates : readJsonl(run.files.candidates);
   const limit = Number(options.limit || options.verify || candidates.length || 0);
   const executableCandidates = candidates.filter(function(item) {
     var action = item && item.nextAction;
     return !action || action === 'sycm_verify' || action === 'direct_product_search';
   });
   const selected = executableCandidates.slice(0, limit);
+  const reserveLimit = options.autoExpandVerify === true
+    ? Math.max(0, Number(options.verifyReserve || 8))
+    : 0;
+  const reserveCandidates = executableCandidates.slice(limit, limit + reserveLimit);
   const verified = [];
   const rejected = [];
   const sycmResults = [];
@@ -737,7 +1020,7 @@ async function flowVerify(options = {}) {
   fs.writeFileSync(run.files.sycmResults, '', 'utf8');
   fs.writeFileSync(run.files.verifiedKeywords, '', 'utf8');
 
-  for (const candidate of selected) {
+  const verifyCandidate = async (candidate, phase = 'primary') => {
     try {
       const sycmAttempt = await fetchSycmWithFallback(candidate.keyword, {
         ...options,
@@ -766,6 +1049,7 @@ async function flowVerify(options = {}) {
       sycmResults.push({
         keyword: candidate.keyword,
         ok: true,
+        phase,
         mode: sycmAttempt.verifyMode,
         fallbackUsed: sycmAttempt.fallbackUsed,
         fallbackReason: sycmAttempt.fallbackReason || '',
@@ -788,18 +1072,70 @@ async function flowVerify(options = {}) {
       sycmResults.push({
         keyword: candidate.keyword,
         ok: false,
+        phase,
         status: row.status,
         error: row.error,
         manualAction: row.manualAction
       });
       if (error && ['login_required', 'slider_required', 'sycm_feature_required'].includes(error.status)) {
-        break;
+        return false;
       }
+    }
+    return true;
+  };
+
+  for (let index = 0; index < selected.length; index += 1) {
+    const canContinue = await verifyCandidate(selected[index]);
+    options.onProgress?.({
+      current: index + 1,
+      total: selected.length + reserveCandidates.length,
+      message: `生意参谋验真 ${index + 1}/${selected.length}`
+    });
+    if (!canContinue) break;
+  }
+
+  const strictEligibleAfterPrimary = verified.filter(row => {
+    const decision = row.keywordOpportunity && row.keywordOpportunity.decision;
+    return !decision || decision === 'continue';
+  });
+  const hasManualActionAfterPrimary = rejected.some(row => (
+    ['login_required', 'slider_required', 'sycm_feature_required'].includes(row.status)
+  ));
+
+  // 每日流程先验证主候选池。严格机会词为零时才补验备用词，避免无节制提高平台请求频率。
+  if (strictEligibleAfterPrimary.length === 0 && !hasManualActionAfterPrimary) {
+    for (let index = 0; index < reserveCandidates.length; index += 1) {
+      const canContinue = await verifyCandidate(reserveCandidates[index], 'reserve');
+      options.onProgress?.({
+        current: selected.length + index + 1,
+        total: selected.length + reserveCandidates.length,
+        message: `补充候选词验真 ${index + 1}/${reserveCandidates.length}`
+      });
+      if (!canContinue) break;
     }
   }
 
   appendJsonl(run.files.sycmResults, sycmResults);
+  const strictGenerationEligible = verified.filter(row => {
+    const decision = row.keywordOpportunity && row.keywordOpportunity.decision;
+    return !decision || decision === 'continue';
+  });
+  const autoFallbackRows = strictGenerationEligible.length === 0 && options.autoAllowReviewKeywords === true
+    ? verified
+      .filter(row => row.keywordOpportunity?.decision === 'observe')
+      .sort((left, right) => Number(right.opportunityScore || 0) - Number(left.opportunityScore || 0))
+      .slice(0, Math.max(1, Number(options.reviewKeywordLimit || 2)))
+    : [];
+  for (const row of autoFallbackRows) {
+    row.autoFallbackEligible = true;
+    row.autoFallbackReason = '严格机会词为空，已作为可复核备用词继续选品和标题生成';
+  }
   appendJsonl(run.files.verifiedKeywords, verified);
+  const generationEligible = verified.filter(isGenerationEligibleKeyword);
+  const opportunityReview = verified.filter(row => {
+    const decision = row.keywordOpportunity && row.keywordOpportunity.decision;
+    return decision && decision !== 'continue';
+  });
   const manualStatuses = ['login_required', 'slider_required', 'sycm_feature_required'];
   const hasManualAction = rejected.some(function(row) {
     return manualStatuses.includes(row.status);
@@ -831,14 +1167,20 @@ async function flowVerify(options = {}) {
   })), { runId: run.runId, dataDir: resolveOpportunityDir(options) });
   run.status = hasManualAction
     ? (verified.length > 0 ? 'verified_partial_manual_required' : 'manual_action_required')
-    : (verified.length > 0 ? 'verified' : 'verified_empty');
+    : (verified.length > 0
+      ? (generationEligible.length > 0 ? 'verified' : 'verified_no_generation_eligible')
+      : 'verified_empty');
   run.counts.sycmVerified = verified.length;
+  run.counts.sycmGenerationEligible = generationEligible.length;
+  run.counts.sycmOpportunityReview = opportunityReview.length;
+  run.counts.sycmReserveChecked = sycmResults.filter(row => row.phase === 'reserve').length;
+  run.counts.sycmAutoFallbackEligible = autoFallbackRows.length;
   run.counts.sycmRejected = rejected.length;
   writeRun(runDir, run);
   const nextCommand = hasManualAction
     ? buildFlowCommand('inspect', run.runId)
-    : (verified.length > 0
-      ? buildFlowCommand('generate', run.runId, { limit: options.generate || 10 })
+    : (generationEligible.length > 0
+      ? buildFlowCommand('select', run.runId, { limit: options.select || options.generate || 10 })
       : buildFlowCommand('inspect', run.runId));
   return flowResponse({
     ok: true,
@@ -849,42 +1191,74 @@ async function flowVerify(options = {}) {
     runDir,
     blockers: hasManualAction
       ? ['sycm_manual_action_required']
-      : (verified.length > 0 ? [] : ['no_verified_keywords']),
+      : (verified.length > 0
+        ? (generationEligible.length > 0 ? [] : ['no_generation_eligible_keywords'])
+        : ['no_verified_keywords']),
     allowedCommands: [nextCommand],
     nextCommand: nextCommand
   });
 }
 
+function productPrice(product = {}) {
+  return product['商品原价'] || product.price || product.priceMin || product.minPrice || '';
+}
+
+function productSales(product = {}) {
+  const stats = product.stats || {};
+  return product['30天销量'] || product.sales30days || product.monthlySales || stats.last30DaysSales || stats.totalSales || 0;
+}
+
+function productImage(product = {}) {
+  return product['主图链接'] || product.imageUrl || product.url || product.mainImage || product.image || '';
+}
+
 /**
- * Generate products and titles for verified keywords.
+ * Select and score 1688 product sources for SYCM-verified keywords.
  * @param {object} options Flow options.
  * @returns {Promise<object>} Step result.
  */
-async function flowGenerate(options = {}) {
+async function flowSelectProducts(options = {}) {
   const { runDir, run } = getRun(options);
-  const verified = readJsonl(run.files.verifiedKeywords);
-  const limit = Number(options.limit || options.generate || verified.length || 0);
-  const selected = verified.slice(0, limit);
-  const generator = options.generator || generateTitlePipeline;
-  const generatedRows = [];
+  const verified = options.manualMode
+    ? readJsonl(run.files.reviewedCandidates).filter(row => row.reviewStatus === 'approved' || row.status === 'keyword_approved')
+    : readJsonl(run.files.verifiedKeywords);
+  const eligible = options.includeReviewKeywords
+    ? verified
+    : verified.filter(isGenerationEligibleKeyword);
+  const limit = Number(options.limit || options.select || options.generate || eligible.length || 0);
+  const selectedKeywords = eligible.slice(0, limit);
+  const productsPerKeyword = Number(options.productsPerKeyword || DEFAULT_PRODUCTS_PER_KEYWORD);
+  const selectedRows = [];
 
-  fs.writeFileSync(run.files.generatedProducts, '', 'utf8');
+  fs.writeFileSync(run.files.selectedProducts, '', 'utf8');
 
-  for (const item of selected) {
+  for (const item of selectedKeywords) {
     try {
-      const result = await generator(item.keyword, {
-        maxLength: Number(options.length || 60),
-        limit: Number(options.productLimit || 0),
-        silent: true,
-        sycmData: item.sycmData || [],
-        searchProducts: options.searchProducts || (({ coreWord, blueOceanWord, modifiers, semanticGroups }) =>
-          searchAll(coreWord, blueOceanWord, modifiers, semanticGroups))
-      });
-      const products = Array.isArray(result.products) ? result.products : [];
-      for (const product of products.slice(0, Number(options.productsPerKeyword || DEFAULT_PRODUCTS_PER_KEYWORD))) {
-        const row = {
-          status: 'generated',
+      const extracted = await extractKeywords('keyword', { data: item.keyword });
+      const coreWord = extracted.coreWord || item.coreProduct || item.keyword;
+      const modifiers = Array.isArray(extracted.modifiers) ? extracted.modifiers : [];
+      const semanticGroups = extracted.semanticGroups || {};
+      const products = await (options.searchProducts || searchAll)(
+        coreWord,
+        item.keyword,
+        modifiers,
+        semanticGroups,
+        options.searchOptions || {}
+      );
+      for (const product of (Array.isArray(products) ? products : []).slice(0, productsPerKeyword)) {
+        const opportunity = scoreProductOpportunity(product, {
           keyword: item.keyword,
+          verifyMode: item.verifyMode,
+          confidence: item.confidence,
+          usage: item.usage,
+          sycmScore: item.sycmScore
+        });
+        selectedRows.push({
+          status: 'selected',
+          keyword: item.keyword,
+          selectedKeyword: item.keyword,
+          coreWord,
+          modifiers,
           keywordOpportunity: item.keywordOpportunity,
           sycmScore: item.sycmScore,
           sycmData: item.sycmData || [],
@@ -896,10 +1270,118 @@ async function flowGenerate(options = {}) {
           fallbackReason: item.fallbackReason || '',
           product,
           url: productUrl(product),
+          sourceTitle: productTitle(product),
           title: productTitle(product),
+          price: productPrice(product),
+          sales30days: productSales(product),
+          imageUrl: productImage(product),
+          productOpportunity: opportunity,
+          opportunityScore: opportunity.score,
+          decision: opportunity.decision,
+          nextAction: opportunity.nextAction,
+          selectedAt: new Date().toISOString()
+        });
+      }
+    } catch (error) {
+      selectedRows.push({
+        status: 'select_failed',
+        keyword: item.keyword,
+        selectedKeyword: item.keyword,
+        error: error && error.message ? error.message : String(error),
+        selectedAt: new Date().toISOString()
+      });
+    }
+  }
+
+  appendJsonl(run.files.selectedProducts, selectedRows);
+  const selectedCount = selectedRows.filter(row => row.status === 'selected').length;
+  run.status = selectedCount > 0 ? 'products_selected' : 'select_failed';
+  run.counts.selectedProducts = selectedCount;
+  writeRun(runDir, run);
+  return flowResponse({
+    ok: true,
+    runId: run.runId,
+    status: run.status,
+    selected: selectedRows,
+    runDir,
+    blockers: selectedCount > 0 ? [] : ['no_selected_products'],
+    allowedCommands: [selectedCount > 0
+      ? buildFlowCommand('generate', run.runId, { limit: options.generate || 10 })
+      : buildFlowCommand('inspect', run.runId)],
+    nextCommand: selectedCount > 0
+      ? buildFlowCommand('generate', run.runId, { limit: options.generate || 10 })
+      : buildFlowCommand('inspect', run.runId)
+  });
+}
+
+/**
+ * Generate products and titles for verified keywords.
+ * @param {object} options Flow options.
+ * @returns {Promise<object>} Step result.
+ */
+async function flowGenerate(options = {}) {
+  const { runDir, run } = getRun(options);
+  const verified = options.manualMode
+    ? readJsonl(run.files.reviewedCandidates).filter(row => row.reviewStatus === 'approved' || row.status === 'keyword_approved')
+    : readJsonl(run.files.verifiedKeywords);
+  const selectedProducts = readJsonl(run.files.selectedProducts)
+    .filter(row => row.status === 'selected' && row.product);
+  const eligible = selectedProducts.length > 0
+    ? Array.from(new Map(selectedProducts.map(row => [row.keyword, row])).values())
+    : (options.includeReviewKeywords
+      ? verified
+      : verified.filter(isGenerationEligibleKeyword));
+  const limit = Number(options.limit || options.generate || eligible.length || 0);
+  const selected = eligible.slice(0, limit);
+  const generator = options.generator || generateTitlePipeline;
+  const generatedRows = [];
+
+  fs.writeFileSync(run.files.generatedProducts, '', 'utf8');
+
+  for (const item of selected) {
+    try {
+      const productRowsForKeyword = selectedProducts.filter(row => row.keyword === item.keyword);
+      const externalProducts = productRowsForKeyword.map(row => row.product);
+      const result = await generator(item.keyword, {
+        maxLength: Number(options.length || 60),
+        limit: Number(options.productLimit || 0),
+        silent: true,
+        sycmData: item.sycmData || [],
+        products: externalProducts,
+        coreWord: item.coreWord || '',
+        modifiers: item.modifiers || null,
+        productLimit: externalProducts.length || undefined,
+        searchProducts: options.searchProducts || (({ coreWord, blueOceanWord, modifiers, semanticGroups }) =>
+          searchAll(coreWord, blueOceanWord, modifiers, semanticGroups))
+      });
+      const products = Array.isArray(result.products) ? result.products : [];
+      for (const product of products.slice(0, Number(options.productsPerKeyword || DEFAULT_PRODUCTS_PER_KEYWORD))) {
+        const url = productUrl(product);
+        const selectedProduct = productRowsForKeyword.find(row => row.url && row.url === url) || {};
+        const mergedProduct = selectedProduct.product
+          ? { ...selectedProduct.product, ...product }
+          : product;
+        const row = {
+          status: 'generated',
+          keyword: item.keyword,
+          selectedKeyword: item.keyword,
+          keywordOpportunity: item.keywordOpportunity || selectedProduct.keywordOpportunity,
+          sycmScore: item.sycmScore || selectedProduct.sycmScore,
+          sycmData: item.sycmData || [],
+          recommendedCategory: item.recommendedCategory || selectedProduct.recommendedCategory || '',
+          verifyMode: item.verifyMode || selectedProduct.verifyMode || '',
+          confidence: item.confidence || selectedProduct.confidence || '',
+          usage: item.usage || selectedProduct.usage || '',
+          fallbackUsed: !!item.fallbackUsed,
+          fallbackReason: item.fallbackReason || selectedProduct.fallbackReason || '',
+          selectedProduct,
+          manualSelectionStatus: selectedProduct.manualSelectionStatus || '',
+          product: mergedProduct,
+          url,
+          title: productTitle(mergedProduct),
           generatedAt: new Date().toISOString()
         };
-        const productOpportunity = scoreProductOpportunity(product, {
+        const productOpportunity = selectedProduct.productOpportunity || scoreProductOpportunity(mergedProduct, {
           keyword: item.keyword,
           verifyMode: item.verifyMode,
           confidence: item.confidence,
@@ -928,6 +1410,7 @@ async function flowGenerate(options = {}) {
     .map(row => ({
       runId: run.runId,
       keyword: row.keyword,
+      selectedKeyword: row.selectedKeyword || row.keyword,
       url: row.url,
       title: row.title,
       recommendedCategory: row.recommendedCategory,
@@ -978,7 +1461,8 @@ async function flowExport(options = {}) {
       hotExportLimit,
       hotUsed,
       seenUrls,
-      seenTitles
+      seenTitles,
+      manualMode: options.manualMode === true || run.options?.mode === 'manual'
     });
     const exportRow = {
       ...row,
@@ -1003,6 +1487,7 @@ async function flowExport(options = {}) {
   appendOpportunity('rejected', rejectedRows.map(row => ({
     runId: run.runId,
     keyword: row.keyword,
+    selectedKeyword: row.selectedKeyword || row.keyword,
     url: row.url,
     title: row.title,
     status: row.exportStatus,
@@ -1044,11 +1529,11 @@ async function flowExport(options = {}) {
 }
 
 /**
- * Run the flow for one user-provided keyword without keyword mining or rewriting.
+ * Prepare a run for one exact keyword without mining or rewriting.
  * @param {object} options Flow options.
- * @returns {Promise<object>} Exact keyword flow result.
+ * @returns {Promise<object>} Prepared run result.
  */
-async function flowKeyword(options = {}) {
+async function flowKeywordStart(options = {}) {
   const keyword = String(options.keyword || '').trim();
   if (!keyword) throw new Error('keyword is required');
   const { runDir, run } = initRun({
@@ -1065,13 +1550,37 @@ async function flowKeyword(options = {}) {
   run.status = 'mined';
   run.counts.candidates = 1;
   writeRun(runDir, run);
+  return flowResponse({
+    ok: true,
+    runId: run.runId,
+    runDir,
+    exactKeyword: keyword,
+    status: run.status,
+    candidates: [candidate],
+    blockers: [],
+    allowedCommands: [buildFlowCommand('verify', run.runId, { limit: 1 })],
+    nextCommand: buildFlowCommand('verify', run.runId, { limit: 1 })
+  });
+}
 
-  const verify = await flowVerify({ ...options, runId: run.runId, limit: 1 });
+/**
+ * Run the flow for one user-provided keyword without keyword mining or rewriting.
+ * @param {object} options Flow options.
+ * @returns {Promise<object>} Exact keyword flow result.
+ */
+async function flowKeyword(options = {}) {
+  const keyword = String(options.keyword || '').trim();
+  if (!keyword) throw new Error('keyword is required');
+  const prepared = await flowKeywordStart(options);
+  const runDir = prepared.runDir;
+  const runId = prepared.runId;
+
+  const verify = await flowVerify({ ...options, runId, limit: 1 });
   if (verify.verified.length === 0 || verify.blockers.includes('sycm_manual_action_required')) {
-    const latest = getRun({ dataDir: options.dataDir, runId: run.runId });
+    const latest = getRun({ dataDir: options.dataDir, runId });
     return flowResponse({
       ok: true,
-      runId: run.runId,
+      runId,
       runDir,
       exactKeyword: keyword,
       counts: latest.run.counts,
@@ -1090,18 +1599,49 @@ async function flowKeyword(options = {}) {
     });
   }
 
+  const select = await flowSelectProducts({
+    ...options,
+    runId,
+    limit: 1,
+    productsPerKeyword: options.productsPerKeyword || DEFAULT_PRODUCTS_PER_KEYWORD
+  });
+  const selectedCount = select.selected.filter(row => row.status === 'selected').length;
+  if (selectedCount === 0) {
+    const latest = getRun({ dataDir: options.dataDir, runId });
+    return flowResponse({
+      ok: true,
+      runId,
+      runDir,
+      exactKeyword: keyword,
+      counts: latest.run.counts,
+      status: latest.run.status,
+      files: latest.run.files,
+      blockers: ['no_selected_products'],
+      allowedCommands: [select.nextCommand],
+      nextCommand: select.nextCommand,
+      steps: {
+        mined: 1,
+        verified: verify.verified.length,
+        selected: 0,
+        rejected: verify.rejected.length,
+        generated: 0,
+        exported: 0
+      }
+    });
+  }
+
   const generate = await flowGenerate({
     ...options,
-    runId: run.runId,
+    runId,
     limit: 1,
     productsPerKeyword: options.productsPerKeyword || DEFAULT_PRODUCTS_PER_KEYWORD
   });
   const generatedCount = generate.generated.filter(row => row.status === 'generated').length;
   if (generatedCount === 0) {
-    const latest = getRun({ dataDir: options.dataDir, runId: run.runId });
+    const latest = getRun({ dataDir: options.dataDir, runId });
     return flowResponse({
       ok: true,
-      runId: run.runId,
+      runId,
       runDir,
       exactKeyword: keyword,
       counts: latest.run.counts,
@@ -1113,6 +1653,7 @@ async function flowKeyword(options = {}) {
       steps: {
         mined: 1,
         verified: verify.verified.length,
+        selected: selectedCount,
         rejected: verify.rejected.length,
         generated: 0,
         exported: 0
@@ -1120,11 +1661,11 @@ async function flowKeyword(options = {}) {
     });
   }
 
-  const exported = await flowExport({ ...options, runId: run.runId, limit: options.export || 20 });
-  const latest = getRun({ dataDir: options.dataDir, runId: run.runId });
+  const exported = await flowExport({ ...options, runId, limit: options.export || 20 });
+  const latest = getRun({ dataDir: options.dataDir, runId });
   return flowResponse({
     ok: true,
-    runId: run.runId,
+    runId,
     runDir,
     exactKeyword: keyword,
     counts: latest.run.counts,
@@ -1138,6 +1679,7 @@ async function flowKeyword(options = {}) {
     steps: {
       mined: 1,
       verified: verify.verified.length,
+      selected: selectedCount,
       rejected: verify.rejected.length,
       generated: generatedCount,
       exported: exported.count
@@ -1146,12 +1688,45 @@ async function flowKeyword(options = {}) {
 }
 
 /**
- * Run the first version of the daily flow: mine, verify, generate, export.
+ * Run the first version of the daily flow: mine, review keywords, verify, select products, generate, export.
  * @param {object} options Flow options.
  * @returns {Promise<object>} Daily flow result.
  */
 async function flowDaily(options = {}) {
-  const mine = await flowMine({ ...options, limit: options.mine || options.limit || 50 });
+  const mine = await flowMine({
+    ...options,
+    limit: options.mine || options.limit || 50,
+    excludeSeen: options.excludeSeen !== false,
+    recordSeen: options.recordSeen !== false
+  });
+  const keywordReview = flowReviewCandidates({
+    ...options,
+    runId: mine.runId,
+    approveAll: options.reviewMode === 'auto' || options.approveAll === true
+  });
+  if (keywordReview.status === 'awaiting_keyword_review' || keywordReview.status === 'keyword_review_empty') {
+    const { run } = getRun({ dataDir: options.dataDir, runId: mine.runId });
+    return flowResponse({
+      ok: true,
+      runId: mine.runId,
+      runDir: mine.runDir,
+      counts: run.counts,
+      status: run.status,
+      files: run.files,
+      blockers: keywordReview.blockers,
+      allowedCommands: keywordReview.allowedCommands,
+      nextCommand: keywordReview.nextCommand,
+      steps: {
+        mined: mine.candidates.length,
+        reviewed: keywordReview.approved ? keywordReview.approved.length : 0,
+        verified: 0,
+        rejected: 0,
+        selected: 0,
+        generated: 0,
+        exported: 0
+      }
+    });
+  }
   const verify = await flowVerify({ ...options, runId: mine.runId, limit: options.verify || 20 });
   if (verify.verified.length === 0 || verify.blockers.includes('sycm_manual_action_required')) {
     const { run } = getRun({ dataDir: options.dataDir, runId: mine.runId });
@@ -1167,7 +1742,40 @@ async function flowDaily(options = {}) {
       nextCommand: verify.nextCommand,
       steps: {
         mined: mine.candidates.length,
+        reviewed: keywordReview.approved.length,
         verified: 0,
+        rejected: verify.rejected.length,
+        selected: 0,
+        generated: 0,
+        exported: 0
+      }
+    });
+  }
+
+  const select = await flowSelectProducts({
+    ...options,
+    runId: mine.runId,
+    limit: options.select || options.generate || 10,
+    productsPerKeyword: options.productsPerKeyword || DEFAULT_PRODUCTS_PER_KEYWORD
+  });
+  const selectedCount = select.selected.filter(row => row.status === 'selected').length;
+  if (selectedCount === 0) {
+    const { run } = getRun({ dataDir: options.dataDir, runId: mine.runId });
+    return flowResponse({
+      ok: true,
+      runId: mine.runId,
+      runDir: mine.runDir,
+      counts: run.counts,
+      status: run.status,
+      files: run.files,
+      blockers: ['no_selected_products'],
+      allowedCommands: [select.nextCommand],
+      nextCommand: select.nextCommand,
+      steps: {
+        mined: mine.candidates.length,
+        reviewed: keywordReview.approved.length,
+        verified: verify.verified.length,
+        selected: 0,
         rejected: verify.rejected.length,
         generated: 0,
         exported: 0
@@ -1191,7 +1799,9 @@ async function flowDaily(options = {}) {
       nextCommand: generate.nextCommand,
       steps: {
         mined: mine.candidates.length,
+        reviewed: keywordReview.approved.length,
         verified: verify.verified.length,
+        selected: selectedCount,
         rejected: verify.rejected.length,
         generated: 0,
         exported: 0
@@ -1215,7 +1825,9 @@ async function flowDaily(options = {}) {
     nextCommand: exported.nextCommand,
     steps: {
       mined: mine.candidates.length,
+      reviewed: keywordReview.approved.length,
       verified: verify.verified.length,
+      selected: selectedCount,
       rejected: verify.rejected.length,
       generated: generatedCount,
       exported: exported.count
@@ -1331,14 +1943,20 @@ module.exports = {
   createRunId,
   readJsonl,
   getRun,
+  markRunDistributionComplete,
   scoreSycmRows,
   shouldFallbackToNextTier,
   fetchSycmWithFallback,
   appendRunCandidates,
+  flowManualStart,
+  flowReviewProducts,
   flowMine,
+  flowReviewCandidates,
   flowVerify,
+  flowSelectProducts,
   flowGenerate,
   flowExport,
+  flowKeywordStart,
   flowKeyword,
   flowDaily,
   createWorkflowRunner,

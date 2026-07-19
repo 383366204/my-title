@@ -264,8 +264,9 @@ async function inspectBrowser(port = DEFAULT_CDP_PORT, options = {}) {
       }
     }
     const jnesoftPageLoaded = jnesoftTarget && pageState && String(pageState.url || '').includes('item.jnesoft.com');
+    const quotaExhausted = isDistributionQuotaExhausted(pageState || {});
     return {
-      ok: !!target && jnesoftPageLoaded && !loginExpired,
+      ok: !!target && jnesoftPageLoaded && !loginExpired && !quotaExhausted,
       port,
       targetCount: targets.length,
       target: target ? {
@@ -277,6 +278,7 @@ async function inspectBrowser(port = DEFAULT_CDP_PORT, options = {}) {
       pageState,
       loginExpired,
       loginState,
+      quotaExhausted,
       jnesoftTarget,
       jnesoftPageLoaded,
       loginRecoverable: loginState.recoverable === true,
@@ -287,7 +289,9 @@ async function inspectBrowser(port = DEFAULT_CDP_PORT, options = {}) {
             ? 'Chrome CDP created a jnesoft target, but the page did not finish loading'
             : (loginExpired
             ? `Chrome CDP is available, but the distribution page needs login recovery (${loginState.kind})`
-            : 'Chrome CDP is available and a jnesoft distribution page target was found')))
+            : (quotaExhausted
+              ? '铺货平台剩余额度为 0，请充值或更换可用账号后再提交'
+              : 'Chrome CDP is available and a jnesoft distribution page target was found'))))
         : 'Chrome CDP is available but no reusable page target was found'
     };
   } catch (err) {
@@ -306,6 +310,11 @@ function isLoginExpiredText(text) {
 
 function isLoginExpiredTextStable(text) {
   return /\u767b\u5f55\u4fe1\u606f\u5df2\u8fc7\u671f|\u91cd\u65b0\u767b\u5f55|\u626b\u7801\u767b\u5f55|\u77ed\u4fe1\u767b\u5f55|\u5bc6\u7801\u767b\u5f55|\u6388\u6743\u72b6\u6001\u5931\u8d25|\u83b7\u53d6\u6388\u6743\u72b6\u6001\u5931\u8d25|\u8bf7\u767b\u5f55|\u5e94\u7528\u6388\u6743|\u767b\u5f55\u5e76\u6388\u6743|\u70b9\u51fb\u6388\u6743\u5e76\u767b\u5f55|\u6388\u6743\u987b\u77e5/.test(String(text || ''));
+}
+
+function isDistributionQuotaExhausted(pageState = {}) {
+  const body = String(pageState.body || '');
+  return /(?:剩余)?额度\s*[：:]\s*0(?:\D|$)|剩余(?:次数|配额)\s*[：:]\s*0(?:\D|$)/.test(body);
 }
 
 isLoginExpiredText = isLoginExpiredTextStable;
@@ -1380,9 +1389,42 @@ async function distributeProducts(options = {}) {
   const port = parseInt(options.port || process.env.BROWSER_CDP_PORT || process.env.CHROME_DEBUG_PORT || DEFAULT_CDP_PORT, 10);
   const stateFile = options.stateFile || DEFAULT_STATE_FILE;
   const results = [];
+  let stoppedStatus = null;
+
+  const reportProgress = async (event) => {
+    if (typeof options.onProgress === 'function') {
+      await options.onProgress({
+        total: items.length,
+        batchTotal: batches.length,
+        results: results.slice(),
+        ...event
+      });
+    }
+  };
+
+  const control = async (event = {}) => {
+    if (typeof options.shouldStop === 'function') {
+      const action = await options.shouldStop({
+        total: items.length,
+        batchTotal: batches.length,
+        results: results.slice(),
+        ...event
+      });
+      if (action === 'cancel' || action === 'pause') return action;
+    }
+    return null;
+  };
 
   for (let i = 0; i < batches.length; i += 1) {
     const batchItems = batches[i];
+    const batchIndex = i + 1;
+    const requestedAction = await control({ batchIndex, batchItems, phase: 'before_batch' });
+    if (requestedAction) {
+      stoppedStatus = requestedAction;
+      await reportProgress({ batchIndex, phase: requestedAction, status: requestedAction });
+      break;
+    }
+    await reportProgress({ batchIndex, batchItems, phase: 'batch_started', status: 'running' });
     const batchHash = createBatchHash(batchItems, options);
     const duplicate = findRecentDuplicate(batchHash, stateFile);
     if (duplicate && !options.force) {
@@ -1394,6 +1436,7 @@ async function distributeProducts(options = {}) {
         batchHash,
         duplicate
       });
+      await reportProgress({ batchIndex, batchItems, phase: 'batch_skipped', status: 'skipped' });
       continue;
     }
     if (options.dryRun) {
@@ -1406,6 +1449,7 @@ async function distributeProducts(options = {}) {
         batchHash,
         input: normalizeItemsForInput(batchItems)
       });
+      await reportProgress({ batchIndex, batchItems, phase: 'batch_completed', status: 'completed' });
       continue;
     }
 
@@ -1435,6 +1479,7 @@ async function distributeProducts(options = {}) {
           logUrl: logState.url,
           confirmation
         });
+        await reportProgress({ batchIndex, batchItems, phase: 'batch_completed', status: confirmation.status || 'failed' });
         continue;
       }
       appendRunRecord({
@@ -1461,8 +1506,16 @@ async function distributeProducts(options = {}) {
         confirmation,
         logPreview: confirmation.preview || logState.body.slice(0, 1000)
       });
+      await reportProgress({ batchIndex, batchItems, phase: 'batch_completed', status: 'confirmed' });
     } finally {
       await client.close();
+    }
+
+    const requestedAfterBatch = await control({ batchIndex, batchItems, phase: 'after_batch' });
+    if (requestedAfterBatch) {
+      stoppedStatus = requestedAfterBatch;
+      await reportProgress({ batchIndex, batchItems, phase: requestedAfterBatch, status: requestedAfterBatch });
+      break;
     }
   }
 
@@ -1477,10 +1530,12 @@ async function distributeProducts(options = {}) {
     ? results.every(row => row.ok)
     : results.every(row => row.ok);
   return withAgentResponseFields({
-    ok,
+    ok: stoppedStatus ? false : ok,
     total: items.length,
     batches: results,
-    canSubmit: !options.dryRun && ok,
+    canSubmit: !options.dryRun && !stoppedStatus && ok,
+    status: stoppedStatus || (ok ? 'confirmed' : 'completed_with_issues'),
+    stoppedStatus,
     mustReview: reviewRows.length > 0,
     blockers: reviewRows.map(row => row.reason || row.status || (row.confirmation && row.confirmation.status)),
     nextActionCode: options.dryRun
@@ -1581,7 +1636,11 @@ async function checkDistributionReadiness(options = {}) {
 function getReadinessBlockers({ itemCount, browser, duplicates }) {
   const blockers = [];
   if (itemCount === 0) blockers.push('empty_input');
-  if (!browser.ok) blockers.push(browser.loginExpired ? 'login_expired' : 'browser_cdp_unavailable');
+  if (!browser.ok) {
+    if (browser.loginExpired) blockers.push('login_expired');
+    else if (browser.quotaExhausted) blockers.push('distribution_quota_exhausted');
+    else blockers.push('browser_cdp_unavailable');
+  }
   if (duplicates.length > 0) blockers.push('recent_duplicate_batch');
   return blockers;
 }
@@ -1600,6 +1659,7 @@ module.exports = {
   findRecentDuplicate,
   inspectBrowser,
   isLoginExpiredText,
+  isDistributionQuotaExhausted,
   classifyLoginState,
   recoverLoginIfNeeded,
   getReadinessBlockers,

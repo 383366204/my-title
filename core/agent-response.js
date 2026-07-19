@@ -13,6 +13,7 @@ const MANUAL_ACTION_STATUSES = new Set([
   'captcha_required',
   'authorization_required',
   'manual_action_required',
+  'verified_no_generation_eligible',
   'verified_partial_manual_required'
 ]);
 

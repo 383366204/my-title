@@ -19,7 +19,8 @@ const {
   readWorkflowNodeArtifact,
   writeWorkflowDefinition,
   appendWorkflowEvent,
-  readWorkflowEvents
+  readWorkflowEvents,
+  deleteWorkflowRun
 } = require('../workflow/pipeline-adapter');
 
 function tempPipelineDir() {
@@ -41,7 +42,9 @@ describe('workflow pipeline adapter', () => {
     assert.deepEqual(WORKFLOW_NODE_IDS, {
       start: 'start',
       mine: 'mine',
+      keywordReview: 'keywordReview',
       verify: 'verify',
+      select: 'select',
       generate: 'generate',
       export: 'export',
       review: 'review',
@@ -50,10 +53,20 @@ describe('workflow pipeline adapter', () => {
 
     const templates = listProductionWorkflowTemplates();
 
-    assert.deepEqual(templates.map(template => template.id), ['daily-selection-v1', 'exact-keyword-v1']);
+    assert.deepEqual(templates.map(template => template.id), ['daily-selection-v1', 'exact-keyword-v1', 'manual-selection-v1']);
+    assert.deepEqual(templates.map(template => template.entryLabel), ['入口：种子池', '入口：手动关键词', '入口：手动关键词']);
+    assert.match(templates[0].scenarioLabel, /每天自动发现/);
+    assert.match(templates[1].scenarioLabel, /明确目标词/);
+    assert.match(templates[0].flowSummary, /选词挖掘/);
+    assert.match(templates[1].flowSummary, /跳过挖词/);
+    assert.match(templates[0].modeHint, /种子池/);
+    assert.match(templates[1].modeHint, /直接进入生意参谋/);
+    assert.match(templates[2].flowSummary, /人工选词/);
+    assert.match(templates[2].flowSummary, /URL\$\$标题\$\$类目/);
     const dailyStart = templates[0].workflow.nodes.find(node => node.id === WORKFLOW_NODE_IDS.start);
     const keywordStart = templates[1].workflow.nodes.find(node => node.id === WORKFLOW_NODE_IDS.start);
     assert.deepEqual(Object.keys(dailyStart.data).sort(), [
+      'description',
       'export',
       'generate',
       'label',
@@ -61,22 +74,71 @@ describe('workflow pipeline adapter', () => {
       'mine',
       'pages',
       'productsPerKeyword',
+      'rootCooldownDays',
+      'rootLimit',
+      'rootMode',
+      'select',
+      'source',
+      'stepIndex',
+      'stepTotal',
       'verify'
     ]);
     assert.equal(keywordStart.data.keyword, '');
+    assert.equal(templates[2].workflow.nodes.find(node => node.id === WORKFLOW_NODE_IDS.start).data.keywords, '');
     for (const template of templates) {
       assert.equal(template.production, true);
       assert.ok(template.workflow);
-      assert.deepEqual(template.workflow.nodes.map(node => node.id), Object.values(WORKFLOW_NODE_IDS));
-      assert.deepEqual(template.workflow.edges.map(edge => `${edge.source}->${edge.target}`), [
-        'start->mine',
-        'mine->verify',
-        'verify->generate',
-        'generate->export',
-        'export->review',
-        'review->end'
-      ]);
     }
+    assert.deepEqual(templates[0].workflow.nodes.map(node => node.id), [
+      WORKFLOW_NODE_IDS.start,
+      WORKFLOW_NODE_IDS.mine,
+      WORKFLOW_NODE_IDS.keywordReview,
+      WORKFLOW_NODE_IDS.verify,
+      WORKFLOW_NODE_IDS.select,
+      WORKFLOW_NODE_IDS.generate,
+      WORKFLOW_NODE_IDS.export,
+      WORKFLOW_NODE_IDS.end
+    ]);
+    assert.deepEqual(templates[0].workflow.edges.map(edge => `${edge.source}->${edge.target}`), [
+      'start->mine',
+      'mine->keywordReview',
+      'keywordReview->verify',
+      'verify->select',
+      'select->generate',
+      'generate->export',
+      'export->end'
+    ]);
+    assert.ok(templates[0].workflow.edges.every(edge => edge.type === 'straight'));
+    assert.deepEqual(templates[1].workflow.nodes.map(node => node.id), [
+      WORKFLOW_NODE_IDS.start,
+      WORKFLOW_NODE_IDS.verify,
+      WORKFLOW_NODE_IDS.select,
+      WORKFLOW_NODE_IDS.generate,
+      WORKFLOW_NODE_IDS.export,
+      WORKFLOW_NODE_IDS.end
+    ]);
+    assert.deepEqual(templates[1].workflow.edges.map(edge => `${edge.source}->${edge.target}`), [
+      'start->verify',
+      'verify->select',
+      'select->generate',
+      'generate->export',
+      'export->end'
+    ]);
+    assert.ok(templates[1].workflow.edges.every(edge => edge.type === 'straight'));
+    assert.deepEqual(templates[2].workflow.nodes.map(node => node.id), [
+      WORKFLOW_NODE_IDS.start,
+      WORKFLOW_NODE_IDS.keywordReview,
+      WORKFLOW_NODE_IDS.generate,
+      WORKFLOW_NODE_IDS.export,
+      WORKFLOW_NODE_IDS.end
+    ]);
+    assert.deepEqual(templates[2].workflow.edges.map(edge => `${edge.source}->${edge.target}`), [
+      'start->keywordReview',
+      'keywordReview->generate',
+      'generate->export',
+      'export->end'
+    ]);
+    assert.ok(templates[2].workflow.edges.every(edge => edge.type === 'straight'));
   });
 
   it('keeps production workflow template nodes compact and ordered for canvas fit', () => {
@@ -93,21 +155,48 @@ describe('workflow pipeline adapter', () => {
       const uniquePositions = new Set(nodes.map(node => `${node.position.x},${node.position.y}`));
       const nodeWidth = 232;
       const nodeHeight = 118;
-      const minGap = 60;
+      const minGap = 24;
 
-      assert.deepEqual(nodes.map(node => node.id), [
-        WORKFLOW_NODE_IDS.start,
-        WORKFLOW_NODE_IDS.mine,
-        WORKFLOW_NODE_IDS.verify,
-        WORKFLOW_NODE_IDS.generate,
-        WORKFLOW_NODE_IDS.export,
-        WORKFLOW_NODE_IDS.review,
-        WORKFLOW_NODE_IDS.end
-      ]);
+      const expectedIds = template.mode === 'keyword'
+        ? [
+            WORKFLOW_NODE_IDS.start,
+            WORKFLOW_NODE_IDS.verify,
+            WORKFLOW_NODE_IDS.select,
+            WORKFLOW_NODE_IDS.generate,
+            WORKFLOW_NODE_IDS.export,
+            WORKFLOW_NODE_IDS.end
+          ]
+        : template.mode === 'manual'
+          ? [
+              WORKFLOW_NODE_IDS.start,
+              WORKFLOW_NODE_IDS.keywordReview,
+              WORKFLOW_NODE_IDS.generate,
+              WORKFLOW_NODE_IDS.export,
+              WORKFLOW_NODE_IDS.end
+            ]
+        : [
+            WORKFLOW_NODE_IDS.start,
+            WORKFLOW_NODE_IDS.mine,
+            WORKFLOW_NODE_IDS.keywordReview,
+            WORKFLOW_NODE_IDS.verify,
+            WORKFLOW_NODE_IDS.select,
+            WORKFLOW_NODE_IDS.generate,
+            WORKFLOW_NODE_IDS.export,
+            WORKFLOW_NODE_IDS.end
+          ];
+      assert.deepEqual(nodes.map(node => node.id), expectedIds);
       assert.equal(uniquePositions.size, nodes.length, 'template nodes should not share the same canvas position');
-      assert.ok(maxX - minX <= 680, `template ${template.id} spans ${maxX - minX}px horizontally`);
-      assert.ok(maxY - minY <= 440, `template ${template.id} spans ${maxY - minY}px vertically`);
+      assert.ok(maxY - minY <= 80, `template ${template.id} should read as a single horizontal pipeline`);
+      assert.ok(maxX - minX <= 1820, `template ${template.id} should not keep legacy wide spacing`);
+      assert.deepEqual(nodes.map(node => node.data.stepIndex), nodes.map((_, index) => index + 1));
+      assert.deepEqual(nodes.map(node => node.data.stepTotal), nodes.map(() => nodes.length));
       for (let index = 0; index < nodes.length; index += 1) {
+        if (index > 0) {
+          assert.ok(
+            nodes[index].position.x > nodes[index - 1].position.x,
+            `template ${template.id} node ${nodes[index].id} should be placed after ${nodes[index - 1].id}`
+          );
+        }
         for (let other = index + 1; other < nodes.length; other += 1) {
           const a = nodes[index].position;
           const b = nodes[other].position;
@@ -123,13 +212,20 @@ describe('workflow pipeline adapter', () => {
   });
 
   it('validates production workflow graphs without the legacy node registry', () => {
-    const [template] = listProductionWorkflowTemplates();
+    const templates = listProductionWorkflowTemplates();
+    const [template, keywordTemplate] = templates;
 
     assert.deepEqual(validateProductionWorkflow(template.workflow), {
       ok: true,
       errors: [],
       production: true,
       templateId: 'daily-selection-v1'
+    });
+    assert.deepEqual(validateProductionWorkflow(keywordTemplate.workflow), {
+      ok: true,
+      errors: [],
+      production: true,
+      templateId: 'exact-keyword-v1'
     });
 
     const invalid = validateProductionWorkflow({
@@ -202,9 +298,17 @@ describe('workflow pipeline adapter', () => {
       port: '9223',
       pages: 9,
       minBlueRows: '-5',
-      fallbackHot: false
+      fallbackHot: false,
+      source: 'invalid',
+      rootMode: 'invalid',
+      rootLimit: '99',
+      rootCooldownDays: '-4'
     }), {
       mine: 200,
+      source: 'sycm_hot',
+      rootMode: 'auto',
+      rootLimit: 20,
+      rootCooldownDays: 0,
       verify: 1,
       generate: 10,
       export: 100,
@@ -353,11 +457,10 @@ describe('workflow pipeline adapter', () => {
     assert.equal(run.nodeStates.mine.status, 'completed');
     assert.equal(run.nodeStates.verify.status, 'completed');
     assert.equal(run.nodeStates.generate.status, 'completed');
-    assert.equal(run.nodeStates.export.status, 'completed');
-    assert.equal(run.nodeStates.review.status, 'needs_review');
+    assert.equal(run.nodeStates.export.status, 'needs_review');
     assert.equal(run.nodeStates.end.status, 'idle');
     assert.equal(run.nodeStates.mine.output.count, 2);
-    assert.equal(run.nodeStates.review.output.reviewFile, '/tmp/distribution-review.md');
+    assert.equal(run.nodeStates.export.output.reviewFile, '/tmp/distribution-review.md');
   });
 
   it('attaches runtime state and maps runtime progress into workflow node states', () => {
@@ -470,6 +573,59 @@ describe('workflow pipeline adapter', () => {
     });
   });
 
+  it('surfaces SYCM CDP failures from sycm results instead of generic empty verification guidance', () => {
+    const dataDir = tempPipelineDir();
+    const runId = 'sycm_cdp_failure_run';
+    const runDir = path.join(dataDir, 'runs', runId);
+    writeJson(path.join(runDir, 'run.json'), {
+      runId,
+      status: 'verified_empty',
+      startedAt: '2026-06-29T04:00:00.000Z',
+      updatedAt: '2026-06-29T04:01:00.000Z',
+      counts: {
+        candidates: 1,
+        sycmVerified: 0,
+        sycmRejected: 1
+      },
+      files: {
+        sycmResults: path.join(runDir, 'sycm-results.jsonl'),
+        verifiedKeywords: path.join(runDir, 'verified-keywords.jsonl')
+      }
+    });
+    writeJson(path.join(runDir, 'runtime.json'), {
+      status: 'blocked',
+      activeStep: WORKFLOW_NODE_IDS.verify,
+      steps: ['mine', 'verify', 'generate', 'export', 'review'],
+      progress: {
+        verify: { status: 'completed', current: 1, total: 1, percent: 100, message: '完成' }
+      }
+    });
+    writeText(path.join(runDir, 'sycm-results.jsonl'), JSON.stringify({
+      keyword: '纯银项链',
+      ok: false,
+      status: 'transient_failure',
+      error: 'connect ECONNREFUSED 127.0.0.1:9222',
+      manualAction: {
+        status: 'transient_failure',
+        userMessage: '生意参谋暂时访问失败，可稍后重试。'
+      }
+    }) + '\n');
+
+    const run = getWorkflowRun({ dataDir, runId });
+
+    assert.equal(run.nodeStates.verify.status, 'blocked');
+    assert.equal(run.nodeStates.verify.blocker, 'sycm_transient_failure');
+    assert.equal(run.nodeStates.verify.platform, 'sycm');
+    assert.equal(run.nodeStates.verify.platformStatus, 'transient_failure');
+    assert.match(run.nodeStates.verify.actionHint, /Chrome CDP 不可用/);
+    assert.match(run.nodeStates.verify.actionHint, /9222/);
+    assert.deepEqual(run.nodeStates.verify.nextRecommendedAction, {
+      action: 'start-sycm-chrome',
+      label: '启动 Chrome',
+      description: '启动带远程调试端口的 Chrome，登录生意参谋后重试校验。'
+    });
+  });
+
   it('maps explicit pipeline statuses to production node states', () => {
     const cases = [
       {
@@ -495,17 +651,17 @@ describe('workflow pipeline adapter', () => {
       {
         status: 'needs_review',
         stage: 'review',
-        expected: { export: 'completed', review: 'needs_review', end: 'idle' }
+        expected: { export: 'needs_review', review: 'idle', end: 'idle' }
       },
       {
         status: 'ready_to_distribute',
         stage: 'ready',
-        expected: { export: 'completed', review: 'waiting_confirmation', end: 'idle' }
+        expected: { export: 'waiting_confirmation', review: 'idle', end: 'idle' }
       },
       {
         status: 'awaiting_user_confirmation',
         stage: 'ready',
-        expected: { export: 'completed', review: 'waiting_confirmation', end: 'idle' }
+        expected: { export: 'waiting_confirmation', review: 'idle', end: 'idle' }
       },
       {
         status: 'workflow_complete',
@@ -576,6 +732,30 @@ describe('workflow pipeline adapter', () => {
     assert.equal(readWorkflowNodeArtifact({ dataDir, runId, nodeId: WORKFLOW_NODE_IDS.end }), null);
   });
 
+  it('deletes pipeline workflow run directories and clears latest pointer', () => {
+    const dataDir = tempPipelineDir();
+    const runId = 'delete_run';
+    const runDir = path.join(dataDir, 'runs', runId);
+    writeJson(path.join(runDir, 'run.json'), {
+      runId,
+      status: 'mined',
+      startedAt: '2026-06-29T04:00:00.000Z',
+      updatedAt: '2026-06-29T04:10:00.000Z',
+      counts: { candidates: 1 },
+      files: { candidates: path.join(runDir, 'candidates.jsonl') }
+    });
+    writeJson(path.join(dataDir, 'latest.json'), { runId, runDir, updatedAt: '2026-06-29T04:10:00.000Z' });
+    writeText(path.join(runDir, 'candidates.jsonl'), '{"keyword":"项链"}\n');
+
+    const result = deleteWorkflowRun({ dataDir, runId });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.deleted.pipelineRun, true);
+    assert.equal(fs.existsSync(runDir), false);
+    assert.equal(fs.existsSync(path.join(dataDir, 'latest.json')), false);
+    assert.equal(getWorkflowRun({ dataDir, runId }), null);
+  });
+
   it('persists workflow definitions and events next to pipeline runs', () => {
     const dataDir = tempPipelineDir();
     const runId = 'snapshot_run-1';
@@ -640,7 +820,7 @@ describe('workflow pipeline adapter', () => {
     ]);
   });
 
-  it('attaches review node actions for review and distribution confirmation states', () => {
+  it('attaches distribution review actions to the merged export node', () => {
     const reviewRun = pipelineSummaryToWorkflowRun({
       runId: 'needs_review_action_run',
       status: 'needs_review',
@@ -651,10 +831,10 @@ describe('workflow pipeline adapter', () => {
       files: {}
     });
 
-    assert.deepEqual(reviewRun.nodeStates.review.nextRecommendedAction, {
+    assert.deepEqual(reviewRun.nodeStates.export.nextRecommendedAction, {
       action: 'open-review',
-      label: '查看复核报告',
-      description: '先检查风险项和待处理商品，再决定是否补充信息或重新导出。'
+      label: '处理铺货复核',
+      description: '查看自动清单、拦截原因，并人工加入可铺货项。'
     });
 
     const readyRun = pipelineSummaryToWorkflowRun({
@@ -667,7 +847,7 @@ describe('workflow pipeline adapter', () => {
       files: {}
     });
 
-    assert.deepEqual(readyRun.nodeStates.review.nextRecommendedAction, {
+    assert.deepEqual(readyRun.nodeStates.export.nextRecommendedAction, {
       action: 'confirm-distribution',
       label: '确认铺货清单',
       description: '铺货前必须人工确认具体商品清单，确认后再进入提交动作。'

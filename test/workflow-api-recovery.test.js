@@ -386,6 +386,77 @@ test('workflow recovery APIs - pause, resume, and retry', async (t) => {
       }
     });
 
+    await t.test('POST /api/workflows/sycm/chrome/start launches Chrome through injectable launcher', async () => {
+      const originalLauncher = app.locals.sycmChromeLauncher;
+      const originalPageOpener = app.locals.sycmChromePageOpener;
+      const calls = [];
+      const opened = [];
+      app.locals.sycmChromeLauncher = async (port, options) => {
+        calls.push({ port, options });
+        return { success: true, message: 'Chrome 已启动并就绪' };
+      };
+      app.locals.sycmChromePageOpener = async (port, url) => {
+        opened.push({ port, url });
+        return { success: true, url };
+      };
+
+      try {
+        const res = await fetch(`http://127.0.0.1:${port}/api/workflows/sycm/chrome/start`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ port: 9333, runId: 'run_api_sycm', nodeId: 'verify' })
+        });
+        const payload = await res.json();
+
+        assert.strictEqual(res.status, 200);
+        assert.strictEqual(payload.ok, true);
+        assert.strictEqual(payload.status, 'ready');
+        assert.strictEqual(payload.port, 9333);
+        assert.match(payload.userMessage, /已打开生意参谋页面/);
+        assert.deepStrictEqual(calls, [{
+          port: 9333,
+          options: { userDataDir: undefined }
+        }]);
+        assert.deepStrictEqual(opened, [{
+          port: 9333,
+          url: 'https://sycm.taobao.com/mc/free/search_analysis'
+        }]);
+      } finally {
+        app.locals.sycmChromeLauncher = originalLauncher;
+        app.locals.sycmChromePageOpener = originalPageOpener;
+      }
+    });
+
+    await t.test('DELETE /api/workflows/runs/:runId removes persisted pipeline history', async () => {
+      const runId = 'api_delete_history_run';
+      const pipelineDataDir = path.join(process.cwd(), 'data', 'pipeline');
+      const runDir = path.join(pipelineDataDir, 'runs', runId);
+      fs.mkdirSync(runDir, { recursive: true });
+      fs.writeFileSync(path.join(runDir, 'run.json'), JSON.stringify({
+        runId,
+        status: 'mined',
+        startedAt: '2026-06-29T04:00:00.000Z',
+        updatedAt: '2026-06-29T04:10:00.000Z',
+        counts: { candidates: 1 },
+        files: { candidates: path.join(runDir, 'candidates.jsonl') }
+      }), 'utf8');
+      fs.writeFileSync(path.join(runDir, 'candidates.jsonl'), '{"keyword":"项链"}\n', 'utf8');
+      fs.writeFileSync(path.join(pipelineDataDir, 'latest.json'), JSON.stringify({ runId, runDir }), 'utf8');
+
+      const res = await fetch(`http://127.0.0.1:${port}/api/workflows/runs/${runId}`, {
+        method: 'DELETE',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ confirm: true })
+      });
+      const payload = await res.json();
+
+      assert.strictEqual(res.status, 200);
+      assert.strictEqual(payload.ok, true);
+      assert.strictEqual(payload.data.runId, runId);
+      assert.strictEqual(fs.existsSync(runDir), false);
+      assert.strictEqual(fs.existsSync(path.join(pipelineDataDir, 'latest.json')), false);
+    });
+
   } finally {
     await new Promise((resolve) => server.close(resolve));
     // clean up temporary files in directory

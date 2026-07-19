@@ -19,6 +19,7 @@ const {
 
 const { generateTitlePipeline } = require('../skills/title-gen');
 const { searchAll } = require('../skills/alibaba1688');
+const { autoLaunchChrome, openChromeUrl, SYCM_SELECTORS } = require('../skills/sycm-research');
 
 const {
   WORKFLOW_NODE_IDS,
@@ -28,7 +29,8 @@ const {
   resolveProductionWorkflowLaunch,
   listWorkflowRuns,
   getWorkflowRun,
-  readWorkflowNodeArtifact
+  readWorkflowNodeArtifact,
+  deleteWorkflowRun
 } = require('../core/workflow/pipeline-adapter');
 const {
   resumeWorkflow,
@@ -39,21 +41,32 @@ const {
 const {
   createRunId,
   flowMine,
+  flowReviewCandidates,
   flowVerify,
+  flowSelectProducts,
   flowGenerate,
   flowExport,
-  appendRunCandidates
+  appendRunCandidates,
+  flowReviewProducts,
+  markRunDistributionComplete
 } = require('../skills/pipeline-flow');
 const {
   runPipelineRuntime
 } = require('../skills/pipeline-flow/runtime/runner');
 const {
+  parseItems,
+  checkDistributionReadiness,
+  distributeProducts
+} = require('../skills/1688-distribution');
+const {
   readRuntimeState,
+  updateRuntimeState,
   requestRuntimeCancel,
   requestRuntimePause,
   requestRuntimeResume,
   requestRuntimeRetryStep,
-  readRuntimeEvents
+  readRuntimeEvents,
+  appendRuntimeEvent
 } = require('../skills/pipeline-flow/runtime/store');
 
 const {
@@ -75,6 +88,62 @@ const originalLog = console.log;
 const originalError = console.error;
 const WORKBENCH_OUTPUT_LIMIT_BYTES = 200 * 1024;
 let activeWorkbenchProcess = null;
+const activeDistributionJobs = new Map();
+const DISTRIBUTION_JOB_DIR = path.join(process.cwd(), 'data', 'pipeline', 'distribution-runs');
+
+function distributionJobFile(jobId) {
+  if (!/^[a-zA-Z0-9_-]+$/.test(String(jobId || ''))) throw new Error('无效的铺货运行 ID。');
+  return path.join(DISTRIBUTION_JOB_DIR, `${jobId}.json`);
+}
+
+function readDistributionJob(jobId) {
+  const file = distributionJobFile(jobId);
+  if (!fs.existsSync(file)) return null;
+  return JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
+}
+
+function writeDistributionJob(job) {
+  fs.mkdirSync(DISTRIBUTION_JOB_DIR, { recursive: true });
+  fs.writeFileSync(distributionJobFile(job.jobId), `${JSON.stringify(job, null, 2)}\n`, 'utf8');
+  return job;
+}
+
+function updateDistributionJob(jobId, patch = {}) {
+  const current = activeDistributionJobs.get(jobId) || readDistributionJob(jobId) || {};
+  const next = { ...current, ...patch, updatedAt: new Date().toISOString() };
+  activeDistributionJobs.set(jobId, next);
+  return writeDistributionJob(next);
+}
+
+function syncCompletedDistributionWorkflow(job) {
+  if (!job || job.status !== 'completed' || !job.workflowRunId) return;
+  const currentSummary = summarizePipelineRun({ runId: job.workflowRunId });
+  const currentRuntime = readRuntimeState({ runId: job.workflowRunId });
+  if (currentSummary?.status === 'workflow_complete' && currentRuntime?.status === 'completed') return;
+  markRunDistributionComplete({
+    runId: job.workflowRunId,
+    distributionResult: job.result || {}
+  });
+  const runtime = currentRuntime || readRuntimeState({ runId: job.workflowRunId });
+  if (!runtime) return;
+  updateRuntimeState({
+    runId: job.workflowRunId,
+    patch: {
+      status: 'completed',
+      activeStep: 'end',
+      progress: {
+        ...(runtime.progress || {}),
+        export: { status: 'completed', current: 1, total: 1, percent: 100, message: '铺货已确认' },
+        end: { status: 'completed', current: 1, total: 1, percent: 100, message: '流程完成' }
+      },
+      requestedAction: null
+    }
+  });
+  appendRuntimeEvent({
+    runId: job.workflowRunId,
+    event: { event: 'status', status: 'completed', pipelineStatus: 'workflow_complete', step: 'end' }
+  });
+}
 
 const sendSseLog = (type, args) => {
   const res = logStorage.getStore();
@@ -364,7 +433,9 @@ app.post('/api/pipeline/start', (req, res) => {
     const params = sanitizeWorkflowParams(launch.mode, launch.params);
     const runId = createRunId();
     const steps = launch.mode === 'daily'
-      ? [WORKFLOW_NODE_IDS.mine, WORKFLOW_NODE_IDS.verify, WORKFLOW_NODE_IDS.generate, WORKFLOW_NODE_IDS.export, WORKFLOW_NODE_IDS.review]
+      ? [WORKFLOW_NODE_IDS.mine, WORKFLOW_NODE_IDS.keywordReview, WORKFLOW_NODE_IDS.verify, WORKFLOW_NODE_IDS.select, WORKFLOW_NODE_IDS.generate, WORKFLOW_NODE_IDS.export]
+      : launch.mode === 'manual'
+        ? [WORKFLOW_NODE_IDS.start, WORKFLOW_NODE_IDS.keywordReview, WORKFLOW_NODE_IDS.select, WORKFLOW_NODE_IDS.generate, WORKFLOW_NODE_IDS.export]
       : undefined;
     const promise = runPipelineRuntime({ runId, mode: launch.mode, params, steps });
     const runState = { runId, mode: launch.mode, promise };
@@ -476,7 +547,7 @@ app.post('/api/pipeline/runs/:runId/:step/retry', async (req, res) => {
   if (!isValidWorkflowRunIdParam(runId)) {
     return res.status(400).json({ ok: false, error: '无效的运行 ID。' });
   }
-  if (!['mine', 'verify', 'generate', 'export'].includes(step)) {
+  if (!['mine', 'review', 'keywordReview', 'verify', 'select', 'generate', 'export'].includes(step)) {
     return res.status(400).json({ ok: false, error: '不支持的流程步骤。' });
   }
   if (activeWorkbenchProcess) {
@@ -515,7 +586,7 @@ app.post('/api/pipeline/runs/:runId/:step', async (req, res) => {
   if (!isValidWorkflowRunIdParam(runId)) {
     return res.status(400).json({ ok: false, error: '无效的运行 ID。' });
   }
-  if (!['mine', 'verify', 'generate', 'export'].includes(step)) {
+  if (!['mine', 'review', 'keywordReview', 'verify', 'select', 'generate', 'export'].includes(step)) {
     return res.status(400).json({ ok: false, error: '不支持的流程步骤。' });
   }
   try {
@@ -534,6 +605,14 @@ app.post('/api/pipeline/runs/:runId/:step', async (req, res) => {
 
 function getPipelineRuntimeRunner() {
   return app.locals.pipelineRuntimeRunner || runPipelineRuntime;
+}
+
+function getSycmChromeLauncher() {
+  return app.locals.sycmChromeLauncher || autoLaunchChrome;
+}
+
+function getSycmChromePageOpener() {
+  return app.locals.sycmChromePageOpener || openChromeUrl;
 }
 
 function pipelineRunResponse(runId, extra = {}) {
@@ -562,8 +641,14 @@ async function runPipelineStep(step, runId, body = {}) {
     runId,
     limit: parsePositiveNumber(body.limit || body[step], step === 'mine' ? 50 : 20)
   };
+  if (step === 'mine') {
+    options.excludeSeen = body.excludeSeen !== false;
+    options.recordSeen = body.recordSeen !== false;
+  }
   if (step === 'mine') return flowMine(options);
+  if (step === 'review' || step === 'keywordReview') return flowReviewCandidates(options);
   if (step === 'verify') return flowVerify(options);
+  if (step === 'select') return flowSelectProducts(options);
   if (step === 'generate') return flowGenerate(options);
   if (step === 'export') return flowExport(options);
   throw new Error('不支持的流程步骤。');
@@ -607,6 +692,30 @@ app.post('/api/seeds/:keyword/toggle', (req, res) => {
     }
     seed.status = seed.status === 'paused' ? 'active' : 'paused';
     saveSeeds(seeds, DEFAULT_DATA_DIR);
+    res.json({ ok: true, data: seed });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// 4.5 POST /api/seeds/:keyword/status - Move a seed through its lifecycle.
+app.post('/api/seeds/:keyword/status', (req, res) => {
+  const keyword = req.params.keyword;
+  const status = String(req.body?.status || '').trim().toLowerCase();
+  const allowedStatuses = new Set(['active', 'observing', 'explore', 'cooling', 'paused', 'disabled']);
+  if (!allowedStatuses.has(status)) {
+    return res.status(400).json({ ok: false, error: '不支持的种子状态。' });
+  }
+  try {
+    const seeds = loadSeeds(DEFAULT_DATA_DIR);
+    const seed = seeds.find(item => item.keyword === keyword);
+    if (!seed) return res.status(404).json({ ok: false, error: '种子词不存在' });
+    seed.status = status;
+    seed.statusReason = String(req.body?.reason || '').trim();
+    seed.statusUpdatedAt = new Date().toISOString();
+    saveSeeds(seeds, DEFAULT_DATA_DIR);
+    const { recordSeedEvent } = require('../skills/keyword-mining');
+    recordSeedEvent({ type: 'status', keyword, status, reason: seed.statusReason, source: 'manual' }, DEFAULT_DATA_DIR);
     res.json({ ok: true, data: seed });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
@@ -872,6 +981,163 @@ app.get('/api/workflows/templates', (req, res) => {
   res.json({ ok: true, data: listProductionWorkflowTemplates() });
 });
 
+// 1.5 POST /api/distribution/check - 检查人工复核后的铺货清单，不提交
+app.post('/api/distribution/check', async (req, res) => {
+  try {
+    const input = String(req.body?.input || '').trim();
+    if (!input) {
+      return res.status(400).json({ ok: false, error: '铺货清单为空，请先保留或加入至少 1 个商品。' });
+    }
+    const { checkDistributionReadiness } = require('../skills/1688-distribution');
+    const result = await checkDistributionReadiness({
+      input,
+      batchSize: parsePositiveNumber(req.body?.batchSize, 20),
+      port: parsePositiveNumber(req.body?.port, process.env.BROWSER_CDP_PORT || process.env.CHROME_DEBUG_PORT || 9222),
+      skipBrowser: req.body?.skipBrowser === true
+    });
+    return res.json({ ok: true, data: result });
+  } catch (err) {
+    const status = err && err.code === 'INVALID_ITEM' ? 400 : 500;
+    return res.status(status).json({ ok: false, error: err.message });
+  }
+});
+
+// 1.6 POST /api/distribution/submit - 经用户确认后启动后台自动铺货
+app.post('/api/distribution/submit', async (req, res) => {
+  try {
+    if (req.body?.confirm !== true) {
+      return res.status(400).json({ ok: false, error: '自动铺货需要用户明确确认。' });
+    }
+    const input = String(req.body?.input || '').trim();
+    const items = parseItems(input);
+    if (items.length === 0) {
+      return res.status(400).json({ ok: false, error: '铺货清单为空。' });
+    }
+    const runningJob = [...activeDistributionJobs.values()].find(job => ['checking', 'submitting', 'paused'].includes(job.status));
+    if (runningJob) {
+      return res.status(409).json({ ok: false, error: `已有铺货任务正在处理：${runningJob.jobId}` });
+    }
+
+    const readiness = await checkDistributionReadiness({
+      input,
+      batchSize: parsePositiveNumber(req.body?.batchSize, 20),
+      port: parsePositiveNumber(req.body?.port, process.env.BROWSER_CDP_PORT || process.env.CHROME_DEBUG_PORT || 9222)
+    });
+    if (!readiness.canSubmit) {
+      return res.status(409).json({ ok: false, error: '铺货环境检查未通过。', data: readiness });
+    }
+
+    const jobId = `${req.body?.runId || createRunId()}-distribution`;
+    const job = writeDistributionJob({
+      jobId,
+      workflowRunId: req.body?.runId || '',
+      status: 'submitting',
+      requestedAction: null,
+      total: items.length,
+      completed: 0,
+      failed: 0,
+      skipped: 0,
+      batchSize: parsePositiveNumber(req.body?.batchSize, 20),
+      progress: { batchIndex: 0, batchTotal: Math.ceil(items.length / parsePositiveNumber(req.body?.batchSize, 20)), phase: 'starting' },
+      items: items.map(item => ({ offerId: item.offerId, url: item.url, title: item.title, category: item.category })),
+      results: [],
+      startedAt: new Date().toISOString()
+    });
+    activeDistributionJobs.set(jobId, job);
+
+    distributeProducts({
+      input,
+      batchSize: job.batchSize,
+      port: parsePositiveNumber(req.body?.port, process.env.BROWSER_CDP_PORT || process.env.CHROME_DEBUG_PORT || 9222),
+      onProgress: async (event) => {
+        const results = event.results || [];
+        updateDistributionJob(jobId, {
+          status: event.status === 'pause' ? 'paused' : event.status === 'cancel' ? 'cancelled' : 'submitting',
+          progress: { batchIndex: event.batchIndex || 0, batchTotal: event.batchTotal || job.progress.batchTotal, phase: event.phase || '' },
+          results,
+          completed: results.filter(row => row.status === 'confirmed' || row.ok === true).reduce((sum, row) => sum + Number(row.count || 0), 0),
+          failed: results.filter(row => row.status && row.status !== 'confirmed' && !row.skipped).reduce((sum, row) => sum + Number(row.count || 0), 0),
+          skipped: results.filter(row => row.skipped).reduce((sum, row) => sum + Number(row.count || 0), 0)
+        });
+      },
+      shouldStop: async () => {
+        const current = activeDistributionJobs.get(jobId) || readDistributionJob(jobId);
+        return current?.requestedAction || null;
+      }
+    }).then(result => {
+      const finalStatus = result.stoppedStatus === 'pause'
+        ? 'paused'
+        : result.stoppedStatus === 'cancel'
+          ? 'cancelled'
+          : result.ok
+            ? 'completed'
+            : 'completed_with_issues';
+      if (finalStatus === 'completed' && job.workflowRunId) {
+        try {
+          syncCompletedDistributionWorkflow({ ...job, status: finalStatus, result });
+        } catch (workflowError) {
+          originalError(`[Distribution Complete] 工作流状态回写失败，runId=${job.workflowRunId}:`, workflowError.message);
+        }
+      }
+      updateDistributionJob(jobId, {
+        status: finalStatus,
+        result,
+        results: result.batches || [],
+        progress: { batchIndex: result.batches?.length || 0, batchTotal: job.progress.batchTotal, phase: finalStatus },
+        requestedAction: null
+      });
+      activeDistributionJobs.delete(jobId);
+    }).catch(error => {
+      updateDistributionJob(jobId, { status: 'failed', error: error.message, requestedAction: null });
+      activeDistributionJobs.delete(jobId);
+    });
+
+    return res.json({ ok: true, data: { jobId, status: 'submitting', total: items.length } });
+  } catch (err) {
+    const status = err && err.code === 'INVALID_ITEM' ? 400 : 500;
+    return res.status(status).json({ ok: false, error: err.message });
+  }
+});
+
+app.get('/api/distribution/runs/:jobId', (req, res) => {
+  try {
+    let job = activeDistributionJobs.get(req.params.jobId) || readDistributionJob(req.params.jobId);
+    if (!job) return res.status(404).json({ ok: false, error: '未找到铺货任务。' });
+    if (job.status === 'completed' && job.workflowRunId) {
+      try {
+        syncCompletedDistributionWorkflow(job);
+        job = readDistributionJob(req.params.jobId) || job;
+      } catch (workflowError) {
+        originalError(`[Distribution Complete] 历史任务状态回写失败，runId=${job.workflowRunId}:`, workflowError.message);
+      }
+    }
+    return res.json({ ok: true, data: job });
+  } catch (err) {
+    return res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+app.post('/api/distribution/runs/:jobId/:action', (req, res) => {
+  const action = String(req.params.action || '');
+  if (!['pause', 'cancel'].includes(action)) {
+    return res.status(400).json({ ok: false, error: '不支持的铺货控制操作。' });
+  }
+  try {
+    const job = activeDistributionJobs.get(req.params.jobId) || readDistributionJob(req.params.jobId);
+    if (!job) return res.status(404).json({ ok: false, error: '未找到铺货任务。' });
+    if (!['submitting', 'paused'].includes(job.status)) {
+      return res.status(409).json({ ok: false, error: `当前任务状态为${job.status}，不能执行该操作。` });
+    }
+    const next = updateDistributionJob(req.params.jobId, {
+      requestedAction: action,
+      controlMessage: action === 'pause' ? '将在当前批次完成后暂停' : '将在当前批次完成后取消'
+    });
+    return res.json({ ok: true, data: next });
+  } catch (err) {
+    return res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
 // 2. GET /api/workflows/runs - 获取历史工作流运行记录列表
 app.get('/api/workflows/runs', (req, res) => {
   try {
@@ -879,6 +1145,33 @@ app.get('/api/workflows/runs', (req, res) => {
     res.json({ ok: true, data: listWorkflowRuns({ limit }) });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// 2.2 DELETE /api/workflows/runs/:runId - 删除历史运行记录及其产物
+app.delete('/api/workflows/runs/:runId', (req, res) => {
+  const runId = req.params.runId;
+  try {
+    if (req.body?.confirm !== true) {
+      return res.status(400).json({ ok: false, error: '删除运行历史需要确认。' });
+    }
+    if (activeWorkbenchProcess && activeWorkbenchProcess.runId === runId) {
+      return res.status(409).json({ ok: false, error: '当前运行仍在执行中，不能删除。' });
+    }
+    const runtime = readRuntimeState({ runId });
+    const runtimeStatus = String(runtime?.status || '').toLowerCase();
+    if (['running', 'retrying', 'resuming', 'cancelling'].includes(runtimeStatus)) {
+      return res.status(409).json({ ok: false, error: '当前运行仍在执行中，不能删除。' });
+    }
+
+    const result = deleteWorkflowRun({ runId });
+    if (!result.ok) {
+      return res.status(404).json({ ok: false, error: '未找到该运行历史。' });
+    }
+    return res.json({ ok: true, data: result });
+  } catch (err) {
+    const status = /Invalid workflow run id|Invalid runtime run id/.test(err.message) ? 400 : 500;
+    return res.status(status).json({ ok: false, error: err.message });
   }
 });
 
@@ -907,7 +1200,9 @@ app.post('/api/workflows/run', (req, res) => {
     const params = sanitizeWorkflowParams(launch.mode, launch.params);
     const runId = createRunId();
     const steps = launch.mode === 'daily'
-      ? [WORKFLOW_NODE_IDS.mine, WORKFLOW_NODE_IDS.verify, WORKFLOW_NODE_IDS.generate, WORKFLOW_NODE_IDS.export, WORKFLOW_NODE_IDS.review]
+      ? [WORKFLOW_NODE_IDS.mine, WORKFLOW_NODE_IDS.verify, WORKFLOW_NODE_IDS.generate, WORKFLOW_NODE_IDS.export]
+      : launch.mode === 'manual'
+        ? [WORKFLOW_NODE_IDS.start, WORKFLOW_NODE_IDS.keywordReview, WORKFLOW_NODE_IDS.select, WORKFLOW_NODE_IDS.generate, WORKFLOW_NODE_IDS.export]
       : undefined;
     const promise = runPipelineRuntime({ runId, mode: launch.mode, params, steps });
     const runState = {
@@ -960,6 +1255,119 @@ app.get('/api/workflows/runs/:runId/artifacts/:nodeId', (req, res) => {
   }
 });
 
+// 4.1 GET /api/workflows/runs/:runId/artifacts/:nodeId/raw - 打开节点产物原文
+app.post('/api/workflows/runs/:runId/keyword-review', (req, res) => {
+  const runId = req.params.runId;
+  if (!isValidWorkflowRunIdParam(runId)) {
+    return res.status(400).json({ ok: false, error: '无效的运行 ID。' });
+  }
+  try {
+    const result = flowReviewCandidates({
+      runId,
+      approvedKeywords: Array.isArray(req.body?.approvedKeywords) ? req.body.approvedKeywords : [],
+      rejectedKeywords: Array.isArray(req.body?.rejectedKeywords) ? req.body.rejectedKeywords : [],
+      manualKeywords: Array.isArray(req.body?.manualKeywords) ? req.body.manualKeywords : [],
+      approveAll: req.body?.approveAll === true
+    });
+    const runtime = readRuntimeState({ runId });
+    if (runtime && result.status === 'keywords_reviewed') {
+      const nextStep = runtime.steps?.includes('verify') ? 'verify' : 'select';
+      updateRuntimeState({
+        runId,
+        patch: {
+          status: 'paused',
+          activeStep: nextStep,
+          blocker: null,
+          actionHint: null,
+          manualAction: null,
+          progress: {
+            keywordReview: {
+              status: 'completed',
+              current: result.approved.length,
+              total: result.approved.length + result.rejected.length,
+              percent: 100,
+              message: `人工筛词完成，通过 ${result.approved.length} 个`
+            },
+            ...(runtime.steps?.includes('verify') ? { verify: {
+              status: 'idle',
+              current: 0,
+              total: 0,
+              percent: 0,
+              message: '等待继续生意参谋校验'
+            } } : { select: {
+              status: 'idle',
+              current: 0,
+              total: 0,
+              percent: 0,
+              message: '等待继续加载货源'
+            } })
+          }
+        }
+      });
+    }
+    res.json({
+      ok: true,
+      data: {
+        result,
+        currentRun: withPipelineRuntimeFields(summarizePipelineRun({ runId }))
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post('/api/workflows/runs/:runId/product-review', (req, res) => {
+  const runId = req.params.runId;
+  if (!isValidWorkflowRunIdParam(runId)) {
+    return res.status(400).json({ ok: false, error: '无效的运行 ID。' });
+  }
+  try {
+    const result = flowReviewProducts({
+      runId,
+      approvedProductIds: Array.isArray(req.body?.approvedProductIds) ? req.body.approvedProductIds : [],
+      manualProducts: Array.isArray(req.body?.manualProducts) ? req.body.manualProducts : [],
+      approveAll: req.body?.approveAll === true
+    });
+    const runtime = readRuntimeState({ runId });
+    if (runtime && result.status === 'products_selected') {
+      updateRuntimeState({
+        runId,
+        patch: {
+          status: 'paused',
+          activeStep: 'generate',
+          blocker: null,
+          actionHint: null,
+          progress: {
+            select: { status: 'completed', current: result.selected.length, total: result.selected.length, percent: 100, message: `人工选品完成，保留 ${result.selected.length} 个商品` },
+            generate: { status: 'idle', current: 0, total: 0, percent: 0, message: '等待继续生成标题' }
+          }
+        }
+      });
+    }
+    return res.json({ ok: true, data: { result, currentRun: withPipelineRuntimeFields(summarizePipelineRun({ runId })) } });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.get('/api/workflows/runs/:runId/artifacts/:nodeId/raw', (req, res) => {
+  try {
+    const artifact = readWorkflowNodeArtifact({
+      runId: req.params.runId,
+      nodeId: req.params.nodeId,
+      limit: 1,
+      maxChars: 1
+    });
+    if (!artifact || !artifact.file || !fs.existsSync(artifact.file)) {
+      return res.status(404).type('text/plain').send('未找到该节点产物');
+    }
+    res.type('text/plain; charset=utf-8').send(fs.readFileSync(artifact.file, 'utf8'));
+  } catch (err) {
+    res.status(500).type('text/plain').send(err.message);
+  }
+});
+
 // 5. GET /api/workflows/runs/:runId - 获取工作流运行的最新状态与日志
 app.get('/api/workflows/runs/:runId', (req, res) => {
   try {
@@ -1001,7 +1409,7 @@ app.post('/api/workflows/runs/:runId/retry-node', async (req, res) => {
     }
     const runtime = readRuntimeState({ runId });
     if (runtime) {
-      if (!['mine', 'verify', 'generate', 'export'].includes(nodeId)) {
+      if (!['mine', 'keywordReview', 'verify', 'select', 'generate', 'export'].includes(nodeId)) {
         return res.status(400).json({ ok: false, error: '不支持的流程步骤。' });
       }
       if (activeWorkbenchProcess) {
@@ -1089,6 +1497,106 @@ app.post('/api/workflows/runs/:runId/pause', (req, res) => {
     return res.json({ ok: true, run });
   } catch (err) {
     return res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+// 8.6. POST /api/workflows/sycm/chrome/start - 启动生意参谋调试浏览器
+app.post('/api/workflows/sycm/chrome/start', async (req, res) => {
+  const port = parsePositiveNumber(req.body?.port || process.env.SYCM_DEBUG_PORT || 9222, 9222);
+  const chromeProfileDir = req.body?.chromeProfileDir || process.env.SYCM_CHROME_PROFILE_DIR;
+  const sycmUrl = req.body?.url || process.env.SYCM_START_URL || SYCM_SELECTORS.SEARCH_URL;
+  try {
+    const launchResult = await getSycmChromeLauncher()(port, { userDataDir: chromeProfileDir });
+    if (!launchResult || launchResult.success !== true) {
+      return res.status(500).json({
+        ok: false,
+        status: 'chrome_launch_failed',
+        port,
+        message: launchResult?.message || 'Chrome 启动失败',
+        userMessage: 'Chrome 启动失败。请手动启动带远程调试端口的 Chrome，然后重跑验真。'
+      });
+    }
+    let openResult = null;
+    try {
+      openResult = await getSycmChromePageOpener()(port, sycmUrl);
+    } catch (openErr) {
+      return res.json({
+        ok: true,
+        status: 'ready',
+        port,
+        url: sycmUrl,
+        message: launchResult.message || 'Chrome 已启动并就绪',
+        openStatus: 'open_page_failed',
+        openMessage: openErr.message,
+        userMessage: `Chrome 已启动，但没有自动打开生意参谋页面。请在该 Chrome 中手动打开：${sycmUrl}`
+      });
+    }
+    return res.json({
+      ok: true,
+      status: 'ready',
+      port,
+      url: sycmUrl,
+      openStatus: openResult?.success === false ? 'open_page_failed' : 'opened',
+      message: launchResult.message || 'Chrome 已启动并就绪',
+      userMessage: 'Chrome 已启动并就绪，已打开生意参谋页面。请登录或完成验证后重跑验真。'
+    });
+  } catch (err) {
+    return res.status(500).json({
+      ok: false,
+      status: 'chrome_launch_failed',
+      port,
+      message: err.message,
+      userMessage: 'Chrome 启动失败。请手动启动带远程调试端口的 Chrome，然后重跑验真。'
+    });
+  }
+});
+
+// 8.7. POST /api/distribution/chrome/start - 启动铺货专用调试浏览器
+app.post('/api/distribution/chrome/start', async (req, res) => {
+  const port = parsePositiveNumber(req.body?.port || process.env.BROWSER_CDP_PORT || process.env.CHROME_DEBUG_PORT || 9222, 9222);
+  const chromeProfileDir = req.body?.chromeProfileDir || process.env.SYCM_CHROME_PROFILE_DIR;
+  const distributionUrl = req.body?.url || 'https://item.jnesoft.com/';
+  try {
+    const launchResult = await getSycmChromeLauncher()(port, { userDataDir: chromeProfileDir });
+    if (!launchResult || launchResult.success !== true) {
+      return res.status(500).json({
+        ok: false,
+        status: 'chrome_launch_failed',
+        port,
+        message: launchResult?.message || 'Chrome 启动失败',
+        userMessage: `铺货 Chrome 启动失败（调试端口 ${port}）。请关闭占用该端口的 Chrome 后重试。`
+      });
+    }
+    try {
+      await getSycmChromePageOpener()(port, distributionUrl);
+    } catch (openErr) {
+      return res.json({
+        ok: true,
+        status: 'ready',
+        port,
+        url: distributionUrl,
+        openStatus: 'open_page_failed',
+        openMessage: openErr.message,
+        userMessage: `Chrome 已启动，但铺货页面未自动打开。请在该 Chrome 中手动打开：${distributionUrl}`
+      });
+    }
+    return res.json({
+      ok: true,
+      status: 'ready',
+      port,
+      url: distributionUrl,
+      openStatus: 'opened',
+      message: launchResult.message || 'Chrome 已启动并就绪',
+      userMessage: '铺货 Chrome 已启动，并已打开铺货平台。登录后点击重新检查。'
+    });
+  } catch (err) {
+    return res.status(500).json({
+      ok: false,
+      status: 'chrome_launch_failed',
+      port,
+      message: err.message,
+      userMessage: `铺货 Chrome 启动失败（调试端口 ${port}）。请确认 Chrome 已安装后重试。`
+    });
   }
 });
 

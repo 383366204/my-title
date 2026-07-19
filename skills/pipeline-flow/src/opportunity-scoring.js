@@ -83,18 +83,23 @@ function getProductSales(product = {}) {
 function confidenceBonus(confidence) {
   if (confidence === 'high') return 10;
   if (confidence === 'medium') return 5;
-  if (confidence === 'trend') return -5;
+  if (confidence === 'trend') return 0;
   return 0;
 }
 
 function usageBonus(usage) {
   if (usage === 'title_core') return 8;
   if (usage === 'title_optional') return 3;
-  if (usage === 'trend_reference') return -8;
+  if (usage === 'trend_reference') return -3;
   return 0;
 }
 
 function keywordDecision(score, sycmScore) {
+  if (sycmScore && sycmScore.passed && sycmScore.mode === 'hot') {
+    if (score >= 55) return { decision: 'continue', nextAction: 'search_1688' };
+    if (score >= 45) return { decision: 'observe', nextAction: 'manual_review' };
+    return { decision: 'reject', nextAction: 'stop' };
+  }
   if (score >= 72 && (!sycmScore || sycmScore.passed !== false)) {
     return { decision: 'continue', nextAction: 'search_1688' };
   }
@@ -102,56 +107,105 @@ function keywordDecision(score, sycmScore) {
   return { decision: 'reject', nextAction: 'stop' };
 }
 
+function pushScoreTerm(list, key, label, value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric === 0) return;
+  list.push({
+    key,
+    label,
+    value: Math.round(numeric * 10) / 10
+  });
+}
+
 /**
  * Score a keyword opportunity after local mining and optional SYCM verification.
  * @param {object} row Keyword row.
- * @returns {{score:number,decision:string,nextAction:string,reasons:string[],riskFlags:string[]}}
+ * @returns {{score:number,decision:string,nextAction:string,reasons:string[],riskFlags:string[],breakdown:object}}
  */
 function scoreKeywordOpportunity(row = {}) {
   const keyword = String(row.keyword || '').trim();
   const sycmScore = row.sycmScore || {};
   const reasons = [];
   const riskFlags = [];
+  const positive = [];
+  const negative = [];
   let score = 0;
 
   const localScore = clamp(row.localScore || row.score || 0);
-  score += localScore * 0.35;
+  const localContribution = localScore * 0.35;
+  score += localContribution;
+  pushScoreTerm(positive, 'local_score', '本地挖词质量', localContribution);
   if (localScore >= 75) reasons.push('local_high_intent');
   else if (localScore < 55) riskFlags.push('local_weak');
 
   if (sycmScore && Object.keys(sycmScore).length) {
     const marketScore = clamp(sycmScore.score || 0);
-    score += marketScore * 0.45;
-    score += confidenceBonus(sycmScore.confidence || row.confidence);
-    score += usageBonus(sycmScore.usage || row.usage);
+    const marketContribution = marketScore * 0.45;
+    const confidenceContribution = confidenceBonus(sycmScore.confidence || row.confidence);
+    const usageContribution = usageBonus(sycmScore.usage || row.usage);
+    score += marketContribution;
+    score += confidenceContribution;
+    score += usageContribution;
+    pushScoreTerm(positive, 'sycm_score', '生意参谋指标', marketContribution);
+    pushScoreTerm(
+      confidenceContribution >= 0 ? positive : negative,
+      'confidence',
+      '数据置信度',
+      confidenceContribution
+    );
+    pushScoreTerm(
+      usageContribution >= 0 ? positive : negative,
+      'usage',
+      '标题用途',
+      usageContribution
+    );
     if (sycmScore.passed) reasons.push(`sycm_${sycmScore.mode || row.verifyMode || 'passed'}`);
     else riskFlags.push('sycm_not_passed');
   } else {
     score += 12;
+    pushScoreTerm(positive, 'sycm_missing_baseline', '缺少生意参谋时的保守基础分', 12);
     riskFlags.push('sycm_missing');
   }
 
-  if (keyword.length >= 3 && keyword.length <= 12) score += 8;
-  else riskFlags.push('keyword_length_edge');
+  if (keyword.length >= 3 && keyword.length <= 12) {
+    score += 8;
+    pushScoreTerm(positive, 'keyword_length', '关键词长度适中', 8);
+  } else {
+    riskFlags.push('keyword_length_edge');
+  }
   if (row.fallbackUsed) {
-    score -= row.verifyMode === 'hot' ? 12 : 5;
+    const fallbackPenalty = row.verifyMode === 'hot' ? -5 : -5;
+    score += fallbackPenalty;
+    pushScoreTerm(negative, 'fallback_penalty', row.verifyMode === 'hot' ? '热搜降级惩罚' : '降级查询惩罚', fallbackPenalty);
     riskFlags.push(`fallback_${row.verifyMode || 'used'}`);
   }
 
   const banned = checkBannedWords(keyword);
   if (!banned.valid) {
     score = 0;
+    pushScoreTerm(negative, 'banned_keyword', '命中违禁词，分数归零', -100);
     riskFlags.push('banned_keyword');
   }
 
   const finalScore = clamp(Math.round(score));
   const action = keywordDecision(finalScore, sycmScore);
+  const continueThreshold = sycmScore && sycmScore.passed && sycmScore.mode === 'hot' ? 55 : 72;
+  const threshold = action.decision === 'continue' ? continueThreshold : action.decision === 'observe' ? 45 : continueThreshold;
   return {
     score: finalScore,
     decision: action.decision,
     nextAction: action.nextAction,
     reasons,
-    riskFlags
+    riskFlags,
+    breakdown: {
+      formula: 'localScore*0.35 + sycmScore*0.45 + confidenceBonus + usageBonus + keywordLengthBonus - fallbackPenalty',
+      localScore,
+      sycmScore: clamp(sycmScore.score || 0),
+      positive,
+      negative,
+      threshold,
+      gapToContinue: Math.max(0, continueThreshold - finalScore)
+    }
   };
 }
 

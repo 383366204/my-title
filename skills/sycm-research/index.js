@@ -5,6 +5,8 @@ module.exports = {
   extractSycmData: sycmCdp.extractSycmData,
   isChromeDevToolsAvailable: sycmBrowser.isChromeDevToolsAvailable,
   autoLaunchChrome: sycmBrowser.autoLaunchChrome,
+  openChromeUrl: sycmBrowser.openChromeUrl,
+  SYCM_SELECTORS: sycmBrowser.SYCM_SELECTORS,
   DEFAULT_FILTER_CONDITIONS: sycmCdp.DEFAULT_FILTER_CONDITIONS,
   VALID_COMPARE_TYPES: sycmCdp.VALID_COMPARE_TYPES,
   VALID_PERIODS: sycmCdp.VALID_PERIODS,

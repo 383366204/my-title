@@ -171,6 +171,74 @@ describe('pipeline runtime runner', () => {
     assert.ok(readRuntimeEvents({ dataDir, runId: 'runtime_run' }).some(event => event.event === 'progress'));
   });
 
+  it('default mine step writes visible mining stage progress events', async () => {
+    const dataDir = tempDataDir();
+    const result = await runPipelineRuntime({
+      dataDir,
+      mode: 'daily',
+      params: { mine: 5 },
+      steps: ['mine']
+    });
+
+    const events = readRuntimeEvents({ dataDir, runId: result.runId })
+      .filter(event => event.event === 'progress' && event.step === 'mine');
+    assert.ok(events.some(event => event.message === '读取种子池'));
+    assert.ok(events.some(event => event.message.includes('扩展候选词')));
+    assert.ok(events.some(event => event.message.includes('排序筛选')));
+  });
+
+  it('runs exact keyword mode with canvas-aligned production steps', async () => {
+    const dataDir = tempDataDir();
+    const calls = [];
+    const result = await runPipelineRuntime({
+      dataDir,
+      mode: 'keyword',
+      params: { keyword: '纯银项链', export: 3 },
+      stepFns: {
+        start: async ({ reportProgress, params }) => {
+          calls.push(`start:${params.keyword}`);
+          reportProgress({ current: 1, total: 1, message: '准备精确关键词' });
+          return { status: 'mined' };
+        },
+        verify: async ({ reportProgress }) => {
+          calls.push('verify');
+          reportProgress({ current: 1, total: 1, message: '验真完成' });
+          return { status: 'verified' };
+        },
+        select: async ({ reportProgress }) => {
+          calls.push('select');
+          reportProgress({ current: 1, total: 1, message: '选品完成' });
+          return { status: 'products_selected' };
+        },
+        generate: async ({ reportProgress }) => {
+          calls.push('generate');
+          reportProgress({ current: 1, total: 1, message: '生成完成' });
+          return { status: 'generated' };
+        },
+        export: async ({ reportProgress, params }) => {
+          calls.push(`export:${params.export}`);
+          reportProgress({ current: 1, total: 1, message: '导出完成' });
+          return { status: 'workflow_complete' };
+        },
+        review: async () => {
+          calls.push('review');
+          return { status: 'needs_review' };
+        }
+      }
+    });
+
+    assert.deepEqual(calls, ['start:纯银项链', 'verify', 'select', 'generate', 'export:3']);
+    assert.equal(result.runtimeStatus, 'completed');
+    const runtime = readRuntimeState({ dataDir, runId: result.runId });
+    assert.equal(runtime.mode, 'keyword');
+    assert.deepEqual(runtime.steps, ['start', 'verify', 'select', 'generate', 'export']);
+    assert.equal(runtime.progress.start.status, 'completed');
+    assert.equal(runtime.progress.verify.status, 'completed');
+    assert.equal(runtime.progress.select.status, 'completed');
+    assert.equal(runtime.progress.generate.status, 'completed');
+    assert.equal(runtime.progress.export.status, 'completed');
+  });
+
   it('keeps progress percent safe for unusual totals', async () => {
     const dataDir = tempDataDir();
     const result = await runPipelineRuntime({

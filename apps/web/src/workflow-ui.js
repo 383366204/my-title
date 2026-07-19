@@ -1,14 +1,68 @@
 export const BUSINESS_FUNNEL = [
   { id: 'candidate', label: '候选词' },
   { id: 'verified', label: '大盘验真' },
-  { id: 'generated', label: '标题货源' },
+  { id: 'selected', label: '货源选品' },
+  { id: 'generated', label: '标题生成' },
   { id: 'pending_review', label: '待确认铺货' },
   { id: 'submitted', label: '已提交' }
 ];
 
+const PIPELINE_FIRST_NAV_ITEMS = [
+  { id: 'workflow', label: '选品流水线' }
+];
+
+const LEGACY_TARGET_NODE = {
+  dashboard: 'review',
+  mine: 'mine',
+  title: 'generate'
+};
+
+const STEP_NODE = {
+  start: 'start',
+  mine: 'mine',
+  keywordReview: 'keywordReview',
+  verify: 'verify',
+  select: 'select',
+  generate: 'generate',
+  export: 'export',
+  review: 'review',
+  submit: 'review'
+};
+
+export function getPipelineFirstNavItems() {
+  return PIPELINE_FIRST_NAV_ITEMS.map((item) => ({ ...item }));
+}
+
+export function getWorkflowNodeIdForLegacyTarget(targetTab) {
+  return LEGACY_TARGET_NODE[String(targetTab || '')] || '';
+}
+
+export function getPipelineFirstActionTarget(action = {}) {
+  const stepNode = STEP_NODE[String(action.step || '')] || '';
+  const legacyNode = getWorkflowNodeIdForLegacyTarget(action.targetTab);
+  const nodeId = stepNode || legacyNode;
+  if (nodeId) return { type: 'select-node', nodeId };
+  return { type: 'workspace', nodeId: '' };
+}
+
+export function getWorkflowNodePanelKind(nodeId) {
+  const normalized = String(nodeId || '');
+  if (normalized === 'start') return 'start-config';
+  if (normalized === 'mine') return 'keyword-mining';
+  if (normalized === 'keywordReview') return 'keyword-review';
+  if (normalized === 'verify') return 'sycm-verify';
+  if (normalized === 'select') return 'product-select';
+  if (normalized === 'generate') return 'title-generate';
+  if (normalized === 'export') return 'distribution-export';
+  if (normalized === 'review') return 'distribution-export';
+  if (normalized === 'end') return 'completion';
+  return 'artifact';
+}
+
 export function mapPipelineStageToFunnel(stage) {
   const normalized = String(stage || '').toLowerCase();
   if (normalized === 'verified') return 'verified';
+  if (normalized === 'selected') return 'selected';
   if (normalized === 'generated') return 'generated';
   if (normalized === 'review' || normalized === 'ready') return 'pending_review';
   if (normalized === 'submitted') return 'submitted';
@@ -21,8 +75,9 @@ export function getWorkflowAction(run = {}) {
   if (stage === 'candidate') {
     return { label: needsAction ? '去挖词确认' : '继续挖词', targetTab: 'mine', tone: needsAction ? 'warn' : 'default' };
   }
-  if (stage === 'verified') return { label: '生成标题货源', targetTab: 'title', tone: 'default' };
-  if (stage === 'generated') return { label: '查看标题货源', targetTab: 'title', tone: needsAction ? 'warn' : 'default' };
+  if (stage === 'verified') return { label: '执行货源选品', targetTab: 'workflow', step: 'select', tone: 'default' };
+  if (stage === 'selected') return { label: '生成标题', targetTab: 'title', step: 'generate', tone: 'default' };
+  if (stage === 'generated') return { label: '查看标题结果', targetTab: 'title', tone: needsAction ? 'warn' : 'default' };
   if (stage === 'pending_review') return { label: '处理待复核', targetTab: 'dashboard', tone: needsAction ? 'warn' : 'default' };
   return { label: '查看已提交', targetTab: 'dashboard', tone: 'default' };
 }
@@ -39,6 +94,7 @@ export function getPipelineSummaryVisualState(summary = null) {
     'processing',
     'mined',
     'verified',
+    'products_selected',
     'generated',
     'needs_review',
     'awaiting_user_confirmation'
@@ -112,6 +168,18 @@ export function getCanvasNodeTone(state) {
 export function getWorkflowNodeAction(nodeId, state) {
   const normalizedNodeId = String(nodeId || '').toLowerCase();
   const normalizedState = String(state || '').toLowerCase();
+  if (normalizedNodeId === 'keywordreview' && ['needs_review', 'waiting_confirmation', 'awaiting_keyword_review', 'blocked'].includes(normalizedState)) {
+    return { label: '输入/筛词', action: 'keyword-review', tone: 'warn' };
+  }
+  if (normalizedNodeId === 'select' && ['awaiting_product_review', 'needs_review', 'waiting_confirmation'].includes(normalizedState)) {
+    return { label: '人工选品', action: 'product-review', tone: 'warn' };
+  }
+  if (normalizedNodeId === 'export' && ['needs_review'].includes(normalizedState)) {
+    return { label: '处理铺货复核', action: 'open-review', tone: 'warn' };
+  }
+  if (normalizedNodeId === 'export' && ['waiting_confirmation', 'awaiting_user_confirmation', 'ready', 'ready_to_distribute', 'completed'].includes(normalizedState)) {
+    return { label: '确认铺货', action: 'confirm-distribution', tone: 'warn' };
+  }
   if (normalizedNodeId === 'review' && (normalizedState === 'needs_review' || normalizedState === 'waiting_confirmation')) {
     return { label: '处理复核', action: 'review', tone: 'warn' };
   }
@@ -195,8 +263,19 @@ export function getWorkflowBlockerView(state = {}) {
 export function getWorkflowBlockerActions(nodeId, state = {}) {
   const status = String(state.status || '').toLowerCase();
   const blocker = String(state.blocker || '').toLowerCase();
+  const error = String(state.error || '').toLowerCase();
+  const actionHint = String(state.actionHint || '').toLowerCase();
+  const platformStatus = String(state.platformStatus || state.manualAction?.status || '').toLowerCase();
   const recommended = state.nextRecommendedAction || null;
   const actions = [];
+  const sycmChromeBlocked = nodeId === 'verify' && (
+    blocker.includes('browser_cdp_unavailable') ||
+    blocker.includes('cdp_unavailable') ||
+    platformStatus.includes('cdp_unavailable') ||
+    error.includes('127.0.0.1:9222') ||
+    error.includes('econnrefused') ||
+    actionHint.includes('chrome cdp')
+  );
 
   if (recommended && recommended.action) {
     actions.push({
@@ -206,11 +285,24 @@ export function getWorkflowBlockerActions(nodeId, state = {}) {
     });
   }
 
-  if (nodeId === 'verify' && blocker === 'verified_empty') {
+  if (sycmChromeBlocked) {
+    actions.push({
+      action: 'start-sycm-chrome',
+      label: '启动 Chrome',
+      description: '打开带调试端口的 Chrome，登录生意参谋后可重新检测或重跑验真。'
+    });
     actions.push({
       action: 'retry-node',
       label: '重跑验真',
-      description: '补充候选词或调整参数后，从生意参谋校验节点重新执行。'
+      description: 'Chrome 就绪并完成登录后，从生意参谋校验节点重新执行。'
+    });
+  } else if (nodeId === 'verify' && (blocker === 'verified_empty' || blocker === 'no_generation_eligible_keywords')) {
+    actions.push({
+      action: 'retry-node',
+      label: '重跑验真',
+      description: blocker === 'no_generation_eligible_keywords'
+        ? '调整候选词或人工放行后，从生意参谋校验节点重新执行。'
+        : '补充候选词或调整参数后，从生意参谋校验节点重新执行。'
     });
   } else if (['waiting_manual', 'paused', 'blocked'].includes(status)) {
     actions.push({
@@ -238,6 +330,9 @@ export function getMiningRecoveryHint(run = null) {
   if (run.status === 'verified_empty') {
     return '当前流程验真无结果。补充候选词后，回到选品流水线重跑“生意参谋校验”。';
   }
+  if (run.status === 'verified_no_generation_eligible') {
+    return '当前流程有验真词，但机会分都未通过。请补充更好的候选词，或人工放行后再继续生成标题。';
+  }
   if (run.status === 'manual_action_required' || run.status === 'verified_partial_manual_required') {
     return '当前流程需要处理生意参谋状态。处理完成后，回到选品流水线继续或重跑验真。';
   }
@@ -245,7 +340,7 @@ export function getMiningRecoveryHint(run = null) {
 }
 
 export function getMiningRecoveryAction(run = null, addedCandidateCount = 0) {
-  if (!run || run.status !== 'verified_empty') {
+  if (!run || (run.status !== 'verified_empty' && run.status !== 'verified_no_generation_eligible')) {
     return { visible: false, canRetryVerify: false, label: '', message: '' };
   }
   const added = Number.isFinite(Number(addedCandidateCount)) ? Math.max(0, Number(addedCandidateCount)) : 0;
@@ -269,6 +364,8 @@ export function getWorkflowNodeViewModel(nodeId, state = {}) {
   const status = state.status || state.state || 'idle';
   const progress = state.progress || null;
   const blocker = getWorkflowBlockerView(state);
+  const successLabel = getWorkflowNodeSuccessLabel(nodeId, state);
+  const resultLocation = getWorkflowNodeResultLocation(nodeId, state);
   return {
     nodeId,
     status,
@@ -284,7 +381,115 @@ export function getWorkflowNodeViewModel(nodeId, state = {}) {
     blockerMessage: blocker?.message || '',
     hasBlocker: Boolean(blocker),
     durationMs: Number.isFinite(Number(state.durationMs)) ? Number(state.durationMs) : null,
-    outputSummary: state.outputSummary || ''
+    outputSummary: state.outputSummary || successLabel || '',
+    successLabel,
+    resultLocation
+  };
+}
+
+export function getWorkflowNodeSuccessLabel(nodeId, state = {}) {
+  const output = state.output && typeof state.output === 'object' ? state.output : {};
+  const normalized = String(nodeId || '');
+  if (normalized === 'mine') {
+    const count = Number(output.count ?? state.count ?? 0);
+    return count > 0 ? `成功 ${count} 个候选词` : '';
+  }
+  if (normalized === 'keywordReview') {
+    const approved = Number(output.approved ?? state.approved ?? 0);
+    const rejected = Number(output.rejected ?? state.rejected ?? 0);
+    const pending = Number(output.pending ?? state.pending ?? 0);
+    if (approved > 0 || rejected > 0) return `通过 ${approved} 个，筛除 ${rejected} 个`;
+    if (pending > 0) return `待筛选 ${pending} 个候选词`;
+    return '';
+  }
+  if (normalized === 'verify') {
+    const verified = Number(output.verified ?? output.count ?? state.verified ?? 0);
+    const rejected = Number(output.rejected ?? state.rejected ?? 0);
+    const generationEligible = Number(output.generationEligible ?? verified);
+    const opportunityReview = Number(output.opportunityReview ?? Math.max(0, verified - generationEligible));
+    if (verified > 0 || rejected > 0) {
+      return `验真通过 ${verified} 个，可生成 ${generationEligible} 个，需复核/拒绝 ${opportunityReview} 个，验真拒绝 ${rejected} 个`;
+    }
+    return '';
+  }
+  if (normalized === 'generate') {
+    const count = Number(output.count ?? state.count ?? 0);
+    const titleCount = Number(output.titleCount ?? count);
+    const sourceCount = Number(output.sourceCount ?? count);
+    return count > 0 ? `${count} 条标题记录（${titleCount} 个标题，关联 ${sourceCount} 个已选货源）` : '';
+  }
+  if (normalized === 'select') {
+    const count = Number(output.productCount ?? output.count ?? state.count ?? 0);
+    return count > 0 ? `选中 ${count} 条货源` : '';
+  }
+  if (normalized === 'export') {
+    const count = Number(output.count ?? state.count ?? 0);
+    return count > 0 ? `成功 ${count} 条铺货清单` : '';
+  }
+  return '';
+}
+
+export function getWorkflowNodeResultLocation(nodeId, state = {}) {
+  const output = state.output && typeof state.output === 'object' ? state.output : {};
+  const normalized = String(nodeId || '');
+  if (normalized === 'mine') return output.file || '';
+  if (normalized === 'keywordReview') return output.file || '';
+  if (normalized === 'verify') return output.file || '';
+  if (normalized === 'select') return output.file || '';
+  if (normalized === 'generate') return output.file || '';
+  if (normalized === 'export') {
+    const locations = [
+      output.batchFile ? `铺货清单：${output.batchFile}` : '',
+      output.reviewFile ? `复核报告：${output.reviewFile}` : ''
+    ].filter(Boolean);
+    return locations.join('\n') || output.file || '';
+  }
+  if (normalized === 'review') return output.reviewFile || '';
+  return output.file || '';
+}
+
+export function getWorkflowResultSummaryView(nodeId, state = {}) {
+  const normalized = String(nodeId || '');
+  const titles = {
+    mine: '选词挖掘结果',
+    keywordReview: '人工筛词结果',
+    verify: '生意参谋校验结果',
+    select: '货源选品结果',
+    generate: '标题生成结果',
+    export: '铺货清单与复核结果',
+    review: '铺货清单与复核结果',
+    end: '流程完成结果'
+  };
+  const hints = {
+    mine: '候选词在下方结果列表中预览，完整内容保存在 candidates.jsonl。',
+    keywordReview: '人工确认后的关键词会保存到 reviewed-candidates.jsonl，只有通过项会进入生意参谋校验。',
+    verify: '验真通过词在下方结果列表中预览，完整内容保存在 verified-keywords.jsonl。',
+    select: '已选货源会按商品信息和机会分展示，完整内容保存在 selected-products.jsonl。',
+    generate: '每条标题记录会关联已选货源；完整内容保存在 generated-products.jsonl。',
+    export: '自动导出的清单和被拦截的复核项会合并在下方操作台。',
+    review: '自动导出的清单和被拦截的复核项会合并在下方操作台。',
+    end: '流程完成后可从各节点查看对应产物。'
+  };
+  const actionLabels = {
+    mine: '查看候选词',
+    keywordReview: '查看筛词结果',
+    verify: '查看验真词',
+    select: '查看已选货源',
+    generate: '查看标题结果',
+    export: '查看铺货复核',
+    review: '查看铺货复核',
+    end: '查看完成结果'
+  };
+  const countLabel = getWorkflowNodeSuccessLabel(normalized, state);
+  const locationLabel = getWorkflowNodeResultLocation(normalized, state);
+  return {
+    title: titles[normalized] || '节点结果',
+    statusLabel: labelWorkflowNodeStatus(state.status || state.state || 'idle'),
+    countLabel,
+    locationLabel,
+    hint: hints[normalized] || '节点结果会在下方展示，完整内容保存在对应产物文件。',
+    primaryActionLabel: actionLabels[normalized] || '查看结果',
+    empty: !countLabel && !locationLabel
   };
 }
 
@@ -292,6 +497,9 @@ export function labelWorkflowBlockerReason(blocker) {
   const normalized = String(blocker || '').toLowerCase();
   const labels = {
     verified_empty: '验真无结果',
+    keyword_review_required: '需要人工筛词',
+    no_keyword_review_approved: '没有通过筛词的关键词',
+    no_generation_eligible_keywords: '没有可生成标题的词',
     sycm_manual_action_required: '生意参谋需要人工处理',
     sycm_partial_manual_required: '生意参谋部分阻塞',
     sycm_login_required: '生意参谋需要登录',
@@ -329,7 +537,9 @@ export function getWorkflowNodeDetailRows(node = {}) {
   if (data.keyword) rows.push({ label: '关键词', value: data.keyword });
   if (data.count) rows.push({ label: '数量', value: `${data.count}` });
   if (data.maxLength) rows.push({ label: '标题长度', value: `${data.maxLength}` });
+  if (view.successLabel) rows.push({ label: '成功数量', value: view.successLabel });
   if (view.outputSummary) rows.push({ label: '输出摘要', value: view.outputSummary });
+  if (view.resultLocation) rows.push({ label: '产物位置', value: view.resultLocation });
   if (data.error) rows.push({ label: '错误', value: data.error });
   if (data.blocker && !data.error) rows.push({ label: '阻塞原因', value: labelWorkflowBlockerReason(data.blocker) });
   if (inferredVerifiedEmpty) rows.push({ label: '阻塞原因', value: '验真无结果' });
@@ -349,7 +559,7 @@ export function getWorkflowNodeDetailRows(node = {}) {
 export function getWorkflowRuntimeActions({ runStatus = '', nodeId = '', state = {} } = {}) {
   const normalizedRunStatus = String(runStatus || '').toLowerCase();
   const normalizedNodeStatus = String(state.status || state.state || '').toLowerCase();
-  const activeRunStatuses = new Set(['pending', 'running', 'created', 'mined', 'verified', 'generated', 'resuming', 'retrying']);
+  const activeRunStatuses = new Set(['pending', 'running', 'created', 'mined', 'awaiting_keyword_review', 'keywords_reviewed', 'verified', 'generated', 'resuming', 'retrying']);
   const activeNodeStatuses = new Set(['running', 'resuming', 'retrying']);
   if (!nodeId || !activeRunStatuses.has(normalizedRunStatus) || !activeNodeStatuses.has(normalizedNodeStatus)) {
     return [];
@@ -369,10 +579,14 @@ export function getWorkflowOperationMessage(action, result, error = '') {
         ? '继续请求失败'
         : action === 'retry-node'
           ? '重试请求失败'
-          : action === 'open-review'
-            ? '复核报告打开失败'
-            : action === 'confirm-distribution'
-              ? '确认铺货失败'
+        : action === 'open-review'
+          ? '复核报告打开失败'
+        : action === 'confirm-distribution'
+            ? '确认铺货失败'
+            : action === 'product-review'
+              ? '人工选品失败'
+            : action === 'start-sycm-chrome'
+              ? '启动 Chrome 失败'
           : '操作失败';
     return `${prefix}: ${error || '未知错误'}`;
   }
@@ -380,12 +594,21 @@ export function getWorkflowOperationMessage(action, result, error = '') {
   if (action === 'resume') return '已请求继续，流程会从当前节点恢复。';
   if (action === 'retry-node') return '已请求重试，当前节点及下游步骤会重新执行。';
   if (action === 'open-review') return '复核报告已在节点产物中展示。';
-  if (action === 'confirm-distribution') return '请先人工确认铺货清单，确认后再执行提交动作。';
+  if (action === 'confirm-distribution') return '已打开铺货复核，请在清单预览中确认商品后开始自动铺货。';
+  if (action === 'keyword-review') return '已打开人工筛词，请保留或筛除关键词后确认。';
+  if (action === 'product-review') return '已打开人工选品，请勾选 1688 货源或手动添加商品后确认。';
+  if (action === 'start-sycm-chrome') return result?.userMessage || 'Chrome 已启动。请登录生意参谋后重跑验真。';
   return '操作已提交。';
 }
 
 export function buildWorkflowOperationRequest(runId, action, nodeId = '') {
   const encodedRunId = encodeURIComponent(String(runId || ''));
+  if (action === 'start-sycm-chrome') {
+    return {
+      endpoint: '/api/workflows/sycm/chrome/start',
+      body: { runId, nodeId }
+    };
+  }
   if (action === 'retry-node') {
     return {
       endpoint: `/api/workflows/runs/${encodedRunId}/retry-node`,
@@ -398,10 +621,55 @@ export function buildWorkflowOperationRequest(runId, action, nodeId = '') {
   };
 }
 
+export function buildWorkflowDeleteRunRequest(runId) {
+  const encodedRunId = encodeURIComponent(String(runId || ''));
+  return {
+    endpoint: `/api/workflows/runs/${encodedRunId}`,
+    options: {
+      method: 'DELETE',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ confirm: true })
+    }
+  };
+}
+
+export function getWorkflowTemplateView(template = {}) {
+  const mode = String(template.mode || template.workflow?.mode || '').toLowerCase();
+  const id = String(template.id || '').toLowerCase();
+  const isKeyword = mode === 'keyword' || id === 'exact-keyword-v1';
+  const isManual = mode === 'manual' || id === 'manual-selection-v1';
+  const defaults = isManual
+    ? {
+        entryLabel: '入口：手动关键词',
+        scenarioLabel: '适合：精确控制词和商品',
+        flowSummary: '流程：人工选词 → 人工选品 → AI生成标题 → URL$$标题$$类目',
+        modeHint: '先输入关键词并筛选，再勾选 1688 货源或手动添加商品。'
+      }
+    : isKeyword
+    ? {
+        entryLabel: '入口：手动关键词',
+        scenarioLabel: '适合：验证一个明确目标词',
+        flowSummary: '流程：输入关键词 → 跳过挖词 → 生意参谋校验 → 货源选品 → 标题生成 → 导出复核',
+        modeHint: '使用你输入的关键词，跳过选词挖掘，直接进入生意参谋校验。'
+      }
+    : {
+        entryLabel: '入口：种子池',
+        scenarioLabel: '适合：每天自动发现新机会',
+        flowSummary: '流程：选词挖掘 → 人工筛词 → 生意参谋校验 → 货源选品 → 标题生成 → 导出复核',
+        modeHint: '从种子池自动扩展候选词，会先执行选词挖掘。'
+      };
+  return {
+    entryLabel: template.entryLabel || defaults.entryLabel,
+    scenarioLabel: template.scenarioLabel || defaults.scenarioLabel,
+    flowSummary: template.flowSummary || defaults.flowSummary,
+    modeHint: template.modeHint || defaults.modeHint
+  };
+}
+
 export function getWorkflowRunActiveNodeId(run = {}) {
   const priority = ['blocked', 'failed', 'retryable', 'waiting_manual', 'paused', 'needs_review', 'waiting_confirmation', 'running', 'resuming', 'retrying'];
   const nodeStates = run.nodeStates && typeof run.nodeStates === 'object'
-    ? Object.entries(run.nodeStates).map(([id, state]) => ({ id, state: state || {} }))
+    ? Object.entries(run.nodeStates).map(([id, state]) => ({ id: id === 'review' ? 'export' : id, state: state || {} }))
     : Array.isArray(run.workflow?.nodes)
       ? run.workflow.nodes.map((node) => ({ id: node.id, state: node.data || {} }))
       : [];
@@ -434,9 +702,11 @@ function labelUnifiedRunStage(run = {}) {
   const labels = {
     seed: '种子启动',
     mined: '选词挖掘',
+    keyword_review: '人工筛词',
     verified: '大盘验真',
-    generated: '标题货源',
-    review: '人工复核',
+    selected: '货源选品',
+    generated: '标题生成',
+    review: '铺货复核',
     ready: '待铺货',
     submitted: '已提交'
   };
@@ -447,6 +717,7 @@ function labelUnifiedRunStatus(status) {
   const normalized = String(status || '').toLowerCase();
   const labels = {
     verified_empty: '验真无结果',
+    verified_no_generation_eligible: '无可生成词',
     ready_to_distribute: '待确认铺货',
     manual_action_required: '需要人工处理',
     verified_partial_manual_required: '部分需要人工处理',
@@ -527,6 +798,53 @@ function compactMetric(label, value) {
   return `${label} ${value}`;
 }
 
+const OPPORTUNITY_DECISION_LABELS = {
+  continue: '可生成',
+  observe: '观察',
+  review: '人工复核',
+  reject: '停止'
+};
+
+const OPPORTUNITY_ACTION_LABELS = {
+  search_1688: '搜索货源',
+  manual_review: '人工复核',
+  stop: '停止'
+};
+
+const SCORE_REASON_LABELS = {
+  local_high_intent: '本地挖词意图强',
+  local_weak: '本地挖词质量偏弱',
+  sycm_blue: '严格蓝海通过',
+  sycm_blue_relaxed: '放宽蓝海通过',
+  sycm_hot: '只通过热搜降级',
+  sycm_passed: '生意参谋通过',
+  sycm_not_passed: '生意参谋指标未通过',
+  sycm_missing: '缺少生意参谋数据',
+  keyword_length_edge: '关键词长度不理想',
+  fallback_hot: '热搜降级',
+  fallback_blue_relaxed: '放宽蓝海降级',
+  fallback_used: '降级查询',
+  banned_keyword: '命中违禁词'
+};
+
+function labelOpportunityDecision(value) {
+  return OPPORTUNITY_DECISION_LABELS[String(value || '').trim()] || String(value || '');
+}
+
+function labelOpportunityAction(value) {
+  return OPPORTUNITY_ACTION_LABELS[String(value || '').trim()] || String(value || '');
+}
+
+function labelScoreReason(value) {
+  return SCORE_REASON_LABELS[String(value || '').trim()] || String(value || '');
+}
+
+function formatScoreTerm(term = {}) {
+  const value = Number(term.value);
+  const prefix = Number.isFinite(value) && value > 0 ? '+' : '';
+  return `${term.label || term.key || '评分项'} ${Number.isFinite(value) ? `${prefix}${value}` : ''}`.trim();
+}
+
 function businessRowTitle(row = {}) {
   return String(
     row.title
@@ -540,18 +858,36 @@ function businessRowTitle(row = {}) {
   ).trim() || '未命名结果';
 }
 
+function selectedKeyword(row = {}) {
+  return String(row.selectedKeyword || row.keyword || row.blueOceanWord || row.product?.蓝海词 || row['蓝海词'] || '').trim();
+}
+
 function businessRowMeta(row = {}, nodeId = '') {
   const parts = [];
   if (nodeId === 'verify') {
     const score = candidateScore(row);
     if (score !== null) parts.push(`评分 ${score}`);
+    if (row.keywordOpportunity?.score !== undefined) parts.push(`机会分 ${row.keywordOpportunity.score}`);
+    if (row.keywordOpportunity?.decision) parts.push(`决策 ${labelOpportunityDecision(row.keywordOpportunity.decision)}`);
     if (row.status) parts.push(String(row.status));
     if (row.source) parts.push(String(row.source));
+  } else if (nodeId === 'select') {
+    const keyword = selectedKeyword(row);
+    if (keyword) parts.push(`选词 ${keyword}`);
+    if (row.productOpportunity?.score !== undefined) parts.push(`货源分 ${row.productOpportunity.score}`);
+    if (row.productOpportunity?.decision) parts.push(`决策 ${labelOpportunityDecision(row.productOpportunity.decision)}`);
+    if (row.sourceTitle || row.productTitle || row.product?.['链接原标题']) {
+      parts.push(String(row.sourceTitle || row.productTitle || row.product?.['链接原标题']));
+    }
   } else if (nodeId === 'generate') {
-    if (row.keyword) parts.push(String(row.keyword));
-    if (row.productTitle || row['链接原标题']) parts.push(String(row.productTitle || row['链接原标题']));
+    const keyword = selectedKeyword(row);
+    if (keyword) parts.push(`选词 ${keyword}`);
+    if (row.productTitle || row['链接原标题'] || row.product?.['链接原标题']) {
+      parts.push(String(row.productTitle || row['链接原标题'] || row.product?.['链接原标题']));
+    }
   } else if (nodeId === 'export') {
-    if (row.keyword) parts.push(String(row.keyword));
+    const keyword = selectedKeyword(row);
+    if (keyword) parts.push(`选词 ${keyword}`);
     if (row.status) parts.push(String(row.status));
   }
   return parts.join(' · ');
@@ -563,30 +899,80 @@ function businessMetrics(row = {}, nodeId = '') {
       compactMetric('搜索人气', metricValue(row, ['searchPopularity', 'sycmData.searchPopularity', 'marketMetrics.searchPopularity'])),
       compactMetric('供需比', metricValue(row, ['demandSupplyRatio', 'sycmData.demandSupplyRatio', 'marketMetrics.demandSupplyRatio'])),
       compactMetric('点击率', metricValue(row, ['clickRate', 'sycmData.clickRate', 'marketMetrics.clickRate'])),
-      compactMetric('转化率', metricValue(row, ['conversionRate', 'sycmData.conversionRate', 'marketMetrics.conversionRate']))
+      compactMetric('转化率', metricValue(row, ['conversionRate', 'sycmData.conversionRate', 'marketMetrics.conversionRate'])),
+      compactMetric('下一步', labelOpportunityAction(row.keywordOpportunity?.nextAction)),
+      row.keywordOpportunity?.breakdown?.gapToContinue
+        ? compactMetric('距生成线还差', row.keywordOpportunity.breakdown.gapToContinue)
+        : ''
     ].filter(Boolean);
   }
-  if (nodeId === 'generate' || nodeId === 'export') {
+  if (nodeId === 'select' || nodeId === 'generate' || nodeId === 'export') {
+    const keyword = selectedKeyword(row);
     return [
-      compactMetric('价格', metricValue(row, ['price', '商品原价', 'minPrice'])),
-      compactMetric('销量', metricValue(row, ['sales', '30天销量', 'monthlySales'])),
-      compactMetric('好评率', metricValue(row, ['positiveRate', '好评率'])),
-      compactMetric('复购率', metricValue(row, ['repurchaseRate', '复购率']))
+      keyword ? compactMetric('选词', keyword) : '',
+      compactMetric('价格', metricValue(row, ['price', '商品原价', 'minPrice', 'product.商品原价', 'product.price'])),
+      compactMetric('销量', metricValue(row, ['sales', 'sales30days', '30天销量', 'monthlySales', 'product.30天销量', 'product.sales'])),
+      compactMetric('好评率', metricValue(row, ['positiveRate', '好评率', 'product.好评率'])),
+      compactMetric('复购率', metricValue(row, ['repurchaseRate', '复购率', 'product.复购率']))
     ].filter(Boolean);
   }
   return [];
 }
 
-function businessDescription(row = {}) {
+function businessDescription(row = {}, nodeId = '') {
+  if (nodeId === 'select' && row.productOpportunity) {
+    const opportunity = row.productOpportunity || {};
+    const reasons = Array.isArray(opportunity.reasons)
+      ? opportunity.reasons.map(labelScoreReason).join('，')
+      : '';
+    const risks = Array.isArray(opportunity.riskFlags)
+      ? opportunity.riskFlags.map(labelScoreReason).join('，')
+      : '';
+    const suggestion = opportunity.decision === 'continue'
+      ? '建议继续进入标题生成。'
+      : opportunity.decision === 'observe'
+        ? '建议人工观察货源稳定性后再放行。'
+        : '建议停止使用该货源。';
+    return [
+      reasons ? `依据：${reasons}` : '',
+      risks ? `风险：${risks}` : '',
+      suggestion
+    ].filter(Boolean).join('；');
+  }
+  if (row.keywordOpportunity) {
+    const breakdown = row.keywordOpportunity.breakdown || {};
+    const positive = Array.isArray(breakdown.positive) ? breakdown.positive.map(formatScoreTerm).join('，') : '';
+    const negative = Array.isArray(breakdown.negative) ? breakdown.negative.map(formatScoreTerm).join('，') : '';
+    const reasons = Array.isArray(row.keywordOpportunity.reasons)
+      ? row.keywordOpportunity.reasons.map(labelScoreReason).join('，')
+      : '';
+    const risks = Array.isArray(row.keywordOpportunity.riskFlags)
+      ? row.keywordOpportunity.riskFlags.map(labelScoreReason).join('，')
+      : '';
+    const suggestion = row.keywordOpportunity.decision === 'continue'
+      ? '建议继续进入标题与货源生成。'
+      : row.keywordOpportunity.decision === 'observe'
+        ? '建议加入观察池，或人工确认后再放行。'
+        : '建议停止生成，补充更具体的蓝海候选词。';
+    return [
+      positive ? `加分：${positive}` : '',
+      negative ? `扣分：${negative}` : '',
+      reasons ? `依据：${reasons}` : '',
+      risks ? `风险：${risks}` : '',
+      suggestion
+    ].filter(Boolean).join('；');
+  }
   return String(
     row.reason
     || row.选品理由
+    || row.product?.选品理由
     || row.gateReason
     || row.risk
     || row.riskReason
     || row.nextAction
     || row.productUrl
     || row['产品链接']
+    || row.product?.['产品链接']
     || ''
   ).trim();
 }
@@ -596,7 +982,7 @@ function mapBusinessRows(items = [], nodeId = '') {
     title: businessRowTitle(item),
     meta: businessRowMeta(item, nodeId),
     metrics: businessMetrics(item, nodeId),
-    description: businessDescription(item),
+    description: businessDescription(item, nodeId),
     raw: item
   }));
 }
@@ -607,7 +993,7 @@ function parseDistributionBatch(text = '') {
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line) => {
-      const parts = line.split(/\t|,/).map((part) => part.trim()).filter(Boolean);
+      const parts = line.split(/\$\$|\t|,/).map((part) => part.trim()).filter(Boolean);
       const url = parts.find((part) => /^https?:\/\//.test(part)) || '';
       const title = parts.find((part) => part && part !== url && !/^\d+(\.\d+)?$/.test(part)) || line;
       const price = parts.find((part) => /^\d+(\.\d+)?$/.test(part)) || '';
@@ -619,6 +1005,76 @@ function parseDistributionBatch(text = '') {
         raw: { line, url, price }
       };
     });
+}
+
+const REVIEW_SECTION_GROUP = {
+  'Recommended Submit': 'recommended',
+  'Manual Review Candidates': 'manual',
+  'Hard Rejected': 'rejected'
+};
+
+const REVIEW_FIELD = {
+  'Export Status': 'status',
+  'Review Reasons': 'reason',
+  URL: 'url',
+  Title: 'title',
+  Category: 'category',
+  'Category Confidence': 'categoryConfidence',
+  'Category Reason': 'categoryReason',
+  'Verify Mode': 'verifyMode',
+  Confidence: 'confidence',
+  Usage: 'usage',
+  'Keyword Opportunity': 'keywordOpportunity',
+  'Product Opportunity': 'productOpportunity',
+  'Product Risk Flags': 'riskFlags',
+  Decision: 'decision',
+  Risk: 'risk',
+  Fallback: 'fallback',
+  'SYCM Reason': 'sycmReason'
+};
+
+function pushReviewRow(rows, row) {
+  if (!row) return;
+  rows.push({
+    ...row,
+    title: row.title || row.heading || '未命名复核项',
+    reason: row.reason || '',
+    raw: { ...row }
+  });
+}
+
+function parseDistributionReview(text = '') {
+  const rows = [];
+  let group = '';
+  let current = null;
+
+  for (const rawLine of String(text || '').split(/\r?\n/)) {
+    const line = rawLine.trim();
+    const section = line.match(/^##\s+(.+)$/);
+    if (section) {
+      pushReviewRow(rows, current);
+      current = null;
+      group = REVIEW_SECTION_GROUP[section[1].trim()] || group;
+      continue;
+    }
+
+    const heading = line.match(/^###\s+\d+\.\s+(.+)$/);
+    if (heading) {
+      pushReviewRow(rows, current);
+      current = { group: group || 'manual', heading: heading[1].trim() };
+      continue;
+    }
+
+    const field = line.match(/^-\s+([^:]+):\s*(.*)$/);
+    if (field && current) {
+      const fieldName = field[1].trim();
+      const key = REVIEW_FIELD[fieldName] || fieldName.replace(/\s+/g, '_').toLowerCase();
+      current[key] = field[2].trim();
+    }
+  }
+
+  pushReviewRow(rows, current);
+  return rows;
 }
 
 export function getWorkflowArtifactView(artifact, nodeId = '') {
@@ -644,6 +1100,23 @@ export function getWorkflowArtifactView(artifact, nodeId = '') {
       text: ''
     };
   }
+  if (effectiveNodeId === 'keywordReview' && Array.isArray(items)) {
+    return {
+      kind: 'candidate-list',
+      title: '人工筛词结果',
+      emptyText: '暂无待筛选候选词',
+      rows: items.map((item) => ({
+        title: candidateTitle(item),
+        meta: [
+          candidateMeta(item),
+          item.reviewStatus === 'approved' ? '已通过' : item.reviewStatus === 'rejected' ? '已筛除' : '待确认'
+        ].filter(Boolean).join(' · '),
+        description: String(item.reviewReason || item.reason || item.nextAction || '').trim(),
+        raw: item
+      })),
+      text: ''
+    };
+  }
   if (effectiveNodeId === 'verify' && Array.isArray(items)) {
     return {
       kind: 'business-list',
@@ -653,11 +1126,20 @@ export function getWorkflowArtifactView(artifact, nodeId = '') {
       text: ''
     };
   }
+  if (effectiveNodeId === 'select' && Array.isArray(items)) {
+    return {
+      kind: 'business-list',
+      title: '货源选品结果',
+      emptyText: '暂无已选货源',
+      rows: mapBusinessRows(items, effectiveNodeId),
+      text: ''
+    };
+  }
   if (effectiveNodeId === 'generate' && Array.isArray(items)) {
     return {
       kind: 'business-list',
-      title: '标题货源',
-      emptyText: '暂无标题货源',
+      title: '标题与货源链接',
+      emptyText: '暂无标题与货源链接',
       rows: mapBusinessRows(items, effectiveNodeId),
       text: ''
     };
@@ -685,6 +1167,15 @@ export function getWorkflowArtifactView(artifact, nodeId = '') {
       text: ''
     };
   }
+  if (effectiveNodeId === 'review' && text.trim()) {
+    return {
+      kind: 'review-list',
+      title: '铺货复核',
+      emptyText: '暂无复核项',
+      rows: parseDistributionReview(text),
+      text: ''
+    };
+  }
   if (Array.isArray(items)) {
     return { kind: 'json-list', emptyText: '暂无数据项', rows: items, text: '' };
   }
@@ -705,11 +1196,17 @@ export function normalizeCandidateForTitle(candidate = {}) {
     gateStatus: candidate.gateStatus || (candidate.canDistribute ? 'verified' : 'candidate'),
     gateReason: candidate.gateReason || candidate.lastReason || '',
     canDistribute: Boolean(candidate.canDistribute),
+    marketScore: candidate.marketScore ?? sycmData.marketScore ?? null,
+    confidence: candidate.marketMetrics?.confidence || candidate.confidence || null,
+    scoreBreakdown: candidate.marketMetrics?.breakdown || candidate.scoreBreakdown || null,
     market: {
       searchPopularity: sycmData.searchPopularity ?? null,
       demandSupplyRatio: sycmData.demandSupplyRatio ?? null,
       clickRate: sycmData.clickRate ?? null,
-      conversionRate: sycmData.conversionRate ?? null
+      conversionRate: sycmData.conversionRate ?? sycmData.payConversionRate ?? null,
+      buyerCount: sycmData.buyerCount ?? null,
+      onlineProductCount: sycmData.onlineProductCount ?? null,
+      trend: sycmData.trend ?? null
     },
     raw: candidate
   };
@@ -719,6 +1216,7 @@ export function buildReviewProduct({ keyword, product = {}, candidate = {} }) {
   return {
     id: `${keyword || candidate.keyword || ''}:${product['产品链接'] || product.productUrl || product['铺货标题'] || Date.now()}`,
     keyword: keyword || candidate.keyword || '',
+    selectedKeyword: keyword || candidate.selectedKeyword || candidate.keyword || '',
     title: product['铺货标题'] || product.title || '',
     productTitle: product['链接原标题'] || product.productTitle || '',
     productUrl: product['产品链接'] || product.productUrl || '',
@@ -771,9 +1269,21 @@ export function getStartNodeParams(nodes = []) {
 }
 
 export function getWorkflowLaunchBlocker(mode, nodes = []) {
-  if (mode !== 'keyword') return null;
   const params = getStartNodeParams(nodes);
-  if (String(params.keyword || '').trim()) return null;
+  if (mode === 'manual') {
+    if (String(params.keywords || '').trim()) return null;
+    const message = '请至少输入一个关键词';
+    return {
+      status: 'blocked',
+      error: message,
+      logs: [{
+        timestamp: new Date().toISOString(),
+        level: 'error',
+        message: `[keywords_required] ${message}`
+      }]
+    };
+  }
+  if (mode !== 'keyword' || String(params.keyword || '').trim()) return null;
   const message = '关键词不能为空';
   return {
     status: 'blocked',

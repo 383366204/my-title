@@ -6,9 +6,13 @@ const {
   DEFAULT_FLOW_DIR,
   createRunId,
   flowMine,
+  flowReviewCandidates,
   flowVerify,
+  flowSelectProducts,
   flowGenerate,
   flowExport,
+  flowManualStart,
+  flowKeywordStart,
   flowKeyword
 } = require('../index');
 const {
@@ -21,20 +25,32 @@ const {
   appendRuntimeEvent
 } = require('./store');
 
-const DEFAULT_STEPS = ['mine', 'verify', 'generate', 'export', 'review'];
+const DEFAULT_STEPS = ['mine', 'keywordReview', 'verify', 'select', 'generate', 'export'];
+const KEYWORD_STEPS = ['start', 'verify', 'select', 'generate', 'export'];
+const MANUAL_STEPS = ['start', 'keywordReview', 'select', 'generate', 'export'];
 const STOP_STATUSES = new Set([
   'verified_empty',
+  'verified_no_generation_eligible',
+  'awaiting_keyword_review',
+  'awaiting_product_review',
+  'keyword_review_empty',
   'manual_action_required',
   'verified_partial_manual_required',
+  'select_failed',
   'generate_failed',
   'needs_review',
   'ready_to_distribute',
-  'awaiting_user_confirmation'
+  'awaiting_user_confirmation',
+  'workflow_complete'
 ]);
-const FAILED_PIPELINE_STATUSES = new Set(['generate_failed']);
+const FAILED_PIPELINE_STATUSES = new Set(['select_failed', 'generate_failed']);
 const BLOCKED_PIPELINE_STATUSES = new Set([
   'manual_action_required',
   'verified_partial_manual_required',
+  'awaiting_keyword_review',
+  'awaiting_product_review',
+  'keyword_review_empty',
+  'verified_no_generation_eligible',
   'verified_empty'
 ]);
 const REVIEW_PIPELINE_STATUSES = new Set([
@@ -106,24 +122,61 @@ function createReporter({ dataDir, getRunId, step }) {
   };
 }
 
-function createDefaultStepFns({ dataDir, runId, params }) {
+function createDefaultStepFns({ dataDir, runId, params, mode = 'daily' }) {
+  const keywordMode = mode === 'keyword';
+  const manualMode = mode === 'manual';
   const mineLimit = params.mine || params.limit || 50;
-  const verifyLimit = params.verify || 20;
-  const generateLimit = params.generate || 10;
+  const verifyLimit = keywordMode ? 1 : (params.verify || 20);
+  const selectLimit = keywordMode ? 1 : (params.select || params.generate || 10);
+  const generateLimit = keywordMode ? 1 : (params.generate || 10);
   const exportLimit = params.export || 20;
 
   return {
+    start: async ({ reportProgress }) => {
+      reportProgress({ current: 0, total: 1, message: '准备精确关键词' });
+      if (manualMode) return flowManualStart({ ...params, dataDir, runId });
+      return flowKeywordStart({ ...params, dataDir, runId, keyword: params.keyword });
+    },
     mine: async ({ reportProgress }) => {
       reportProgress({ current: 0, total: mineLimit, message: '开始挖词' });
-      return flowMine({ ...params, dataDir, runId, limit: mineLimit });
+      return flowMine({
+        ...params,
+        dataDir,
+        runId,
+        limit: mineLimit,
+        source: params.source || 'local',
+        rootMode: params.rootMode || 'auto',
+        rootLimit: params.rootLimit || 5,
+        rootCooldownDays: params.rootCooldownDays || 7,
+        excludeSeen: params.excludeSeen !== false,
+        recordSeen: params.recordSeen !== false,
+        onProgress: reportProgress
+      });
     },
     verify: async ({ reportProgress }) => {
       reportProgress({ current: 0, total: verifyLimit, message: '开始验真' });
-      return flowVerify({ ...params, dataDir, runId, limit: verifyLimit });
+      return flowVerify({ ...params, dataDir, runId, limit: verifyLimit, onProgress: reportProgress });
+    },
+    keywordReview: async ({ reportProgress }) => {
+      reportProgress({ current: 0, total: mineLimit, message: '等待人工筛词' });
+      return flowReviewCandidates({
+        ...params,
+        dataDir,
+        runId,
+        approveAll: mode === 'daily' && params.autoApproveKeywords !== false
+      });
+    },
+    select: async ({ reportProgress }) => {
+      reportProgress({ current: 0, total: selectLimit, message: '开始货源选品' });
+      const result = await flowSelectProducts({ ...params, dataDir, runId, limit: selectLimit, manualMode });
+      if (manualMode && result.selected?.length > 0) {
+        return { ...result, status: 'awaiting_product_review', blockers: ['product_review_required'], userMessage: '1688 货源已加载，请人工勾选或手动添加商品。' };
+      }
+      return result;
     },
     generate: async ({ reportProgress }) => {
-      reportProgress({ current: 0, total: generateLimit, message: '开始生成标题货源' });
-      return flowGenerate({ ...params, dataDir, runId, limit: generateLimit });
+      reportProgress({ current: 0, total: generateLimit, message: '开始标题生成' });
+      return flowGenerate({ ...params, dataDir, runId, limit: generateLimit, manualMode });
     },
     export: async ({ reportProgress }) => {
       reportProgress({ current: 0, total: exportLimit, message: '开始导出清单' });
@@ -187,10 +240,8 @@ async function runPipelineRuntime(options = {}) {
     : null;
   const params = options.params == null ? (existingRuntime?.params || {}) : options.params;
   const mode = options.mode || existingRuntime?.mode || 'daily';
-  const steps = mode === 'keyword' && !injectedStepFns
-    ? ['keyword']
-    : (options.steps || DEFAULT_STEPS);
-  const stepFns = injectedStepFns || createDefaultStepFns({ dataDir, runId, params });
+  const steps = options.steps || (mode === 'keyword' ? KEYWORD_STEPS : mode === 'manual' ? MANUAL_STEPS : DEFAULT_STEPS);
+  const stepFns = injectedStepFns || createDefaultStepFns({ dataDir, runId, params, mode });
   const startStep = options.retryStep || options.resumeFromStep || existingRuntime?.activeStep || steps[0];
   const startIndex = Math.max(0, steps.indexOf(startStep));
   const stepsToRun = steps.slice(startIndex);

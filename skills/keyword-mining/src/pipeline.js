@@ -1,13 +1,16 @@
 const fs = require('fs');
 const path = require('path');
-const { DEFAULT_DATA_DIR, listSeeds } = require('./seed-store');
+const { DEFAULT_DATA_DIR, listSeeds, normalizeKeyword } = require('./seed-store');
 const { expandSeeds } = require('./expand-keywords');
 const { scoreKeyword } = require('./score-keyword');
 const { precheckCandidates } = require('./sycm-precheck');
 const { generateAIKeywordCandidates } = require('./ai-mine-keywords');
 const { gateCandidate } = require('./candidate-gate');
+const { loadSeen, recordSeen } = require('./seen-store');
+const { selectShortRoots, recordRootQueries } = require('./root-keywords');
 
 const CANDIDATES_FILE = 'candidates.jsonl';
+const MINING_PROGRESS_TOTAL = 6;
 
 function ensureDir(dataDir) {
   fs.mkdirSync(dataDir, { recursive: true });
@@ -151,6 +154,17 @@ function buildStats({ seeds, expanded, scored, clustered, threshold, source, aiM
   };
 }
 
+function createProgressReporter(onProgress) {
+  return function reportProgress(event = {}) {
+    if (typeof onProgress !== 'function') return;
+    onProgress({
+      current: 0,
+      total: 0,
+      ...event
+    });
+  };
+}
+
 function directSeedCandidates(seeds) {
   return seeds
     .filter(seed => seed.type === 'direct')
@@ -193,17 +207,35 @@ function buildDirectKeywords(seeds, limit = 20) {
  * @param {boolean} [options.sycmPrecheck=false] Whether to run SYCM precheck.
  * @param {number} [options.minSearchPopularity=50] Min SYCM search popularity.
  * @param {boolean} [options.includeDirect=false] Whether direct seeds should also appear in candidates.
+ * @param {boolean} [options.excludeSeen=false] Whether recent output keywords should be skipped.
+ * @param {string[]} [options.excludeKeywords] Additional keywords to skip.
+ * @param {boolean} [options.recordSeen=false] Whether selected keywords should be recorded as seen.
+ * @param {number} [options.seenTtlDays=30] Recent seen keyword TTL.
  * @param {string} [options.mode=balanced] strict/balanced/explore threshold mode.
+ * @param {Function} [options.onProgress] Optional progress callback.
  * @returns {Promise<{ok:boolean,date:string,seedsUsed:number,directKeywords:Array<object>,candidates:Array<object>,stats:object,precheckStats?:object}>}
  */
-async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds = 20, maxPerSeed = 30, outputMaxPerSeed = 5, outputMaxPerCategory = 20, outputMaxPerPattern = 20, outputMaxPerProductCore = 3, persist = true, sycmPrecheck = false, minSearchPopularity = 50, includeDirect = false, mode = 'balanced', source = 'local', aiCandidates = 80, aiBatchSize = 20, llmClient = null } = {}) {
+async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds = 20, maxPerSeed = 30, outputMaxPerSeed = 5, outputMaxPerCategory = 20, outputMaxPerPattern = 20, outputMaxPerProductCore = 3, persist = true, sycmPrecheck = false, minSearchPopularity = 50, includeDirect = false, excludeSeen = false, excludeKeywords = [], recordSeen: shouldRecordSeen = false, seenTtlDays = 30, mode = 'balanced', source = 'local', aiCandidates = 80, aiBatchSize = 20, llmClient = null, onProgress = null, rootMode = 'auto', rootLimit = 5, rootCooldownDays = 7 } = {}) {
   const effectiveSource = normalizeSource(source);
   const seeds = listSeeds({ dataDir }).slice(0, maxSeeds);
   const expandableSeeds = seeds.filter(seed => seed.type !== 'direct');
   const date = new Date().toISOString().slice(0, 10);
+  const reportProgress = createProgressReporter(onProgress);
+  reportProgress({
+    stage: 'load-seeds',
+    current: 1,
+    total: MINING_PROGRESS_TOTAL,
+    message: '读取种子池'
+  });
   let aiMeta = null;
   let aiExpanded = [];
   if (effectiveSource === 'ai' || effectiveSource === 'hybrid') {
+    reportProgress({
+      stage: 'ai-expand',
+      current: 2,
+      total: MINING_PROGRESS_TOTAL,
+      message: 'AI 扩展候选词'
+    });
     try {
       const aiResult = await generateAIKeywordCandidates({
         seeds,
@@ -217,6 +249,12 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
         ...(aiResult.meta || {}),
         generated: aiExpanded.length
       };
+      reportProgress({
+        stage: 'ai-expand',
+        current: 2,
+        total: MINING_PROGRESS_TOTAL,
+        message: `AI 扩展候选词 ${aiExpanded.length} 个`
+      });
     } catch (error) {
       if (effectiveSource === 'ai') throw error;
       aiMeta = {
@@ -226,35 +264,62 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
         generated: 0,
         error: error.message
       };
+      reportProgress({
+        stage: 'ai-expand',
+        current: 2,
+        total: MINING_PROGRESS_TOTAL,
+        message: 'AI 扩展失败，改用本地规则'
+      });
     }
   }
   const localExpanded = effectiveSource === 'local' || effectiveSource === 'hybrid'
     ? expandSeeds(expandableSeeds, { maxPerSeed })
     : [];
+  if (effectiveSource === 'local' || effectiveSource === 'hybrid') {
+    reportProgress({
+      stage: 'expand',
+      current: 2,
+      total: MINING_PROGRESS_TOTAL,
+      message: `扩展候选词 ${localExpanded.length} 个`
+    });
+  }
 
   let sycmExpanded = [];
   if (effectiveSource === 'sycm_hot' || effectiveSource === 'sycm_blue') {
     const isBlue = effectiveSource === 'sycm_blue';
     const sycmMode = isBlue ? 'blue' : 'hot';
-    console.log(`🔌 开始生意参谋关联词挖掘模式: ${sycmMode}...`);
-    for (const seed of expandableSeeds) {
+    const roots = rootMode === 'seed'
+      ? expandableSeeds.map(seed => ({ root: seed.keyword, originalKeyword: seed.keyword, category: seed.category || '' }))
+      : selectShortRoots(expandableSeeds, { dataDir, limit: rootLimit, cooldownDays: rootCooldownDays });
+    const querySeeds = roots.length > 0 ? roots : expandableSeeds.slice(0, rootLimit);
+    console.log(`🔌 开始生意参谋关联词挖掘模式: ${sycmMode}，查询 ${querySeeds.length} 个词根...`);
+    for (let seedIndex = 0; seedIndex < querySeeds.length; seedIndex++) {
+      const seed = querySeeds[seedIndex];
+      const query = seed.root || seed.keyword;
       try {
-        console.log(`🔍 正在查询种子词 "${seed.keyword}" 的生意参谋关联词...`);
+        reportProgress({
+          stage: 'sycm-expand',
+          current: seedIndex,
+          total: expandableSeeds.length,
+          message: `查询生意参谋关联词：${query}`
+        });
+        console.log(`🔍 正在查询词根 "${query}" 的生意参谋关联词...`);
         const { extractSycmData } = require('../../sycm-research');
-        const sycmRes = await extractSycmData(seed.keyword, {
+        const sycmRes = await extractSycmData(query, {
           mode: sycmMode,
           maxPages: 2,
           port: 9222
         });
         const items = sycmRes.data || [];
-        console.log(`✓ 种子词 "${seed.keyword}" 成功获取到 ${items.length} 个关联词。`);
+        console.log(`✓ 词根 "${query}" 成功获取到 ${items.length} 个关联词。`);
 
-        const startIndex = (items.length > 0 && String(items[0].keyword).trim() === String(seed.keyword).trim()) ? 1 : 0;
+        const startIndex = (items.length > 0 && String(items[0].keyword).trim() === String(query).trim()) ? 1 : 0;
         for (let i = startIndex; i < items.length; i++) {
           const item = items[i];
           sycmExpanded.push({
             keyword: item.keyword,
-            seed: seed.keyword,
+            seed: query,
+            root: query,
             category: seed.category || '',
             pattern: `sycm-${sycmMode}-related`,
             source: effectiveSource,
@@ -263,14 +328,25 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
               clickRate: parsePercentOrNumber(item.clickRate),
               clickPopularity: parseSearchPop(item.clickPopularity),
               demandSupplyRatio: parsePercentOrNumber(item.demandSupplyRatio),
-              payConversionRate: parsePercentOrNumber(item.payConversionRate || item.conversionRate)
+              payConversionRate: parsePercentOrNumber(item.payConversionRate || item.conversionRate),
+              conversionRate: parsePercentOrNumber(item.conversionRate || item.payConversionRate),
+              buyerCount: parseSearchPop(item.buyerCount || item.payBuyerCount),
+              onlineProductCount: parseSearchPop(item.onlineProductCount || item.productCount || item.competitionCount),
+              trend: parsePercentOrNumber(item.trend || item.trendRate || item.searchTrend)
             }
           });
         }
       } catch (err) {
-        console.error(`❌ 查询种子词 "${seed.keyword}" 失败:`, err.message);
+        console.error(`❌ 查询词根 "${query}" 失败:`, err.message);
       }
+      reportProgress({
+        stage: 'sycm-expand',
+        current: seedIndex + 1,
+        total: expandableSeeds.length,
+        message: `生意参谋关联词已处理 ${seedIndex + 1}/${expandableSeeds.length}`
+      });
     }
+    if (roots.length > 0 && persist) recordRootQueries(roots, { dataDir });
   }
 
   const expanded = [
@@ -279,6 +355,12 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
     ...localExpanded,
     ...sycmExpanded
   ];
+  reportProgress({
+    stage: 'score',
+    current: 3,
+    total: MINING_PROGRESS_TOTAL,
+    message: `评分候选词 ${expanded.length} 个`
+  });
 
   const scored = expanded.map(item => {
     const scoredItem = scoreKeyword(item);
@@ -310,6 +392,7 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
       category: item.category || '',
       pattern: item.pattern,
       source: item.source || 'local',
+      root: item.root || item.seed || '',
       localScore,
       tier: scoredItem.nextAction === 'reject' ? 'reject' : localScore >= 78 ? 'high' : localScore >= 62 ? 'mid' : 'low',
       reason: scoredItem.reason,
@@ -344,6 +427,12 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
   const ranked = clustered
     .filter(item => item.localScore >= threshold && item.nextAction !== 'reject' && item.gateStatus !== 'rejected')
     .sort((a, b) => b.localScore - a.localScore || String(a.seed).localeCompare(String(b.seed), 'zh-CN') || String(a.keyword).localeCompare(String(b.keyword), 'zh-CN'));
+  reportProgress({
+    stage: 'rank',
+    current: 4,
+    total: MINING_PROGRESS_TOTAL,
+    message: `排序筛选 ${ranked.length} 个`
+  });
 
   let precheckStats = null;
   let prechecked = ranked;
@@ -387,7 +476,20 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
     }
   }
 
-  const candidates = diversifyCandidates(prechecked, {
+  const recentSeen = excludeSeen ? loadSeen({ dataDir, ttlDays: Number(seenTtlDays || 30) }) : new Set();
+  for (const keyword of Array.isArray(excludeKeywords) ? excludeKeywords : []) {
+    const normalized = normalizeKeyword(keyword);
+    if (normalized) recentSeen.add(normalized);
+  }
+  const unseenPrechecked = excludeSeen
+    ? prechecked.filter(item => !recentSeen.has(normalizeKeyword(item.keyword)))
+    : prechecked;
+  // 开启去重后，候选池耗尽应显式暴露给上层补词策略，不能悄悄复用旧词。
+  const selectionPool = excludeSeen ? unseenPrechecked : prechecked;
+  const seenFiltered = Math.max(0, prechecked.length - unseenPrechecked.length);
+  const seenPoolExhausted = excludeSeen && unseenPrechecked.length === 0 && prechecked.length > 0;
+
+  const candidates = diversifyCandidates(selectionPool, {
     count: Number(count || 50),
     maxPerSeed: outputMaxPerSeed,
     maxPerCategory: outputMaxPerCategory,
@@ -408,13 +510,27 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
   }
 
   if (persist && candidates.length > 0) writeCandidates(candidates, dataDir);
+  if (shouldRecordSeen && candidates.length > 0) {
+    recordSeen(candidates.map(item => item.keyword), { dataDir });
+  }
+  reportProgress({
+    stage: 'complete',
+    current: MINING_PROGRESS_TOTAL,
+    total: MINING_PROGRESS_TOTAL,
+    message: `挖词完成 ${candidates.length} 个`
+  });
 
   const result = {
     ok: true,
     date,
     seedsUsed: seeds.length,
     directKeywords: buildDirectKeywords(seeds),
-    stats: buildStats({ seeds, expanded, scored, clustered, threshold, source: effectiveSource, aiMeta }),
+    stats: {
+      ...buildStats({ seeds, expanded, scored, clustered, threshold, source: effectiveSource, aiMeta }),
+      seenFiltered,
+      seenTtlDays: Number(seenTtlDays || 30),
+      seenPoolExhausted
+    },
     candidates
   };
   if (precheckStats) result.precheckStats = precheckStats;

@@ -19,6 +19,7 @@ const { normalizeSynonyms, configuredProductWords } = require('./src/config-load
 const { classifySeed } = require('./src/seed-classifier');
 const { checkExpansionCompatibility } = require('./src/facet-compatibility');
 const { gateCandidate } = require('./src/candidate-gate');
+const { extractShortRoot, selectShortRoots, recordRootQueries } = require('./src/root-keywords');
 
 module.exports = {
   DEFAULT_DATA_DIR,
@@ -43,6 +44,9 @@ module.exports = {
   classifySeed,
   checkExpansionCompatibility,
   gateCandidate,
+  extractShortRoot,
+  selectShortRoots,
+  recordRootQueries,
   keywordSignature,
   rejectCandidate,
   reverseMine

@@ -5,15 +5,21 @@ const path = require('path');
 const { withAgentResponseFields } = require('./agent-response');
 
 const DEFAULT_PIPELINE_DIR = path.join(process.cwd(), 'data', 'pipeline');
-const STAGE_ORDER = ['seed', 'mined', 'verified', 'generated', 'review', 'ready', 'submitted'];
+const STAGE_ORDER = ['seed', 'mined', 'keyword_review', 'verified', 'selected', 'generated', 'review', 'ready', 'submitted'];
 
 const STATUS_STAGE = {
   created: 'seed',
   mined: 'mined',
+  awaiting_keyword_review: 'keyword_review',
+  keywords_reviewed: 'keyword_review',
+  keyword_review_empty: 'keyword_review',
   manual_action_required: 'verified',
   verified_partial_manual_required: 'verified',
   verified: 'verified',
   verified_empty: 'verified',
+  verified_no_generation_eligible: 'verified',
+  products_selected: 'selected',
+  select_failed: 'selected',
   generated: 'generated',
   generate_failed: 'generated',
   needs_review: 'review',
@@ -202,8 +208,10 @@ function safeRunFile(runDir, persistedPath, fallbackName) {
 function defaultFiles(runDir, files = {}) {
   return {
     candidates: safeRunFile(runDir, files.candidates, 'candidates.jsonl'),
+    reviewedCandidates: safeRunFile(runDir, files.reviewedCandidates, 'reviewed-candidates.jsonl'),
     sycmResults: safeRunFile(runDir, files.sycmResults, 'sycm-results.jsonl'),
     verifiedKeywords: safeRunFile(runDir, files.verifiedKeywords, 'verified-keywords.jsonl'),
+    selectedProducts: safeRunFile(runDir, files.selectedProducts, 'selected-products.jsonl'),
     generatedProducts: safeRunFile(runDir, files.generatedProducts, 'generated-products.jsonl'),
     distributionBatch: safeRunFile(runDir, files.distributionBatch, 'distribution-batch.txt'),
     distributionReview: safeRunFile(runDir, files.distributionReview, 'distribution-review.md')
@@ -213,8 +221,12 @@ function defaultFiles(runDir, files = {}) {
 function buildNextCommand(status, runId, files) {
   const runPart = runId ? ` --run ${runId}` : '';
   if (status === 'created') return `node bin/cli.js flow mine${runPart} --json`;
-  if (status === 'mined') return `node bin/cli.js flow verify${runPart} --json`;
-  if (status === 'verified' || status === 'verified_empty') return `node bin/cli.js flow generate${runPart} --json`;
+  if (status === 'mined' || status === 'awaiting_keyword_review' || status === 'keyword_review_empty') return `node bin/cli.js flow review${runPart} --approve-all --json`;
+  if (status === 'keywords_reviewed') return `node bin/cli.js flow verify${runPart} --json`;
+  if (status === 'verified') return `node bin/cli.js flow select${runPart} --json`;
+  if (status === 'products_selected') return `node bin/cli.js flow generate${runPart} --json`;
+  if (status === 'select_failed') return `node bin/cli.js flow select${runPart} --json`;
+  if (status === 'verified_empty' || status === 'verified_no_generation_eligible') return `node bin/cli.js flow inspect${runPart} --json`;
   if (status === 'generated' || status === 'generate_failed' || status === 'export_empty') return `node bin/cli.js flow export${runPart} --json`;
   if (status === 'needs_review') return files.distributionReview ? `Review ${files.distributionReview}` : '';
   if (status === 'ready_to_distribute') {
@@ -262,6 +274,10 @@ function summarizePipelineRun({ dataDir = DEFAULT_PIPELINE_DIR, runId, previewLi
   if (status === 'manual_action_required' || status === 'verified_partial_manual_required') {
     blockers.push('sycm_manual_action_required');
   }
+  if (status === 'verified_no_generation_eligible') blockers.push('no_generation_eligible_keywords');
+  if (status === 'awaiting_keyword_review') blockers.push('keyword_review_required');
+  if (status === 'keyword_review_empty') blockers.push('no_keyword_review_approved');
+  if (status === 'select_failed') blockers.push('no_selected_products');
 
   const nextCommand = run.nextCommand || buildNextCommand(status, targetRunId, files);
   const payload = withAgentResponseFields({
@@ -285,7 +301,9 @@ function summarizePipelineRun({ dataDir = DEFAULT_PIPELINE_DIR, runId, previewLi
     nextCommand,
     previews: {
       candidates: readJsonlPreview(files.candidates, previewLimit),
+      reviewedCandidates: readJsonlPreview(files.reviewedCandidates, previewLimit),
       verifiedKeywords: readJsonlPreview(files.verifiedKeywords, previewLimit),
+      selectedProducts: readJsonlPreview(files.selectedProducts, previewLimit),
       generatedProducts: readJsonlPreview(files.generatedProducts, previewLimit),
       distributionReview: readTextPreview(reviewFile, reviewChars)
     }

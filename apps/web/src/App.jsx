@@ -13,7 +13,6 @@ import {
   RefreshCw,
   Search,
   Send,
-  Settings,
   Square,
   Trash2
 } from 'lucide-react';
@@ -24,6 +23,7 @@ import {
   getMiningRecoveryAction,
   getMiningRecoveryHint,
   getWorkflowAction,
+  getPipelineFirstActionTarget,
   mapPipelineStageToFunnel,
   normalizeCandidateForTitle,
   buildReviewProduct
@@ -44,13 +44,6 @@ import { usePipelineRun } from './use-pipeline-run.js';
 import { HistoryService } from './history-service.js';
 import { IndexedDbHistoryStore } from './indexeddb-history-store.js';
 import './App.css';
-
-const NAV_ITEMS = [
-  { id: 'dashboard', label: '工作台', icon: LayoutDashboard },
-  { id: 'mine', label: '挖词选品', icon: Search },
-  { id: 'title', label: '标题生成', icon: PenLine },
-  { id: 'workflow', label: '选品流水线', icon: FlaskConical }
-];
 
 const MINER_TABS = [
   { id: 'peer', label: '同行词根', endpoint: '/api/miner/peer', needsInput: true },
@@ -113,47 +106,9 @@ function getGateMeta(item = {}) {
   };
 }
 
-function AppShell({ activeTab, setActiveTab, children }) {
-  const [showDeveloperTools, setShowDeveloperTools] = useState(false);
-
+function AppShell({ children }) {
   return (
-    <div className="app-shell">
-      <aside className="app-sidebar">
-        <div className="brand-block">
-          <div className="brand-mark">E</div>
-          <div>
-            <h1>电商选品工具</h1>
-            <p>React unified console</p>
-          </div>
-        </div>
-        <nav className="app-nav">
-          {NAV_ITEMS.map((item) => {
-            const Icon = item.icon;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                data-testid={`nav-${item.id}`}
-                className={`nav-button ${activeTab === item.id ? 'nav-button-active' : ''}`}
-                onClick={() => setActiveTab(item.id)}
-              >
-                <Icon size={17} />
-                <span>{item.label}</span>
-              </button>
-            );
-          })}
-        </nav>
-        <div className="sidebar-tools">
-          <button className="sidebar-tool-button" type="button" onClick={() => setShowDeveloperTools((value) => !value)}>
-            <Settings size={14} /> 系统
-          </button>
-          {showDeveloperTools && (
-            <div className="sidebar-tool-menu">
-              <button type="button" onClick={() => setActiveTab('workflow')}>选品流水线</button>
-            </div>
-          )}
-        </div>
-      </aside>
+    <div className="app-shell app-shell-no-sidebar">
       <main className="app-main">{children}</main>
     </div>
   );
@@ -1054,7 +1009,7 @@ function ProductCard({ product, safety, sourceCandidate, onAddReview }) {
 }
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [, setActiveTab] = useState('workflow');
   const [status, setStatus] = useState(null);
   const [platformStatus, setPlatformStatus] = useState(null);
   const pipeline = usePipelineRun({ limit: 12 });
@@ -1096,49 +1051,19 @@ export default function App() {
     setActiveTab('title');
   };
 
-  if (activeTab === 'workflow') {
-    return (
-      <AppShell activeTab={activeTab} setActiveTab={setActiveTab}>
-        <div className="studio-host">
-          <WorkflowStudio key={activeTab} initialMode="monitor" onNavigate={setActiveTab} />
-        </div>
-      </AppShell>
-    );
-  }
+  const navigatePipelineFirst = (target) => {
+    const intent = getPipelineFirstActionTarget({ targetTab: target });
+    if (intent.type === 'select-node' && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('workflow:select-node', { detail: { nodeId: intent.nodeId } }));
+    }
+    setActiveTab('workflow');
+  };
 
   return (
-    <AppShell activeTab={activeTab} setActiveTab={setActiveTab}>
-      {activeTab === 'dashboard' && (
-        <DashboardView
-          status={status}
-          platforms={platformStatus}
-          runs={pipeline.runs}
-          loading={pipeline.loading}
-          onRefresh={() => refreshOverview().catch(() => {})}
-          onStartWorkbench={startWorkbench}
-          onNavigate={setActiveTab}
-          reviewProducts={reviewProducts}
-          onClearReviewProduct={(id) => setReviewProducts((current) => current.filter((item) => item.id !== id))}
-        />
-      )}
-      {activeTab === 'mine' && <MiningView onSendToTitle={sendToTitle} onNavigate={setActiveTab} historyService={historyService} pipeline={pipeline} />}
-      {activeTab === 'title' && (
-        <TitleView
-          sourceCandidate={sourceCandidate}
-          pipeline={pipeline}
-          onUseVerifiedKeyword={useVerifiedKeywordForTitle}
-          historyService={historyService}
-          onAddReviewProduct={(product) => {
-            setReviewProducts((current) => [
-              product,
-              ...current.filter((item) => item.id !== product.id)
-            ]);
-            if (sourceCandidate) {
-              historyService?.markPendingReview(sourceCandidate.raw || sourceCandidate, product).catch(() => {});
-            }
-          }}
-        />
-      )}
+    <AppShell>
+      <div className="studio-host">
+        <WorkflowStudio key="workflow" initialMode="monitor" onNavigate={navigatePipelineFirst} />
+      </div>
     </AppShell>
   );
 }

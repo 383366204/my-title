@@ -61,6 +61,30 @@ function httpGet(url, timeout = 3000) {
   });
 }
 
+function httpJsonRequest(url, options = {}) {
+  const method = options.method || 'GET';
+  const timeout = options.timeout || 3000;
+  return new Promise((resolve, reject) => {
+    const req = http.request(url, { method, timeout }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          resolve(data ? JSON.parse(data) : {});
+        } catch (e) {
+          reject(new Error('Chrome 返回了无效的 JSON 数据'));
+        }
+      });
+    });
+    req.on('error', reject);
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new Error('请求超时'));
+    });
+    req.end();
+  });
+}
+
 /**
  * 检查 Chrome DevTools Protocol 是否可用
  * @param {number} [port=9222] - Chrome 调试端口
@@ -173,6 +197,21 @@ async function checkSycmLoginStatus(port = 9222) {
 }
 
 /**
+ * 通过 Chrome DevTools 打开新页面。
+ * @param {number} [port=9222] - Chrome 调试端口
+ * @param {string} url - 要打开的页面地址
+ * @returns {Promise<{success: boolean, url: string, target?: object}>} 打开结果
+ */
+async function openChromeUrl(port = 9222, url) {
+  const targetUrl = String(url || SYCM_SELECTORS.SEARCH_URL);
+  const target = await httpJsonRequest(
+    `http://127.0.0.1:${port}/json/new?${encodeURIComponent(targetUrl)}`,
+    { method: 'PUT', timeout: 5000 }
+  );
+  return { success: true, url: targetUrl, target };
+}
+
+/**
  * 自动启动 Chrome 调试模式并等待就绪
  * 检测到 Chrome DevTools 不可用时，按当前平台启动 Chrome/Edge 并轮询等待端口就绪。
  * @param {number} [port=9222] - Chrome 调试端口
@@ -217,6 +256,7 @@ module.exports = {
   generateChromeLaunchCommand,
   checkSycmLoginStatus,
   autoLaunchChrome,
+  openChromeUrl,
   getDedicatedProfileDir,
   ERRORS,
   SYCM_SELECTORS
