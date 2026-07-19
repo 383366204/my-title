@@ -160,4 +160,3 @@ test('platform guard classifies slider text as hard blocker status', async () =>
   assert.equal(status.available, false);
   assert.equal(status.manualAction.status, 'slider_required');
 });
-

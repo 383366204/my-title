@@ -317,7 +317,12 @@ describe('workflow pipeline adapter', () => {
       port: 9223,
       pages: 5,
       minBlueRows: 0,
-      fallbackHot: false
+      fallbackHot: false,
+      autoApproveKeywords: true,
+      autoExpandVerify: true,
+      verifyReserve: 8,
+      autoAllowReviewKeywords: true,
+      reviewKeywordLimit: 2
     });
 
     assert.deepEqual(sanitizeWorkflowParams('keyword', {
@@ -369,6 +374,7 @@ describe('workflow pipeline adapter', () => {
       '--port', '9222',
       '--pages', '1',
       '--min-blue-rows', '1',
+      '--verify-reserve', '8',
       '--no-hot-fallback',
       '--json'
     ]);

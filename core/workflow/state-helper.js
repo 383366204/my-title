@@ -62,7 +62,7 @@ function normalizePlatformError(err) {
   const platform = err.platform || '';
   const rawStatus = err.status || '';
   const cooldownRemainingMs = Number(err.cooldownRemainingMs) || 0;
-  
+
   // 归纳 platform 标识
   const displayPlatform = platform ? String(platform).toUpperCase() : '平台';
 

@@ -35,7 +35,7 @@ test('Workflow Observability - Run Store Initialization Fields', (t) => {
 
   const run = createRun(mockWorkflow);
   assert.ok(run.runId);
-  
+
   const nodeState = run.nodeStates['start'];
   assert.ok(nodeState);
   assert.strictEqual(nodeState.status, 'idle');
@@ -116,7 +116,7 @@ test('Workflow Observability - Scheduler Platform Blocker Mapping & Failed Node 
 
   const finalRun = getRun(run.runId);
   assert.ok(finalRun);
-  
+
   const blockedNodeState = finalRun.nodeStates['node_block'];
   assert.ok(blockedNodeState);
   assert.strictEqual(blockedNodeState.status, 'waiting_manual');
