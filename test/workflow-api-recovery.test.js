@@ -389,8 +389,11 @@ test('workflow recovery APIs - pause, resume, and retry', async (t) => {
     await t.test('POST /api/workflows/sycm/chrome/start launches Chrome through injectable launcher', async () => {
       const originalLauncher = app.locals.sycmChromeLauncher;
       const originalPageOpener = app.locals.sycmChromePageOpener;
+      const originalStatusReader = app.locals.sycmAccessStatusReader;
+      const originalBlockerClearer = app.locals.sycmAccessBlockerClearer;
       const calls = [];
       const opened = [];
+      const cleared = [];
       app.locals.sycmChromeLauncher = async (port, options) => {
         calls.push({ port, options });
         return { success: true, message: 'Chrome 已启动并就绪' };
@@ -398,6 +401,13 @@ test('workflow recovery APIs - pause, resume, and retry', async (t) => {
       app.locals.sycmChromePageOpener = async (port, url) => {
         opened.push({ port, url });
         return { success: true, url };
+      };
+      app.locals.sycmAccessStatusReader = () => ({
+        breaker: { open: true, reason: 'No Chrome tab found on port 9222' }
+      });
+      app.locals.sycmAccessBlockerClearer = (platform) => {
+        cleared.push(platform);
+        return { available: true, breaker: { open: false } };
       };
 
       try {
@@ -421,9 +431,12 @@ test('workflow recovery APIs - pause, resume, and retry', async (t) => {
           port: 9333,
           url: 'https://sycm.taobao.com/mc/free/search_analysis'
         }]);
+        assert.deepStrictEqual(cleared, ['sycm']);
       } finally {
         app.locals.sycmChromeLauncher = originalLauncher;
         app.locals.sycmChromePageOpener = originalPageOpener;
+        app.locals.sycmAccessStatusReader = originalStatusReader;
+        app.locals.sycmAccessBlockerClearer = originalBlockerClearer;
       }
     });
 

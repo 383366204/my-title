@@ -14,12 +14,20 @@ const {
   loadSeeds,
   saveSeeds,
   mineKeywords,
+  auditSeedPool,
+  prepareSeedSuggestions,
+  buildSeedReplenishmentPlan,
   DEFAULT_DATA_DIR
 } = require('../skills/keyword-mining');
 
 const { generateTitlePipeline } = require('../skills/title-gen');
 const { searchAll } = require('../skills/alibaba1688');
-const { autoLaunchChrome, openChromeUrl, SYCM_SELECTORS } = require('../skills/sycm-research');
+const {
+  autoLaunchChrome,
+  isChromeDevToolsAvailable,
+  openChromeUrl,
+  SYCM_SELECTORS
+} = require('../skills/sycm-research');
 
 const {
   WORKFLOW_NODE_IDS,
@@ -73,7 +81,10 @@ const {
   listPipelineRuns,
   summarizePipelineRun
 } = require('../core/pipeline-run-summary');
-const { getPlatformAccessStatus } = require('../core/platform-access-guard');
+const {
+  clearPlatformAccessBlocker,
+  getPlatformAccessStatus
+} = require('../core/platform-access-guard');
 
 const app = express();
 app.use(express.json());
@@ -615,6 +626,33 @@ function getSycmChromePageOpener() {
   return app.locals.sycmChromePageOpener || openChromeUrl;
 }
 
+function getSycmChromeAvailabilityChecker() {
+  return app.locals.sycmChromeAvailabilityChecker || isChromeDevToolsAvailable;
+}
+
+function getSycmAccessStatus() {
+  return (app.locals.sycmAccessStatusReader || getPlatformAccessStatus)('sycm');
+}
+
+function clearSycmAccessBlocker() {
+  return (app.locals.sycmAccessBlockerClearer || clearPlatformAccessBlocker)('sycm');
+}
+
+function isRecoverableChromeBlocker(access = {}) {
+  const reason = String(access.breaker?.reason || access.manualAction?.message || '');
+  return /no chrome tab found|127\.0\.0\.1:9222|econnrefused|chrome[^\n]*(?:tab|debug)|cdp|devtools/i.test(reason);
+}
+
+async function recoverSycmAccessAfterChrome(port, { assumeReady = false } = {}) {
+  const access = getSycmAccessStatus();
+  if (!access.breaker?.open || !isRecoverableChromeBlocker(access)) {
+    return { cleared: false, chromeReady: true, access };
+  }
+  const chromeReady = assumeReady || await getSycmChromeAvailabilityChecker()(port);
+  if (!chromeReady) return { cleared: false, chromeReady: false, access };
+  return { cleared: true, chromeReady: true, access: clearSycmAccessBlocker() };
+}
+
 function pipelineRunResponse(runId, extra = {}) {
   return {
     ...extra,
@@ -654,11 +692,52 @@ async function runPipelineStep(step, runId, body = {}) {
   throw new Error('不支持的流程步骤。');
 }
 
-// 2. GET /api/seeds - Get sorted seed list (including paused)
+// 2. GET /api/seeds/audit - Read-only seed migration and health preview.
+app.get('/api/seeds/audit', (req, res) => {
+  try {
+    const seeds = listSeeds({ dataDir: DEFAULT_DATA_DIR, includePaused: true });
+    res.json({ ok: true, data: auditSeedPool(seeds) });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// 2.1 POST /api/seeds/suggestions/preview - Evaluate discoveries without writing the seed file.
+app.post('/api/seeds/suggestions/preview', (req, res) => {
+  try {
+    const seeds = listSeeds({ dataDir: DEFAULT_DATA_DIR, includePaused: true });
+    const result = prepareSeedSuggestions(req.body?.candidates, {
+      existingSeeds: seeds,
+      maxSuggestions: Number(req.body?.maxSuggestions || 5),
+      minQualityScore: Number(req.body?.minQualityScore || 45)
+    });
+    res.json({ ok: true, data: result });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+// 2.2 POST /api/seeds/replenishment/preview - Balance candidates across discovery sources.
+app.post('/api/seeds/replenishment/preview', (req, res) => {
+  try {
+    const seeds = listSeeds({ dataDir: DEFAULT_DATA_DIR, includePaused: true });
+    const result = buildSeedReplenishmentPlan(req.body?.sources, {
+      existingSeeds: seeds,
+      sourceQuotas: req.body?.sourceQuotas,
+      maxSuggestions: Number(req.body?.maxSuggestions || 8),
+      minQualityScore: Number(req.body?.minQualityScore || 45)
+    });
+    res.json({ ok: true, data: result });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+// 2.3 GET /api/seeds - Get enriched, sorted seed list (including paused)
 app.get('/api/seeds', (req, res) => {
   try {
     const seeds = listSeeds({ dataDir: DEFAULT_DATA_DIR, includePaused: true });
-    res.json({ ok: true, data: seeds });
+    res.json({ ok: true, data: auditSeedPool(seeds).profiles });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
@@ -666,12 +745,13 @@ app.get('/api/seeds', (req, res) => {
 
 // 3. POST /api/seeds - Add or update a seed
 app.post('/api/seeds', (req, res) => {
-  const { keyword, category, priority, type } = req.body;
+  const { keyword, category, priority, type, status } = req.body;
   try {
     const seed = addSeed(keyword, {
       category,
       priority: Number(priority),
       type,
+      status,
       source: 'manual',
       dataDir: DEFAULT_DATA_DIR
     });
@@ -1412,6 +1492,17 @@ app.post('/api/workflows/runs/:runId/retry-node', async (req, res) => {
       if (!['mine', 'keywordReview', 'verify', 'select', 'generate', 'export'].includes(nodeId)) {
         return res.status(400).json({ ok: false, error: '不支持的流程步骤。' });
       }
+      if (nodeId === 'verify') {
+        const port = parsePositiveNumber(runtime.params?.port || process.env.SYCM_DEBUG_PORT || 9222, 9222);
+        const recovery = await recoverSycmAccessAfterChrome(port);
+        if (!recovery.chromeReady) {
+          return res.status(409).json({
+            ok: false,
+            code: 'SYCM_CHROME_REQUIRED',
+            error: `Chrome 调试连接仍不可用（端口 ${port}）。请先点击节点上的“启动 Chrome”，完成登录后再重跑验真。`
+          });
+        }
+      }
       if (activeWorkbenchProcess) {
         return res.status(409).json({ ok: false, error: '已有工作流正在运行，请等待完成后再重试。' });
       }
@@ -1516,6 +1607,7 @@ app.post('/api/workflows/sycm/chrome/start', async (req, res) => {
         userMessage: 'Chrome 启动失败。请手动启动带远程调试端口的 Chrome，然后重跑验真。'
       });
     }
+    await recoverSycmAccessAfterChrome(port, { assumeReady: true });
     let openResult = null;
     try {
       openResult = await getSycmChromePageOpener()(port, sycmUrl);
@@ -1620,7 +1712,10 @@ app.get('/api/workflows/runs/:runId/events', (req, res) => {
   res.write(`data: ${JSON.stringify({ event: 'init', payload: { status: runObj.status, nodeStates: runObj.nodeStates } })}\n\n`);
   const allInitialRuntimeEvents = readRuntimeEvents({ runId });
   allInitialRuntimeEvents.slice(-100).forEach(event => {
-    writeWorkflowSseEvent(res, event.event || event.type || 'runtime_event', event);
+    writeWorkflowSseEvent(res, event.event || event.type || 'runtime_event', {
+      ...event,
+      replay: true
+    });
   });
 
   let lastSnapshot = JSON.stringify({ status: runObj.status, nodeStates: runObj.nodeStates });

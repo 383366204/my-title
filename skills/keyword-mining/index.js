@@ -20,6 +20,10 @@ const { classifySeed } = require('./src/seed-classifier');
 const { checkExpansionCompatibility } = require('./src/facet-compatibility');
 const { gateCandidate } = require('./src/candidate-gate');
 const { extractShortRoot, selectShortRoots, recordRootQueries } = require('./src/root-keywords');
+const { buildSeedProfile, auditSeedPool, scoreSeedQuality, recommendedStatus } = require('./src/seed-profile');
+const { applySeedFeedback } = require('./src/seed-feedback');
+const { prepareSeedSuggestions } = require('./src/seed-suggestions');
+const { DEFAULT_SOURCE_QUOTAS, buildSeedReplenishmentPlan } = require('./src/seed-replenishment');
 
 module.exports = {
   DEFAULT_DATA_DIR,
@@ -47,6 +51,14 @@ module.exports = {
   extractShortRoot,
   selectShortRoots,
   recordRootQueries,
+  buildSeedProfile,
+  auditSeedPool,
+  scoreSeedQuality,
+  recommendedStatus,
+  applySeedFeedback,
+  prepareSeedSuggestions,
+  DEFAULT_SOURCE_QUOTAS,
+  buildSeedReplenishmentPlan,
   keywordSignature,
   rejectCandidate,
   reverseMine

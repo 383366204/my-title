@@ -6,6 +6,7 @@ const { test, beforeEach } = require('node:test');
 
 const {
   PlatformAccessError,
+  clearPlatformAccessBlocker,
   getPlatformAccessStatus,
   reportPlatformBlocker,
   resetPlatformAccessState,
@@ -124,6 +125,22 @@ test('platform blocker report protects 1688 without using browser-specific code'
   const status = getPlatformAccessStatus('1688', { dataDir });
   assert.equal(status.breaker.open, true);
   assert.equal(status.manualAction.status, 'rate_limited');
+});
+
+test('platform blocker can be cleared after the user restores browser access', () => {
+  const dataDir = tempDataDir();
+  reportPlatformBlocker('sycm', {
+    dataDir,
+    status: 'transient_failure',
+    message: 'No Chrome tab found on port 9222',
+    cooldownMs: 60_000
+  });
+
+  const cleared = clearPlatformAccessBlocker('sycm', { dataDir });
+
+  assert.equal(cleared.available, true);
+  assert.equal(cleared.breaker.open, false);
+  assert.equal(cleared.manualAction, null);
 });
 
 test('platform guard exposes normalized ready status for taobao', () => {

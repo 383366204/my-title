@@ -1,14 +1,7 @@
 const { normalizeKeyword } = require('./seed-store');
 const { FACETS } = require('./expand-keywords');
-const { configuredProductWords, normalizeSynonyms, mergeFacets } = require('./config-loader');
-
-const PRODUCT_WORDS = [
-  '狗咬胶', '逗猫棒', '收纳盒', '置物架', '喜糖盒', '多肉盆栽', '肥皂盒',
-  '睫毛夹', '手机壳', '钥匙扣', '小夜灯', '修正带',
-  '戒指', '项链', '手链', '手绳', '耳环', '耳钉', '发夹', '头绳',
-  '玩具', '挂绳', '香包', '水枪', '飞盘', '冰袖',
-  '弹力带', '防晒面罩', '泡沫轴', '瑜伽垫', '雨伞', '遮阳帽'
-].sort((a, b) => b.length - a.length);
+const { normalizeSynonyms, mergeFacets } = require('./config-loader');
+const { BASE_PRODUCT_WORDS, findProductWord } = require('./product-words');
 
 const OPTIONAL_FACETS = new Set(['style', 'scene', 'price_band', 'pain_point', 'trend_word']);
 const RIGID_FACETS = new Set(['material', 'crowd', 'function']);
@@ -31,8 +24,7 @@ function findFacetWords(keyword, facetNames, options = {}) {
 }
 
 function findCoreProduct(keyword, options = {}) {
-  const productWords = configuredProductWords(PRODUCT_WORDS, options);
-  return productWords.find(word => keyword.includes(word)) || '';
+  return findProductWord(keyword, options);
 }
 
 function residualTokens(keyword, knownWords) {
@@ -74,7 +66,7 @@ function keywordSignature(keyword, options = {}) {
 }
 
 module.exports = {
-  PRODUCT_WORDS,
+  PRODUCT_WORDS: BASE_PRODUCT_WORDS,
   keywordSignature,
   findCoreProduct
 };

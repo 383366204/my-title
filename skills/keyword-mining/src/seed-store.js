@@ -132,7 +132,7 @@ function listSeeds({ dataDir = DEFAULT_DATA_DIR, includePaused = false } = {}) {
  * @param {string} [options.dataDir] 数据目录
  * @returns {object} 新增或更新后的种子
  */
-function addSeed(keyword, { category = '', priority = 5, source = 'manual', reason = '', type = 'expand', dataDir = DEFAULT_DATA_DIR } = {}) {
+function addSeed(keyword, { category = '', priority = 5, source = 'manual', reason = '', type = 'expand', status = 'active', coreProduct = '', familyKey = '', role = '', evidence = null, dataDir = DEFAULT_DATA_DIR } = {}) {
   const normalized = normalizeKeyword(keyword);
   if (!normalized) throw new Error('种子词不能为空');
   const banned = checkBannedWords(normalized);
@@ -144,9 +144,13 @@ function addSeed(keyword, { category = '', priority = 5, source = 'manual', reas
     existing.priority = Math.max(Number(existing.priority || 0), Number(priority || 0));
     existing.category = category || existing.category || '';
     existing.source = existing.source || source;
-    existing.status = existing.status || 'active';
+    existing.status = existing.status || normalizeSeedStatus(status);
     existing.reason = reason || existing.reason || '';
     existing.type = type || existing.type || 'expand';
+    if (coreProduct) existing.coreProduct = normalizeKeyword(coreProduct);
+    if (familyKey) existing.familyKey = normalizeKeyword(familyKey);
+    if (role) existing.role = role;
+    if (evidence) existing.evidence = { ...(existing.evidence || {}), ...evidence };
     recordSeedEvent({ type: 'update', keyword: normalized, source, reason }, dataDir);
     saveSeeds(seeds, dataDir);
     return existing;
@@ -158,11 +162,15 @@ function addSeed(keyword, { category = '', priority = 5, source = 'manual', reas
     priority: Number(priority || 5),
     source,
     type,
-    status: 'active',
+    status: normalizeSeedStatus(status),
     successCount: 0,
     failCount: 0,
     reason
   };
+  if (coreProduct) seed.coreProduct = normalizeKeyword(coreProduct);
+  if (familyKey) seed.familyKey = normalizeKeyword(familyKey);
+  if (role) seed.role = role;
+  if (evidence) seed.evidence = { ...evidence };
   seeds.push(seed);
   saveSeeds(seeds, dataDir);
   recordSeedEvent({ type: 'add', keyword: normalized, source, reason }, dataDir);

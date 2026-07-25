@@ -302,13 +302,21 @@ describe('workflow pipeline adapter', () => {
       source: 'invalid',
       rootMode: 'invalid',
       rootLimit: '99',
-      rootCooldownDays: '-4'
+      rootCooldownDays: '-4',
+      maxObservingSeeds: '99',
+      maxNewSeeds: '-2',
+      autoReplenishSeeds: false,
+      recordSeedFeedback: false
     }), {
       mine: 200,
       source: 'sycm_hot',
       rootMode: 'auto',
       rootLimit: 20,
       rootCooldownDays: 0,
+      maxObservingSeeds: 10,
+      maxNewSeeds: 0,
+      autoReplenishSeeds: false,
+      recordSeedFeedback: false,
       verify: 1,
       generate: 10,
       export: 100,
@@ -630,6 +638,30 @@ describe('workflow pipeline adapter', () => {
       label: '启动 Chrome',
       description: '启动带远程调试端口的 Chrome，登录生意参谋后重试校验。'
     });
+  });
+
+  it('maps missing Chrome tab cooldown errors to a Chrome startup action', () => {
+    const dataDir = tempPipelineDir();
+    const runId = 'sycm-no-chrome-tab-run';
+    const runDir = path.join(dataDir, 'runs', runId);
+    fs.mkdirSync(runDir, { recursive: true });
+    fs.writeFileSync(path.join(runDir, 'run.json'), JSON.stringify({
+      runId,
+      status: 'manual_action_required',
+      stage: 'verified',
+      files: { sycmResults: path.join(runDir, 'sycm-results.jsonl') }
+    }));
+    fs.writeFileSync(path.join(runDir, 'sycm-results.jsonl'), JSON.stringify({
+      ok: false,
+      status: 'transient_failure',
+      error: 'sycm access is cooling down: No Chrome tab found on port 9222'
+    }) + '\n');
+
+    const run = getWorkflowRun({ dataDir, runId });
+
+    assert.equal(run.nodeStates.verify.status, 'blocked');
+    assert.match(run.nodeStates.verify.actionHint, /Chrome CDP 不可用/);
+    assert.equal(run.nodeStates.verify.nextRecommendedAction.action, 'start-sycm-chrome');
   });
 
   it('maps explicit pipeline statuses to production node states', () => {

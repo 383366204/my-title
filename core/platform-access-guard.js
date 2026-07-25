@@ -418,6 +418,16 @@ function getPlatformAccessStatus(platform, options = {}) {
   };
 }
 
+function clearPlatformAccessBlocker(platform, options = {}) {
+  const guardOptions = mergeOptions(platform, options);
+  const files = statusFiles(platform, guardOptions);
+  clearBreaker(platform, guardOptions);
+  if (fs.existsSync(files.manualAction)) {
+    fs.rmSync(files.manualAction, { force: true });
+  }
+  return getPlatformAccessStatus(platform, guardOptions);
+}
+
 function resetPlatformAccessState(options = {}) {
   const dataDir = resolveDataDir(options);
   if (fs.existsSync(dataDir)) {
@@ -427,6 +437,7 @@ function resetPlatformAccessState(options = {}) {
 
 module.exports = {
   PlatformAccessError,
+  clearPlatformAccessBlocker,
   getPlatformAccessStatus,
   reportPlatformBlocker,
   resetPlatformAccessState,

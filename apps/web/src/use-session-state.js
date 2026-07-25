@@ -5,7 +5,7 @@ export function useSessionState(key, initialValue) {
     try {
       const raw = sessionStorage.getItem(key);
       return raw ? JSON.parse(raw) : initialValue;
-    } catch (_) {
+    } catch {
       return initialValue;
     }
   });
@@ -13,7 +13,7 @@ export function useSessionState(key, initialValue) {
   useEffect(() => {
     try {
       sessionStorage.setItem(key, JSON.stringify(value));
-    } catch (_) {}
+    } catch {}
   }, [key, value]);
 
   return [value, setValue];

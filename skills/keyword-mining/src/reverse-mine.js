@@ -1,6 +1,7 @@
 const { execSync } = require('child_process');
-const { DEFAULT_DATA_DIR, addSeed, loadSeeds, normalizeKeyword } = require('./seed-store');
+const { DEFAULT_DATA_DIR, addSeed, loadSeeds } = require('./seed-store');
 const { scoreKeyword } = require('./score-keyword');
+const { prepareSeedSuggestions } = require('./seed-suggestions');
 
 /**
  * 从已验证关键词反向挖掘 sycm 关联词，评分后自动入库优质新种子。
@@ -65,7 +66,6 @@ async function reverseMine(keyword, options = {}) {
 
   // 3) 加载已有种子池用于去重判断
   const existingSeeds = autoAddSeeds ? loadSeeds(dataDir) : [];
-  const existingNormSet = new Set(existingSeeds.map(s => normalizeKeyword(s.keyword)));
 
   // 4) 对每个关联词打分，标记 promising / addedAsSeed
   const relatedWords = [];
@@ -75,29 +75,6 @@ async function reverseMine(keyword, options = {}) {
     const kw = item.keyword || '';
     const scored = scoreKeyword(kw);
     const promising = scored.localScore >= 65;
-    let addedAsSeed = false;
-
-    // 自动添加种子：localScore >= 70 且不在已有种子池中
-    if (autoAddSeeds && scored.localScore >= 70 && addedCount < maxNewSeeds) {
-      const normKw = normalizeKeyword(kw);
-      if (!existingNormSet.has(normKw)) {
-        try {
-          addSeed(kw, {
-            type: 'expand',
-            source: 'reverse_mine',
-            reason: `反向挖掘来源: ${keyword} (搜索人气:${item.searchPopularity}, 供需比:${item.demandSupplyRatio})`,
-            priority: 6,
-            dataDir
-          });
-          addedAsSeed = true;
-          addedCount++;
-          existingNormSet.add(normKw); // 防止同批次重复添加
-        } catch (e) {
-          // addSeed 可能因违禁词等抛错，静默跳过
-        }
-      }
-    }
-
     relatedWords.push({
       keyword: kw,
       searchPopularity: item.searchPopularity || 0,
@@ -105,16 +82,50 @@ async function reverseMine(keyword, options = {}) {
       conversionRate: item.conversionRate || 0,
       score: scored.localScore,
       promising,
-      addedAsSeed,
+      addedAsSeed: false,
       reason: scored.reason,
       nextAction: scored.nextAction
     });
   }
 
+  if (autoAddSeeds && relatedWords.length > 0) {
+    const suggestions = prepareSeedSuggestions(
+      relatedWords.filter(item => item.score >= 70).map(item => ({
+        ...item,
+        source: 'reverse_mine',
+        category: '',
+        reason: `反向挖掘来源: ${keyword} (搜索人气:${item.searchPopularity}, 供需比:${item.demandSupplyRatio})`
+      })),
+      { existingSeeds, maxSuggestions: maxNewSeeds }
+    );
+    for (const suggestion of suggestions.accepted) {
+      try {
+        addSeed(suggestion.keyword, {
+          category: suggestion.category,
+          type: suggestion.type,
+          source: suggestion.source,
+          reason: suggestion.reason,
+          priority: suggestion.priority,
+          status: 'observing',
+          coreProduct: suggestion.coreProduct,
+          familyKey: suggestion.familyKey,
+          role: suggestion.role,
+          evidence: suggestion.evidence,
+          dataDir
+        });
+        const related = relatedWords.find(item => item.keyword === suggestion.sourceKeyword);
+        if (related) related.addedAsSeed = true;
+        addedCount += 1;
+      } catch (_) {
+        // 违禁词或并发去重失败时跳过，保留本次发现结果。
+      }
+    }
+  }
+
   return {
     ok: true,
     sourceKeyword: keyword,
-    totalCount: sycmResult.totalCount || sycmResult.data.length,
+    totalCount: sycmResult.totalCount || sycmItems.length,
     relatedWords,
     newSeedsAdded: addedCount
   };

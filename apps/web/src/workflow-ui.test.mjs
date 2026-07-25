@@ -642,6 +642,10 @@ test('buildWorkflowOperationRequest keeps production controls behind workflow en
     endpoint: '/api/workflows/runs/run-20260707-120000/retry-node',
     body: { nodeId: 'generate' }
   });
+  assert.deepEqual(buildWorkflowOperationRequest('run-20260707-120000', 'mine-more', 'verify'), {
+    endpoint: '/api/workflows/runs/run-20260707-120000/retry-node',
+    body: { nodeId: 'mine' }
+  });
   assert.deepEqual(buildWorkflowOperationRequest('run-20260707-120000', 'start-sycm-chrome', 'verify'), {
     endpoint: '/api/workflows/sycm/chrome/start',
     body: { runId: 'run-20260707-120000', nodeId: 'verify' }
@@ -672,6 +676,46 @@ test('getWorkflowBlockerActions offers Chrome startup for SYCM browser blockers'
     description: '打开带调试端口的 Chrome，登录生意参谋后可重新检测或重跑验真。'
   });
   assert.ok(actions.some((action) => action.action === 'retry-node'));
+});
+
+test('getWorkflowBlockerActions offers Chrome startup when SYCM reports no Chrome tab', () => {
+  const actions = getWorkflowBlockerActions('verify', {
+    status: 'blocked',
+    error: 'sycm access is cooling down: No Chrome tab found on port 9222',
+    nextRecommendedAction: {
+      action: 'resume-after-manual',
+      label: '我已处理，继续流程'
+    }
+  });
+
+  assert.deepEqual(actions.map((action) => action.action), ['start-sycm-chrome', 'retry-node']);
+  assert.equal(actions[0].label, '启动 Chrome');
+});
+
+test('getWorkflowBlockerActions hides stale blocker actions while node is retrying', () => {
+  assert.deepEqual(getWorkflowBlockerActions('verify', {
+    status: 'retrying',
+    blocker: 'browser_cdp_unavailable',
+    actionHint: 'Chrome CDP 不可用。'
+  }), []);
+});
+
+test('running verify node hides stale blocker and result counts from a previous attempt', () => {
+  const state = {
+    status: 'running',
+    blocker: 'verified_empty',
+    actionHint: '上一轮没有验真通过词。',
+    output: { verified: 0, rejected: 6 },
+    progress: { current: 2, total: 6, percent: 33, message: '生意参谋验真 2/6' }
+  };
+  const view = getWorkflowNodeViewModel('verify', state);
+  const rows = getWorkflowNodeDetailRows({ id: 'verify', data: state });
+
+  assert.equal(view.hasBlocker, false);
+  assert.equal(view.successLabel, '');
+  assert.equal(rows.some((row) => row.label === '阻塞原因'), false);
+  assert.equal(rows.some((row) => row.label === '处理建议'), false);
+  assert.equal(rows.some((row) => row.label === '成功数量'), false);
 });
 
 test('getWorkflowRunActiveNodeId prefers blocked or running workflow nodes', () => {

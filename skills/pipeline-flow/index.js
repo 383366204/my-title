@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { mineKeywords } = require('../keyword-mining');
+const { applySeedFeedback, mineKeywords } = require('../keyword-mining');
 const { generateTitlePipeline } = require('../title-gen');
 const { extractKeywords } = require('../title-gen/src/extract-core');
 const { searchAll } = require('../alibaba1688');
@@ -845,6 +845,7 @@ async function flowMine(options = {}) {
   const result = await mineKeywords({
     count: options.limit || options.mine || 50,
     maxSeeds: options.maxSeeds || 20,
+    maxObservingSeeds: options.maxObservingSeeds || 3,
     maxPerSeed: options.maxPerSeed || 30,
     outputMaxPerSeed: options.outputMaxPerSeed || 5,
     outputMaxPerCategory: options.outputMaxPerCategory || 20,
@@ -862,6 +863,9 @@ async function flowMine(options = {}) {
       ...(Array.isArray(options.excludeKeywords) ? options.excludeKeywords : [])
     ],
     recordSeen: options.recordSeen === true,
+    recordSeedFeedback: options.recordSeedFeedback === true,
+    autoReplenishSeeds: options.autoReplenishSeeds === true,
+    maxNewSeeds: options.maxNewSeeds || 3,
     seenTtlDays: options.seenTtlDays || 30,
     onProgress: options.onProgress
   });
@@ -1136,6 +1140,21 @@ async function flowVerify(options = {}) {
     const decision = row.keywordOpportunity && row.keywordOpportunity.decision;
     return decision && decision !== 'continue';
   });
+  if (options.recordSeedFeedback === true && verified.length > 0) {
+    const outcomes = new Map();
+    for (const row of verified) {
+      const root = row.root || row.seed || row.coreProduct || '';
+      if (!root) continue;
+      const current = outcomes.get(root) || { root, verified: 0, generationEligible: 0 };
+      current.verified += 1;
+      if (isGenerationEligibleKeyword(row)) current.generationEligible += 1;
+      outcomes.set(root, current);
+    }
+    applySeedFeedback([...outcomes.values()], {
+      dataDir: options.keywordDataDir || path.join(process.cwd(), 'data', 'keyword-mining'),
+      eventType: 'verification-outcome'
+    });
+  }
   const manualStatuses = ['login_required', 'slider_required', 'sycm_feature_required'];
   const hasManualAction = rejected.some(function(row) {
     return manualStatuses.includes(row.status);
@@ -1257,6 +1276,9 @@ async function flowSelectProducts(options = {}) {
           status: 'selected',
           keyword: item.keyword,
           selectedKeyword: item.keyword,
+          seed: item.seed || '',
+          root: item.root || item.seed || item.coreProduct || '',
+          familyKey: item.familyKey || item.coreProduct || '',
           coreWord,
           modifiers,
           keywordOpportunity: item.keywordOpportunity,
@@ -1295,6 +1317,18 @@ async function flowSelectProducts(options = {}) {
 
   appendJsonl(run.files.selectedProducts, selectedRows);
   const selectedCount = selectedRows.filter(row => row.status === 'selected').length;
+  if (options.recordSeedFeedback === true && selectedCount > 0) {
+    const selectedByRoot = new Map();
+    for (const row of selectedRows.filter(item => item.status === 'selected')) {
+      const root = row.root || row.seed || '';
+      if (!root) continue;
+      selectedByRoot.set(root, (selectedByRoot.get(root) || 0) + 1);
+    }
+    applySeedFeedback([...selectedByRoot].map(([root, selectedProducts]) => ({ root, selectedProducts })), {
+      dataDir: options.keywordDataDir || path.join(process.cwd(), 'data', 'keyword-mining'),
+      eventType: 'product-selection-outcome'
+    });
+  }
   run.status = selectedCount > 0 ? 'products_selected' : 'select_failed';
   run.counts.selectedProducts = selectedCount;
   writeRun(runDir, run);
@@ -1365,6 +1399,9 @@ async function flowGenerate(options = {}) {
           status: 'generated',
           keyword: item.keyword,
           selectedKeyword: item.keyword,
+          seed: item.seed || selectedProduct.seed || '',
+          root: item.root || selectedProduct.root || item.seed || item.coreProduct || '',
+          familyKey: item.familyKey || selectedProduct.familyKey || item.coreProduct || '',
           keywordOpportunity: item.keywordOpportunity || selectedProduct.keywordOpportunity,
           sycmScore: item.sycmScore || selectedProduct.sycmScore,
           sycmData: item.sycmData || [],
@@ -1423,6 +1460,18 @@ async function flowGenerate(options = {}) {
     })), { runId: run.runId, dataDir: resolveOpportunityDir(options) });
   run.status = generatedRows.some(row => row.status === 'generated') ? 'generated' : 'generate_failed';
   run.counts.generatedProducts = generatedRows.filter(row => row.status === 'generated').length;
+  if (options.recordSeedFeedback === true && run.counts.generatedProducts > 0) {
+    const generatedByRoot = new Map();
+    for (const row of generatedRows.filter(item => item.status === 'generated')) {
+      const root = row.root || row.seed || '';
+      if (!root) continue;
+      generatedByRoot.set(root, (generatedByRoot.get(root) || 0) + 1);
+    }
+    applySeedFeedback([...generatedByRoot].map(([root, generatedTitles]) => ({ root, generatedTitles })), {
+      dataDir: options.keywordDataDir || path.join(process.cwd(), 'data', 'keyword-mining'),
+      eventType: 'title-generation-outcome'
+    });
+  }
   writeRun(runDir, run);
   return flowResponse({
     ok: true,

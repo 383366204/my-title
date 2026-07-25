@@ -150,12 +150,14 @@ function createDefaultStepFns({ dataDir, runId, params, mode = 'daily' }) {
         rootCooldownDays: params.rootCooldownDays || 7,
         excludeSeen: params.excludeSeen !== false,
         recordSeen: params.recordSeen !== false,
+        recordSeedFeedback: params.recordSeedFeedback === true,
+        autoReplenishSeeds: params.autoReplenishSeeds === true,
         onProgress: reportProgress
       });
     },
     verify: async ({ reportProgress }) => {
       reportProgress({ current: 0, total: verifyLimit, message: '开始验真' });
-      return flowVerify({ ...params, dataDir, runId, limit: verifyLimit, onProgress: reportProgress });
+      return flowVerify({ ...params, dataDir, runId, limit: verifyLimit, recordSeedFeedback: params.recordSeedFeedback === true, onProgress: reportProgress });
     },
     keywordReview: async ({ reportProgress }) => {
       reportProgress({ current: 0, total: mineLimit, message: '等待人工筛词' });
@@ -168,7 +170,7 @@ function createDefaultStepFns({ dataDir, runId, params, mode = 'daily' }) {
     },
     select: async ({ reportProgress }) => {
       reportProgress({ current: 0, total: selectLimit, message: '开始货源选品' });
-      const result = await flowSelectProducts({ ...params, dataDir, runId, limit: selectLimit, manualMode });
+      const result = await flowSelectProducts({ ...params, dataDir, runId, limit: selectLimit, manualMode, recordSeedFeedback: params.recordSeedFeedback === true });
       if (manualMode && result.selected?.length > 0) {
         return { ...result, status: 'awaiting_product_review', blockers: ['product_review_required'], userMessage: '1688 货源已加载，请人工勾选或手动添加商品。' };
       }
@@ -176,7 +178,7 @@ function createDefaultStepFns({ dataDir, runId, params, mode = 'daily' }) {
     },
     generate: async ({ reportProgress }) => {
       reportProgress({ current: 0, total: generateLimit, message: '开始标题生成' });
-      return flowGenerate({ ...params, dataDir, runId, limit: generateLimit, manualMode });
+      return flowGenerate({ ...params, dataDir, runId, limit: generateLimit, manualMode, recordSeedFeedback: params.recordSeedFeedback === true });
     },
     export: async ({ reportProgress }) => {
       reportProgress({ current: 0, total: exportLimit, message: '开始导出清单' });

@@ -240,17 +240,6 @@
     "reason": "送礼是高转化场景修饰词"
   },
   {
-    "keyword": "纯银",
-    "category": "饰品",
-    "priority": 10,
-    "source": "manual",
-    "status": "paused",
-    "successCount": 0,
-    "failCount": 0,
-    "reason": "材质词可扩到手链、项链、戒指",
-    "type": "direct"
-  },
-  {
     "keyword": "端午香囊",
     "category": "节日礼品",
     "priority": 9,
@@ -728,8 +717,18 @@
     "source": "manual",
     "type": "expand",
     "status": "active",
-    "successCount": 0,
+    "successCount": 1,
     "failCount": 0,
-    "reason": ""
+    "reason": "",
+    "stats": {
+      "runs": 1,
+      "candidates": 2,
+      "verified": 1,
+      "generationEligible": 1,
+      "selectedProducts": 0,
+      "generatedTitles": 0,
+      "failures": 0
+    },
+    "lastUsedAt": "2026-07-25T06:47:19.320Z"
   }
 ]

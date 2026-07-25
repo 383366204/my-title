@@ -273,6 +273,10 @@ function sanitizeWorkflowParams(mode, raw = {}) {
       rootMode: String(raw.rootMode || 'auto') === 'seed' ? 'seed' : 'auto',
       rootLimit: clampInt(raw.rootLimit, 5, 1, 20),
       rootCooldownDays: clampInt(raw.rootCooldownDays, 7, 0, 60),
+      maxObservingSeeds: clampInt(raw.maxObservingSeeds, 3, 0, 10),
+      maxNewSeeds: clampInt(raw.maxNewSeeds, 3, 0, 10),
+      autoReplenishSeeds: sanitizeBool(raw.autoReplenishSeeds, true),
+      recordSeedFeedback: sanitizeBool(raw.recordSeedFeedback, true),
       verify: clampInt(raw.verify, 20, 1, 200),
       generate: clampInt(raw.generate, 10, 1, 100),
       export: clampInt(raw.export, 20, 1, 100),
@@ -448,7 +452,7 @@ function resolveProductionWorkflowLaunch(body = {}) {
     ...(body.params || {}),
     ...(body.options || {})
   };
-  for (const key of ['keyword', 'keywords', 'mine', 'source', 'rootMode', 'rootLimit', 'rootCooldownDays', 'verify', 'generate', 'export', 'productsPerKeyword', 'length', 'port', 'pages', 'minBlueRows', 'fallbackHot', 'autoApproveKeywords', 'autoExpandVerify', 'verifyReserve', 'autoAllowReviewKeywords', 'reviewKeywordLimit']) {
+  for (const key of ['keyword', 'keywords', 'mine', 'source', 'rootMode', 'rootLimit', 'rootCooldownDays', 'maxObservingSeeds', 'maxNewSeeds', 'autoReplenishSeeds', 'recordSeedFeedback', 'verify', 'generate', 'export', 'productsPerKeyword', 'length', 'port', 'pages', 'minBlueRows', 'fallbackHot', 'autoApproveKeywords', 'autoExpandVerify', 'verifyReserve', 'autoAllowReviewKeywords', 'reviewKeywordLimit']) {
     if (Object.prototype.hasOwnProperty.call(body, key)) params[key] = body[key];
   }
 
@@ -601,7 +605,7 @@ function sycmFailureIntervention(row) {
   const status = String(row.status || row.manualAction?.status || 'transient_failure');
   const error = String(row.error || row.manualAction?.error || '');
   const userMessage = String(row.manualAction?.userMessage || '').trim();
-  const cdpUnavailable = /ECONNREFUSED|127\.0\.0\.1:9222|cdp|devtools/i.test(error);
+  const cdpUnavailable = /ECONNREFUSED|127\.0\.0\.1:9222|no chrome tab found|chrome[^\n]*(?:tab|debug)|cdp|devtools/i.test(error);
 
   if (cdpUnavailable) {
     return {
@@ -663,9 +667,11 @@ function summaryInterventionForNode(summary, nodeId) {
     }
   }
   if (nodeId === WORKFLOW_NODE_IDS.verify) {
+    const sycmFailure = sycmFailureIntervention(firstSycmFailure(summary));
+    if (sycmFailure && ['verified_empty', 'manual_action_required', 'verified_partial_manual_required'].includes(status)) {
+      return sycmFailure;
+    }
     if (status === 'verified_empty') {
-      const sycmFailure = sycmFailureIntervention(firstSycmFailure(summary));
-      if (sycmFailure) return sycmFailure;
       return {
         blocker: 'verified_empty',
         actionHint: '生意参谋验真没有通过词。请更换候选词、降低蓝海阈值，或重新挖词后再继续。',

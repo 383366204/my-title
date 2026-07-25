@@ -1,12 +1,6 @@
 const { normalizeKeyword } = require('./seed-store');
-const { configuredProductWords, mergeFacets, normalizeSynonyms } = require('./config-loader');
-
-const DEFAULT_PRODUCT_WORDS = [
-  '手机壳', '灯笼', '收纳盒', '置物架', '钥匙扣', '小夜灯',
-  '戒指', '项链', '手链', '手绳', '耳环', '耳钉', '吊坠', '发夹', '头绳',
-  '玩具', '香包', '水枪', '飞盘', '冰袖', '弹力带', '防晒面罩', '泡沫轴', '瑜伽垫',
-  '雨伞', '遮阳帽'
-];
+const { mergeFacets, normalizeSynonyms } = require('./config-loader');
+const { BASE_PRODUCT_WORDS, findProductWord } = require('./product-words');
 
 const DEFAULT_FACETS = {
   crowd: ['女', '男士', '儿童', '宝宝', '学生', '情侣', '宝妈', '上班族', '租房党', '学生党'],
@@ -28,8 +22,7 @@ function includesAny(keyword, words) {
 }
 
 function findCoreProduct(keyword, options = {}) {
-  return configuredProductWords(DEFAULT_PRODUCT_WORDS, { ...options, maxSeeds: 0 })
-    .find(word => keyword.includes(normalizeSynonyms(word))) || '';
+  return findProductWord(keyword, options);
 }
 
 function findFacetHits(keyword, options = {}) {
@@ -84,4 +77,4 @@ function classifySeed(seed, options = {}) {
   return { keyword, category, role: 'product', coreProduct, facetHits, facetWords, reason: '具体商品词' };
 }
 
-module.exports = { classifySeed, DEFAULT_PRODUCT_WORDS, DEFAULT_FACETS };
+module.exports = { classifySeed, DEFAULT_PRODUCT_WORDS: BASE_PRODUCT_WORDS, DEFAULT_FACETS };

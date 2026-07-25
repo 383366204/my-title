@@ -702,6 +702,45 @@ seedCommand
   .option('--data-dir <path>', '种子池数据目录（测试/调试用）')
   .action(listSeedCommand);
 
+seedCommand
+  .command('audit')
+  .description('只读检查种子质量、重复商品族和状态迁移建议')
+  .option('--json', '纯 JSON 输出模式')
+  .option('--data-dir <path>', '种子池数据目录（测试/调试用）')
+  .action(function(options, command) {
+    const commandObj = command || (options && typeof options.opts === 'function' ? options : null);
+    const local = {
+      ...(options && typeof options === 'object' && typeof options.opts !== 'function' ? options : {}),
+      ...(commandObj ? commandObj.optsWithGlobals() : {})
+    };
+    const root = commandObj && commandObj.parent && commandObj.parent.parent ? commandObj.parent.parent.opts() : {};
+    const jsonMode = !!local.json || !!root.json;
+    try {
+      const { auditSeedPool, listSeeds } = require('../skills/keyword-mining');
+      const audit = auditSeedPool(listSeeds({
+        includePaused: true,
+        dataDir: local.dataDir || root.dataDir
+      }));
+      if (jsonMode) {
+        writeAsciiJson({ ok: true, audit });
+        return;
+      }
+      const summary = audit.summary;
+      console.log('\n种子池健康检查（只读）');
+      console.log('='.repeat(80));
+      console.log(`总数 ${summary.total} | 可执行 ${summary.actionable} | 场景词 ${summary.contextOnly} | 未识别 ${summary.unrecognized}`);
+      console.log(`重复商品族 ${summary.repeatedFamilyGroups} | 建议调整 ${summary.migrationChanges}`);
+      audit.migration.filter(item => item.needsChange).forEach((item, index) => {
+        console.log(`${index + 1}. ${item.keyword} | 商品族 ${item.familyKey || '-'} | 质量 ${item.qualityScore} | ${item.currentStatus} -> ${item.recommendedStatus}`);
+      });
+      console.log();
+    } catch (error) {
+      if (jsonMode) writeAsciiJson({ ok: false, error: error.message });
+      else console.error('\n错误:', error.message);
+      process.exit(1);
+    }
+  });
+
 program
   .command('seed-add <keyword>')
   .description('添加一个蓝海选词种子')

@@ -32,20 +32,33 @@ function extractShortRoot(seed) {
 function selectShortRoots(seeds, { dataDir, limit = 5, cooldownDays = 7, includeRecentlyUsed = false } = {}) {
   const history = readHistory(dataDir);
   const cutoff = Date.now() - Number(cooldownDays || 7) * 86400000;
+  const latestUse = new Map();
+  for (const row of history) {
+    const root = normalizeKeyword(row.root);
+    const time = Date.parse(row.checkedAt || row.date || '');
+    if (!root || !Number.isFinite(time)) continue;
+    latestUse.set(root, Math.max(latestUse.get(root) || 0, time));
+  }
   const recent = new Set(history.filter(row => {
     const time = Date.parse(row.checkedAt || row.date || '');
     return includeRecentlyUsed || !Number.isFinite(time) || time >= cutoff;
   }).map(row => normalizeKeyword(row.root)).filter(Boolean));
-  const selected = [];
+  const available = [];
   const seen = new Set();
   for (const seed of seeds || []) {
     const item = extractShortRoot(seed);
-    if (!item || seen.has(item.root) || recent.has(item.root)) continue;
+    if (!item || seen.has(item.root)) continue;
     seen.add(item.root);
-    selected.push(item);
-    if (selected.length >= Number(limit || 5)) break;
+    available.push({ ...item, lastUsedAt: latestUse.get(item.root) ? new Date(latestUse.get(item.root)).toISOString() : null });
   }
-  return selected;
+  const selected = available.filter(item => !recent.has(item.root)).slice(0, Number(limit || 5));
+  if (selected.length > 0 || includeRecentlyUsed || available.length === 0) return selected;
+
+  // 所有词根都在冷却期时，选择最久未使用的一组，避免退回固定的前几个种子。
+  return available
+    .sort((a, b) => (latestUse.get(a.root) || 0) - (latestUse.get(b.root) || 0))
+    .slice(0, Number(limit || 5))
+    .map(item => ({ ...item, cooldownFallback: true }));
 }
 
 function recordRootQueries(roots, { dataDir, result = 'queried' } = {}) {
@@ -58,7 +71,9 @@ function recordRootQueries(roots, { dataDir, result = 'queried' } = {}) {
       root: root.root || root,
       originalKeyword: root.originalKeyword || '',
       checkedAt,
-      result
+      result: root.result || result,
+      candidateCount: Number(root.candidateCount || 0),
+      error: root.error || ''
     }) + '\n', 'utf8');
   }
 }

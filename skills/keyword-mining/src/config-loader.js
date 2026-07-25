@@ -42,6 +42,7 @@ function loadKeywordConfig(options = {}) {
 }
 
 function seedProductWords({ dataDir = DEFAULT_DATA_DIR, maxSeeds = 200 } = {}) {
+  if (Number(maxSeeds) <= 0) return [];
   try {
     return listSeeds({ dataDir, includePaused: false })
       .slice(0, maxSeeds)
