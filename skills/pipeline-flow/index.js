@@ -9,6 +9,7 @@ const { checkBannedWords } = require('../../core/banned-words');
 const { withAgentResponseFields } = require('../../core/agent-response');
 const { scoreKeywordOpportunity, scoreProductOpportunity } = require('./src/opportunity-scoring');
 const { appendOpportunity, summarizeOpportunities } = require('./src/opportunity-store');
+const { getLLMProviderInfo } = require('../../core/llm');
 
 const DEFAULT_FLOW_DIR = path.join(process.cwd(), 'data', 'pipeline');
 const DEFAULT_RELAXED_FILTER_CONDITIONS = {
@@ -1368,6 +1369,11 @@ async function flowGenerate(options = {}) {
   const limit = Number(options.limit || options.generate || eligible.length || 0);
   const selected = eligible.slice(0, limit);
   const generator = options.generator || generateTitlePipeline;
+  const llmInfo = getLLMProviderInfo({ provider: options.llmProvider });
+  const configuredTitleRunTimeoutMs = Number(options.titleRunTimeoutMs);
+  const titleRunTimeoutMs = Number.isFinite(configuredTitleRunTimeoutMs) && configuredTitleRunTimeoutMs > 0
+    ? Math.max(30000, configuredTitleRunTimeoutMs)
+    : llmInfo.recommendedRunTimeoutMs;
   const generatedRows = [];
 
   fs.writeFileSync(run.files.generatedProducts, '', 'utf8');
@@ -1385,6 +1391,7 @@ async function flowGenerate(options = {}) {
         coreWord: item.coreWord || '',
         modifiers: item.modifiers || null,
         productLimit: externalProducts.length || undefined,
+        runTimeoutMs: titleRunTimeoutMs,
         searchProducts: options.searchProducts || (({ coreWord, blueOceanWord, modifiers, semanticGroups }) =>
           searchAll(coreWord, blueOceanWord, modifiers, semanticGroups))
       });
@@ -1436,6 +1443,12 @@ async function flowGenerate(options = {}) {
         status: 'generate_failed',
         keyword: item.keyword,
         error: error && error.message ? error.message : String(error),
+        code: error && error.code ? error.code : '',
+        source: error && error.source ? error.source : '',
+        retryWith: error && error.retryWith ? error.retryWith : null,
+        llmProvider: llmInfo.provider,
+        llmProviderLabel: llmInfo.label,
+        llmModel: llmInfo.model,
         generatedAt: new Date().toISOString()
       });
     }

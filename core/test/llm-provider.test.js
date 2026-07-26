@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 
 const {
   createLLMClient,
+  getLLMProviderInfo,
   normalizeProvider
 } = require('../llm');
 
@@ -78,6 +79,16 @@ describe('LLM provider factory', () => {
     assert.equal(client.apiBase, 'https://api.minimaxi.com/v1');
     assert.equal(client.model, 'MiniMax-test-model');
     assert.equal(client._buildChatPayload({ messages: [], temperature: 0.1 }).reasoning_split, true);
+
+    const info = getLLMProviderInfo();
+    assert.deepEqual(info, {
+      provider: 'minimax',
+      label: 'MiniMax',
+      model: 'MiniMax-test-model',
+      apiBase: 'https://api.minimaxi.com/v1',
+      configured: true,
+      recommendedRunTimeoutMs: 180000
+    });
   });
 
   it('supports a generic OpenAI-compatible provider', () => {

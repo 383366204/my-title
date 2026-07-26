@@ -262,9 +262,9 @@ export function WorkflowRightSidebar({
             {/* 标题生成器节点参数 */}
             {!isViewingRun && selectedNode.type === 'title-generator' && (
               <div className="space-y-4 border-t border-slate-800/80 pt-4 text-xs text-slate-400 leading-relaxed">
-                <div>此节点将接收上一节点的关键词挖掘结果，合并淘宝与1688竞品数据，通过 GLM 大模型自动编排生成最符合 SEO 权重的高点击率标题。</div>
+                <div>此节点将接收上一节点的关键词与货源结果，合并淘宝与 1688 竞品数据，通过当前配置的模型服务（如 MiniMax）生成符合 SEO 规则的标题。</div>
                 <div className="p-3 bg-slate-950/40 rounded border border-emerald-950/40 text-emerald-400/90 text-[11px]">
-                  💡 <b>温馨提示：</b>该步骤运行包含 1688 淘系商品抓取与 LLM 管道融合，有完整的 API key 时大约需 15 秒完成；若无 API 则自动秒级降级为高仿模拟数据，确保原型运行成功。
+                  <b>运行提示：</b>该步骤包含商品数据处理和模型批量生成，耗时会随商品数量与模型响应速度变化。失败时可在节点上查看真实原因并重跑。
                 </div>
               </div>
             )}

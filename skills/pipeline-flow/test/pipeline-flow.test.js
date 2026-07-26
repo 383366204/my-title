@@ -514,6 +514,39 @@ describe('pipeline-flow', () => {
     assert.strictEqual(generated.generated.filter(row => row.status === 'generated').length, 12);
   });
 
+  test('flowGenerate uses the MiniMax timeout and persists diagnostic metadata', async () => {
+    const dataDir = tempDataDir();
+    const mined = await flowMine({ dataDir, limit: 1 });
+    fs.writeFileSync(path.join(mined.runDir, 'verified-keywords.jsonl'), JSON.stringify({
+      keyword: '陶瓷摆件',
+      status: 'verified',
+      sycmScore: { passed: true }
+    }) + '\n', 'utf8');
+    let receivedTimeout = 0;
+
+    const generated = await flowGenerate({
+      dataDir,
+      runId: mined.runId,
+      limit: 1,
+      llmProvider: 'minimax',
+      generator: async (_keyword, options) => {
+        receivedTimeout = options.runTimeoutMs;
+        const error = new Error('标题生成超时(180s)，请简化关键词或减少数量');
+        error.code = 'title_generation_timeout';
+        error.source = 'title-gen';
+        error.retryWith = { count: 3, runTimeoutMs: 180000 };
+        throw error;
+      }
+    });
+
+    assert.strictEqual(receivedTimeout, 180000);
+    assert.strictEqual(generated.status, 'generate_failed');
+    assert.strictEqual(generated.generated[0].llmProvider, 'minimax');
+    assert.strictEqual(generated.generated[0].llmModel, 'MiniMax-M2.7');
+    assert.strictEqual(generated.generated[0].code, 'title_generation_timeout');
+    assert.deepStrictEqual(generated.generated[0].retryWith, { count: 3, runTimeoutMs: 180000 });
+  });
+
   test('flowGenerate skips verified keywords that fail keyword opportunity scoring by default', async () => {
     const dataDir = tempDataDir();
     const mined = await flowMine({ dataDir, limit: 1 });

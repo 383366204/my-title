@@ -733,6 +733,30 @@ describe('workflow pipeline adapter', () => {
     }
   });
 
+  it('shows the actual MiniMax title-generation failure instead of a stale GLM hint', () => {
+    const run = pipelineSummaryToWorkflowRun({
+      runId: 'minimax_generate_failed',
+      status: 'generate_failed',
+      stage: 'generated',
+      counts: { generatedProducts: 0 },
+      files: {},
+      previews: {
+        generatedProducts: [{
+          status: 'generate_failed',
+          error: '标题生成超时(120s)，请简化关键词或减少数量',
+          code: 'title_generation_timeout',
+          llmProvider: 'minimax',
+          llmModel: 'MiniMax-M2.7'
+        }]
+      }
+    });
+
+    assert.match(run.nodeStates.generate.actionHint, /MiniMax（MiniMax-M2\.7）/);
+    assert.match(run.nodeStates.generate.actionHint, /标题生成超时\(120s\)/);
+    assert.doesNotMatch(run.nodeStates.generate.actionHint, /检查 GLM 配置/);
+    assert.equal(run.nodeStates.generate.nextRecommendedAction.action, 'retry-node');
+  });
+
   it('lists, gets, and reads workflow node artifacts from pipeline runs', () => {
     const dataDir = tempPipelineDir();
     const runId = 'artifact_run';

@@ -12,6 +12,7 @@ const {
 const {
   readRuntimeState
 } = require('../../skills/pipeline-flow/runtime/store');
+const { getLLMProviderInfo } = require('../llm');
 
 const WORKFLOW_NODE_IDS = {
   start: 'start',
@@ -717,9 +718,32 @@ function summaryInterventionForNode(summary, nodeId) {
     }
   }
   if (nodeId === WORKFLOW_NODE_IDS.generate && status === 'generate_failed') {
+    const failure = (summary.previews?.generatedProducts || [])
+      .find(row => row && row.status === 'generate_failed');
+    const llmInfo = getLLMProviderInfo({ provider: failure?.llmProvider });
+    const llmModel = failure?.llmModel || llmInfo.model;
+    const providerLabel = llmModel
+      ? `${llmInfo.label}（${llmModel}）`
+      : llmInfo.label;
+    const reason = String(failure?.error || '').trim();
+    const isTimeout = failure?.code === 'title_generation_timeout' || /标题生成超时/.test(reason);
+    const timeoutAdvice = llmInfo.provider === 'minimax'
+      ? '模型配置已识别，请重跑标题生成；系统将使用更长的 MiniMax 生成时限。'
+      : '模型配置已识别，请减少单次商品数量或调高标题生成时限后重跑。';
     return {
       blocker: 'generate_failed',
-      actionHint: '标题生成失败。请检查 GLM 配置、关键词数据和运行日志后重试。'
+      actionHint: reason
+        ? `标题生成失败。当前使用 ${providerLabel}。失败原因：${reason}${isTimeout ? `。${timeoutAdvice}` : ''}`
+        : `标题生成失败。当前使用 ${providerLabel}。请检查当前模型服务配置、关键词数据和运行日志后重试。`,
+      llmProvider: llmInfo.provider,
+      llmModel,
+      nextRecommendedAction: {
+        action: 'retry-node',
+        label: '重跑标题生成',
+        description: isTimeout
+          ? '使用更长的标题生成时限重新运行当前节点。'
+          : '保留当前产物并重新运行标题生成节点。'
+      }
     };
   }
   if (nodeId === WORKFLOW_NODE_IDS.select && status === 'select_failed') {
