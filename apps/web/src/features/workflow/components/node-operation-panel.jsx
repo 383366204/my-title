@@ -107,7 +107,9 @@ export const NodeOperationPanel = ({
   onDistributionJobChange
 }) => {
   const kind = getWorkflowNodePanelKind(selectedNode?.id);
-  const copy = NODE_PANEL_COPY[kind];
+  const copy = kind === 'product-select' && manualMode
+    ? { title: '商品资料获取结果', description: '逐条查看1688商品标题、主图、类目和获取失败原因。' }
+    : NODE_PANEL_COPY[kind];
   const resultHint = nodeResultHint(kind);
   if (!copy) return <ArtifactPanel state={artifactState} />;
 
@@ -182,6 +184,7 @@ export const NodeOperationPanel = ({
           onConfirm={onConfirmProductReview}
         />
       )}
+      {kind === 'product-select' && manualMode && <ArtifactPanel state={artifactState} />}
       {kind === 'distribution-export' && (
         <DistributionExportPanel
           artifactState={artifactState}

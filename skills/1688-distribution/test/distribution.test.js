@@ -200,6 +200,25 @@ describe('1688 distribution input handling', () => {
     assert.equal(result.perOfferId['657358172481'].status, 'skipped');
   });
 
+  it('does not attribute the next page toolbar status to the previous offer', () => {
+    const body = [
+      '上家ID：640322388000',
+      '店铺：测试店铺',
+      '复制中',
+      '取消复制',
+      '--- PAGE BREAK ---',
+      '复制中',
+      '复制成功',
+      '复制失败',
+      '跳过复制',
+      '上家ID：657358172481',
+      '复制成功'
+    ].join('\n');
+
+    assert.equal(inferOfferCopyStatus(body, '640322388000'), 'copying');
+    assert.equal(inferOfferCopyStatus(body, '657358172481'), 'success');
+  });
+
   it('confirms current copy log without submitting', async () => {
     const client = {
       async evaluate(expression) {

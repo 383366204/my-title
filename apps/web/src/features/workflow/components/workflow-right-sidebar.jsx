@@ -47,6 +47,7 @@ export function WorkflowRightSidebar({
   copyText,
   currentRunId,
   isViewingRun,
+  onOpenManualInput,
   onToggle,
   operationProps,
   selectedNode,
@@ -54,6 +55,7 @@ export function WorkflowRightSidebar({
   updateDistributionNodeJob,
   updateNodeData
 }) {
+  const distributionPreview = getWorkflowNodePanelKind(selectedNode?.id) === 'distribution-export';
   return (
 <div className={`w-[420px] max-w-[44vw] border-l border-slate-800 bg-slate-900/40 flex flex-col h-full shrink-0 workflow-right-sidebar ${collapsed ? 'is-collapsed' : ''}`}>
         <button
@@ -105,11 +107,11 @@ export function WorkflowRightSidebar({
 
             {artifactPreviewOpen && (
               <div className="workflow-modal-backdrop" role="presentation" onClick={() => setArtifactPreviewOpen(false)}>
-                <section className="workflow-modal artifact-preview-modal" role="dialog" aria-modal="true" aria-label="节点产物预览" onClick={(event) => event.stopPropagation()}>
+                <section className={`workflow-modal artifact-preview-modal ${distributionPreview ? 'is-distribution-preview' : ''}`} role="dialog" aria-modal="true" aria-label={distributionPreview ? '导出清单预览' : '节点产物预览'} onClick={(event) => event.stopPropagation()}>
                   <div className="workflow-modal-head">
                     <div>
-                      <strong>{selectedNode.data?.label || selectedNode.id}产物</strong>
-                      <span>已转换成可读视图；原始文件位置仍保留在上方节点详情中。</span>
+                      <strong>{distributionPreview ? '导出清单预览' : `${selectedNode.data?.label || selectedNode.id}产物`}</strong>
+                      <span>{distributionPreview ? '核对标题和类目，可复制铺货内容进行人工铺货，也可直接启动自动铺货。' : '已转换成可读视图；原始文件位置仍保留在上方节点详情中。'}</span>
                     </div>
                     <button type="button" className="workflow-modal-close" onClick={() => setArtifactPreviewOpen(false)}>×</button>
                   </div>
@@ -122,6 +124,7 @@ export function WorkflowRightSidebar({
                           currentRunId={currentRunId}
                           sourceNodeId={selectedNode?.id}
                           onDistributionJobChange={updateDistributionNodeJob}
+                          directPreview
                         />
                       </Suspense>
                     ) : (
@@ -163,14 +166,14 @@ export function WorkflowRightSidebar({
                   {activeTemplateView.modeHint}
                 </div>
                 <div className="border-t border-slate-800/80 pt-4">
-                  <label className="text-xs font-bold text-slate-300 block mb-2">人工输入关键词</label>
-                  <textarea
-                    value={selectedNode.data.keywords || ''}
-                    onChange={(e) => updateNodeData(selectedNode.id, 'keywords', e.target.value)}
-                    className="w-full min-h-28 p-2.5 rounded-lg border border-slate-700 bg-slate-950 focus:border-blue-500 focus:outline-none text-slate-100 text-sm transition-all resize-y"
-                    placeholder="每行一个关键词，也可以用逗号分隔"
-                  />
-                  <p className="text-[10px] text-slate-500 mt-1">启动后先人工筛词，再检查 1688 货源并勾选或手动添加商品。</p>
+                  <div className="manual-input-summary">
+                    <strong>{selectedNode.data.items?.length || 0} 个商品已准备</strong>
+                    <span>{selectedNode.data.defaultKeyword ? `默认关键词：${selectedNode.data.defaultKeyword}` : '每个商品需要绑定关键词'}</span>
+                  </div>
+                  <button type="button" className="node-primary-button" onClick={onOpenManualInput}>
+                    录入关键词和1688链接
+                  </button>
+                  <p className="text-[10px] text-slate-500 mt-2">启动后直接获取商品资料，不再经过人工筛词或默认货源搜索。</p>
                 </div>
               </div>
             )}

@@ -137,6 +137,30 @@ describe('pipeline runtime store', () => {
   });
 });
 describe('pipeline runtime runner', () => {
+  it('runs manual direct-input mode from start to product enrichment without keyword review', async () => {
+    const dataDir = tempDataDir();
+    const runId = 'manual_runtime_v2';
+    const result = await runPipelineRuntime({
+      dataDir,
+      runId,
+      mode: 'manual',
+      steps: ['start', 'select'],
+      params: {
+        items: [{ keyword: '法式连衣裙', url: 'https://detail.1688.com/offer/123456.html' }],
+        detailFetcher: async () => ({
+          model: { bizData: { title: '法式碎花收腰连衣裙夏季女装', categoryName: '女装 > 连衣裙' } }
+        })
+      }
+    });
+
+    const runtime = readRuntimeState({ dataDir, runId });
+    assert.equal(result.status, 'products_selected');
+    assert.deepEqual(runtime.steps, ['start', 'select']);
+    assert.equal(runtime.progress.start.status, 'completed');
+    assert.equal(runtime.progress.select.status, 'completed');
+    assert.equal(runtime.progress.keywordReview, undefined);
+  });
+
   it('runs steps in order and writes progress events', async () => {
     const dataDir = tempDataDir();
     const calls = [];

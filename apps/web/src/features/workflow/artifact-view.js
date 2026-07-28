@@ -132,6 +132,8 @@ function businessRowMeta(row = {}, nodeId = '') {
     if (row.sourceTitle || row.productTitle || row.product?.['链接原标题']) {
       parts.push(String(row.sourceTitle || row.productTitle || row.product?.['链接原标题']));
     }
+    if (row.enrichStatus === 'failed' || row.status === 'enrich_failed') parts.push('获取失败');
+    if (row.enrichStatus === 'completed') parts.push('资料已获取');
   } else if (nodeId === 'generate') {
     const keyword = selectedKeyword(row);
     if (keyword) parts.push(`选词 ${keyword}`);
@@ -173,6 +175,9 @@ function businessMetrics(row = {}, nodeId = '') {
 }
 
 function businessDescription(row = {}, nodeId = '') {
+  if (nodeId === 'select' && row.enrichError) {
+    return `获取失败：${row.enrichError}`;
+  }
   if (nodeId === 'select' && row.productOpportunity) {
     const opportunity = row.productOpportunity || {};
     const reasons = Array.isArray(opportunity.reasons)
@@ -246,16 +251,25 @@ function parseDistributionBatch(text = '') {
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line) => {
-      const parts = line.split(/\$\$|\t|,/).map((part) => part.trim()).filter(Boolean);
-      const url = parts.find((part) => /^https?:\/\//.test(part)) || '';
-      const title = parts.find((part) => part && part !== url && !/^\d+(\.\d+)?$/.test(part)) || line;
-      const price = parts.find((part) => /^\d+(\.\d+)?$/.test(part)) || '';
+      const distributionParts = line.includes('$$')
+        ? line.split('$$').map((part) => part.trim())
+        : null;
+      const legacyParts = distributionParts
+        ? distributionParts
+        : line.split(/\t|,/).map((part) => part.trim()).filter(Boolean);
+      const url = distributionParts?.[0] || legacyParts.find((part) => /^https?:\/\//.test(part)) || '';
+      const title = distributionParts?.[1]
+        || legacyParts.find((part) => part && part !== url && !/^\d+(\.\d+)?$/.test(part))
+        || line;
+      const category = distributionParts ? distributionParts.slice(2).join('$$').trim() : '';
+      const price = distributionParts ? '' : legacyParts.find((part) => /^\d+(\.\d+)?$/.test(part)) || '';
       return {
         title,
         meta: price ? `价格 ${price}` : '',
         metrics: [],
         description: url,
-        raw: { line, url, price }
+        category,
+        raw: { line, url, title, category, price }
       };
     });
 }

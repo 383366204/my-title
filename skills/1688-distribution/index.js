@@ -1173,15 +1173,28 @@ function inferOfferCopyStatus(text, offerId) {
   const markerIndex = body.indexOf(marker);
   const idIndex = markerIndex >= 0 ? markerIndex : body.indexOf(id);
   if (idIndex < 0) return 'unknown';
-  const after = body.slice(idIndex, Math.min(body.length, idIndex + 900));
-  const nextIdIndex = after.slice(markerIndex >= 0 ? marker.length : id.length).search(/\u4e0a\u5bb6ID\uff1a\d{6,}/);
-  const window = nextIdIndex >= 0
-    ? after.slice(0, (markerIndex >= 0 ? marker.length : id.length) + nextIdIndex)
+  const after = body.slice(idIndex, Math.min(body.length, idIndex + 1200));
+  const markerLength = markerIndex >= 0 ? marker.length : id.length;
+  const boundaryIndexes = [
+    after.slice(markerLength).search(/\u4e0a\u5bb6ID\uff1a\d{6,}/),
+    after.indexOf('\n--- PAGE BREAK ---'),
+    after.indexOf('\n--- SINGLE SEARCH ')
+  ].map((index, position) => {
+    if (index < 0) return -1;
+    return position === 0 ? markerLength + index : index;
+  }).filter(index => index >= 0);
+  const window = boundaryIndexes.length > 0
+    ? after.slice(0, Math.min(...boundaryIndexes))
     : after;
-  if (window.includes('\u8df3\u8fc7\u590d\u5236')) return 'skipped';
-  if (window.includes('\u590d\u5236\u5931\u8d25')) return 'failed';
-  if (window.includes('\u590d\u5236\u6210\u529f')) return 'success';
-  if (window.includes('\u590d\u5236\u4e2d')) return 'copying';
+  const statusMarkers = [
+    { status: 'success', index: window.indexOf('\u590d\u5236\u6210\u529f') },
+    { status: 'failed', index: window.indexOf('\u590d\u5236\u5931\u8d25') },
+    { status: 'skipped', index: window.indexOf('\u8df3\u8fc7\u590d\u5236') },
+    { status: 'stopped', index: window.indexOf('\u505c\u6b62\u590d\u5236') },
+    { status: 'cancelled', index: window.indexOf('\u53d6\u6d88\u590d\u5236') },
+    { status: 'copying', index: window.indexOf('\u590d\u5236\u4e2d') }
+  ].filter(item => item.index >= 0).sort((left, right) => left.index - right.index);
+  if (statusMarkers.length > 0) return statusMarkers[0].status;
   return 'unknown';
 }
 

@@ -440,6 +440,159 @@ test('workflow recovery APIs - pause, resume, and retry', async (t) => {
       }
     });
 
+    await t.test('POST /api/distribution/runs/:jobId/recheck completes the workflow after log confirmation', async () => {
+      const runId = 'api_distribution_recheck_run';
+      const jobId = `${runId}-distribution`;
+      const pipelineDataDir = path.join(process.cwd(), 'data', 'pipeline');
+      const runDir = path.join(pipelineDataDir, 'runs', runId);
+      const jobDir = path.join(pipelineDataDir, 'distribution-runs');
+      const jobFile = path.join(jobDir, `${jobId}.json`);
+      const originalReader = app.locals.distributionConfirmationReader;
+      fs.mkdirSync(runDir, { recursive: true });
+      fs.mkdirSync(jobDir, { recursive: true });
+      fs.writeFileSync(path.join(runDir, 'run.json'), JSON.stringify({
+        runId,
+        status: 'ready_to_distribute',
+        startedAt: '2026-07-26T04:00:00.000Z',
+        updatedAt: '2026-07-26T04:10:00.000Z',
+        counts: { readyToDistribute: 1 },
+        files: {}
+      }), 'utf8');
+      fs.writeFileSync(jobFile, JSON.stringify({
+        jobId,
+        workflowRunId: runId,
+        status: 'completed_with_issues',
+        total: 1,
+        completed: 0,
+        failed: 1,
+        items: [{
+          offerId: '640322388000',
+          url: 'https://detail.1688.com/offer/640322388000.html',
+          title: '宠物玩具飞盘',
+          category: '宠物用品'
+        }],
+        progress: { batchIndex: 1, batchTotal: 1, phase: 'completed_with_issues' }
+      }), 'utf8');
+      app.locals.distributionConfirmationReader = async ({ input }) => {
+        assert.match(input, /640322388000/);
+        return { ok: true, status: 'confirmed', total: 1 };
+      };
+
+      try {
+        const res = await fetch(`http://127.0.0.1:${port}/api/distribution/runs/${jobId}/recheck`, {
+          method: 'POST'
+        });
+        const payload = await res.json();
+        const persistedRun = JSON.parse(fs.readFileSync(path.join(runDir, 'run.json'), 'utf8'));
+
+        assert.strictEqual(res.status, 200);
+        assert.strictEqual(payload.ok, true);
+        assert.strictEqual(payload.data.status, 'completed');
+        assert.strictEqual(payload.data.completed, 1);
+        assert.strictEqual(persistedRun.status, 'workflow_complete');
+      } finally {
+        app.locals.distributionConfirmationReader = originalReader;
+        fs.rmSync(runDir, { recursive: true, force: true });
+        fs.rmSync(jobFile, { force: true });
+      }
+    });
+
+    await t.test('POST /api/distribution/manual-complete records the manual batch and completes the workflow idempotently', async () => {
+      const runId = 'api_manual_distribution_complete_run';
+      const jobId = `${runId}-distribution`;
+      const pipelineDataDir = path.join(process.cwd(), 'data', 'pipeline');
+      const runDir = path.join(pipelineDataDir, 'runs', runId);
+      const jobFile = path.join(pipelineDataDir, 'distribution-runs', `${jobId}.json`);
+      fs.mkdirSync(runDir, { recursive: true });
+      fs.writeFileSync(path.join(runDir, 'run.json'), JSON.stringify({
+        runId,
+        status: 'ready_to_distribute',
+        startedAt: '2026-07-27T04:00:00.000Z',
+        updatedAt: '2026-07-27T04:10:00.000Z',
+        counts: { readyToDistribute: 1 },
+        files: {}
+      }), 'utf8');
+      const body = {
+        confirm: true,
+        runId,
+        input: 'https://detail.1688.com/offer/640322388000.html$$宠物玩具飞盘$$宠物用品 > 狗狗玩具'
+      };
+
+      try {
+        const firstResponse = await fetch(`http://127.0.0.1:${port}/api/distribution/manual-complete`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        const firstPayload = await firstResponse.json();
+        const secondResponse = await fetch(`http://127.0.0.1:${port}/api/distribution/manual-complete`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        const secondPayload = await secondResponse.json();
+        const persistedRun = JSON.parse(fs.readFileSync(path.join(runDir, 'run.json'), 'utf8'));
+        const persistedJob = JSON.parse(fs.readFileSync(jobFile, 'utf8'));
+
+        assert.strictEqual(firstResponse.status, 200);
+        assert.strictEqual(firstPayload.data.status, 'completed');
+        assert.strictEqual(firstPayload.data.mode, 'manual');
+        assert.strictEqual(firstPayload.data.completed, 1);
+        assert.strictEqual(secondResponse.status, 200);
+        assert.strictEqual(secondPayload.data.completedAt, firstPayload.data.completedAt);
+        assert.strictEqual(persistedRun.status, 'workflow_complete');
+        assert.strictEqual(persistedRun.distribution.method, 'manual');
+        assert.strictEqual(persistedJob.items[0].category, '宠物用品 > 狗狗玩具');
+      } finally {
+        fs.rmSync(runDir, { recursive: true, force: true });
+        fs.rmSync(jobFile, { force: true });
+      }
+    });
+
+    await t.test('POST /api/distribution/manual-complete refuses to override an active automatic job', async () => {
+      const runId = 'api_manual_distribution_active_job_run';
+      const jobId = `${runId}-distribution`;
+      const pipelineDataDir = path.join(process.cwd(), 'data', 'pipeline');
+      const runDir = path.join(pipelineDataDir, 'runs', runId);
+      const jobDir = path.join(pipelineDataDir, 'distribution-runs');
+      const jobFile = path.join(jobDir, `${jobId}.json`);
+      fs.mkdirSync(runDir, { recursive: true });
+      fs.mkdirSync(jobDir, { recursive: true });
+      fs.writeFileSync(path.join(runDir, 'run.json'), JSON.stringify({
+        runId,
+        status: 'ready_to_distribute',
+        startedAt: '2026-07-27T04:00:00.000Z',
+        counts: { readyToDistribute: 1 },
+        files: {}
+      }), 'utf8');
+      fs.writeFileSync(jobFile, JSON.stringify({
+        jobId,
+        workflowRunId: runId,
+        status: 'submitting',
+        total: 1,
+        items: []
+      }), 'utf8');
+
+      try {
+        const response = await fetch(`http://127.0.0.1:${port}/api/distribution/manual-complete`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            confirm: true,
+            runId,
+            input: 'https://detail.1688.com/offer/640322388000.html$$宠物玩具飞盘$$宠物用品'
+          })
+        });
+        const payload = await response.json();
+
+        assert.strictEqual(response.status, 409);
+        assert.match(payload.error, /自动铺货任务仍在处理中/);
+      } finally {
+        fs.rmSync(runDir, { recursive: true, force: true });
+        fs.rmSync(jobFile, { force: true });
+      }
+    });
+
     await t.test('DELETE /api/workflows/runs/:runId removes persisted pipeline history', async () => {
       const runId = 'api_delete_history_run';
       const pipelineDataDir = path.join(process.cwd(), 'data', 'pipeline');

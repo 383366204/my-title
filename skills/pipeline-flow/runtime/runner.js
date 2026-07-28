@@ -12,6 +12,7 @@ const {
   flowGenerate,
   flowExport,
   flowManualStart,
+  flowEnrichManualProducts,
   flowKeywordStart,
   flowKeyword
 } = require('../index');
@@ -27,7 +28,7 @@ const {
 
 const DEFAULT_STEPS = ['mine', 'keywordReview', 'verify', 'select', 'generate', 'export'];
 const KEYWORD_STEPS = ['start', 'verify', 'select', 'generate', 'export'];
-const MANUAL_STEPS = ['start', 'keywordReview', 'select', 'generate', 'export'];
+const MANUAL_STEPS = ['start', 'select', 'generate', 'export'];
 const STOP_STATUSES = new Set([
   'verified_empty',
   'verified_no_generation_eligible',
@@ -169,11 +170,13 @@ function createDefaultStepFns({ dataDir, runId, params, mode = 'daily' }) {
       });
     },
     select: async ({ reportProgress }) => {
+      if (manualMode) {
+        const total = Array.isArray(params.items) ? params.items.length : 0;
+        reportProgress({ current: 0, total, message: '开始获取商品资料' });
+        return flowEnrichManualProducts({ ...params, dataDir, runId, onProgress: reportProgress });
+      }
       reportProgress({ current: 0, total: selectLimit, message: '开始货源选品' });
       const result = await flowSelectProducts({ ...params, dataDir, runId, limit: selectLimit, manualMode, recordSeedFeedback: params.recordSeedFeedback === true });
-      if (manualMode && result.selected?.length > 0) {
-        return { ...result, status: 'awaiting_product_review', blockers: ['product_review_required'], userMessage: '1688 货源已加载，请人工勾选或手动添加商品。' };
-      }
       return result;
     },
     generate: async ({ reportProgress }) => {

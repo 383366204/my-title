@@ -45,9 +45,9 @@ function buildDistributionText(rows) {
     .map((row) => {
       const url = distributionRowUrl(row);
       const category = distributionRowCategory(row);
-      return [url, row.title, category && category !== '-' ? category : ''].filter(Boolean).join('$$');
+      return [url, row.title || '', category && category !== '-' ? category : ''].join('$$');
     })
-    .filter(Boolean)
+    .filter((line) => line.replace(/\$/g, '').trim())
     .join('\n');
 }
 
@@ -169,7 +169,7 @@ function exportReviewRowToDistributionRow(row = {}, index = 0) {
   };
 }
 
-export const DistributionExportPanel = ({ artifactState, onCopyText, currentRunId, sourceNodeId = 'export', onDistributionJobChange }) => {
+export const DistributionExportPanel = ({ artifactState, onCopyText, currentRunId, sourceNodeId = 'export', onDistributionJobChange, directPreview = false }) => {
   const [exportArtifactState, setExportArtifactState] = useState({ status: 'empty', artifact: null, error: '' });
   const sourceIsReview = sourceNodeId === 'review';
   const exportArtifact = sourceIsReview ? exportArtifactState.artifact : artifactState.artifact;
@@ -178,20 +178,28 @@ export const DistributionExportPanel = ({ artifactState, onCopyText, currentRunI
   const view = getWorkflowArtifactView(exportArtifact, 'export');
   const storageKey = `ecom.exportSelection.${currentRunId || artifactState.artifact?.runId || 'draft'}`;
   const includeStorageKey = `ecom.exportManualInclude.${currentRunId || artifactState.artifact?.runId || 'draft'}`;
+  const editStorageKey = `ecom.exportEdits.${currentRunId || artifactState.artifact?.runId || 'draft'}`;
   const [removed, setRemoved] = useState({});
   const [included, setIncluded] = useState({});
+  const [edits, setEdits] = useState({});
   const [reviewArtifactState, setReviewArtifactState] = useState({ status: 'empty', artifact: null, error: '' });
   const [previewOpen, setPreviewOpen] = useState(false);
   const [distributionCheck, setDistributionCheck] = useState({ status: 'idle', result: null, error: '' });
+  const [manualCopiedText, setManualCopiedText] = useState('');
+  const [manualCompleteStatus, setManualCompleteStatus] = useState({ status: 'idle', message: '' });
   const {
     job: distributionJob,
     error: distributionSubmitError,
     chromeStarting: distributionChromeStarting,
     chromeMessage: distributionChromeMessage,
     submit: submitDistributionJob,
+    completeManual: completeManualDistributionJob,
     control: controlDistributionJob,
     startChrome: startDistributionChromeJob
-  } = useDistributionJob({ onJobChange: onDistributionJobChange });
+  } = useDistributionJob({
+    initialJobId: currentRunId ? `${currentRunId}-distribution` : '',
+    onJobChange: onDistributionJobChange
+  });
 
   useEffect(() => {
     if (!sourceIsReview) {
@@ -255,6 +263,25 @@ export const DistributionExportPanel = ({ artifactState, onCopyText, currentRunI
   }, [includeStorageKey, included]);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const saved = JSON.parse(window.localStorage.getItem(editStorageKey) || '{}');
+      setEdits(saved && typeof saved === 'object' ? saved : {});
+    } catch {
+      setEdits({});
+    }
+  }, [editStorageKey]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(editStorageKey, JSON.stringify(edits));
+    } catch {
+      // 浏览器禁用 localStorage 时，编辑仍保留到当前页面关闭为止。
+    }
+  }, [editStorageKey, edits]);
+
+  useEffect(() => {
     if (sourceIsReview) {
       setReviewArtifactState({ status: artifactState.status, artifact: artifactState.artifact, error: artifactState.error || '' });
       return;
@@ -278,10 +305,11 @@ export const DistributionExportPanel = ({ artifactState, onCopyText, currentRunI
   }, [artifactState, currentRunId, sourceIsReview]);
 
   const sourceRows = view.kind === 'business-list' ? (view.rows || []) : [];
+  const applyEdits = (row) => ({ ...row, ...(edits[row.key] || {}) });
   const readyRows = sourceRows.map((row, index) => {
     const key = `${distributionRowUrl(row) || row.title || 'row'}:${index}`;
     return { ...row, key, removed: Boolean(removed[key]), fromReview: false };
-  });
+  }).map(applyEdits);
   const reviewView = getWorkflowArtifactView(reviewArtifactState.artifact, 'review');
   const blockedRows = reviewView.kind === 'review-list'
     ? reviewView.rows
@@ -290,12 +318,22 @@ export const DistributionExportPanel = ({ artifactState, onCopyText, currentRunI
     : [];
   const manuallyIncludedRows = blockedRows
     .filter((row) => included[row.key])
-    .map((row) => ({ ...row, removed: Boolean(removed[row.key]) }));
+    .map((row) => applyEdits({ ...row, removed: Boolean(removed[row.key]) }));
   const rows = [...readyRows, ...manuallyIncludedRows];
   const activeRows = rows.filter((row) => !row.removed);
   const removedRows = rows.filter((row) => row.removed);
-  const pendingBlockedRows = blockedRows.filter((row) => !included[row.key]);
+  const pendingBlockedRows = blockedRows.filter((row) => !included[row.key]).map(applyEdits);
   const copyTextValue = buildDistributionText(activeRows);
+  const manualIncompleteCount = activeRows.filter((row) => (
+    !distributionRowUrl(row) || !String(row.title || '').trim()
+  )).length;
+  const manualMissingCategoryCount = activeRows.filter((row) => !String(distributionRowCategory(row) || '').trim()).length;
+  const manualCopyCurrent = Boolean(copyTextValue) && manualCopiedText === copyTextValue;
+  const canManualCopy = Boolean(currentRunId) && activeRows.length > 0 && manualIncompleteCount === 0;
+
+  useEffect(() => {
+    setDistributionCheck({ status: 'idle', result: null, error: '' });
+  }, [copyTextValue]);
 
   const markRemoved = (key, value) => {
     setRemoved((previous) => ({ ...previous, [key]: value }));
@@ -306,6 +344,13 @@ export const DistributionExportPanel = ({ artifactState, onCopyText, currentRunI
     if (value) {
       setRemoved((previous) => ({ ...previous, [key]: false }));
     }
+  };
+
+  const updateRowEdit = (key, field, value) => {
+    setEdits((previous) => ({
+      ...previous,
+      [key]: { ...(previous[key] || {}), [field]: value }
+    }));
   };
 
   const checkDistribution = async () => {
@@ -338,6 +383,37 @@ export const DistributionExportPanel = ({ artifactState, onCopyText, currentRunI
     if (checkResult?.canSubmit) await submitDistribution(checkResult);
   };
 
+  const copyManualDistribution = async () => {
+    if (!canManualCopy) return;
+    try {
+      await onCopyText(copyTextValue);
+      setManualCopiedText(copyTextValue);
+      setManualCompleteStatus({
+        status: 'copied',
+        message: `已复制 ${activeRows.length} 条人工铺货清单${manualMissingCategoryCount > 0 ? `，其中 ${manualMissingCategoryCount} 条类目为空` : ''}。完成外部铺货后，再点击“标记人工铺货完成”。`
+      });
+    } catch (error) {
+      setManualCompleteStatus({ status: 'error', message: `复制失败：${error.message}` });
+    }
+  };
+
+  const confirmManualDistributionComplete = async () => {
+    if (!manualCopyCurrent || !currentRunId || manualCompleteStatus.status === 'completing') return;
+    const categoryReminder = manualMissingCategoryCount > 0
+      ? `其中 ${manualMissingCategoryCount} 条类目为空，请确认你已在人工铺货时选择了正确类目。\n\n`
+      : '';
+    const confirmed = window.confirm(`${categoryReminder}确认已经按照刚复制的清单，手动完成 ${activeRows.length} 个商品的铺货？确认后本次流水线将进入完成状态。`);
+    if (!confirmed) return;
+    setManualCompleteStatus({ status: 'completing', message: '正在记录人工铺货结果...' });
+    const job = await completeManualDistributionJob({ input: copyTextValue, runId: currentRunId });
+    if (job) {
+      setManualCompleteStatus({ status: 'completed', message: '人工铺货已确认，流水线正在进入完成节点。' });
+      setPreviewOpen(false);
+    } else {
+      setManualCompleteStatus({ status: 'error', message: '人工铺货完成状态记录失败，请查看下方错误后重试。' });
+    }
+  };
+
   const startDistributionChrome = async () => {
     await startDistributionChromeJob();
   };
@@ -347,6 +423,147 @@ export const DistributionExportPanel = ({ artifactState, onCopyText, currentRunI
   const controlDistribution = async (action) => {
     await controlDistributionJob(action);
   };
+
+  const previewPanelContent = (
+    <>
+      <div className="export-preview-actions">
+        <button type="button" className="node-primary-button" disabled={!canManualCopy} onClick={copyManualDistribution}>
+          <Copy size={13} /> 复制铺货内容
+        </button>
+        <button type="button" className="node-secondary-button success" disabled={!manualCopyCurrent || manualCompleteStatus.status === 'completing' || distributionJob?.status === 'submitting'} onClick={confirmManualDistributionComplete}>
+          {manualCompleteStatus.status === 'completing' ? <RefreshCw size={13} className="animate-spin" /> : <Check size={13} />}
+          {manualCompleteStatus.status === 'completing' ? '正在确认' : '标记人工铺货完成'}
+        </button>
+        <button type="button" className="node-secondary-button" disabled={removedRows.length === 0} onClick={() => setRemoved({})}>
+          <RefreshCw size={13} /> 恢复全部
+        </button>
+        <button type="button" className="node-primary-button danger" disabled={!copyTextValue || distributionJob?.status === 'submitting' || distributionCheck.status === 'loading'} onClick={confirmAndSubmitDistribution}>
+          {distributionCheck.status === 'loading' ? <RefreshCw size={13} className="animate-spin" /> : <Play size={13} />}
+          {distributionCheck.status === 'loading' ? '正在检查铺货环境' : '确认并开始自动铺货'}
+        </button>
+      </div>
+      <div className="export-preview-status">
+        <p className="distribution-confirm-warning">人工铺货请先复制“链接$$标题$$类目”，完成外部铺货后再标记完成；自动铺货会使用当前 Chrome 登录态。</p>
+        {manualIncompleteCount > 0 && <div className="distribution-modal-feedback blocked">有 {manualIncompleteCount} 条缺少链接或标题，请在下方补充后再复制。</div>}
+        {manualMissingCategoryCount > 0 && <div className="distribution-modal-feedback checking">有 {manualMissingCategoryCount} 条历史清单没有类目，复制内容会保留第三段为空。可在下方补充，或在人工铺货时选择正确类目。</div>}
+        {manualCopiedText && !manualCopyCurrent && <div className="distribution-modal-feedback blocked">清单已经修改，请重新复制最新内容后再确认完成。</div>}
+        {manualCompleteStatus.message && manualCopyCurrent && <div className={`distribution-modal-feedback ${manualCompleteStatus.status === 'error' ? 'blocked' : 'checking'}`}>{manualCompleteStatus.message}</div>}
+        {distributionCheck.status === 'loading' && (
+          <div className="distribution-modal-feedback checking">
+            <RefreshCw size={13} className="animate-spin" /> 正在检查清单、Chrome 调试端口和登录状态，请稍候...
+          </div>
+        )}
+        {distributionCheck.status === 'error' && (
+          <div className="distribution-modal-feedback blocked">铺货检查失败：{distributionCheck.error || '未知错误'}</div>
+        )}
+        {distributionCheck.status === 'ready' && !distributionCheck.result?.canSubmit && (
+          <div className="distribution-modal-feedback blocked">
+            <strong>暂时无法开始自动铺货</strong>
+            {Array.isArray(distributionCheck.result?.blockers) && distributionCheck.result.blockers.length > 0
+              ? <span>阻塞原因：{distributionCheck.result.blockers.map(labelDistributionBlocker).join('，')}</span>
+              : <span>请检查 Chrome 登录状态、CDP 端口和清单格式。</span>}
+            {distributionNeedsChrome && (
+              <div className="distribution-modal-feedback-actions">
+                <button type="button" className="node-secondary-button" onClick={startDistributionChrome} disabled={distributionChromeStarting}>
+                  {distributionChromeStarting ? <RefreshCw size={13} className="animate-spin" /> : <Play size={13} />}
+                  {distributionChromeStarting ? '正在启动 Chrome' : '启动铺货 Chrome'}
+                </button>
+                <button type="button" className="node-secondary-button" onClick={checkDistribution} disabled={distributionChromeStarting || distributionCheck.status === 'loading'}>
+                  <RefreshCw size={13} /> 重新检查
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+        {distributionSubmitError && (
+          <div className="distribution-modal-feedback blocked">提交失败：{distributionSubmitError}</div>
+        )}
+        {distributionChromeMessage && !distributionSubmitError && (
+          <div className="distribution-modal-feedback checking">{distributionChromeMessage}</div>
+        )}
+      </div>
+
+      <div className="export-preview-list">
+        {exportStatus === 'loading' && <div className="artifact-empty"><RefreshCw size={13} className="animate-spin" /> 正在加载铺货清单...</div>}
+        {exportStatus === 'error' && <div className="artifact-error">{exportError || '铺货清单加载失败'}</div>}
+        {exportStatus !== 'loading' && rows.length === 0 && (
+          <div className="artifact-empty">当前导出清单为空，通常表示前面的生成或复核没有产出可铺货商品。</div>
+        )}
+        {rows.map((row) => {
+          const url = distributionRowUrl(row);
+          const keyword = rowSelectedKeyword(row);
+          return (
+            <article className={`export-preview-row ${row.removed ? 'is-removed' : ''}`} key={row.key}>
+              <div>
+                <strong>{row.title || '未命名铺货项'}</strong>
+                <span>{row.removed ? '已移除' : '将导出'}</span>
+                {keyword && <small className="selected-keyword-badge">选词：{keyword}</small>}
+              </div>
+              {Array.isArray(row.metrics) && row.metrics.length > 0 && <p>{row.metrics.join(' · ')}</p>}
+              {url && <p>{url}</p>}
+              <div className="distribution-edit-grid">
+                <label><span>铺货标题</span><input value={row.title || ''} disabled={row.removed} onChange={(event) => updateRowEdit(row.key, 'title', event.target.value)} /></label>
+                <label><span>铺货类目</span><input value={distributionRowCategory(row)} disabled={row.removed} onChange={(event) => updateRowEdit(row.key, 'category', event.target.value)} placeholder="请选择或填写类目" /></label>
+              </div>
+              <div className="review-row-actions">
+                <button type="button" className={`node-secondary-button ${row.removed ? 'success' : 'danger'}`} onClick={() => markRemoved(row.key, !row.removed)}>
+                  {row.removed ? <Check size={13} /> : <X size={13} />}
+                  {row.removed ? '恢复' : '移除'}
+                </button>
+                {url && (
+                  <a className="node-secondary-button" href={url} target="_blank" rel="noreferrer">
+                    <ExternalLink size={13} /> 打开货源
+                  </a>
+                )}
+              </div>
+            </article>
+          );
+        })}
+        {pendingBlockedRows.map((row) => {
+          const url = distributionRowUrl(row);
+          const keyword = rowSelectedKeyword(row);
+          return (
+            <article className="export-preview-row blocked" key={row.key}>
+              <div>
+                <strong>{row.title}</strong>
+                <span>被拦截，未加入</span>
+                {keyword && <small className="selected-keyword-badge">选词：{keyword}</small>}
+              </div>
+              {row.description && <p>拦截原因：{row.description}</p>}
+              {Array.isArray(row.metrics) && row.metrics.length > 0 && <p>{row.metrics.join(' · ')}</p>}
+              {url && <p>{url}</p>}
+              <div className="distribution-edit-grid">
+                <label><span>铺货标题</span><input value={row.title || ''} onChange={(event) => updateRowEdit(row.key, 'title', event.target.value)} /></label>
+                <label><span>铺货类目</span><input value={distributionRowCategory(row)} onChange={(event) => updateRowEdit(row.key, 'category', event.target.value)} placeholder="补充类目后再加入" /></label>
+              </div>
+              <div className="review-row-actions">
+                <button type="button" className="node-secondary-button success" onClick={() => markIncluded(row.key, true)}>
+                  <Check size={13} /> 加入当前清单
+                </button>
+                {url && (
+                  <a className="node-secondary-button" href={url} target="_blank" rel="noreferrer">
+                    <ExternalLink size={13} /> 打开货源
+                  </a>
+                )}
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </>
+  );
+
+  if (directPreview) {
+    return (
+      <div className="export-preview-direct">
+        <div className="export-preview-direct-summary">
+          <strong>{activeRows.length} 条待铺货</strong>
+          <span>{removedRows.length} 条已移除 · {pendingBlockedRows.length} 条待人工加入</span>
+        </div>
+        {previewPanelContent}
+      </div>
+    );
+  }
 
   return (
     <div className="export-workbench">
@@ -364,25 +581,59 @@ export const DistributionExportPanel = ({ artifactState, onCopyText, currentRunI
           <button type="button" className="node-primary-button" disabled={!copyTextValue} onClick={() => setPreviewOpen(true)}>
             <FileText size={14} /> 查看并确认清单
           </button>
-          <button type="button" className="node-secondary-button" disabled={!copyTextValue} onClick={() => onCopyText(copyTextValue)}>
-            <Copy size={13} /> 复制待铺货清单
-          </button>
         </div>
       </section>
 
       <div className="distribution-next-steps" aria-label="铺货操作步骤">
         <span className="is-current"><b>1</b>确认商品</span>
         <ChevronRight size={13} />
-        <span><b>2</b>检查环境</span>
+        <span><b>2</b>选择人工或自动铺货</span>
         <ChevronRight size={13} />
-        <span><b>3</b>确认并自动铺货</span>
+        <span><b>3</b>确认完成</span>
       </div>
+
+      <section className="distribution-method-grid" aria-label="选择铺货方式">
+        <article className="distribution-method-card manual">
+          <div>
+            <span>人工铺货</span>
+            <strong>复制清单后手动铺货</strong>
+            <p>复制为“链接$$标题$$类目”，在外部工具完成铺货后手动确认流程完成。</p>
+          </div>
+          <div className="distribution-method-actions">
+            <button type="button" className="node-secondary-button" disabled={!canManualCopy} onClick={copyManualDistribution}>
+              <Copy size={13} /> 人工复制铺货
+            </button>
+            <button type="button" className="node-secondary-button success" disabled={!manualCopyCurrent || manualCompleteStatus.status === 'completing' || distributionJob?.status === 'submitting'} onClick={confirmManualDistributionComplete}>
+              {manualCompleteStatus.status === 'completing' ? <RefreshCw size={13} className="animate-spin" /> : <Check size={13} />}
+              {manualCompleteStatus.status === 'completing' ? '正在确认' : '标记人工铺货完成'}
+            </button>
+          </div>
+          {manualIncompleteCount > 0 && <small className="distribution-method-warning">有 {manualIncompleteCount} 条缺少链接或标题，请补充后再复制。</small>}
+          {manualMissingCategoryCount > 0 && <small className="distribution-method-warning">有 {manualMissingCategoryCount} 条类目为空，复制时第三段会留空，请在人工铺货时选择正确类目。</small>}
+          {manualCopiedText && !manualCopyCurrent && <small className="distribution-method-warning">清单已经修改，请重新复制最新内容后再确认完成。</small>}
+          {manualCompleteStatus.message && manualCopyCurrent && <small className={`distribution-method-feedback ${manualCompleteStatus.status}`}>{manualCompleteStatus.message}</small>}
+          {manualCompleteStatus.status === 'error' && distributionSubmitError && <small className="distribution-method-feedback error">{distributionSubmitError}</small>}
+        </article>
+        <article className="distribution-method-card automatic">
+          <div>
+            <span>自动铺货</span>
+            <strong>使用当前 Chrome 登录态</strong>
+            <p>先检查 Chrome、登录状态和重复批次，再在清单预览中确认提交。</p>
+          </div>
+          <div className="distribution-method-actions">
+            <button type="button" className="node-secondary-button" disabled={!copyTextValue || distributionCheck.status === 'loading'} onClick={checkDistribution}>
+              {distributionCheck.status === 'loading' ? <RefreshCw size={13} className="animate-spin" /> : <Check size={13} />}
+              检查自动铺货环境
+            </button>
+          </div>
+        </article>
+      </section>
 
       {distributionJob && (
         <section className={`distribution-execution-panel ${distributionJob.status === 'failed' || distributionJob.status === 'completed_with_issues' ? 'blocked' : ''}`}>
           <div className="distribution-execution-head">
             <div>
-              <strong>{distributionJob.status === 'submitting' ? '正在自动铺货' : distributionJob.status === 'paused' ? '铺货已暂停' : distributionJob.status === 'completed' ? '铺货已完成' : distributionJob.status === 'cancelled' ? '铺货已取消' : '铺货结果'}</strong>
+              <strong>{distributionJob.status === 'submitting' ? '正在自动铺货' : distributionJob.status === 'checking_confirmation' ? '正在核对铺货结果' : distributionJob.status === 'paused' ? '铺货已暂停' : distributionJob.status === 'completed' && distributionJob.mode === 'manual' ? '人工铺货已确认' : distributionJob.status === 'completed' ? '铺货已完成' : distributionJob.status === 'cancelled' ? '铺货已取消' : '铺货结果'}</strong>
               <span>{distributionJob.completed || 0} / {distributionJob.total || activeRows.length} 个商品已处理</span>
             </div>
             {distributionJob.status === 'submitting' && (
@@ -391,10 +642,18 @@ export const DistributionExportPanel = ({ artifactState, onCopyText, currentRunI
                 <button type="button" className="node-secondary-button danger" onClick={() => controlDistribution('cancel')}><Square size={13} /> 取消后续批次</button>
               </div>
             )}
+            {distributionJob.status === 'completed_with_issues' && (
+              <div className="distribution-execution-actions">
+                <button type="button" className="node-secondary-button" onClick={() => controlDistribution('recheck')}>
+                  <RefreshCw size={13} /> 重新核对铺货结果
+                </button>
+              </div>
+            )}
           </div>
           <div className="distribution-progress-track"><span style={{ width: `${Math.min(100, Math.round(((distributionJob.completed || 0) / Math.max(1, distributionJob.total || 1)) * 100))}%` }} /></div>
           <p>第 {distributionJob.progress?.batchIndex || 0} / {distributionJob.progress?.batchTotal || 0} 批 · {distributionJob.progress?.phase || '等待状态更新'}</p>
           {distributionJob.error && <p className="distribution-error-text">{distributionJob.error}</p>}
+          {distributionJob.confirmationError && <p className="distribution-error-text">结果核对失败：{distributionJob.confirmationError}</p>}
           {distributionSubmitError && <p className="distribution-error-text">{distributionSubmitError}</p>}
           {Array.isArray(distributionJob.results) && distributionJob.results.some(row => row.status && row.status !== 'confirmed' && !row.skipped) && (
             <p className="distribution-error-text">存在未确认成功的批次，请查看结果后再处理，不会自动重复提交。</p>
@@ -421,13 +680,6 @@ export const DistributionExportPanel = ({ artifactState, onCopyText, currentRunI
       <div className="export-toolbar">
         <button type="button" className="node-secondary-button" onClick={() => setPreviewOpen(true)} disabled={!copyTextValue}>
           <FileText size={13} /> 打开清单预览
-        </button>
-        <button type="button" className="node-secondary-button" disabled={!copyTextValue} onClick={() => onCopyText(copyTextValue)}>
-          <Copy size={13} /> 复制当前清单
-        </button>
-        <button type="button" className="node-secondary-button success" disabled={!copyTextValue || distributionCheck.status === 'loading'} onClick={checkDistribution}>
-          {distributionCheck.status === 'loading' ? <RefreshCw size={13} className="animate-spin" /> : <Check size={13} />}
-          检查铺货环境
         </button>
         <button type="button" className="node-secondary-button" disabled={removedRows.length === 0} onClick={() => setRemoved({})}>
           <RefreshCw size={13} /> 恢复全部
@@ -481,6 +733,10 @@ export const DistributionExportPanel = ({ artifactState, onCopyText, currentRunI
                 </div>
               )}
               {url && <p className="export-row-url">{url}</p>}
+              <div className="distribution-edit-grid">
+                <label><span>铺货标题</span><input value={row.title || ''} disabled={row.removed} onChange={(event) => updateRowEdit(row.key, 'title', event.target.value)} /></label>
+                <label><span>铺货类目</span><input value={distributionRowCategory(row)} disabled={row.removed} onChange={(event) => updateRowEdit(row.key, 'category', event.target.value)} placeholder="请选择或填写类目" /></label>
+              </div>
               <div className="review-row-actions">
                 <button type="button" className="node-secondary-button" onClick={() => onCopyText(row.title || '')}>
                   <Copy size={13} /> 复制标题
@@ -526,6 +782,10 @@ export const DistributionExportPanel = ({ artifactState, onCopyText, currentRunI
                       </div>
                     )}
                     {row.description && <p className="export-row-url">拦截原因：{row.description}</p>}
+                    <div className="distribution-edit-grid">
+                      <label><span>铺货标题</span><input value={row.title || ''} onChange={(event) => updateRowEdit(row.key, 'title', event.target.value)} /></label>
+                      <label><span>铺货类目</span><input value={distributionRowCategory(row)} onChange={(event) => updateRowEdit(row.key, 'category', event.target.value)} placeholder="补充类目后再加入" /></label>
+                    </div>
                     <div className="review-row-actions">
                       <button type="button" className="node-secondary-button success" onClick={() => markIncluded(row.key, true)}>
                         <Check size={13} /> 加入当前清单
@@ -557,112 +817,7 @@ export const DistributionExportPanel = ({ artifactState, onCopyText, currentRunI
               </button>
             </div>
 
-            <div className="export-preview-actions">
-              <button type="button" className="node-secondary-button" disabled={!copyTextValue} onClick={() => onCopyText(copyTextValue)}>
-                <Copy size={13} /> 复制弹窗清单
-              </button>
-              <button type="button" className="node-secondary-button" disabled={removedRows.length === 0} onClick={() => setRemoved({})}>
-                <RefreshCw size={13} /> 恢复全部
-              </button>
-              <button type="button" className="node-primary-button danger" disabled={!copyTextValue || distributionJob?.status === 'submitting' || distributionCheck.status === 'loading'} onClick={confirmAndSubmitDistribution}>
-                {distributionCheck.status === 'loading' ? <RefreshCw size={13} className="animate-spin" /> : <Play size={13} />}
-                {distributionCheck.status === 'loading' ? '正在检查铺货环境' : '确认并开始自动铺货'}
-              </button>
-            </div>
-            <div className="export-preview-status">
-              <p className="distribution-confirm-warning">提交后会使用当前 Chrome 登录态进行铺货。已确认成功的商品不会自动重复提交，请确认清单无误。</p>
-              {distributionCheck.status === 'loading' && (
-                <div className="distribution-modal-feedback checking">
-                  <RefreshCw size={13} className="animate-spin" /> 正在检查清单、Chrome 调试端口和登录状态，请稍候...
-                </div>
-              )}
-              {distributionCheck.status === 'error' && (
-                <div className="distribution-modal-feedback blocked">铺货检查失败：{distributionCheck.error || '未知错误'}</div>
-              )}
-              {distributionCheck.status === 'ready' && !distributionCheck.result?.canSubmit && (
-                <div className="distribution-modal-feedback blocked">
-                  <strong>暂时无法开始自动铺货</strong>
-                  {Array.isArray(distributionCheck.result?.blockers) && distributionCheck.result.blockers.length > 0
-                    ? <span>阻塞原因：{distributionCheck.result.blockers.map(labelDistributionBlocker).join('，')}</span>
-                    : <span>请检查 Chrome 登录状态、CDP 端口和清单格式。</span>}
-                  {distributionNeedsChrome && (
-                    <div className="distribution-modal-feedback-actions">
-                      <button type="button" className="node-secondary-button" onClick={startDistributionChrome} disabled={distributionChromeStarting}>
-                        {distributionChromeStarting ? <RefreshCw size={13} className="animate-spin" /> : <Play size={13} />}
-                        {distributionChromeStarting ? '正在启动 Chrome' : '启动铺货 Chrome'}
-                      </button>
-                      <button type="button" className="node-secondary-button" onClick={checkDistribution} disabled={distributionChromeStarting || distributionCheck.status === 'loading'}>
-                        <RefreshCw size={13} /> 重新检查
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-              {distributionSubmitError && (
-                <div className="distribution-modal-feedback blocked">提交失败：{distributionSubmitError}</div>
-              )}
-              {distributionChromeMessage && !distributionSubmitError && (
-                <div className="distribution-modal-feedback checking">{distributionChromeMessage}</div>
-              )}
-            </div>
-
-            <div className="export-preview-list">
-              {rows.length === 0 && (
-                <div className="artifact-empty">当前导出清单为空，通常表示前面的生成或复核没有产出可铺货商品。</div>
-              )}
-              {rows.map((row) => {
-                const url = distributionRowUrl(row);
-                const keyword = rowSelectedKeyword(row);
-                return (
-                  <article className={`export-preview-row ${row.removed ? 'is-removed' : ''}`} key={row.key}>
-                    <div>
-                      <strong>{row.title || '未命名铺货项'}</strong>
-                      <span>{row.removed ? '已移除' : '将导出'}</span>
-                      {keyword && <small className="selected-keyword-badge">选词：{keyword}</small>}
-                    </div>
-                    {Array.isArray(row.metrics) && row.metrics.length > 0 && <p>{row.metrics.join(' · ')}</p>}
-                    {url && <p>{url}</p>}
-                    <div className="review-row-actions">
-                      <button type="button" className={`node-secondary-button ${row.removed ? 'success' : 'danger'}`} onClick={() => markRemoved(row.key, !row.removed)}>
-                        {row.removed ? <Check size={13} /> : <X size={13} />}
-                        {row.removed ? '恢复' : '移除'}
-                      </button>
-                      {url && (
-                        <a className="node-secondary-button" href={url} target="_blank" rel="noreferrer">
-                          <ExternalLink size={13} /> 打开货源
-                        </a>
-                      )}
-                    </div>
-                  </article>
-                );
-              })}
-              {pendingBlockedRows.map((row) => {
-                const url = distributionRowUrl(row);
-                const keyword = rowSelectedKeyword(row);
-                return (
-                  <article className="export-preview-row blocked" key={row.key}>
-                    <div>
-                      <strong>{row.title}</strong>
-                      <span>被拦截，未加入</span>
-                      {keyword && <small className="selected-keyword-badge">选词：{keyword}</small>}
-                    </div>
-                    {row.description && <p>拦截原因：{row.description}</p>}
-                    {Array.isArray(row.metrics) && row.metrics.length > 0 && <p>{row.metrics.join(' · ')}</p>}
-                    {url && <p>{url}</p>}
-                    <div className="review-row-actions">
-                      <button type="button" className="node-secondary-button success" onClick={() => markIncluded(row.key, true)}>
-                        <Check size={13} /> 加入当前清单
-                      </button>
-                      {url && (
-                        <a className="node-secondary-button" href={url} target="_blank" rel="noreferrer">
-                          <ExternalLink size={13} /> 打开货源
-                        </a>
-                      )}
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
+            {previewPanelContent}
           </section>
         </div>
       )}

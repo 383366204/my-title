@@ -7,6 +7,8 @@ const {
   flowDaily,
   flowMine,
   flowReviewCandidates,
+  flowManualStart,
+  flowEnrichManualProducts,
   flowVerify,
   flowGenerate,
   flowExport,
@@ -42,6 +44,106 @@ function mockProduct(keyword = '测试货源', id = '123') {
 }
 
 describe('pipeline-flow', () => {
+  test('manual workflow records direct URLs and enriches each product independently', async () => {
+    const dataDir = tempDataDir();
+    const runId = 'manual_direct_input';
+    const started = flowManualStart({
+      dataDir,
+      runId,
+      items: [
+        { keyword: '法式连衣裙', url: 'https://detail.1688.com/offer/123456.html' },
+        { keyword: '碎花连衣裙', url: 'https://detail.1688.com/offer/789012.html' }
+      ]
+    });
+
+    assert.strictEqual(started.status, 'manual_products_received');
+    assert.strictEqual(readJsonl(getRun({ dataDir, runId }).run.files.reviewedCandidates).length, 2);
+
+    const progress = [];
+    const enriched = await flowEnrichManualProducts({
+      dataDir,
+      runId,
+      detailFetcher: async (offerId) => {
+        if (offerId === '789012') throw new Error('商品已下架');
+        return {
+          model: {
+            bizData: {
+              title: '法式收腰碎花连衣裙夏季新款女装',
+              categoryName: '女装 > 连衣裙',
+              imageUrl: 'https://img.example.com/123456.jpg',
+              price: '29.90'
+            }
+          }
+        };
+      },
+      onProgress: (value) => progress.push(value)
+    });
+
+    assert.strictEqual(enriched.status, 'products_selected');
+    assert.strictEqual(enriched.selected.length, 1);
+    assert.strictEqual(enriched.failed.length, 1);
+    assert.strictEqual(enriched.selected[0].recommendedCategory, '女装 > 连衣裙');
+    assert.strictEqual(enriched.failed[0].enrichError, '商品已下架');
+    assert.strictEqual(getRun({ dataDir, runId }).run.options.workflowVersion, 2);
+    assert.ok(progress.some((value) => value.current === 2 && value.total === 2));
+
+    const retriedOfferIds = [];
+    const retried = await flowEnrichManualProducts({
+      dataDir,
+      runId,
+      detailFetcher: async (offerId) => {
+        retriedOfferIds.push(offerId);
+        return { model: { bizData: { title: '碎花连衣裙夏季新款女装', categoryName: '女装 > 连衣裙' } } };
+      }
+    });
+    assert.deepStrictEqual(retriedOfferIds, ['789012']);
+    assert.strictEqual(retried.selected.length, 2);
+    assert.strictEqual(retried.failed.length, 0);
+  });
+
+  test('manual title generation keeps the category associated with each URL', async () => {
+    const dataDir = tempDataDir();
+    const runId = 'manual_category_per_url';
+    flowManualStart({
+      dataDir,
+      runId,
+      items: [
+        { keyword: '桌面收纳', url: 'https://detail.1688.com/offer/111111.html' },
+        { keyword: '桌面收纳', url: 'https://detail.1688.com/offer/222222.html' }
+      ]
+    });
+    await flowEnrichManualProducts({
+      dataDir,
+      runId,
+      detailFetcher: async (offerId) => ({
+        model: {
+          bizData: {
+            title: offerId === '111111' ? '桌面收纳盒办公用品' : '桌面收纳架厨房用品',
+            categoryName: offerId === '111111' ? '办公用品 > 收纳盒' : '厨房用品 > 收纳架'
+          }
+        }
+      })
+    });
+
+    const generated = await flowGenerate({
+      dataDir,
+      runId,
+      manualMode: true,
+      generator: async (keyword, options) => ({
+        products: options.products.map((product, index) => ({
+          ...product,
+          '铺货标题': `${keyword}${index + 1}多功能分类整理置物收纳用品家用办公室厨房桌面`
+        }))
+      })
+    });
+
+    assert.strictEqual(generated.generated.length, 2);
+    assert.deepStrictEqual(generated.generated.map((row) => row.recommendedCategory), [
+      '办公用品 > 收纳盒',
+      '厨房用品 > 收纳架'
+    ]);
+  });
+
   test('scoreSycmRows accepts usable blue-ocean data', () => {
     const result = scoreSycmRows([
       {

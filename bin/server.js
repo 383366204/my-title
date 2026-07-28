@@ -64,6 +64,7 @@ const {
 const {
   parseItems,
   checkDistributionReadiness,
+  confirmDistributionLog,
   distributeProducts
 } = require('../skills/1688-distribution');
 const {
@@ -126,6 +127,49 @@ function updateDistributionJob(jobId, patch = {}) {
   return writeDistributionJob(next);
 }
 
+function distributionJobInput(job = {}) {
+  return (job.items || []).map(item => (
+    `${item.url || ''}$$${item.title || ''}$$${item.category || ''}`
+  )).join('\n');
+}
+
+async function recheckDistributionJob(job) {
+  const input = distributionJobInput(job);
+  if (!input) throw new Error('铺货任务没有可复核的商品清单。');
+  const reader = app.locals.distributionConfirmationReader || confirmDistributionLog;
+  updateDistributionJob(job.jobId, {
+    status: 'checking_confirmation',
+    confirmationError: '',
+    progress: { ...(job.progress || {}), phase: 'checking_confirmation' }
+  });
+  try {
+    const confirmationCheck = await reader({ input });
+    const completed = confirmationCheck?.ok === true && confirmationCheck?.status === 'confirmed';
+    const next = updateDistributionJob(job.jobId, {
+      status: completed ? 'completed' : 'completed_with_issues',
+      completed: completed ? Number(job.total || 0) : Number(job.completed || 0),
+      failed: completed ? 0 : Number(job.failed || 0),
+      confirmationCheck,
+      confirmationError: '',
+      progress: { ...(job.progress || {}), phase: completed ? 'completed' : 'completed_with_issues' }
+    });
+    if (completed && next.workflowRunId) {
+      syncCompletedDistributionWorkflow({
+        ...next,
+        result: { ...(next.result || {}), total: next.total, confirmed: next.total, confirmationCheck }
+      });
+    }
+    return next;
+  } catch (error) {
+    updateDistributionJob(job.jobId, {
+      status: 'completed_with_issues',
+      confirmationError: error.message,
+      progress: { ...(job.progress || {}), phase: 'confirmation_failed' }
+    });
+    throw error;
+  }
+}
+
 function syncCompletedDistributionWorkflow(job) {
   if (!job || job.status !== 'completed' || !job.workflowRunId) return;
   const currentSummary = summarizePipelineRun({ runId: job.workflowRunId });
@@ -133,7 +177,7 @@ function syncCompletedDistributionWorkflow(job) {
   if (currentSummary?.status === 'workflow_complete' && currentRuntime?.status === 'completed') return;
   markRunDistributionComplete({
     runId: job.workflowRunId,
-    distributionResult: job.result || {}
+    distributionResult: { ...(job.result || {}), method: job.mode || job.result?.method || 'automatic' }
   });
   const runtime = currentRuntime || readRuntimeState({ runId: job.workflowRunId });
   if (!runtime) return;
@@ -144,7 +188,13 @@ function syncCompletedDistributionWorkflow(job) {
       activeStep: 'end',
       progress: {
         ...(runtime.progress || {}),
-        export: { status: 'completed', current: 1, total: 1, percent: 100, message: '铺货已确认' },
+        export: {
+          status: 'completed',
+          current: 1,
+          total: 1,
+          percent: 100,
+          message: job.mode === 'manual' ? '人工铺货已确认' : '铺货已确认'
+        },
         end: { status: 'completed', current: 1, total: 1, percent: 100, message: '流程完成' }
       },
       requestedAction: null
@@ -446,7 +496,7 @@ app.post('/api/pipeline/start', (req, res) => {
     const steps = launch.mode === 'daily'
       ? [WORKFLOW_NODE_IDS.mine, WORKFLOW_NODE_IDS.keywordReview, WORKFLOW_NODE_IDS.verify, WORKFLOW_NODE_IDS.select, WORKFLOW_NODE_IDS.generate, WORKFLOW_NODE_IDS.export]
       : launch.mode === 'manual'
-        ? [WORKFLOW_NODE_IDS.start, WORKFLOW_NODE_IDS.keywordReview, WORKFLOW_NODE_IDS.select, WORKFLOW_NODE_IDS.generate, WORKFLOW_NODE_IDS.export]
+        ? [WORKFLOW_NODE_IDS.start, WORKFLOW_NODE_IDS.select, WORKFLOW_NODE_IDS.generate, WORKFLOW_NODE_IDS.export]
       : undefined;
     const promise = runPipelineRuntime({ runId, mode: launch.mode, params, steps });
     const runState = { runId, mode: launch.mode, promise };
@@ -471,7 +521,7 @@ app.post('/api/pipeline/start', (req, res) => {
       }
     });
   } catch (err) {
-    const status = /未知 workflow mode|未知 workflow template|关键词不能为空/.test(err.message) ? 400 : 500;
+    const status = /未知 workflow mode|未知 workflow template|关键词不能为空|1688 商品链接|商品缺少关键词|商品重复/.test(err.message) ? 400 : 500;
     res.status(status).json({ ok: false, error: err.message });
   }
 });
@@ -1179,6 +1229,84 @@ app.post('/api/distribution/submit', async (req, res) => {
   }
 });
 
+// 1.7 POST /api/distribution/manual-complete - 用户在外部手动铺货后确认完成
+app.post('/api/distribution/manual-complete', (req, res) => {
+  try {
+    if (req.body?.confirm !== true) {
+      return res.status(400).json({ ok: false, error: '人工铺货完成需要用户明确确认。' });
+    }
+    const workflowRunId = String(req.body?.runId || '').trim();
+    if (!workflowRunId) {
+      return res.status(400).json({ ok: false, error: '缺少工作流运行 ID。' });
+    }
+    const input = String(req.body?.input || '').trim();
+    const items = parseItems(input);
+    if (items.length === 0) {
+      return res.status(400).json({ ok: false, error: '人工铺货清单为空。' });
+    }
+    const incompleteItem = items.find(item => !item.url || !item.title);
+    if (incompleteItem) {
+      return res.status(400).json({ ok: false, error: '人工铺货清单必须包含链接和标题；类目可在人工铺货时补充。' });
+    }
+
+    const currentSummary = summarizePipelineRun({ runId: workflowRunId });
+    if (!currentSummary?.runId) {
+      return res.status(404).json({ ok: false, error: '未找到对应的工作流运行。' });
+    }
+    const allowedStatuses = new Set(['ready_to_distribute', 'needs_review', 'awaiting_user_confirmation', 'workflow_complete']);
+    if (!allowedStatuses.has(currentSummary.status)) {
+      return res.status(409).json({ ok: false, error: `当前流程状态为 ${currentSummary.status || '未知'}，还不能确认人工铺货完成。` });
+    }
+
+    const jobId = `${workflowRunId}-distribution`;
+    const existingJob = activeDistributionJobs.get(jobId) || readDistributionJob(jobId);
+    if (existingJob?.status === 'completed' && existingJob?.mode === 'manual') {
+      return res.json({ ok: true, data: existingJob });
+    }
+    if (existingJob?.status === 'completed') {
+      return res.status(409).json({ ok: false, error: '该流水线已经通过自动铺货完成，不能改记为人工铺货。' });
+    }
+    if (currentSummary.status === 'workflow_complete') {
+      return res.status(409).json({ ok: false, error: '该流水线已经完成，无需再次确认人工铺货。' });
+    }
+    if (existingJob && ['checking', 'checking_confirmation', 'submitting', 'paused'].includes(existingJob.status)) {
+      return res.status(409).json({ ok: false, error: '自动铺货任务仍在处理中，请先暂停或取消后再确认人工铺货。' });
+    }
+
+    const completedAt = new Date().toISOString();
+    const job = writeDistributionJob({
+      jobId,
+      workflowRunId,
+      mode: 'manual',
+      status: 'completed',
+      requestedAction: null,
+      total: items.length,
+      completed: items.length,
+      failed: 0,
+      skipped: 0,
+      items: items.map(item => ({ offerId: item.offerId, url: item.url, title: item.title, category: item.category })),
+      results: [],
+      result: {
+        ok: true,
+        status: 'manually_confirmed',
+        method: 'manual',
+        total: items.length,
+        confirmed: items.length
+      },
+      progress: { batchIndex: 1, batchTotal: 1, phase: 'manual_completed' },
+      startedAt: existingJob?.startedAt || completedAt,
+      completedAt,
+      previousStatus: existingJob?.status || null
+    });
+    activeDistributionJobs.delete(jobId);
+    syncCompletedDistributionWorkflow(job);
+    return res.json({ ok: true, data: job });
+  } catch (err) {
+    const status = err && err.code === 'INVALID_ITEM' ? 400 : /未找到|不存在/.test(String(err?.message || '')) ? 404 : 500;
+    return res.status(status).json({ ok: false, error: err.message });
+  }
+});
+
 app.get('/api/distribution/runs/:jobId', (req, res) => {
   try {
     let job = activeDistributionJobs.get(req.params.jobId) || readDistributionJob(req.params.jobId);
@@ -1197,14 +1325,21 @@ app.get('/api/distribution/runs/:jobId', (req, res) => {
   }
 });
 
-app.post('/api/distribution/runs/:jobId/:action', (req, res) => {
+app.post('/api/distribution/runs/:jobId/:action', async (req, res) => {
   const action = String(req.params.action || '');
-  if (!['pause', 'cancel'].includes(action)) {
+  if (!['pause', 'cancel', 'recheck'].includes(action)) {
     return res.status(400).json({ ok: false, error: '不支持的铺货控制操作。' });
   }
   try {
     const job = activeDistributionJobs.get(req.params.jobId) || readDistributionJob(req.params.jobId);
     if (!job) return res.status(404).json({ ok: false, error: '未找到铺货任务。' });
+    if (action === 'recheck') {
+      if (!['completed_with_issues', 'checking_confirmation'].includes(job.status)) {
+        return res.status(409).json({ ok: false, error: `当前任务状态为${job.status}，无需重新核对。` });
+      }
+      const next = await recheckDistributionJob(job);
+      return res.json({ ok: true, data: next });
+    }
     if (!['submitting', 'paused'].includes(job.status)) {
       return res.status(409).json({ ok: false, error: `当前任务状态为${job.status}，不能执行该操作。` });
     }
@@ -1282,7 +1417,7 @@ app.post('/api/workflows/run', (req, res) => {
     const steps = launch.mode === 'daily'
       ? [WORKFLOW_NODE_IDS.mine, WORKFLOW_NODE_IDS.verify, WORKFLOW_NODE_IDS.generate, WORKFLOW_NODE_IDS.export]
       : launch.mode === 'manual'
-        ? [WORKFLOW_NODE_IDS.start, WORKFLOW_NODE_IDS.keywordReview, WORKFLOW_NODE_IDS.select, WORKFLOW_NODE_IDS.generate, WORKFLOW_NODE_IDS.export]
+        ? [WORKFLOW_NODE_IDS.start, WORKFLOW_NODE_IDS.select, WORKFLOW_NODE_IDS.generate, WORKFLOW_NODE_IDS.export]
       : undefined;
     const promise = runPipelineRuntime({ runId, mode: launch.mode, params, steps });
     const runState = {
@@ -1312,7 +1447,7 @@ app.post('/api/workflows/run', (req, res) => {
     });
   } catch (err) {
     if (activeWorkbenchProcess && !activeWorkbenchProcess.pid && !activeWorkbenchProcess.promise) activeWorkbenchProcess = null;
-    const status = /未知 workflow mode|未知 workflow template|关键词不能为空/.test(err.message) ? 400 : 500;
+    const status = /未知 workflow mode|未知 workflow template|关键词不能为空|1688 商品链接|商品缺少关键词|商品重复/.test(err.message) ? 400 : 500;
     res.status(status).json({ ok: false, error: err.message });
   }
 });

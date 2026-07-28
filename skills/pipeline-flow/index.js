@@ -3,7 +3,7 @@ const path = require('path');
 const { applySeedFeedback, mineKeywords } = require('../keyword-mining');
 const { generateTitlePipeline } = require('../title-gen');
 const { extractKeywords } = require('../title-gen/src/extract-core');
-const { searchAll } = require('../alibaba1688');
+const { searchAll, Alibaba1688Client, parse1688Url } = require('../alibaba1688');
 const { extractSycmData, DEFAULT_FILTER_CONDITIONS } = require('../sycm-research');
 const { checkBannedWords } = require('../../core/banned-words');
 const { withAgentResponseFields } = require('../../core/agent-response');
@@ -222,6 +222,7 @@ function markRunDistributionComplete({ dataDir = DEFAULT_FLOW_DIR, runId, distri
   run.nextCommand = '';
   run.distribution = {
     status: 'completed',
+    method: String(distributionResult.method || distributionResult.mode || 'automatic'),
     completedAt: new Date().toISOString(),
     total: Number(distributionResult.total || run.counts?.readyToDistribute || 0),
     confirmed: Number(distributionResult.confirmed || distributionResult.total || 0)
@@ -407,6 +408,78 @@ function productUrl(product) {
 
 function productTitle(product) {
   return product && (product['铺货标题'] || product.title || product.subject || product.generatedTitle || product.name || '');
+}
+
+function parsePossibleJson(value) {
+  if (typeof value !== 'string') return value;
+  const text = value.trim();
+  if (!text || (!text.startsWith('{') && !text.startsWith('['))) return value;
+  try {
+    return JSON.parse(text);
+  } catch (_error) {
+    return value;
+  }
+}
+
+function findDetailValue(root, keys) {
+  const targets = new Set(keys.map(key => String(key).toLowerCase()));
+  const queue = [parsePossibleJson(root)];
+  const seen = new Set();
+  while (queue.length > 0) {
+    const current = parsePossibleJson(queue.shift());
+    if (!current || typeof current !== 'object' || seen.has(current)) continue;
+    seen.add(current);
+    for (const [key, rawValue] of Object.entries(current)) {
+      const value = parsePossibleJson(rawValue);
+      if (targets.has(String(key).toLowerCase()) && value != null && typeof value !== 'object' && String(value).trim()) {
+        return String(value).trim();
+      }
+      if (value && typeof value === 'object') queue.push(value);
+    }
+  }
+  return '';
+}
+
+function normalizeManualOfferDetail(raw, input = {}) {
+  const root = parsePossibleJson(raw?.model?.bizData ?? raw?.model?.data ?? raw?.data ?? raw);
+  const text = typeof root === 'string' ? root : '';
+  const fromText = (patterns) => {
+    for (const pattern of patterns) {
+      const match = text.match(pattern);
+      if (match?.[1]) return match[1].trim();
+    }
+    return '';
+  };
+  const title = findDetailValue(root, ['title', 'subject', 'offerTitle', 'productTitle', 'name'])
+    || fromText([/(?:商品标题|标题)[:：]\s*([^\n]+)/i]);
+  const category = findDetailValue(root, ['categoryName', 'leafCategoryName', 'category', 'catName', 'categoryListName'])
+    || fromText([/(?:商品类目|类目)[:：]\s*([^\n]+)/i]);
+  const imageUrl = findDetailValue(root, ['imageUrl', 'mainImage', 'mainPic', 'picUrl', 'image'])
+    || fromText([/(https?:\/\/[^\s"']+\.(?:jpg|jpeg|png|webp))/i]);
+  const price = findDetailValue(root, ['price', 'offerPrice', 'salePrice', 'priceRange'])
+    || fromText([/(?:价格|单价)[:：]\s*([^\n]+)/i]);
+  return {
+    offerId: input.offerId || '',
+    title: title || String(input.title || '').trim(),
+    category: category || String(input.category || '').trim(),
+    imageUrl,
+    price,
+    raw: root
+  };
+}
+
+function createManualDetailFetcher(options = {}) {
+  if (typeof options.detailFetcher === 'function') return options.detailFetcher;
+  const ak = String(options.ali1688Ak || process.env.ALI_1688_AK || '').trim();
+  if (!ak) {
+    return async () => {
+      const error = new Error('缺少 ALI_1688_AK，无法获取 1688 商品资料');
+      error.code = 'ali_1688_ak_missing';
+      throw error;
+    };
+  }
+  const client = new Alibaba1688Client(ak);
+  return offerId => client.getOfferDetail(offerId);
 }
 
 function sycmRecommendedCategory(sycmResult) {
@@ -745,39 +818,184 @@ async function appendRunCandidates(options = {}) {
  * @returns {object} Initialized run result.
  */
 function flowManualStart(options = {}) {
-  const keywords = Array.isArray(options.keywords)
-    ? options.keywords.map(item => String(item || '').trim()).filter(Boolean)
-    : String(options.keywords || '').split(/\r?\n|[,，]/).map(item => item.trim()).filter(Boolean);
-  if (keywords.length === 0) throw new Error('至少输入一个关键词');
+  const inputItems = Array.isArray(options.items) ? options.items : [];
+  if (inputItems.length === 0) throw new Error('至少输入一个关键词和 1688 商品链接');
+  const normalizedItems = inputItems.map((item, index) => {
+    const inputUrl = String(item?.url || '');
+    let inputHostname = '';
+    try {
+      inputHostname = new URL(inputUrl).hostname;
+    } catch (_error) {
+      inputHostname = '';
+    }
+    const validHostname = inputHostname === '1688.com' || inputHostname.endsWith('.1688.com');
+    const parsed = validHostname ? parse1688Url(inputUrl) : null;
+    const keyword = String(item?.keyword || options.defaultKeyword || '').trim();
+    if (!parsed) throw new Error(`第 ${index + 1} 个 1688 商品链接无效`);
+    if (!keyword) throw new Error(`第 ${index + 1} 个商品缺少关键词`);
+    return {
+      clientId: String(item?.clientId || `manual-${parsed.offerId}`),
+      keyword,
+      selectedKeyword: keyword,
+      offerId: parsed.offerId,
+      url: `https://detail.1688.com/offer/${parsed.offerId}.html`,
+      title: String(item?.title || '').trim(),
+      category: String(item?.category || '').trim()
+    };
+  });
+  const keywords = [...new Set(normalizedItems.map(item => item.keyword))];
   const { runDir, run } = initRun({
     ...options,
-    options: { ...(options.options || {}), mode: 'manual' }
+    options: { ...(options.options || {}), mode: 'manual', workflowVersion: 2 }
   });
-  const candidates = [...new Set(keywords)].map(keyword => ({
+  const candidates = keywords.map(keyword => ({
     keyword,
     selectedKeyword: keyword,
-    status: 'candidate',
+    status: 'keyword_approved',
     source: 'manual',
     reason: '用户手动输入',
-    nextAction: 'manual_keyword_review',
+    reviewStatus: 'approved',
+    nextAction: 'fetch_product_details',
     signature: keyword,
     addedAt: new Date().toISOString()
   }));
   fs.writeFileSync(run.files.candidates, '', 'utf8');
   appendJsonl(run.files.candidates, candidates);
-  run.status = 'awaiting_keyword_review';
+  fs.writeFileSync(run.files.reviewedCandidates, '', 'utf8');
+  appendJsonl(run.files.reviewedCandidates, candidates);
+  fs.writeFileSync(run.files.selectedProducts, '', 'utf8');
+  appendJsonl(run.files.selectedProducts, normalizedItems.map(item => ({
+    ...item,
+    status: 'manual_input_pending',
+    source: 'manual_url',
+    product: {
+      offerId: item.offerId,
+      url: item.url,
+      detailUrl: item.url,
+      title: item.title,
+      subject: item.title,
+      category: item.category,
+      '产品链接': item.url,
+      '链接原标题': item.title,
+      '类目': item.category
+    },
+    inputAt: new Date().toISOString()
+  })));
+  run.status = 'manual_products_received';
   run.counts.candidates = candidates.length;
-  run.counts.keywordReviewPending = candidates.length;
+  run.counts.keywordReviewApproved = candidates.length;
+  run.counts.keywordReviewPending = 0;
+  run.counts.manualInputProducts = normalizedItems.length;
   writeRun(runDir, run);
   return flowResponse({
     ok: true,
     runId: run.runId,
     status: run.status,
     candidates,
+    items: normalizedItems,
     runDir,
-    blockers: ['keyword_review_required'],
-    nextActionCode: 'manual_keyword_review',
-    userMessage: `已录入 ${candidates.length} 个关键词，请人工筛选。`
+    blockers: [],
+    nextActionCode: 'fetch_product_details',
+    userMessage: `已录入 ${normalizedItems.length} 个商品，开始获取商品资料。`
+  });
+}
+
+/**
+ * Fetch product details for manually supplied 1688 URLs without running keyword search.
+ * @param {object} options Manual product enrichment options.
+ * @returns {Promise<object>} Enriched product result.
+ */
+async function flowEnrichManualProducts(options = {}) {
+  const { runDir, run } = getRun(options);
+  const rows = readJsonl(run.files.selectedProducts)
+    .filter(row => ['manual_input_pending', 'enrich_failed', 'selected'].includes(row.status));
+  const fetchDetail = createManualDetailFetcher(options);
+  const enriched = [];
+  for (const [index, row] of rows.entries()) {
+    if (row.status === 'selected' && row.enrichStatus === 'completed' && options.retryCompleted !== true) {
+      enriched.push(row);
+      options.onProgress?.({
+        current: index + 1,
+        total: rows.length,
+        message: `已保留 ${index + 1} / ${rows.length} 个商品资料`
+      });
+      continue;
+    }
+    options.onProgress?.({
+      current: index,
+      total: rows.length,
+      message: `正在获取第 ${index + 1} / ${rows.length} 个商品资料`
+    });
+    try {
+      const raw = await fetchDetail(row.offerId, row);
+      const detail = normalizeManualOfferDetail(raw, row);
+      if (!detail.title) throw new Error('1688 返回结果中没有商品标题');
+      const product = {
+        ...(row.product || {}),
+        offerId: row.offerId,
+        id: row.offerId,
+        url: row.url,
+        detailUrl: row.url,
+        title: detail.title,
+        subject: detail.title,
+        category: detail.category,
+        imageUrl: detail.imageUrl,
+        price: detail.price,
+        '产品链接': row.url,
+        '链接原标题': detail.title,
+        '主图链接': detail.imageUrl,
+        '商品原价': detail.price,
+        '类目': detail.category
+      };
+      enriched.push({
+        ...row,
+        status: 'selected',
+        title: detail.title,
+        sourceTitle: detail.title,
+        recommendedCategory: detail.category,
+        imageUrl: detail.imageUrl,
+        price: detail.price,
+        product,
+        manualSelectionStatus: 'approved',
+        enrichStatus: 'completed',
+        enrichedAt: new Date().toISOString(),
+        enrichError: ''
+      });
+    } catch (error) {
+      enriched.push({
+        ...row,
+        status: 'enrich_failed',
+        enrichStatus: 'failed',
+        enrichError: error?.message || String(error),
+        enrichErrorCode: error?.code || '',
+        enrichedAt: new Date().toISOString()
+      });
+    }
+    options.onProgress?.({
+      current: index + 1,
+      total: rows.length,
+      message: `已处理 ${index + 1} / ${rows.length} 个商品`
+    });
+  }
+  fs.writeFileSync(run.files.selectedProducts, '', 'utf8');
+  appendJsonl(run.files.selectedProducts, enriched);
+  const selected = enriched.filter(row => row.status === 'selected');
+  const failed = enriched.filter(row => row.status === 'enrich_failed');
+  run.status = selected.length > 0 ? 'products_selected' : 'select_failed';
+  run.counts.selectedProducts = selected.length;
+  run.counts.productEnrichFailed = failed.length;
+  writeRun(runDir, run);
+  return flowResponse({
+    ok: selected.length > 0,
+    runId: run.runId,
+    status: run.status,
+    selected,
+    failed,
+    runDir,
+    blockers: selected.length > 0 ? [] : ['product_detail_fetch_failed'],
+    userMessage: failed.length > 0
+      ? `成功获取 ${selected.length} 个商品资料，${failed.length} 个失败。`
+      : `成功获取 ${selected.length} 个商品资料。`
   });
 }
 
@@ -1412,7 +1630,9 @@ async function flowGenerate(options = {}) {
           keywordOpportunity: item.keywordOpportunity || selectedProduct.keywordOpportunity,
           sycmScore: item.sycmScore || selectedProduct.sycmScore,
           sycmData: item.sycmData || [],
-          recommendedCategory: item.recommendedCategory || selectedProduct.recommendedCategory || '',
+          recommendedCategory: options.manualMode
+            ? (selectedProduct.recommendedCategory || item.recommendedCategory || '')
+            : (item.recommendedCategory || selectedProduct.recommendedCategory || ''),
           verifyMode: item.verifyMode || selectedProduct.verifyMode || '',
           confidence: item.confidence || selectedProduct.confidence || '',
           usage: item.usage || selectedProduct.usage || '',
@@ -2011,6 +2231,7 @@ module.exports = {
   fetchSycmWithFallback,
   appendRunCandidates,
   flowManualStart,
+  flowEnrichManualProducts,
   flowReviewProducts,
   flowMine,
   flowReviewCandidates,

@@ -31,13 +31,30 @@ import { WorkflowConsole } from './features/workflow/components/workflow-console
 import { WorkflowLeftSidebar } from './features/workflow/components/workflow-left-sidebar.jsx';
 import { WorkflowCanvasWorkspace } from './features/workflow/components/workflow-canvas-workspace.jsx';
 import { WorkflowRightSidebar } from './features/workflow/components/workflow-right-sidebar.jsx';
+import { ManualWorkflowInputPanel } from './features/workflow/components/manual-workflow-input-panel.jsx';
 import { nodeTypes } from './features/workflow/workflow-node-types.js';
 import { artifactItems, candidateKeyword } from './features/workflow/workflow-data.js';
 import { controlDistributionRun } from './api/distribution-api.js';
 
 function copyText(value) {
-  if (!navigator?.clipboard) return Promise.resolve();
-  return navigator.clipboard.writeText(String(value || ''));
+  const text = String(value || '');
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  textarea.style.pointerEvents = 'none';
+  document.body.appendChild(textarea);
+  textarea.select();
+
+  try {
+    if (typeof document.execCommand === 'function' && document.execCommand('copy')) return Promise.resolve();
+  } finally {
+    textarea.remove();
+  }
+
+  if (navigator?.clipboard?.writeText) return navigator.clipboard.writeText(text);
+  return Promise.reject(new Error('当前浏览器不支持复制，请升级浏览器后重试。'));
 }
 
 const DEFAULT_WORKFLOW_MODE = 'daily';
@@ -156,6 +173,8 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
   const [selectedNodeId, setSelectedNodeId] = useState(null);
   const initialTemplateLoadedRef = useRef(false);
   const nodeInteractionRef = useRef({ onAction: null, onViewArtifact: null });
+  const loadHistoryRunRef = useRef(null);
+  const completedDistributionJobsRef = useRef(new Set());
   const dispatchNodeAction = useCallback((action, nodeId) => {
     return nodeInteractionRef.current.onAction?.(action, nodeId);
   }, []);
@@ -216,6 +235,14 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
     generateTitleFromNode
   } = useTitleGeneration({ active: selectedNodeId === 'generate', runId: currentRunId });
   const [artifactPreviewOpen, setArtifactPreviewOpen] = useState(false);
+  const [artifactPreviewTargetNodeId, setArtifactPreviewTargetNodeId] = useState(null);
+  const [manualInputOpen, setManualInputOpen] = useState(false);
+
+  useEffect(() => {
+    if (!artifactPreviewTargetNodeId || selectedNodeId !== artifactPreviewTargetNodeId) return;
+    setArtifactPreviewOpen(true);
+    setArtifactPreviewTargetNodeId(null);
+  }, [artifactPreviewTargetNodeId, selectedNodeId]);
 
   // 加载工作流模板
   const loadTemplate = (template) => {
@@ -320,6 +347,12 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
         return node;
       })
     );
+  };
+
+  const updateNodeFields = (nodeId, fields) => {
+    setNodes((currentNodes) => currentNodes.map((node) => (
+      node.id === nodeId ? { ...node, data: { ...node.data, ...fields } } : node
+    )));
   };
 
   // SSE 连接本身由 Hook 管理；页面只解释运行领域事件。
@@ -511,6 +544,7 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
       }]);
     }
   };
+  loadHistoryRunRef.current = loadHistoryRun;
 
   const deleteHistoryRun = async (runId) => {
     const ok = window.confirm('确认删除这次运行历史？相关产物和日志也会一起删除，此操作不可撤销。');
@@ -640,7 +674,10 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
     const operationNodeId = action === 'mine-more' ? 'mine' : targetNodeId;
     if (action === 'open-review' || action === 'confirm-distribution' || action === 'keyword-review' || action === 'product-review') {
       if (targetNodeId) setSelectedNodeId(targetNodeId);
-      if (action === 'open-review' || action === 'confirm-distribution') setArtifactPreviewOpen(true);
+      if (action === 'open-review' || action === 'confirm-distribution') {
+        if (targetNodeId) setArtifactPreviewTargetNodeId(targetNodeId);
+        else setArtifactPreviewOpen(true);
+      }
       setLogs((prev) => [...prev, {
         timestamp: new Date().toISOString(),
         level: action === 'confirm-distribution' || action === 'keyword-review' ? 'warn' : 'info',
@@ -751,9 +788,27 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
         ? { ...node, data: { ...node.data, distributionJob: job || null } }
         : node
     )));
-  }, [setNodes]);
+    const workflowRunId = job?.workflowRunId || currentRunId;
+    if (job?.status === 'completed' && workflowRunId && !completedDistributionJobsRef.current.has(job.jobId)) {
+      completedDistributionJobsRef.current.add(job.jobId);
+      const manualMode = job.mode === 'manual';
+      setLogs((previous) => [...previous, {
+        timestamp: new Date().toISOString(),
+        level: 'info',
+        message: manualMode
+          ? '人工铺货已确认完成，流水线正在进入完成节点。'
+          : '自动铺货已确认完成，流水线正在进入完成节点。'
+      }]);
+      Promise.resolve().then(() => loadHistoryRunRef.current?.(workflowRunId, { preserveLogs: true }));
+    }
+  }, [currentRunId, setNodes]);
 
   const handleNodeAction = async (action, nodeId) => {
+    if (action === 'manual-input') {
+      setSelectedNodeId(nodeId);
+      setManualInputOpen(true);
+      return;
+    }
     if (action === 'artifact' || action === 'inspect' || action === 'blocked' || action === 'review') {
       setSelectedNodeId(nodeId);
       return;
@@ -785,7 +840,7 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
 
   const handleViewNodeArtifact = (nodeId) => {
     setSelectedNodeId(nodeId);
-    setArtifactPreviewOpen(true);
+    setArtifactPreviewTargetNodeId(nodeId);
   };
 
   // 画布节点由历史数据创建，事件入口必须始终指向当前 render 的运行上下文。
@@ -940,6 +995,7 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
         copyText={copyText}
         currentRunId={currentRunId}
         isViewingRun={isViewingRun}
+        onOpenManualInput={() => setManualInputOpen(true)}
         onToggle={() => setRightSidebarCollapsed((collapsed) => !collapsed)}
         operationProps={nodeOperationProps}
         selectedNode={selectedNode}
@@ -948,6 +1004,24 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
         updateNodeData={updateNodeData}
       />
       </div>
+      {manualInputOpen && (
+        <div className="workflow-modal-backdrop" role="presentation" onClick={() => setManualInputOpen(false)}>
+          <ManualWorkflowInputPanel
+            initialDefaultKeyword={nodes.find((node) => node.id === 'start')?.data?.defaultKeyword || ''}
+            initialItems={nodes.find((node) => node.id === 'start')?.data?.items || []}
+            onCancel={() => setManualInputOpen(false)}
+            onSave={({ defaultKeyword, items }) => {
+              updateNodeFields('start', { defaultKeyword, items });
+              setManualInputOpen(false);
+              setLogs((previous) => [...previous, {
+                timestamp: new Date().toISOString(),
+                level: 'info',
+                message: `已准备 ${items.length} 个商品，启动流水线后将直接获取商品资料。`
+              }]);
+            }}
+          />
+        </div>
+      )}
       <WorkflowConsole logs={logs} onClear={() => setLogs([])} />
     </div>
   );

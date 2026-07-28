@@ -139,7 +139,7 @@ export function getPipelineMonitorNodeStatus(stage = {}, summary = null) {
 
 /**
  * 将工作流节点状态映射到画布展示 tone。
- * @param {string} state 节点状态。
+ * @param {string|object} state 节点状态或节点数据。
  * @returns {string} UI tone。
  */
 export function getCanvasNodeTone(state) {
@@ -167,7 +167,14 @@ export function getCanvasNodeTone(state) {
  */
 export function getWorkflowNodeAction(nodeId, state) {
   const normalizedNodeId = String(nodeId || '').toLowerCase();
-  const normalizedState = String(state || '').toLowerCase();
+  const stateDetails = state && typeof state === 'object' ? state : {};
+  const normalizedState = String(stateDetails.status || stateDetails.state || state || '').toLowerCase();
+  if (normalizedNodeId === 'start' && stateDetails.manualInput === true && ['idle', 'pending'].includes(normalizedState)) {
+    return { label: '录入词和货源', action: 'manual-input', tone: 'warn' };
+  }
+  if (normalizedNodeId === 'select' && stateDetails.manualDirectInput === true && Number(stateDetails.output?.failed || 0) > 0 && normalizedState === 'completed') {
+    return { label: '重试失败项', action: 'retry-node', tone: 'warn' };
+  }
   if (normalizedNodeId === 'keywordreview' && ['needs_review', 'waiting_confirmation', 'awaiting_keyword_review', 'blocked'].includes(normalizedState)) {
     return { label: '输入/筛词', action: 'keyword-review', tone: 'warn' };
   }
@@ -177,7 +184,10 @@ export function getWorkflowNodeAction(nodeId, state) {
   if (normalizedNodeId === 'export' && ['needs_review'].includes(normalizedState)) {
     return { label: '处理铺货复核', action: 'open-review', tone: 'warn' };
   }
-  if (normalizedNodeId === 'export' && ['waiting_confirmation', 'awaiting_user_confirmation', 'ready', 'ready_to_distribute', 'completed'].includes(normalizedState)) {
+  if (normalizedNodeId === 'export' && normalizedState === 'completed') {
+    return { label: '查看铺货清单', action: 'confirm-distribution', tone: 'success' };
+  }
+  if (normalizedNodeId === 'export' && ['waiting_confirmation', 'awaiting_user_confirmation', 'ready', 'ready_to_distribute'].includes(normalizedState)) {
     return { label: '确认铺货', action: 'confirm-distribution', tone: 'warn' };
   }
   if (normalizedNodeId === 'review' && (normalizedState === 'needs_review' || normalizedState === 'waiting_confirmation')) {
@@ -385,7 +395,7 @@ export function getWorkflowNodeViewModel(nodeId, state = {}) {
     progressPercent: progress && Number.isFinite(Number(progress.percent))
       ? Math.max(0, Math.min(100, Number(progress.percent)))
       : 0,
-    primaryAction: getWorkflowNodeAction(nodeId, status),
+    primaryAction: getWorkflowNodeAction(nodeId, state),
     blockerTitle: blocker?.title || '',
     blockerMessage: blocker?.message || '',
     hasBlocker: Boolean(blocker),
@@ -429,6 +439,11 @@ export function getWorkflowNodeSuccessLabel(nodeId, state = {}) {
   }
   if (normalized === 'select') {
     const count = Number(output.productCount ?? output.count ?? state.count ?? 0);
+    const failed = Number(output.failed ?? state.failed ?? 0);
+    if (state.manualDirectInput === true) {
+      if (count > 0 || failed > 0) return `获取 ${count} 个商品，失败 ${failed} 个`;
+      return '';
+    }
     return count > 0 ? `选中 ${count} 条货源` : '';
   }
   if (normalized === 'export') {
@@ -459,6 +474,7 @@ export function getWorkflowNodeResultLocation(nodeId, state = {}) {
 
 export function getWorkflowResultSummaryView(nodeId, state = {}) {
   const normalized = String(nodeId || '');
+  const manualProductInput = normalized === 'select' && state.manualDirectInput === true;
   const titles = {
     mine: '选词挖掘结果',
     keywordReview: '人工筛词结果',
@@ -469,6 +485,7 @@ export function getWorkflowResultSummaryView(nodeId, state = {}) {
     review: '铺货清单与复核结果',
     end: '流程完成结果'
   };
+  if (manualProductInput) titles.select = '商品资料获取结果';
   const hints = {
     mine: '候选词在下方结果列表中预览，完整内容保存在 candidates.jsonl。',
     keywordReview: '人工确认后的关键词会保存到 reviewed-candidates.jsonl，只有通过项会进入生意参谋校验。',
@@ -479,6 +496,7 @@ export function getWorkflowResultSummaryView(nodeId, state = {}) {
     review: '自动导出的清单和被拦截的复核项会合并在下方操作台。',
     end: '流程完成后可从各节点查看对应产物。'
   };
+  if (manualProductInput) hints.select = '每个1688链接会独立读取商品标题、主图、类目和价格，失败项可从当前节点重试。';
   const actionLabels = {
     mine: '查看候选词',
     keywordReview: '查看筛词结果',
@@ -489,6 +507,7 @@ export function getWorkflowResultSummaryView(nodeId, state = {}) {
     review: '查看铺货复核',
     end: '查看完成结果'
   };
+  if (manualProductInput) actionLabels.select = '查看商品资料';
   const countLabel = getWorkflowNodeSuccessLabel(normalized, state);
   const locationLabel = getWorkflowNodeResultLocation(normalized, state);
   return {
@@ -607,7 +626,7 @@ export function getWorkflowOperationMessage(action, result, error = '') {
   if (action === 'mine-more') return '已开始重新挖掘候选词，完成后会继续生意参谋校验。';
   if (action === 'retry-node') return '已请求重试，当前节点及下游步骤会重新执行。';
   if (action === 'open-review') return '复核报告已在节点产物中展示。';
-  if (action === 'confirm-distribution') return '已打开铺货复核，请在清单预览中确认商品后开始自动铺货。';
+  if (action === 'confirm-distribution') return '已打开导出清单预览，可复制铺货内容进行人工铺货，或确认后开始自动铺货。';
   if (action === 'keyword-review') return '已打开人工筛词，请保留或筛除关键词后确认。';
   if (action === 'product-review') return '已打开人工选品，请勾选 1688 货源或手动添加商品后确认。';
   if (action === 'start-sycm-chrome') return result?.userMessage || 'Chrome 已启动。请登录生意参谋后重跑验真。';
@@ -854,8 +873,9 @@ export function getStartNodeParams(nodes = []) {
 export function getWorkflowLaunchBlocker(mode, nodes = []) {
   const params = getStartNodeParams(nodes);
   if (mode === 'manual') {
-    if (String(params.keywords || '').trim()) return null;
-    const message = '请至少输入一个关键词';
+    const items = Array.isArray(params.items) ? params.items : [];
+    if (items.length > 0 && items.every((item) => String(item?.keyword || params.defaultKeyword || '').trim() && /1688\.com/i.test(String(item?.url || '')))) return null;
+    const message = '请先在开始节点录入关键词和有效的 1688 商品链接';
     return {
       status: 'blocked',
       error: message,

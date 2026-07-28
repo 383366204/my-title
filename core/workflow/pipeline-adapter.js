@@ -53,6 +53,52 @@ function sanitizeBool(value, fallback = true) {
   return fallback;
 }
 
+function normalizeManualOfferUrl(value) {
+  const text = String(value || '').trim();
+  if (!text) return null;
+  try {
+    const parsed = new URL(text);
+    if (parsed.hostname !== '1688.com' && !parsed.hostname.endsWith('.1688.com')) return null;
+    const pathMatch = parsed.pathname.match(/\/offer\/(\d+)(?:\.html)?/i);
+    const offerId = pathMatch?.[1] || parsed.searchParams.get('offerId') || parsed.searchParams.get('offer_id');
+    if (!offerId || !/^\d+$/.test(offerId)) return null;
+    return {
+      offerId,
+      url: `https://detail.1688.com/offer/${offerId}.html`
+    };
+  } catch (_error) {
+    return null;
+  }
+}
+
+function sanitizeManualWorkflowItems(raw = {}) {
+  const defaultKeyword = String(raw.defaultKeyword || '').trim();
+  const sourceItems = Array.isArray(raw.items) ? raw.items : [];
+  const seenOfferIds = new Set();
+  const items = [];
+  for (const [index, item] of sourceItems.entries()) {
+    const normalizedUrl = normalizeManualOfferUrl(item?.url || item?.productUrl);
+    if (!normalizedUrl) throw new Error(`第 ${index + 1} 个 1688 商品链接无效`);
+    if (seenOfferIds.has(normalizedUrl.offerId)) {
+      throw new Error(`第 ${index + 1} 个 1688 商品链接与前面的商品重复`);
+    }
+    const keyword = String(item?.keyword || defaultKeyword).trim();
+    if (!keyword) throw new Error(`第 ${index + 1} 个商品缺少关键词`);
+    seenOfferIds.add(normalizedUrl.offerId);
+    items.push({
+      clientId: String(item?.clientId || `manual-${normalizedUrl.offerId}`).trim(),
+      keyword,
+      url: normalizedUrl.url,
+      offerId: normalizedUrl.offerId,
+      title: String(item?.title || item?.sourceTitle || '').trim(),
+      category: String(item?.category || item?.recommendedCategory || '').trim()
+    });
+    if (items.length >= 100) break;
+  }
+  if (items.length === 0) throw new Error('至少输入一个有效的 1688 商品链接');
+  return { defaultKeyword, items };
+}
+
 function assertSafeWorkflowRunId(runId) {
   if (!WORKFLOW_RUN_ID_PATTERN.test(String(runId || ''))) {
     throw new Error('Invalid workflow run id');
@@ -153,12 +199,12 @@ function workflowNodes(mode = 'daily') {
       };
   if (mode === 'manual') {
     return withSteps(positionNodes([
-      { id: WORKFLOW_NODE_IDS.start, type: 'production-start', data: { label: '开始', description: '输入关键词后人工筛选', keywords: '', length: 60, export: 20 } },
-      { id: WORKFLOW_NODE_IDS.keywordReview, type: 'pipeline-keyword-review', data: { label: '人工选词与选品', description: '输入关键词、勾选 1688 货源或手动添加商品' } },
+      { id: WORKFLOW_NODE_IDS.start, type: 'production-start', data: { label: '录入词和货源', description: '输入关键词和 1688 商品链接', manualInput: true, defaultKeyword: '', items: [], length: 60, export: 20 } },
+      { id: WORKFLOW_NODE_IDS.select, type: 'pipeline-select', data: { label: '获取商品资料', description: '读取商品标题、主图、类目和价格', manualDirectInput: true } },
       { id: WORKFLOW_NODE_IDS.generate, type: 'pipeline-generate', data: { label: 'AI生成标题', description: '根据关键词和商品信息生成标题' } },
-      { id: WORKFLOW_NODE_IDS.export, type: 'pipeline-export', data: { label: '输出铺货清单', description: '输出 URL$$标题$$类目 格式' } },
-      { id: WORKFLOW_NODE_IDS.end, type: 'production-end', data: { label: '完成', description: '复制或查看标准铺货清单' } }
-    ], { startX: 110 }));
+      { id: WORKFLOW_NODE_IDS.export, type: 'pipeline-export', data: { label: '铺货复核与执行', description: '确认标题和类目后自动铺货' } },
+      { id: WORKFLOW_NODE_IDS.end, type: 'production-end', data: { label: '完成', description: '铺货结果确认后完成流程' } }
+    ], { startX: 150 }));
   }
   if (mode === 'keyword') {
     return withSteps(positionNodes([
@@ -193,8 +239,8 @@ function workflowEdges(mode = 'daily') {
       ]
     : mode === 'manual'
       ? [
-        [WORKFLOW_NODE_IDS.start, WORKFLOW_NODE_IDS.keywordReview],
-        [WORKFLOW_NODE_IDS.keywordReview, WORKFLOW_NODE_IDS.generate],
+        [WORKFLOW_NODE_IDS.start, WORKFLOW_NODE_IDS.select],
+        [WORKFLOW_NODE_IDS.select, WORKFLOW_NODE_IDS.generate],
         [WORKFLOW_NODE_IDS.generate, WORKFLOW_NODE_IDS.export],
         [WORKFLOW_NODE_IDS.export, WORKFLOW_NODE_IDS.end]
       ]
@@ -251,13 +297,38 @@ function listProductionWorkflowTemplates() {
       flowSummary: '流程：输入关键词 → 跳过挖词 → 生意参谋校验 → 货源选品 → 标题生成 → 导出复核',
       modeHint: '使用你输入的关键词，跳过挖词，直接进入生意参谋校验。'
     }),
-    template('manual-selection-v1', '人工选词人工选品流水线', 'manual', '人工确定关键词和货源，AI只生成标题并输出标准清单', {
-      entryLabel: '入口：手动关键词',
-      scenarioLabel: '适合：精确控制词和商品',
-      flowSummary: '流程：人工选词与选品 → AI生成标题 → URL$$标题$$类目',
-      modeHint: '先输入关键词并筛选，再勾选 1688 货源或手动添加商品。'
+    template('manual-selection-v1', '人工选词人工选品流水线', 'manual', '输入关键词和 1688 货源，生成标题后确认铺货', {
+      entryLabel: '入口：关键词 + 1688链接',
+      scenarioLabel: '适合：已经确定词和货源',
+      flowSummary: '流程：录入词和货源 → 获取商品资料 → AI生成标题 → 铺货复核 → 自动铺货',
+      modeHint: '一次输入关键词和 1688 链接，系统准备好标题与类目后只需复核一次。'
     })
   ];
+}
+
+function legacyManualWorkflowTemplate() {
+  const nodes = [
+    { id: WORKFLOW_NODE_IDS.start, type: 'production-start', position: { x: 110, y: 120 }, data: { label: '开始', description: '输入关键词后人工筛选' } },
+    { id: WORKFLOW_NODE_IDS.keywordReview, type: 'pipeline-keyword-review', position: { x: 370, y: 120 }, data: { label: '人工选词与选品', description: '筛选关键词并选择 1688 货源' } },
+    { id: WORKFLOW_NODE_IDS.generate, type: 'pipeline-generate', position: { x: 630, y: 120 }, data: { label: 'AI生成标题', description: '根据关键词和商品信息生成标题' } },
+    { id: WORKFLOW_NODE_IDS.export, type: 'pipeline-export', position: { x: 890, y: 120 }, data: { label: '输出铺货清单', description: '输出 URL$$标题$$类目 格式' } },
+    { id: WORKFLOW_NODE_IDS.end, type: 'production-end', position: { x: 1150, y: 120 }, data: { label: '完成', description: '查看标准铺货清单' } }
+  ].map((node, index, items) => ({
+    ...node,
+    data: { ...node.data, stepIndex: index + 1, stepTotal: items.length }
+  }));
+  const pairs = [
+    [WORKFLOW_NODE_IDS.start, WORKFLOW_NODE_IDS.keywordReview],
+    [WORKFLOW_NODE_IDS.keywordReview, WORKFLOW_NODE_IDS.generate],
+    [WORKFLOW_NODE_IDS.generate, WORKFLOW_NODE_IDS.export],
+    [WORKFLOW_NODE_IDS.export, WORKFLOW_NODE_IDS.end]
+  ];
+  return {
+    id: 'manual-selection-v1',
+    mode: 'manual',
+    nodes,
+    edges: pairs.map(([source, target]) => ({ id: `${source}-${target}`, source, target, type: 'straight' }))
+  };
 }
 
 /**
@@ -309,10 +380,10 @@ function sanitizeWorkflowParams(mode, raw = {}) {
     };
   }
   if (mode === 'manual') {
-    const keywords = String(raw.keywords || '').split(/\r?\n|[,，]/).map(item => item.trim()).filter(Boolean);
-    if (keywords.length === 0) throw new Error('至少输入一个关键词');
+    const manualInput = sanitizeManualWorkflowItems(raw);
     return {
-      keywords: [...new Set(keywords)].slice(0, 100),
+      defaultKeyword: manualInput.defaultKeyword,
+      items: manualInput.items,
       export: clampInt(raw.export, 20, 1, 100),
       length: clampInt(raw.length, 60, 30, 80)
     };
@@ -567,6 +638,7 @@ function outputForNode(id, summary) {
     return {
       count,
       productCount: count,
+      failed: Number(counts.productEnrichFailed || 0),
       file: summary.files?.selectedProducts || ''
     };
   }
@@ -878,6 +950,12 @@ function statusPlanForSummary(summary) {
     return states;
   }
 
+  if (status === 'manual_products_received') {
+    completeThrough(states, WORKFLOW_NODE_IDS.start);
+    states[WORKFLOW_NODE_IDS.select] = 'running';
+    return states;
+  }
+
   if (status === 'generated') {
     completeThrough(states, WORKFLOW_NODE_IDS.generate);
     states[WORKFLOW_NODE_IDS.export] = 'running';
@@ -917,9 +995,10 @@ function buildNodeStates(summary) {
   }, {});
   Object.entries(runtimeProgress).forEach(([nodeId, progress]) => {
     const manualMode = summary.options?.mode === 'manual';
+    const legacyManualMode = manualMode && Number(summary.options?.workflowVersion || 1) < 2;
     const effectiveNodeId = nodeId === WORKFLOW_NODE_IDS.review
       ? WORKFLOW_NODE_IDS.export
-      : manualMode && nodeId === WORKFLOW_NODE_IDS.select
+      : legacyManualMode && nodeId === WORKFLOW_NODE_IDS.select
         ? WORKFLOW_NODE_IDS.keywordReview
         : nodeId;
     if (!states[effectiveNodeId]) return;
@@ -941,9 +1020,10 @@ function buildNodeStates(summary) {
       outputSummary: progressDetails.outputSummary || states[effectiveNodeId].outputSummary || null
     };
   });
+  const legacyManualMode = summary.options?.mode === 'manual' && Number(summary.options?.workflowVersion || 1) < 2;
   const activeStep = runtime?.activeStep === WORKFLOW_NODE_IDS.review
     ? WORKFLOW_NODE_IDS.export
-    : summary.options?.mode === 'manual' && runtime?.activeStep === WORKFLOW_NODE_IDS.select
+    : legacyManualMode && runtime?.activeStep === WORKFLOW_NODE_IDS.select
       ? WORKFLOW_NODE_IDS.keywordReview
       : runtime?.activeStep;
   if (runtime && activeStep && states[activeStep]) {
@@ -974,6 +1054,9 @@ function buildNodeStates(summary) {
 function templateForSummary(summary) {
   const options = summary.options || {};
   const mode = summary.options?.mode || (options.keyword || summary.exactKeyword ? 'keyword' : 'daily');
+  if (mode === 'manual' && Number(options.workflowVersion || 1) < 2) {
+    return { id: 'manual-selection-v1', mode: 'manual', workflow: legacyManualWorkflowTemplate() };
+  }
   const id = mode === 'keyword' ? 'exact-keyword-v1' : mode === 'manual' ? 'manual-selection-v1' : 'daily-selection-v1';
   return listProductionWorkflowTemplates().find(item => item.id === id);
 }

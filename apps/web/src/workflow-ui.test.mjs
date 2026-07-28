@@ -314,6 +314,16 @@ test('labelWorkflowNodeStatus localizes idle and paused statuses', () => {
 });
 
 test('getWorkflowNodeAction maps review and terminal states to node actions', () => {
+  assert.deepEqual(getWorkflowNodeAction('start', { status: 'idle', manualInput: true }), {
+    label: '录入词和货源',
+    action: 'manual-input',
+    tone: 'warn'
+  });
+  assert.deepEqual(getWorkflowNodeAction('select', { status: 'completed', manualDirectInput: true, output: { failed: 1 } }), {
+    label: '重试失败项',
+    action: 'retry-node',
+    tone: 'warn'
+  });
   assert.deepEqual(getWorkflowNodeAction('keywordReview', 'awaiting_keyword_review'), {
     label: '输入/筛词',
     action: 'keyword-review',
@@ -325,9 +335,9 @@ test('getWorkflowNodeAction maps review and terminal states to node actions', ()
     tone: 'warn'
   });
   assert.deepEqual(getWorkflowNodeAction('export', 'completed'), {
-    label: '确认铺货',
+    label: '查看铺货清单',
     action: 'confirm-distribution',
-    tone: 'warn'
+    tone: 'success'
   });
   assert.deepEqual(getWorkflowNodeAction('review', 'needs_review'), {
     label: '处理复核',
@@ -933,7 +943,7 @@ test('getWorkflowArtifactView formats distribution batches as submit rows', () =
     nodeId: 'export',
     type: 'text',
     text: [
-      'https://detail.1688.com/offer/1.html\t纯银项链女轻奢高级感\t18.8',
+      'https://detail.1688.com/offer/1.html$$纯银项链女轻奢高级感$$饰品 > 项链',
       'https://detail.1688.com/offer/2.html\t珍珠耳环女高级感\t12.5'
     ].join('\n')
   });
@@ -942,6 +952,8 @@ test('getWorkflowArtifactView formats distribution batches as submit rows', () =
   assert.equal(view.title, '待确认铺货清单');
   assert.deepEqual(view.rows.map((row) => row.title), ['纯银项链女轻奢高级感', '珍珠耳环女高级感']);
   assert.match(view.rows[0].description, /offer\/1/);
+  assert.equal(view.rows[0].category, '饰品 > 项链');
+  assert.equal(view.rows[0].raw.category, '饰品 > 项链');
 });
 
 test('getWorkflowArtifactView formats review markdown as actionable review rows', () => {
@@ -1127,4 +1139,24 @@ test('getWorkflowLaunchBlocker keeps daily start parameters runnable', () => {
   ]);
 
   assert.equal(blocker, null);
+});
+
+test('getWorkflowLaunchBlocker requires keyword-bound 1688 items for manual mode', () => {
+  const missing = getWorkflowLaunchBlocker('manual', [
+    { id: 'start', type: 'production-start', data: { defaultKeyword: '法式连衣裙', items: [] } }
+  ]);
+  const ready = getWorkflowLaunchBlocker('manual', [
+    {
+      id: 'start',
+      type: 'production-start',
+      data: {
+        defaultKeyword: '法式连衣裙',
+        items: [{ keyword: '', url: 'https://detail.1688.com/offer/123456.html' }]
+      }
+    }
+  ]);
+
+  assert.equal(missing.status, 'blocked');
+  assert.match(missing.error, /1688 商品链接/);
+  assert.equal(ready, null);
 });

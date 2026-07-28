@@ -54,15 +54,15 @@ describe('workflow pipeline adapter', () => {
     const templates = listProductionWorkflowTemplates();
 
     assert.deepEqual(templates.map(template => template.id), ['daily-selection-v1', 'exact-keyword-v1', 'manual-selection-v1']);
-    assert.deepEqual(templates.map(template => template.entryLabel), ['入口：种子池', '入口：手动关键词', '入口：手动关键词']);
+    assert.deepEqual(templates.map(template => template.entryLabel), ['入口：种子池', '入口：手动关键词', '入口：关键词 + 1688链接']);
     assert.match(templates[0].scenarioLabel, /每天自动发现/);
     assert.match(templates[1].scenarioLabel, /明确目标词/);
     assert.match(templates[0].flowSummary, /选词挖掘/);
     assert.match(templates[1].flowSummary, /跳过挖词/);
     assert.match(templates[0].modeHint, /种子池/);
     assert.match(templates[1].modeHint, /直接进入生意参谋/);
-    assert.match(templates[2].flowSummary, /人工选词/);
-    assert.match(templates[2].flowSummary, /URL\$\$标题\$\$类目/);
+    assert.match(templates[2].flowSummary, /录入词和货源/);
+    assert.match(templates[2].flowSummary, /自动铺货/);
     const dailyStart = templates[0].workflow.nodes.find(node => node.id === WORKFLOW_NODE_IDS.start);
     const keywordStart = templates[1].workflow.nodes.find(node => node.id === WORKFLOW_NODE_IDS.start);
     assert.deepEqual(Object.keys(dailyStart.data).sort(), [
@@ -84,7 +84,7 @@ describe('workflow pipeline adapter', () => {
       'verify'
     ]);
     assert.equal(keywordStart.data.keyword, '');
-    assert.equal(templates[2].workflow.nodes.find(node => node.id === WORKFLOW_NODE_IDS.start).data.keywords, '');
+    assert.deepEqual(templates[2].workflow.nodes.find(node => node.id === WORKFLOW_NODE_IDS.start).data.items, []);
     for (const template of templates) {
       assert.equal(template.production, true);
       assert.ok(template.workflow);
@@ -127,14 +127,14 @@ describe('workflow pipeline adapter', () => {
     assert.ok(templates[1].workflow.edges.every(edge => edge.type === 'straight'));
     assert.deepEqual(templates[2].workflow.nodes.map(node => node.id), [
       WORKFLOW_NODE_IDS.start,
-      WORKFLOW_NODE_IDS.keywordReview,
+      WORKFLOW_NODE_IDS.select,
       WORKFLOW_NODE_IDS.generate,
       WORKFLOW_NODE_IDS.export,
       WORKFLOW_NODE_IDS.end
     ]);
     assert.deepEqual(templates[2].workflow.edges.map(edge => `${edge.source}->${edge.target}`), [
-      'start->keywordReview',
-      'keywordReview->generate',
+      'start->select',
+      'select->generate',
       'generate->export',
       'export->end'
     ]);
@@ -169,7 +169,7 @@ describe('workflow pipeline adapter', () => {
         : template.mode === 'manual'
           ? [
               WORKFLOW_NODE_IDS.start,
-              WORKFLOW_NODE_IDS.keywordReview,
+              WORKFLOW_NODE_IDS.select,
               WORKFLOW_NODE_IDS.generate,
               WORKFLOW_NODE_IDS.export,
               WORKFLOW_NODE_IDS.end
@@ -354,6 +354,31 @@ describe('workflow pipeline adapter', () => {
     });
 
     assert.throws(() => sanitizeWorkflowParams('keyword', { keyword: '   ' }), /关键词不能为空/);
+    assert.deepEqual(sanitizeWorkflowParams('manual', {
+      defaultKeyword: ' 法式连衣裙 ',
+      items: [
+        { url: 'https://detail.1688.com/offer/123456.html?spm=test' },
+        { keyword: '碎花连衣裙', url: 'https://detail.m.1688.com/page/index.htm?offerId=789012' }
+      ],
+      export: 200,
+      length: 20
+    }), {
+      defaultKeyword: '法式连衣裙',
+      items: [
+        { clientId: 'manual-123456', keyword: '法式连衣裙', url: 'https://detail.1688.com/offer/123456.html', offerId: '123456', title: '', category: '' },
+        { clientId: 'manual-789012', keyword: '碎花连衣裙', url: 'https://detail.1688.com/offer/789012.html', offerId: '789012', title: '', category: '' }
+      ],
+      export: 100,
+      length: 30
+    });
+    assert.throws(() => sanitizeWorkflowParams('manual', {
+      defaultKeyword: '法式连衣裙',
+      items: [
+        { url: 'https://detail.1688.com/offer/123456.html' },
+        { url: 'https://detail.1688.com/offer/123456.html?spm=duplicate' }
+      ]
+    }), /商品重复/);
+    assert.throws(() => sanitizeWorkflowParams('manual', { items: [] }), /1688 商品链接/);
     assert.throws(() => sanitizeWorkflowParams('unknown', {}), /未知 workflow mode/);
   });
 
