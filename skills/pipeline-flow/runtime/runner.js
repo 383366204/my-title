@@ -277,6 +277,13 @@ async function runPipelineRuntime(options = {}) {
         status: options.retryStep ? 'retrying' : 'resuming',
         activeStep: startStep,
         requestedAction: null,
+        platform: null,
+        platformStatus: null,
+        manualAction: null,
+        blocker: null,
+        actionHint: null,
+        nextRecommendedAction: null,
+        error: null,
         mode,
         params,
         progress
@@ -300,6 +307,13 @@ async function runPipelineRuntime(options = {}) {
         patch: {
           status: 'running',
           activeStep: step,
+          platform: null,
+          platformStatus: null,
+          manualAction: null,
+          blocker: null,
+          actionHint: null,
+          nextRecommendedAction: null,
+          error: null,
           progress: {
             [step]: { status: 'running', current: 0, total: 0, percent: 0, message: '' }
           }

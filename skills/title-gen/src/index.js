@@ -170,6 +170,7 @@ function buildOutput({ coreWord, blueOceanWord, modifiers, products, selectedPro
         '30天销量': p.stats && typeof p.stats.last30DaysSales === 'number' ? p.stats.last30DaysSales : 0,
         '好评率': p.stats && typeof p.stats.goodRates === 'number' ? p.stats.goodRates : 0,
         '复购率': p.stats && typeof p.stats.repurchaseRate === 'number' ? p.stats.repurchaseRate : 0,
+        '类目': p.category || p.categoryName || p.categoryListName || p.stats?.categoryListName || '',
         '蓝海词': blueOceanWord,
         // 新增字段
         '选品理由': selected.reason || '',

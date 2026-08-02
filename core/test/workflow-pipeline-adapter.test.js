@@ -819,12 +819,12 @@ describe('workflow pipeline adapter', () => {
           error: '标题生成超时(120s)，请简化关键词或减少数量',
           code: 'title_generation_timeout',
           llmProvider: 'minimax',
-          llmModel: 'MiniMax-M2.7'
+          llmModel: 'MiniMax-M3'
         }]
       }
     });
 
-    assert.match(run.nodeStates.generate.actionHint, /MiniMax（MiniMax-M2\.7）/);
+    assert.match(run.nodeStates.generate.actionHint, /MiniMax（MiniMax-M3）/);
     assert.match(run.nodeStates.generate.actionHint, /标题生成超时\(120s\)/);
     assert.doesNotMatch(run.nodeStates.generate.actionHint, /检查 GLM 配置/);
     assert.equal(run.nodeStates.generate.nextRecommendedAction.action, 'retry-node');

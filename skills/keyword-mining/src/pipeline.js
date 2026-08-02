@@ -95,6 +95,36 @@ function normalizeSource(source) {
   throw new Error(`Unsupported keyword mining source: ${source}`);
 }
 
+function sycmRecommendedCategory(result = {}) {
+  const recommended = result?.categoryAnalysis?.recommendation?.recommended;
+  return String(recommended?.category || '').trim();
+}
+
+function sycmProgressMessage(message) {
+  const raw = String(message || '').trim();
+  const mappings = [
+    [/Connecting to Chrome/i, '连接 Chrome'],
+    [/Navigating to/i, '打开生意参谋搜索页'],
+    [/Waiting for page load/i, '等待页面加载'],
+    [/Switching to .* mode/i, '切换关键词查询模式'],
+    [/Checking metric checkboxes/i, '勾选数据指标'],
+    [/Waiting for table columns/i, '等待数据表格加载'],
+    [/Loading table columns\s*(\d+\/\d+)/i, (_, count) => `加载数据表格 ${count}`],
+    [/Applying filter conditions/i, '应用筛选条件'],
+    [/Detecting pagination/i, '读取结果页数'],
+    [/Extracting page\s*(\d+\/\d+)/i, (_, count) => `提取第 ${count} 页数据`],
+    [/Traversing pages/i, '读取后续结果页'],
+    [/Extracting category analysis/i, '分析推荐类目']
+  ];
+  for (const [pattern, replacement] of mappings) {
+    const match = raw.match(pattern);
+    if (!match) continue;
+    return typeof replacement === 'function' ? replacement(...match) : replacement;
+  }
+  const cleaned = raw.replace(/^\[[^\]]+\]\s*/, '').trim();
+  return /[\u3400-\u9fff]/.test(cleaned) ? cleaned : '读取生意参谋数据';
+}
+
 function parseSearchPop(val) {
   if (typeof val === 'number') return val;
   if (!val) return 0;
@@ -346,10 +376,23 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
         const sycmRes = await extractor(query, {
           mode: sycmMode,
           maxPages: Math.max(1, Number(sycmMaxPages || 1)),
-          port: Number(sycmPort || 9222)
+          port: Number(sycmPort || 9222),
+          onProgress: (message) => reportProgress({
+            stage: 'sycm-query-detail',
+            current: seedIndex,
+            total: querySeeds.length,
+            message: `生意参谋 ${seedIndex + 1}/${querySeeds.length} · ${query}：${sycmProgressMessage(message)}`
+          })
         });
         const items = sycmRes.data || [];
-        rootResults.push({ ...seed, result: items.length > 0 ? 'success' : 'empty', candidateCount: items.length });
+        const recommendedCategory = sycmRecommendedCategory(sycmRes) || String(seed.category || '').trim();
+        rootResults.push({
+          ...seed,
+          result: items.length > 0 ? 'success' : 'empty',
+          candidateCount: items.length,
+          recommendedCategory,
+          categorySource: sycmRecommendedCategory(sycmRes) ? 'sycm' : (recommendedCategory ? 'inspiration' : '')
+        });
         console.log(`✓ 词根 "${query}" 成功获取到 ${items.length} 个关联词。`);
 
         const startIndex = (items.length > 0 && String(items[0].keyword).trim() === String(query).trim()) ? 1 : 0;
@@ -367,6 +410,8 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
             relationReason: seed.relationReason || '',
             rootScore: seed.rootScore || null,
             familyKey: seed.familyKey || '',
+            recommendedCategory,
+            categorySource: sycmRecommendedCategory(sycmRes) ? 'sycm' : (recommendedCategory ? 'inspiration' : ''),
             sycmData: {
               searchPopularity: parseSearchPop(item.searchPopularity),
               clickRate: parsePercentOrNumber(item.clickRate),
@@ -474,6 +519,8 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
       inspiration: item.inspiration || null,
       relationReason: item.relationReason || '',
       rootScore: item.rootScore || null,
+      recommendedCategory: item.recommendedCategory || '',
+      categorySource: item.categorySource || '',
       sycmData: item.sycmData || null,
       nextCommands: buildNextCommands(scoredItem.keyword)
     };

@@ -113,6 +113,32 @@ test('platform guard applies cooldown between successful calls', async () => {
   assert.ok(Date.now() - started >= 30);
 });
 
+test('platform guard reports cooldown without shortening the wait', async () => {
+  const dataDir = tempDataDir();
+  const updates = [];
+
+  await runWithPlatformGuard('sycm', {
+    dataDir,
+    cache: false,
+    minCooldownMs: 0,
+    maxCooldownMs: 0
+  }, async () => ({ ok: true }));
+
+  const started = Date.now();
+  await runWithPlatformGuard('sycm', {
+    dataDir,
+    cache: false,
+    minCooldownMs: 35,
+    maxCooldownMs: 35,
+    onCooldown: state => updates.push(state)
+  }, async () => ({ ok: true }));
+
+  assert.ok(Date.now() - started >= 30);
+  assert.ok(updates.length > 0);
+  assert.equal(updates[0].platform, 'sycm');
+  assert.ok(updates[0].remainingMs > 0);
+});
+
 test('platform blocker report protects 1688 without using browser-specific code', () => {
   const dataDir = tempDataDir();
   reportPlatformBlocker('1688', {

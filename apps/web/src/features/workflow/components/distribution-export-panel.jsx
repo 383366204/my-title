@@ -37,6 +37,10 @@ function distributionRowCategory(row = {}) {
     || row.raw?.recommendedCategory
     || row.raw?.productCategory
     || row.raw?.product?.类目
+    || row.raw?.product?.category
+    || row.raw?.product?.categoryName
+    || row.raw?.product?.categoryListName
+    || row.raw?.product?.stats?.categoryListName
     || '';
 }
 

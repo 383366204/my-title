@@ -501,7 +501,9 @@ function productCategory(product, row = {}) {
     product['类目'] ||
     product.category ||
     product.categoryListName ||
-    product.categoryName
+    product.categoryName ||
+    product.stats?.categoryListName ||
+    product.stats?.categoryName
   );
   return String(row.recommendedCategory || direct || '').trim();
 }
@@ -1395,7 +1397,13 @@ async function flowVerify(options = {}) {
         usage: sycmScore.usage,
         fallbackUsed: sycmAttempt.fallbackUsed,
         fallbackReason: sycmAttempt.fallbackReason || '',
-        recommendedCategory: sycmRecommendedCategory(sycmAttempt.result),
+        recommendedCategory: sycmRecommendedCategory(sycmAttempt.result)
+          || candidate.recommendedCategory
+          || candidate.category
+          || '',
+        categorySource: sycmRecommendedCategory(sycmAttempt.result)
+          ? 'sycm'
+          : (candidate.categorySource || (candidate.recommendedCategory || candidate.category ? 'candidate' : '')),
         sycmData: data,
         checkedAt: new Date().toISOString()
       };

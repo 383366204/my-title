@@ -372,6 +372,7 @@ describe('pipeline-flow', () => {
     const dataDir = tempDataDir();
     const keywordDataDir = path.join(dataDir, 'keyword-mining');
     const rootQueries = [];
+    const progress = [];
     const mined = await flowMine({
       dataDir,
       keywordDataDir,
@@ -385,19 +386,29 @@ describe('pipeline-flow', () => {
       newsItems: [{ title: '多地进入高温天气', inspirationWord: '高温' }],
       dictionaryWords: [],
       trendItems: [],
+      onProgress: event => progress.push(event),
       sycmExtractor: async (keyword, options) => {
         rootQueries.push({ keyword, options });
+        options.onProgress('[3/6] Loading table columns 2/8');
         return {
           data: [
             { keyword },
             { keyword: `${keyword}夏季`, searchPopularity: 1800, demandSupplyRatio: 1.8, clickRate: 20, conversionRate: 3 }
-          ]
+          ],
+          categoryAnalysis: {
+            recommendation: {
+              recommended: { category: '家居用品 > 夏季用品', score: 82 }
+            }
+          }
         };
       }
     });
 
     assert.equal(rootQueries.length, 2);
     assert.equal(rootQueries.every(call => call.options.maxPages === 1), true);
+    assert.ok(progress.some(event => event.stage === 'sycm-query-detail'
+      && /生意参谋 1\/2/.test(event.message)
+      && /加载数据表格 2\/8/.test(event.message)));
     assert.ok(readJsonl(mined.inspiration ? path.join(mined.runDir, 'inspirations.jsonl') : '').length > 0);
     assert.ok(readJsonl(path.join(mined.runDir, 'root-candidates.jsonl')).length > 0);
     assert.equal(getRun({ dataDir, runId: mined.runId }).run.counts.selectedRoots, 2);
@@ -416,6 +427,8 @@ describe('pipeline-flow', () => {
     assert.equal(duplicateVerifyCalls, 0);
     assert.ok(verified.verified.length > 0);
     assert.ok(verified.verified.every(row => row.verifyMode === 'inspiration_cached'));
+    assert.ok(verified.verified.every(row => row.recommendedCategory === '家居用品 > 夏季用品'));
+    assert.ok(verified.verified.every(row => row.categorySource === 'sycm'));
   });
 
   test('dynamic mining stops on the mine node when Chrome cannot query SYCM', async () => {
@@ -820,7 +833,7 @@ describe('pipeline-flow', () => {
     assert.strictEqual(receivedTimeout, 180000);
     assert.strictEqual(generated.status, 'generate_failed');
     assert.strictEqual(generated.generated[0].llmProvider, 'minimax');
-    assert.strictEqual(generated.generated[0].llmModel, 'MiniMax-M2.7');
+    assert.strictEqual(generated.generated[0].llmModel, 'MiniMax-M3');
     assert.strictEqual(generated.generated[0].code, 'title_generation_timeout');
     assert.deepStrictEqual(generated.generated[0].retryWith, { count: 3, runTimeoutMs: 180000 });
   });
@@ -1009,6 +1022,19 @@ describe('pipeline-flow', () => {
     assert.equal(ok.ok, true);
     assert.equal(ok.categoryConfidence, 'high');
     assert.equal(conflict.confidence, 'low');
+  });
+
+  test('validateGeneratedRow reads the 1688 category from nested product stats', () => {
+    const result = validateGeneratedRow({
+      keyword: '旅行收纳袋',
+      url: 'https://detail.1688.com/offer/456.html',
+      title: '旅行收纳袋衣物整理包便携大容量牛津布防水防潮分格分类收纳用品',
+      product: { stats: { categoryListName: '家居用品 > 收纳整理 > 收纳袋' } }
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.categoryConfidence, 'medium');
+    assert.equal(result.productCategory, '家居用品 > 收纳整理 > 收纳袋');
   });
 
   test('flowDaily stops when SYCM verifies no keywords', async () => {

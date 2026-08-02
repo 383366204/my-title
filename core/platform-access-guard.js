@@ -315,8 +315,16 @@ async function waitForCooldown(platform, options) {
   const last = Date.parse(state.lastAccessAt || 0);
   if (!last) return;
   const cooldownMs = randomBetween(options.minCooldownMs, options.maxCooldownMs, options.random);
-  const waitMs = Math.max(0, last + cooldownMs - Date.now());
-  await sleep(waitMs);
+  const readyAt = last + cooldownMs;
+  const waitMs = Math.max(0, readyAt - Date.now());
+  let remainingMs = waitMs;
+  while (remainingMs > 0) {
+    if (options.onCooldown) {
+      options.onCooldown({ platform: normalizePlatform(platform), waitMs, remainingMs });
+    }
+    await sleep(Math.min(5_000, remainingMs));
+    remainingMs = Math.max(0, readyAt - Date.now());
+  }
 }
 
 function recordSuccess(platform, options) {
@@ -332,6 +340,7 @@ function mergeOptions(platform, options = {}) {
     ...platformDefaults(platform),
     cache: options.cache,
     cacheKey: options.cacheKey,
+    onCooldown: typeof options.onCooldown === 'function' ? options.onCooldown : null,
     dataDir: resolveDataDir(options),
     random: options.random || Math.random,
     cacheTtlMs: options.cacheTtlMs == null ? platformDefaults(platform).cacheTtlMs : options.cacheTtlMs,

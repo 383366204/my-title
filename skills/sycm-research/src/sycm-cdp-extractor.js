@@ -645,6 +645,7 @@ async function _rawExtractSycmData(keyword, options) {
     onProgress('[3/6] Waiting for table columns...');
     var colReady = false;
     for (var i = 0; i < COLUMN_POLL_MAX; i++) {
+      onProgress('[3/6] Loading table columns ' + (i + 1) + '/' + COLUMN_POLL_MAX);
       await new Promise(function(r) { setTimeout(r, COLUMN_POLL_INTERVAL); });
       await _throwIfManualBlocker(cdp, options, onProgress, 'waiting_for_table_columns');
       var hCount = await cdp.evaluate(
@@ -935,7 +936,12 @@ async function extractSycmData(keyword, options) {
     cacheTtlMs: options.guardCacheTtlMs,
     minCooldownMs: options.guardMinCooldownMs,
     maxCooldownMs: options.guardMaxCooldownMs,
-    breakerCooldownMs: options.guardBreakerCooldownMs
+    breakerCooldownMs: options.guardBreakerCooldownMs,
+    onCooldown: function(state) {
+      if (typeof options.onProgress !== 'function') return;
+      var seconds = Math.max(1, Math.ceil(Number(state.remainingMs || 0) / 1000));
+      options.onProgress('[RATE_LIMIT] 生意参谋访问冷却，约 ' + seconds + ' 秒后继续');
+    }
   }, function() {
     return _rawExtractSycmData(keyword, options).catch(function(err) {
       var classified = classifySycmError(err);

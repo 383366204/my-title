@@ -95,7 +95,7 @@ test('Test 1: Complete happy path', async () => {
   const res = await run('纯银项链女高级感', {
     maxLength: 60,
     products: [
-      { id: 'p1', title: '银质项链', url: 'https://example/p1', price: 100, stats: { last30DaysSales: 20, goodRates: 0.95, repurchaseRate: 0.3 } },
+      { id: 'p1', title: '银质项链', url: 'https://example/p1', price: 100, stats: { last30DaysSales: 20, goodRates: 0.95, repurchaseRate: 0.3, categoryListName: '饰品 > 项链' } },
       { id: 'p2', title: '纯银项链女款', url: 'https://example/p2', price: 120, stats: { last30DaysSales: 12, goodRates: 0.9, repurchaseRate: 0.25 } }
     ]
   });
@@ -106,11 +106,12 @@ test('Test 1: Complete happy path', async () => {
   assert.ok(Array.isArray(res.modifiers) && res.modifiers.length === 3);
   assert.strictEqual(res.filteredCount, 2);
   assert.ok(Array.isArray(res.products) && res.products.length === 2);
-  // 11 required fields per product (3 new fields added)
-  const keys = ['链接原标题', '产品链接', '铺货标题', '商品原价', '30天销量', '好评率', '复购率', '蓝海词', '选品理由', '定价建议', '风险提示'];
+  // Stable output fields required by title review and distribution.
+  const keys = ['链接原标题', '产品链接', '铺货标题', '商品原价', '30天销量', '好评率', '复购率', '类目', '蓝海词', '选品理由', '定价建议', '风险提示'];
   res.products.forEach(p => {
     keys.forEach(k => assert.ok(Object.prototype.hasOwnProperty.call(p, k)));
   });
+  assert.strictEqual(res.products[0]['类目'], '饰品 > 项链');
   assert.ok(Array.isArray(res.titles) && res.titles.length === 3);
 });
 

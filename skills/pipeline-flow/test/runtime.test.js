@@ -422,6 +422,45 @@ describe('pipeline runtime runner', () => {
     assert.equal(runtime.progress.generate.status, 'completed');
   });
 
+  it('clears stale platform blockers while retrying a blocked step', async () => {
+    const dataDir = tempDataDir();
+    const runId = 'retry_blocked_state';
+    await runPipelineRuntime({
+      dataDir,
+      runId,
+      mode: 'daily',
+      steps: ['mine'],
+      stepFns: {
+        mine: async () => ({
+          status: 'mining_manual_action_required',
+          platform: 'sycm',
+          manualAction: { status: 'slider_required', userMessage: '请完成滑块验证' }
+        })
+      }
+    });
+
+    let runningState = null;
+    await runPipelineRuntime({
+      dataDir,
+      runId,
+      mode: 'daily',
+      preserveRuntime: true,
+      retryStep: 'mine',
+      steps: ['mine'],
+      stepFns: {
+        mine: async () => {
+          runningState = readRuntimeState({ dataDir, runId });
+          return { status: 'mined' };
+        }
+      }
+    });
+
+    assert.equal(runningState.status, 'running');
+    assert.equal(runningState.platform, null);
+    assert.equal(runningState.manualAction, null);
+    assert.equal(runningState.error, null);
+  });
+
   it('retries a selected step and resets downstream progress', async () => {
     const dataDir = tempDataDir();
     await runPipelineRuntime({

@@ -20,7 +20,7 @@ const DEFAULTS = {
     apiBaseEnv: 'MINIMAX_API_BASE',
     modelEnv: 'MINIMAX_MODEL',
     apiBase: 'https://api.minimaxi.com/v1',
-    model: 'MiniMax-M2.7'
+    model: 'MiniMax-M3'
   },
   'openai-compatible': {
     apiKeyEnv: 'LLM_API_KEY',
