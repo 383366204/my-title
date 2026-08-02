@@ -86,6 +86,61 @@ function recommendedStatus(profile) {
   return current;
 }
 
+function daysSince(value, now = new Date()) {
+  if (!value) return Infinity;
+  const timestamp = new Date(value).getTime();
+  const nowTimestamp = now instanceof Date ? now.getTime() : new Date(now).getTime();
+  if (!Number.isFinite(timestamp) || !Number.isFinite(nowTimestamp)) return Infinity;
+  return Math.max(0, (nowTimestamp - timestamp) / 86400000);
+}
+
+/**
+ * Score a seed for this run without replacing its long-term quality score.
+ * @param {object} profile Enriched seed profile.
+ * @param {object} [options] Rotation options.
+ * @returns {number} Run-specific scheduling score.
+ */
+function scoreSeedRotation(profile, { now = new Date() } = {}) {
+  const ageDays = daysSince(profile.lastUsedAt, now);
+  const recencyBonus = Number.isFinite(ageDays) ? Math.min(14, ageDays * 2) : 14;
+  const consecutivePenalty = Math.max(0, Number(profile.consecutiveRuns || 0) - 1) * 6;
+  const observingBonus = ['observing', 'explore'].includes(profile.status) ? 6 : profile.status === 'cooling' ? 2 : 0;
+  const priorityTieBreaker = Math.min(5, Number(profile.priorityScore || profile.priority || 0) * 0.25);
+  return Number((profile.qualityScore + recencyBonus + observingBonus + priorityTieBreaker - consecutivePenalty).toFixed(2));
+}
+
+/**
+ * Allocate active and observing seeds by quality-aware rotation.
+ * @param {Array<object>} profiles Audited seed profiles.
+ * @param {object} [options] Scheduling options.
+ * @returns {Array<object>} Scheduled profiles with rotation metadata.
+ */
+function scheduleSeedProfiles(profiles = [], {
+  maxSeeds = 20,
+  maxObservingSeeds = 3,
+  coolingRetryDays = 3,
+  now = new Date()
+} = {}) {
+  const enrich = profile => ({
+    ...profile,
+    rotationScore: scoreSeedRotation(profile, { now }),
+    daysSinceLastUse: daysSince(profile.lastUsedAt, now)
+  });
+  const sort = rows => rows.map(enrich).sort((a, b) =>
+    b.rotationScore - a.rotationScore
+    || b.qualityScore - a.qualityScore
+    || String(a.keyword).localeCompare(String(b.keyword), 'zh-CN'));
+  const active = sort(profiles.filter(profile => profile.status === 'active'));
+  const observing = sort(profiles.filter(profile => (
+    ['observing', 'explore'].includes(profile.status)
+    || (profile.status === 'cooling' && daysSince(profile.lastUsedAt, now) >= Number(coolingRetryDays || 3))
+  )));
+  const observingSlots = Math.min(Number(maxObservingSeeds || 0), observing.length, Number(maxSeeds || 0));
+  const activeSlots = Math.max(0, Number(maxSeeds || 0) - observingSlots);
+  return [...active.slice(0, activeSlots), ...observing.slice(0, observingSlots)]
+    .sort((a, b) => b.rotationScore - a.rotationScore || b.qualityScore - a.qualityScore);
+}
+
 /**
  * Build a read-only, backward-compatible seed profile.
  * @param {object} seed Stored seed row.
@@ -168,4 +223,12 @@ function auditSeedPool(seeds = []) {
   };
 }
 
-module.exports = { buildSeedProfile, auditSeedPool, scoreSeedQuality, normalizedStats, recommendedStatus };
+module.exports = {
+  buildSeedProfile,
+  auditSeedPool,
+  scoreSeedQuality,
+  scoreSeedRotation,
+  scheduleSeedProfiles,
+  normalizedStats,
+  recommendedStatus
+};

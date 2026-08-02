@@ -64,6 +64,8 @@ test('mapPipelineStageToFunnel maps backend stages to five business stages', () 
 
 test('pipeline labels localize status, stage, counts, and next commands', () => {
   assert.equal(labelPipelineStatus('verified_empty'), '验真无结果');
+  assert.equal(labelPipelineStatus('mining_manual_action_required'), '灵感选词需人工处理');
+  assert.equal(labelPipelineStatus('mining_empty'), '灵感选词无结果');
   assert.equal(labelPipelineStatus('awaiting_keyword_review'), '等待人工筛词');
   assert.equal(labelPipelineStatus('ready_to_distribute'), '待确认铺货');
   assert.equal(labelPipelineStage('keyword_review'), '人工筛词');
@@ -248,10 +250,10 @@ test('getWorkflowTemplateView explains daily and exact keyword differences', () 
     name: '每日蓝海选品流水线',
     mode: 'daily'
   }), {
-    entryLabel: '入口：种子池',
+    entryLabel: '入口：动态灵感',
     scenarioLabel: '适合：每天自动发现新机会',
-    flowSummary: '流程：选词挖掘 → 人工筛词 → 生意参谋校验 → 货源选品 → 标题生成 → 导出复核',
-    modeHint: '从种子池自动扩展候选词，会先执行选词挖掘。'
+    flowSummary: '流程：灵感选词 → 人工筛词 → 生意参谋校验 → 货源选品 → 标题生成 → 导出复核',
+    modeHint: '从新闻、字典、日历和趋势动态发现商品词根，不要求预先维护种子池。'
   });
 
   assert.deepEqual(getWorkflowTemplateView({
@@ -825,7 +827,14 @@ test('getWorkflowArtifactView formats mining artifacts as readable candidate row
     nodeId: 'mine',
     type: 'jsonl',
     rows: [
-      { keyword: '纯银项链', localScore: 82, reason: '搜索人气高', source: 'hybrid' },
+      {
+        keyword: '纯银项链',
+        localScore: 82,
+        reason: '搜索人气高',
+        source: 'hybrid',
+        familyKey: '项链',
+        diversity: { noveltyStatus: 'new_family', familyRunCount: 0, historyPenalty: 0 }
+      },
       { word: '珍珠耳环', score: 71, reason: '竞争较低' }
     ]
   });
@@ -835,7 +844,50 @@ test('getWorkflowArtifactView formats mining artifacts as readable candidate row
   assert.deepEqual(view.rows.map((row) => row.title), ['纯银项链', '珍珠耳环']);
   assert.match(view.rows[0].meta, /评分 82/);
   assert.match(view.rows[0].meta, /hybrid/);
+  assert.match(view.rows[0].meta, /词族 项链/);
+  assert.match(view.rows[0].meta, /新词族/);
   assert.equal(view.rows[0].description, '搜索人气高');
+});
+
+test('getWorkflowArtifactView exposes the inspiration chain and clickable source', () => {
+  const view = getWorkflowArtifactView({
+    type: 'jsonl',
+    rows: [{
+      keyword: '宿舍桌面收纳盒',
+      source: 'inspiration',
+      rootKeyword: '收纳盒',
+      relationReason: '开学宿舍场景需要整理桌面',
+      inspiration: {
+        inspirationWord: '开学',
+        sourceType: 'news',
+        sourceUrl: 'https://example.com/news'
+      }
+    }]
+  }, 'mine');
+
+  assert.match(view.rows[0].meta, /动态灵感/);
+  assert.match(view.rows[0].description, /开学.*收纳盒/);
+  assert.equal(view.rows[0].sourceUrl, 'https://example.com/news');
+});
+
+test('getWorkflowArtifactView labels product novelty and history fallback', () => {
+  const view = getWorkflowArtifactView({
+    nodeId: 'select',
+    type: 'jsonl',
+    rows: [{
+      keyword: '宿舍床帘',
+      title: '宿舍学生遮光床帘',
+      supplierName: '义乌家居厂',
+      productDiversity: {
+        noveltyStatus: 'history_fallback',
+        historicalOfferCount: 3
+      }
+    }]
+  });
+
+  assert.match(view.rows[0].meta, /历史回退/);
+  assert.match(view.rows[0].metrics.join(' · '), /历史出现 3 次/);
+  assert.match(view.rows[0].metrics.join(' · '), /供应商 义乌家居厂/);
 });
 
 test('getWorkflowArtifactView formats verified keyword artifacts as metric rows', () => {

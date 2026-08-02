@@ -30,7 +30,7 @@ const NodeResultSummaryCard = ({ nodeId, state }) => {
 };
 
 const nodeResultHint = (kind) => {
-  if (kind === 'keyword-mining') return '候选词会展示在本面板“候选词产物”，并保存到 candidates.jsonl。';
+  if (kind === 'keyword-mining') return '候选词会连同灵感来源、商品词根和拦截原因展示，并保存到当前运行产物。';
   if (kind === 'keyword-review') return '人工筛词会写入 reviewed-candidates.jsonl，只有确认通过的词会进入生意参谋。';
   if (kind === 'sycm-verify') return '验真通过词会展示在节点产物，并保存到 verified-keywords.jsonl。';
   if (kind === 'product-select') return '已选货源会展示在节点产物，并保存到 selected-products.jsonl。';
@@ -41,8 +41,8 @@ const nodeResultHint = (kind) => {
 
 const NODE_PANEL_COPY = {
   'keyword-mining': {
-    title: '选词挖掘操作台',
-    description: '维护种子池、发现词根，并把当前节点产物作为候选词检查。'
+    title: '灵感选词操作台',
+    description: '检查当天灵感、商品词根、候选词和未采用原因。'
   },
   'keyword-review': {
     title: '人工选词与选品操作台',
@@ -124,6 +124,7 @@ export const NodeOperationPanel = ({
       {kind === 'keyword-mining' && (
         <KeywordMiningOperationPanel
           artifactState={artifactState}
+          dynamicMode={String(selectedNode?.data?.discoveryMode || selectedNode?.data?.output?.discovery?.mode || '').toLowerCase() !== 'seed'}
           seedRows={seedRows}
           seedDraft={seedDraft}
           seedLoading={seedLoading}

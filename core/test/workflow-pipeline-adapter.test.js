@@ -54,12 +54,12 @@ describe('workflow pipeline adapter', () => {
     const templates = listProductionWorkflowTemplates();
 
     assert.deepEqual(templates.map(template => template.id), ['daily-selection-v1', 'exact-keyword-v1', 'manual-selection-v1']);
-    assert.deepEqual(templates.map(template => template.entryLabel), ['入口：种子池', '入口：手动关键词', '入口：关键词 + 1688链接']);
+    assert.deepEqual(templates.map(template => template.entryLabel), ['入口：动态灵感', '入口：手动关键词', '入口：关键词 + 1688链接']);
     assert.match(templates[0].scenarioLabel, /每天自动发现/);
     assert.match(templates[1].scenarioLabel, /明确目标词/);
-    assert.match(templates[0].flowSummary, /选词挖掘/);
+    assert.match(templates[0].flowSummary, /灵感选词/);
     assert.match(templates[1].flowSummary, /跳过挖词/);
-    assert.match(templates[0].modeHint, /种子池/);
+    assert.match(templates[0].modeHint, /不要求预先维护种子池/);
     assert.match(templates[1].modeHint, /直接进入生意参谋/);
     assert.match(templates[2].flowSummary, /录入词和货源/);
     assert.match(templates[2].flowSummary, /自动铺货/);
@@ -67,8 +67,12 @@ describe('workflow pipeline adapter', () => {
     const keywordStart = templates[1].workflow.nodes.find(node => node.id === WORKFLOW_NODE_IDS.start);
     assert.deepEqual(Object.keys(dailyStart.data).sort(), [
       'description',
+      'discoveryMode',
       'export',
+      'familyCooldownDays',
       'generate',
+      'inspirationSycmPages',
+      'inspirationUseLLM',
       'label',
       'length',
       'mine',
@@ -309,11 +313,16 @@ describe('workflow pipeline adapter', () => {
       recordSeedFeedback: false
     }), {
       mine: 200,
-      source: 'sycm_hot',
+      discoveryMode: 'inspiration',
+      source: 'inspiration',
       rootMode: 'auto',
       rootLimit: 20,
       rootCooldownDays: 0,
+      familyCooldownDays: 7,
+      inspirationSycmPages: 1,
+      inspirationUseLLM: true,
       maxObservingSeeds: 10,
+      maxObservingPoolSize: 24,
       maxNewSeeds: 0,
       autoReplenishSeeds: false,
       recordSeedFeedback: false,
@@ -399,6 +408,12 @@ describe('workflow pipeline adapter', () => {
       'flow',
       'daily',
       '--mine', '20',
+      '--discovery-mode', 'inspiration',
+      '--source', 'inspiration',
+      '--root-mode', 'auto',
+      '--root-limit', '8',
+      '--root-cooldown-days', '14',
+      '--family-cooldown-days', '7',
       '--verify', '5',
       '--generate', '3',
       '--export', '8',
@@ -471,6 +486,10 @@ describe('workflow pipeline adapter', () => {
         readyToDistribute: 1,
         reviewCandidates: 1
       },
+      diversity: {
+        keyword: { familyCount: 2, newFamilyCount: 1 },
+        product: { uniqueOffers: 1, newOffers: 1, suppliers: 1 }
+      },
       files: {
         candidates: '/tmp/candidates.jsonl',
         verifiedKeywords: '/tmp/verified-keywords.jsonl',
@@ -499,6 +518,8 @@ describe('workflow pipeline adapter', () => {
     assert.equal(run.nodeStates.export.status, 'needs_review');
     assert.equal(run.nodeStates.end.status, 'idle');
     assert.equal(run.nodeStates.mine.output.count, 2);
+    assert.equal(run.nodeStates.mine.output.diversity.familyCount, 2);
+    assert.equal(run.nodeStates.select.output.diversity.newOffers, 1);
     assert.equal(run.nodeStates.export.output.reviewFile, '/tmp/distribution-review.md');
   });
 
@@ -610,6 +631,33 @@ describe('workflow pipeline adapter', () => {
       label: '补充候选词',
       description: '当前没有通过生意参谋验真的词，先补充候选词再重跑验真。'
     });
+  });
+
+  it('keeps inspiration SYCM connection failures on the mining node', () => {
+    const dataDir = tempPipelineDir();
+    const runId = 'mining_chrome_failure_run';
+    const runDir = path.join(dataDir, 'runs', runId);
+    writeJson(path.join(runDir, 'run.json'), {
+      runId,
+      status: 'mining_manual_action_required',
+      startedAt: '2026-06-29T04:00:00.000Z',
+      updatedAt: '2026-06-29T04:01:00.000Z',
+      counts: { candidates: 0, inspirations: 8, selectedRoots: 2 },
+      discovery: {
+        mode: 'inspiration',
+        blocker: 'sycm_chrome_unavailable',
+        blockerReason: 'No Chrome tab found on port 9222'
+      },
+      files: {}
+    });
+
+    const run = getWorkflowRun({ dataDir, runId });
+
+    assert.equal(run.nodeStates.mine.status, 'blocked');
+    assert.equal(run.nodeStates.keywordReview.status, 'idle');
+    assert.equal(run.nodeStates.mine.blocker, 'sycm_chrome_unavailable');
+    assert.match(run.nodeStates.mine.actionHint, /No Chrome tab/);
+    assert.equal(run.nodeStates.mine.nextRecommendedAction.action, 'start-sycm-chrome');
   });
 
   it('surfaces SYCM CDP failures from sycm results instead of generic empty verification guidance', () => {
@@ -792,13 +840,18 @@ describe('workflow pipeline adapter', () => {
       startedAt: '2026-06-29T04:00:00.000Z',
       updatedAt: '2026-06-29T04:10:00.000Z',
       counts: { candidates: 2, sycmVerified: 1, generatedProducts: 1 },
+      discovery: { mode: 'inspiration', stats: { inspirationCount: 1, selectedRootCount: 1 } },
       files: {
         candidates: path.join(runDir, 'candidates.jsonl'),
+        inspirations: path.join(runDir, 'inspirations.jsonl'),
+        rootCandidates: path.join(runDir, 'root-candidates.jsonl'),
         verifiedKeywords: path.join(runDir, 'verified-keywords.jsonl'),
         generatedProducts: path.join(runDir, 'generated-products.jsonl')
       }
     });
     writeText(path.join(runDir, 'candidates.jsonl'), '{"keyword":"项链"}\n{"keyword":"耳环"}\n');
+    writeText(path.join(runDir, 'inspirations.jsonl'), '{"id":"insp-1","inspirationWord":"通勤"}\n');
+    writeText(path.join(runDir, 'root-candidates.jsonl'), '{"rootKeyword":"项链","status":"selected"}\n');
     writeText(path.join(runDir, 'verified-keywords.jsonl'), '{"keyword":"项链","status":"verified"}\n');
     writeText(path.join(runDir, 'generated-products.jsonl'), '{"title":"纯银项链"}\n');
 
@@ -815,6 +868,9 @@ describe('workflow pipeline adapter', () => {
     assert.equal(run.nodeStates.export.status, 'running');
     assert.equal(startArtifact, null);
     assert.deepEqual(mineArtifact.rows.map(row => row.keyword), ['项链', '耳环']);
+    assert.deepEqual(mineArtifact.inspirationRows.map(row => row.inspirationWord), ['通勤']);
+    assert.deepEqual(mineArtifact.rootRows.map(row => row.rootKeyword), ['项链']);
+    assert.equal(mineArtifact.discovery.mode, 'inspiration');
     assert.deepEqual(generateArtifact.rows, [{ title: '纯银项链' }]);
     assert.equal(readWorkflowNodeArtifact({ dataDir, runId, nodeId: WORKFLOW_NODE_IDS.end }), null);
   });

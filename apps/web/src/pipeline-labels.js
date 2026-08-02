@@ -1,6 +1,8 @@
 export const PIPELINE_STATUS_LABEL = {
   created: '已创建',
   mined: '已挖词',
+  mining_manual_action_required: '灵感选词需人工处理',
+  mining_empty: '灵感选词无结果',
   awaiting_keyword_review: '等待人工筛词',
   keywords_reviewed: '已完成人工筛词',
   keyword_review_empty: '筛词无通过项',

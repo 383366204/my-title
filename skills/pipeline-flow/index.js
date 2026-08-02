@@ -10,6 +10,8 @@ const { withAgentResponseFields } = require('../../core/agent-response');
 const { scoreKeywordOpportunity, scoreProductOpportunity } = require('./src/opportunity-scoring');
 const { appendOpportunity, summarizeOpportunities } = require('./src/opportunity-store');
 const { getLLMProviderInfo } = require('../../core/llm');
+const { buildPipelineDiversityHistory } = require('./src/diversity-history');
+const { createProductDiversityState, selectDiverseProducts } = require('./src/product-diversity');
 
 const DEFAULT_FLOW_DIR = path.join(process.cwd(), 'data', 'pipeline');
 const DEFAULT_RELAXED_FILTER_CONDITIONS = {
@@ -152,6 +154,8 @@ function initRun({ dataDir = DEFAULT_FLOW_DIR, runId, options = {} } = {}) {
       readyToDistribute: 0
     },
     files: {
+      inspirations: path.join(resolved.runDir, 'inspirations.jsonl'),
+      rootCandidates: path.join(resolved.runDir, 'root-candidates.jsonl'),
       candidates: path.join(resolved.runDir, 'candidates.jsonl'),
       reviewedCandidates: path.join(resolved.runDir, 'reviewed-candidates.jsonl'),
       sycmResults: path.join(resolved.runDir, 'sycm-results.jsonl'),
@@ -174,6 +178,8 @@ function initRun({ dataDir = DEFAULT_FLOW_DIR, runId, options = {} } = {}) {
 
 function ensureRunFiles(run, runDir) {
   run.files = run.files || {};
+  run.files.inspirations = run.files.inspirations || path.join(runDir, 'inspirations.jsonl');
+  run.files.rootCandidates = run.files.rootCandidates || path.join(runDir, 'root-candidates.jsonl');
   run.files.candidates = run.files.candidates || path.join(runDir, 'candidates.jsonl');
   run.files.reviewedCandidates = run.files.reviewedCandidates || path.join(runDir, 'reviewed-candidates.jsonl');
   run.files.sycmResults = run.files.sycmResults || path.join(runDir, 'sycm-results.jsonl');
@@ -1054,6 +1060,12 @@ function flowReviewProducts(options = {}) {
  */
 async function flowMine(options = {}) {
   const { runDir, run } = initRun(options);
+  const discoveryAttempt = Math.max(1, Number(run.discovery?.attempt || 0) + 1);
+  const diversityHistory = options.diversityHistory || buildPipelineDiversityHistory({
+    dataDir: options.dataDir || DEFAULT_FLOW_DIR,
+    excludeRunId: run.runId,
+    ttlDays: options.diversityHistoryDays || 90
+  });
   const historyExcludeKeywords = options.excludeSeen === true
     ? readRecentPipelineCandidateKeywords({
       dataDir: options.dataDir || DEFAULT_FLOW_DIR,
@@ -1061,20 +1073,28 @@ async function flowMine(options = {}) {
       excludeRunId: run.runId
     })
     : [];
-  const result = await mineKeywords({
+  const discoveryMode = ['inspiration', 'seed', 'hybrid'].includes(String(options.discoveryMode || '').trim())
+    ? String(options.discoveryMode).trim()
+    : '';
+  const miningSource = discoveryMode === 'inspiration' || discoveryMode === 'hybrid'
+    ? 'inspiration'
+    : options.source || 'local';
+  const miningOptions = {
     count: options.limit || options.mine || 50,
     maxSeeds: options.maxSeeds || 20,
     maxObservingSeeds: options.maxObservingSeeds || 3,
+    maxObservingPoolSize: options.maxObservingPoolSize ?? 24,
     maxPerSeed: options.maxPerSeed || 30,
     outputMaxPerSeed: options.outputMaxPerSeed || 5,
     outputMaxPerCategory: options.outputMaxPerCategory || 20,
     outputMaxPerPattern: options.outputMaxPerPattern || 20,
     outputMaxPerProductCore: options.outputMaxPerProductCore || 3,
     dataDir: options.keywordDataDir || path.join(process.cwd(), 'data', 'keyword-mining'),
-    source: options.source || 'local',
+    source: miningSource,
     rootMode: options.rootMode || 'auto',
     rootLimit: options.rootLimit || 5,
-    rootCooldownDays: options.rootCooldownDays || 7,
+    rootCooldownDays: options.rootCooldownDays ?? 7,
+    familyCooldownDays: options.familyCooldownDays ?? 7,
     persist: false,
     excludeSeen: options.excludeSeen === true,
     excludeKeywords: [
@@ -1084,11 +1104,48 @@ async function flowMine(options = {}) {
     recordSeen: options.recordSeen === true,
     recordSeedFeedback: options.recordSeedFeedback === true,
     autoReplenishSeeds: options.autoReplenishSeeds === true,
-    maxNewSeeds: options.maxNewSeeds || 3,
+    maxNewSeeds: options.maxNewSeeds ?? 3,
     seenTtlDays: options.seenTtlDays || 30,
+    mode: options.diversityMode || options.mode || 'balanced',
+    diversityHistory,
+    allowHistoryFallback: options.allowHistoryFallback === true,
+    sycmExtractor: options.sycmExtractor,
+    sycmMaxPages: options.inspirationSycmPages ?? options.sycmMaxPages ?? 1,
+    sycmPort: options.port || 9222,
+    date: options.date,
+    runAttempt: options.runAttempt ?? `${run.runId}:${discoveryAttempt}`,
+    newsItems: options.newsItems || [],
+    newsFeedUrls: options.newsFeedUrls,
+    dictionaryWords: options.dictionaryWords,
+    trendItems: options.trendItems || [],
+    inspirationUseLLM: options.inspirationUseLLM !== false,
     onProgress: options.onProgress
-  });
-  if ((!result.candidates || result.candidates.length === 0) && options.fallbackCandidates !== false) {
+  };
+  let result = await mineKeywords(miningOptions);
+  if (discoveryMode === 'hybrid' && (!result.candidates || result.candidates.length === 0)) {
+    const inspiration = result.inspiration;
+    result = await mineKeywords({
+      ...miningOptions,
+      source: options.seedSource || (options.source && options.source !== 'inspiration' ? options.source : 'sycm_hot')
+    });
+    result.inspiration = inspiration;
+    result.stats = {
+      ...(result.stats || {}),
+      fallbackUsed: true,
+      fallbackReason: 'inspiration_candidates_empty',
+      fallbackMode: 'seed'
+    };
+  }
+  fs.writeFileSync(run.files.inspirations, '', 'utf8');
+  fs.writeFileSync(run.files.rootCandidates, '', 'utf8');
+  if (result.inspiration) {
+    appendJsonl(run.files.inspirations, result.inspiration.inspirations || []);
+    appendJsonl(run.files.rootCandidates, result.inspiration.roots || []);
+  }
+  const allowStaticFallback = miningSource === 'inspiration'
+    ? options.fallbackCandidates === true
+    : options.fallbackCandidates !== false;
+  if ((!result.candidates || result.candidates.length === 0) && allowStaticFallback) {
     const normalizedExcluded = new Set([
       ...historyExcludeKeywords,
       ...(Array.isArray(options.excludeKeywords) ? options.excludeKeywords : [])
@@ -1106,16 +1163,78 @@ async function flowMine(options = {}) {
   appendJsonl(run.files.candidates, result.candidates);
   run.status = 'mined';
   run.counts.candidates = result.candidates.length;
+  run.counts.inspirations = Number(result.inspiration?.stats?.inspirationCount || 0);
+  run.counts.inspirationRejected = Number(result.inspiration?.stats?.inspirationRejected || 0);
+  run.counts.productizedRoots = Number(result.inspiration?.stats?.productizedCount || 0);
+  run.counts.selectedRoots = Number(result.inspiration?.stats?.selectedRootCount || 0);
+  run.discovery = result.inspiration ? {
+    mode: 'inspiration',
+    attempt: discoveryAttempt,
+    stats: result.inspiration.stats,
+    files: {
+      inspirations: run.files.inspirations,
+      rootCandidates: run.files.rootCandidates
+    }
+  } : { mode: 'seed' };
+  run.diversity = {
+    ...(run.diversity || {}),
+    keyword: {
+      ...(result.stats?.diversity || {}),
+      seenFiltered: Number(result.stats?.seenFiltered || 0),
+      seedReplenished: Number(result.stats?.seedReplenishment?.accepted || 0),
+      inspirations: Number(result.inspiration?.stats?.inspirationCount || 0),
+      inspirationRejected: Number(result.inspiration?.stats?.inspirationRejected || 0),
+      productizedRoots: Number(result.inspiration?.stats?.productizedCount || 0),
+      selectedRoots: Number(result.inspiration?.stats?.selectedRootCount || 0),
+      inspirationSources: result.inspiration?.stats?.sourceCounts || {},
+      observingPoolSize: Number(result.stats?.seedReplenishment?.observingPoolSize || 0),
+      observingPoolCapacity: Number(result.stats?.seedReplenishment?.observingPoolCapacity || 0),
+      historyRunsScanned: Number(diversityHistory.stats?.runsScanned || 0)
+    }
+  };
+  const rootQueryRows = result.stats?.rootQueries?.rows || [];
+  const rootQueryFailures = rootQueryRows.filter(row => row.result === 'failed');
+  const chromeFailure = rootQueryFailures.find(row => /ECONNREFUSED|127\.0\.0\.1:9222|no chrome tab found|chrome[^\n]*(?:tab|debug)|cdp|devtools/i.test(String(row.error || '')));
+  const platformFailure = rootQueryFailures.find(row => ['login_required', 'slider_required', 'sycm_feature_required'].includes(String(row.status || '')));
+  const manualFailure = chromeFailure || platformFailure;
+  if (miningSource === 'inspiration' && result.candidates.length === 0) {
+    run.status = manualFailure ? 'mining_manual_action_required' : 'mining_empty';
+    run.discovery.blocker = chromeFailure
+      ? 'sycm_chrome_unavailable'
+      : platformFailure
+        ? `sycm_${platformFailure.status}`
+        : 'no_inspiration_candidates';
+    run.discovery.blockerReason = manualFailure?.error || (
+      Number(result.inspiration?.stats?.selectedRootCount || 0) === 0
+        ? '今日灵感没有选出通过安全、商品化和冷却校验的词根。'
+        : '商品词根没有查询到可用的生意参谋关联词。'
+    );
+    run.discovery.manualAction = manualFailure?.manualAction || null;
+  }
   writeRun(runDir, run);
+  const miningBlocked = ['mining_manual_action_required', 'mining_empty'].includes(run.status);
   return flowResponse({
-    ok: true,
+    ok: !miningBlocked,
     runId: run.runId,
     status: run.status,
     candidates: result.candidates,
+    stats: result.stats,
+    diversity: run.diversity.keyword,
+    inspiration: result.inspiration,
     runDir,
-    blockers: [],
-    allowedCommands: [buildFlowCommand('review', run.runId)],
-    nextCommand: buildFlowCommand('review', run.runId)
+    blockers: miningBlocked ? [run.discovery.blocker] : [],
+    allowedCommands: miningBlocked ? [] : [buildFlowCommand('review', run.runId)],
+    nextCommand: miningBlocked ? '' : buildFlowCommand('review', run.runId),
+    platform: manualFailure ? 'sycm' : undefined,
+    manualAction: manualFailure
+      ? manualFailure.manualAction || {
+          platform: 'sycm',
+          status: chromeFailure ? 'chrome_unavailable' : platformFailure.status,
+          userMessage: chromeFailure
+            ? '请启动带 9222 调试端口的 Chrome，登录生意参谋后重试灵感选词。'
+            : '请在 Chrome 中处理生意参谋登录、滑块或权限问题后重试灵感选词。'
+        }
+      : undefined
   });
 }
 
@@ -1245,10 +1364,26 @@ async function flowVerify(options = {}) {
 
   const verifyCandidate = async (candidate, phase = 'primary') => {
     try {
-      const sycmAttempt = await fetchSycmWithFallback(candidate.keyword, {
-        ...options,
-        sycmExtractor
-      });
+      const reuseInspirationMetrics = candidate.source === 'inspiration'
+        && candidate.sycmData
+        && options.reuseInspirationSycmData !== false;
+      const cachedData = reuseInspirationMetrics
+        ? [{ keyword: candidate.keyword, ...candidate.sycmData }]
+        : [];
+      const sycmAttempt = reuseInspirationMetrics
+        ? {
+            result: { keyword: candidate.keyword, data: cachedData },
+            data: cachedData,
+            sycmScore: scoreSycmRows(cachedData, { mode: 'blue' }),
+            verifyMode: 'inspiration_cached',
+            fallbackUsed: false,
+            fallbackReason: '',
+            attempts: [{ mode: 'inspiration_cached', totalCount: cachedData.length, passed: scoreSycmRows(cachedData, { mode: 'blue' }).passed }]
+          }
+        : await fetchSycmWithFallback(candidate.keyword, {
+            ...options,
+            sycmExtractor
+          });
       const data = sycmAttempt.data;
       const sycmScore = sycmAttempt.sycmScore;
       const row = {
@@ -1467,6 +1602,19 @@ async function flowSelectProducts(options = {}) {
   const selectedKeywords = eligible.slice(0, limit);
   const productsPerKeyword = Number(options.productsPerKeyword || DEFAULT_PRODUCTS_PER_KEYWORD);
   const selectedRows = [];
+  const diversityHistory = options.diversityHistory || buildPipelineDiversityHistory({
+    dataDir: options.dataDir || DEFAULT_FLOW_DIR,
+    excludeRunId: run.runId,
+    ttlDays: options.diversityHistoryDays || 90
+  });
+  const diversityState = createProductDiversityState();
+  const diversityStats = {
+    input: 0,
+    selected: 0,
+    newOffers: 0,
+    historyFallbackCount: 0,
+    filteredReasons: {}
+  };
 
   fs.writeFileSync(run.files.selectedProducts, '', 'utf8');
 
@@ -1483,7 +1631,7 @@ async function flowSelectProducts(options = {}) {
         semanticGroups,
         options.searchOptions || {}
       );
-      for (const product of (Array.isArray(products) ? products : []).slice(0, productsPerKeyword)) {
+      const scoredProducts = (Array.isArray(products) ? products : []).map(product => {
         const opportunity = scoreProductOpportunity(product, {
           keyword: item.keyword,
           verifyMode: item.verifyMode,
@@ -1491,7 +1639,7 @@ async function flowSelectProducts(options = {}) {
           usage: item.usage,
           sycmScore: item.sycmScore
         });
-        selectedRows.push({
+        return {
           status: 'selected',
           keyword: item.keyword,
           selectedKeyword: item.keyword,
@@ -1521,7 +1669,25 @@ async function flowSelectProducts(options = {}) {
           decision: opportunity.decision,
           nextAction: opportunity.nextAction,
           selectedAt: new Date().toISOString()
-        });
+        };
+      });
+      const diverseProducts = selectDiverseProducts(scoredProducts, {
+        history: diversityHistory,
+        state: diversityState,
+        limit: productsPerKeyword,
+        maxPerSupplier: Number(options.maxProductsPerSupplier || 2),
+        titleSimilarityThreshold: Number(options.productTitleSimilarityThreshold || 0.92),
+        generatedOfferCooldownDays: Number(options.generatedOfferCooldownDays || 7),
+        distributedOfferCooldownDays: Number(options.distributedOfferCooldownDays || 30),
+        allowHistoryFallback: options.allowProductHistoryFallback !== false
+      });
+      selectedRows.push(...diverseProducts.selected);
+      diversityStats.input += diverseProducts.stats.input;
+      diversityStats.selected += diverseProducts.stats.selected;
+      diversityStats.newOffers += diverseProducts.stats.newOffers;
+      diversityStats.historyFallbackCount += diverseProducts.stats.historyFallbackCount;
+      for (const [reason, count] of Object.entries(diverseProducts.stats.filteredReasons || {})) {
+        diversityStats.filteredReasons[reason] = Number(diversityStats.filteredReasons[reason] || 0) + Number(count || 0);
       }
     } catch (error) {
       selectedRows.push({
@@ -1550,12 +1716,22 @@ async function flowSelectProducts(options = {}) {
   }
   run.status = selectedCount > 0 ? 'products_selected' : 'select_failed';
   run.counts.selectedProducts = selectedCount;
+  run.diversity = {
+    ...(run.diversity || {}),
+    product: {
+      ...diversityStats,
+      suppliers: diversityState.supplierCounts.size,
+      uniqueOffers: diversityState.offerIds.size,
+      historyRunsScanned: Number(diversityHistory.stats?.runsScanned || 0)
+    }
+  };
   writeRun(runDir, run);
   return flowResponse({
     ok: true,
     runId: run.runId,
     status: run.status,
     selected: selectedRows,
+    diversity: run.diversity.product,
     runDir,
     blockers: selectedCount > 0 ? [] : ['no_selected_products'],
     allowedCommands: [selectedCount > 0
@@ -1979,8 +2155,25 @@ async function flowDaily(options = {}) {
     ...options,
     limit: options.mine || options.limit || 50,
     excludeSeen: options.excludeSeen !== false,
-    recordSeen: options.recordSeen !== false
+    recordSeen: options.recordSeen !== false,
+    recordSeedFeedback: options.recordSeedFeedback !== false,
+    autoReplenishSeeds: options.autoReplenishSeeds !== false
   });
+  if (['mining_manual_action_required', 'mining_empty'].includes(mine.status)) {
+    const { run } = getRun({ dataDir: options.dataDir, runId: mine.runId });
+    return flowResponse({
+      ok: false,
+      runId: mine.runId,
+      runDir: mine.runDir,
+      counts: run.counts,
+      status: run.status,
+      files: run.files,
+      blockers: mine.blockers,
+      allowedCommands: mine.allowedCommands,
+      nextCommand: mine.nextCommand,
+      steps: { mined: 0, reviewed: 0, verified: 0, rejected: 0, selected: 0, generated: 0, exported: 0 }
+    });
+  }
   const keywordReview = flowReviewCandidates({
     ...options,
     runId: mine.runId,

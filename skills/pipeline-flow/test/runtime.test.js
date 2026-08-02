@@ -200,7 +200,7 @@ describe('pipeline runtime runner', () => {
     const result = await runPipelineRuntime({
       dataDir,
       mode: 'daily',
-      params: { mine: 5 },
+      params: { mine: 5, discoveryMode: 'seed', source: 'local' },
       steps: ['mine']
     });
 

@@ -32,9 +32,15 @@ function candidateMeta(row = {}) {
   const parts = [];
   const score = candidateScore(row);
   if (score !== null) parts.push(`评分 ${score}`);
-  if (row.source) parts.push(String(row.source));
+  if (row.source) parts.push(row.source === 'inspiration' ? '动态灵感' : String(row.source));
   if (row.searchPopularity) parts.push(`搜索人气 ${row.searchPopularity}`);
   if (row.competition) parts.push(`竞争 ${row.competition}`);
+  if (row.familyKey) parts.push(`词族 ${row.familyKey}`);
+  const novelty = row.diversity?.noveltyStatus;
+  if (novelty === 'new_family') parts.push('新词族');
+  if (novelty === 'recent_family') parts.push('近期词族');
+  if (novelty === 'cooling_family') parts.push('冷却中词族');
+  if (novelty === 'history_fallback') parts.push('历史回退');
   return parts.join(' · ');
 }
 
@@ -49,6 +55,10 @@ function metricValue(row = {}, keys = []) {
 function compactMetric(label, value) {
   if (value === null || value === undefined || value === '') return '';
   return `${label} ${value}`;
+}
+
+function inspirationSourceLabel(value) {
+  return ({ news: '新闻', dictionary: '字典', calendar: '日历', trend: '趋势' })[value] || String(value || '');
 }
 
 const OPPORTUNITY_DECISION_LABELS = {
@@ -134,6 +144,10 @@ function businessRowMeta(row = {}, nodeId = '') {
     }
     if (row.enrichStatus === 'failed' || row.status === 'enrich_failed') parts.push('获取失败');
     if (row.enrichStatus === 'completed') parts.push('资料已获取');
+    const novelty = row.productDiversity?.noveltyStatus;
+    if (novelty === 'new_offer') parts.push('新货源');
+    if (novelty === 'recent_generated_offer') parts.push('近期生成过');
+    if (novelty === 'history_fallback') parts.push('历史回退');
   } else if (nodeId === 'generate') {
     const keyword = selectedKeyword(row);
     if (keyword) parts.push(`选词 ${keyword}`);
@@ -168,7 +182,11 @@ function businessMetrics(row = {}, nodeId = '') {
       compactMetric('价格', metricValue(row, ['price', '商品原价', 'minPrice', 'product.商品原价', 'product.price'])),
       compactMetric('销量', metricValue(row, ['sales', 'sales30days', '30天销量', 'monthlySales', 'product.30天销量', 'product.sales'])),
       compactMetric('好评率', metricValue(row, ['positiveRate', '好评率', 'product.好评率'])),
-      compactMetric('复购率', metricValue(row, ['repurchaseRate', '复购率', 'product.复购率']))
+      compactMetric('复购率', metricValue(row, ['repurchaseRate', '复购率', 'product.复购率'])),
+      row.productDiversity?.historicalOfferCount
+        ? compactMetric('历史出现', `${row.productDiversity.historicalOfferCount} 次`)
+        : '',
+      row.supplierName ? compactMetric('供应商', row.supplierName) : ''
     ].filter(Boolean);
   }
   return [];
@@ -361,7 +379,17 @@ export function getWorkflowArtifactView(artifact, nodeId = '') {
       rows: items.map((item) => ({
         title: candidateTitle(item),
         meta: candidateMeta(item),
-        description: String(item.reason || item.keywordOpportunity || item.nextAction || '').trim(),
+        metrics: [
+          item.rootKeyword ? `商品词根 ${item.rootKeyword}` : '',
+          item.inspiration?.sourceType ? `来源 ${inspirationSourceLabel(item.inspiration.sourceType)}` : '',
+          item.diversity?.familyRunCount ? `词族历史 ${item.diversity.familyRunCount} 次` : '',
+          item.diversity?.historyPenalty ? `新鲜度扣分 ${item.diversity.historyPenalty}` : ''
+        ].filter(Boolean),
+        description: [
+          item.inspiration?.inspirationWord ? `灵感“${item.inspiration.inspirationWord}”映射为“${item.rootKeyword || item.coreProduct || ''}”` : '',
+          item.relationReason || item.reason || item.keywordOpportunity || item.nextAction || ''
+        ].filter(Boolean).join('；'),
+        sourceUrl: String(item.inspiration?.sourceUrl || item.sourceUrl || '').trim(),
         raw: item
       })),
       text: ''

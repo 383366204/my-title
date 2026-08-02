@@ -35,6 +35,8 @@ describe('pipeline run summary', () => {
     assert.deepEqual(STAGE_ORDER, ['seed', 'mined', 'keyword_review', 'verified', 'selected', 'generated', 'review', 'ready', 'submitted']);
     assert.equal(pipelineStatusToStage('created'), 'seed');
     assert.equal(pipelineStatusToStage('mined'), 'mined');
+    assert.equal(pipelineStatusToStage('mining_manual_action_required'), 'mined');
+    assert.equal(pipelineStatusToStage('mining_empty'), 'mined');
     assert.equal(pipelineStatusToStage('awaiting_keyword_review'), 'keyword_review');
     assert.equal(pipelineStatusToStage('keywords_reviewed'), 'keyword_review');
     assert.equal(pipelineStatusToStage('keyword_review_empty'), 'keyword_review');
@@ -53,6 +55,29 @@ describe('pipeline run summary', () => {
     assert.equal(pipelineStatusToStage('workflow_complete'), 'submitted');
     assert.equal(pipelineStatusToStage('unknown'), 'seed');
     assert.equal(pipelineStatusToStage('not_real'), 'seed');
+  });
+
+  it('marks dynamic mining blockers as requiring user action', () => {
+    const dataDir = tempPipelineDir();
+    const runId = 'mining_blocked_run';
+    const runDir = path.join(dataDir, 'runs', runId);
+    writeJson(path.join(runDir, 'run.json'), {
+      runId,
+      status: 'mining_manual_action_required',
+      startedAt: '2026-08-02T01:00:00.000Z',
+      updatedAt: '2026-08-02T01:01:00.000Z',
+      discovery: {
+        mode: 'inspiration',
+        blocker: 'sycm_chrome_unavailable',
+        blockerReason: 'No Chrome tab found on port 9222'
+      },
+      files: {}
+    });
+
+    const summary = summarizePipelineRun({ dataDir, runId });
+    assert.equal(summary.stage, 'mined');
+    assert.equal(summary.requiresUserAction, true);
+    assert.deepEqual(summary.blockers, ['sycm_chrome_unavailable']);
   });
 
   it('summarizes a needs_review run with previews and review blockers', () => {
@@ -79,6 +104,10 @@ describe('pipeline run summary', () => {
         readyToDistribute: 1,
         reviewCandidates: 1,
         rejectedBeforeDistribution: 1
+      },
+      diversity: {
+        keyword: { familyCount: 2, newFamilyCount: 1 },
+        product: { uniqueOffers: 1, newOffers: 1 }
       },
       files
     });
@@ -110,6 +139,7 @@ describe('pipeline run summary', () => {
     assert.equal(summary.batchExists, true);
     assert.equal(summary.reviewExists, true);
     assert.equal(summary.mustReview, true);
+    assert.deepEqual(summary.diversity.keyword, { familyCount: 2, newFamilyCount: 1 });
     assert.equal(summary.nextActionCode, 'review_required');
     assert.equal(summary.requiresUserAction, true);
     assert.deepEqual(summary.blockers, ['review_rejected_rows']);

@@ -4,22 +4,64 @@ function normalizeHistoryKeyword(value) {
   return String(value || '').trim().replace(/\s+/g, '');
 }
 
+function normalizeHistoryValue(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '');
+}
+
+function normalizeOfferId(input = {}) {
+  const direct = input.offerId || input.productId || input.id || '';
+  const directMatch = String(direct).match(/\d{5,}/);
+  if (directMatch) return directMatch[0];
+  const url = input.url || input.productUrl || input.detailUrl || input['产品链接'] || '';
+  const urlMatch = String(url).match(/\/offer\/(\d+)\.html/i);
+  return urlMatch ? urlMatch[1] : '';
+}
+
+function normalizeTitleFingerprint(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^\u3400-\u9fffa-z0-9]/g, '')
+    .trim();
+}
+
 /**
  * 构建历史记录使用的稳定索引键。
  * @param {object} input - 候选词或历史记录输入。
- * @returns {{normalizedKeyword: string, signature: string, coreProduct: string, keywordKey: string, signatureKey: string, coreProductKey: string}}
+ * @returns {object} Keyword, family, product, supplier, and title keys.
  */
 function buildHistoryKeys(input = {}) {
   const normalizedKeyword = normalizeHistoryKeyword(input.keyword);
   const signature = String(input.signature || normalizedKeyword).trim();
   const coreProduct = String(input.coreProduct || '').trim();
+  const rawFamily = String(input.family || input.familyKey || coreProduct).replace(/^family:/, '').trim();
+  const family = normalizeHistoryValue(rawFamily);
+  const offerId = normalizeOfferId(input) || normalizeOfferId(input.product || {});
+  const supplier = normalizeHistoryValue(
+    input.supplierId || input.sellerId || input.memberId || input.shopName || input.companyName
+      || input.product?.supplierId || input.product?.sellerId || input.product?.memberId
+      || input.product?.shopName || input.product?.companyName || ''
+  );
+  const sourceTitle = input.sourceTitle || input.title || input.subject || input.productTitle
+    || input.product?.sourceTitle || input.product?.title || input.product?.subject || input.product?.['链接原标题'] || '';
+  const titleFingerprint = normalizeTitleFingerprint(sourceTitle);
   return {
     normalizedKeyword,
     signature,
     coreProduct,
-    keywordKey: `kw:${normalizedKeyword}`,
-    signatureKey: `sig:${signature}`,
-    coreProductKey: coreProduct ? `core:${coreProduct}` : ''
+    family,
+    offerId,
+    supplier,
+    titleFingerprint,
+    keywordKey: normalizedKeyword ? `kw:${normalizedKeyword}` : '',
+    signatureKey: signature ? `sig:${signature}` : '',
+    coreProductKey: coreProduct ? `core:${coreProduct}` : '',
+    familyKey: family ? `family:${family}` : '',
+    offerIdKey: offerId ? `offer:${offerId}` : '',
+    supplierKey: supplier ? `supplier:${supplier}` : '',
+    titleFingerprintKey: titleFingerprint ? `title:${titleFingerprint}` : ''
   };
 }
 
@@ -33,7 +75,7 @@ function buildHistoryKeys(input = {}) {
  */
 function normalizeHistoryRecord(input = {}, { now = new Date().toISOString(), existing = null } = {}) {
   const keys = buildHistoryKeys(input);
-  const id = keys.signatureKey || keys.keywordKey;
+  const id = input.id || keys.signatureKey || keys.offerIdKey || keys.titleFingerprintKey || keys.keywordKey;
   return {
     id,
     keyword: String(input.keyword || '').trim(),
@@ -43,6 +85,14 @@ function normalizeHistoryRecord(input = {}, { now = new Date().toISOString(), ex
     signatureKey: keys.signatureKey,
     coreProduct: keys.coreProduct,
     coreProductKey: keys.coreProductKey,
+    family: keys.family,
+    familyKey: keys.familyKey,
+    offerId: keys.offerId,
+    offerIdKey: keys.offerIdKey,
+    supplier: keys.supplier,
+    supplierKey: keys.supplierKey,
+    titleFingerprint: keys.titleFingerprint,
+    titleFingerprintKey: keys.titleFingerprintKey,
     status: input.status || input.gateStatus || 'candidate',
     gateStatus: input.gateStatus || input.status || 'candidate',
     canDistribute: !!input.canDistribute,
@@ -53,6 +103,47 @@ function normalizeHistoryRecord(input = {}, { now = new Date().toISOString(), ex
     seenCount: existing && Number.isFinite(existing.seenCount) ? existing.seenCount + 1 : 1,
     lastAction: input.lastAction || '',
     lastReason: input.lastReason || input.gateReason || ''
+  };
+}
+
+/**
+ * Return a linear recency weight within a cooldown window.
+ * @param {object|null} record Historical entity record.
+ * @param {object} options Recency options.
+ * @returns {number} Value from 0 (expired) to 1 (just seen).
+ */
+function historyRecencyWeight(record, {
+  now = new Date().toISOString(),
+  cooldownDays = 0
+} = {}) {
+  if (!record || !record.lastSeenAt || cooldownDays <= 0) return 0;
+  const ageDays = daysBetween(record.lastSeenAt, now);
+  if (!Number.isFinite(ageDays) || ageDays >= cooldownDays) return 0;
+  return Number(Math.max(0, 1 - ageDays / cooldownDays).toFixed(4));
+}
+
+/**
+ * Decide whether one history entity is still inside its hard cooldown.
+ * @param {object|null} record Historical entity record.
+ * @param {object} options Entity cooldown options.
+ * @returns {{suppress:boolean,reason:string,ageDays?:number,weight:number}}
+ */
+function shouldSuppressHistoryEntity(record, {
+  now = new Date().toISOString(),
+  entityType = 'signature',
+  cooldownDays = 0,
+  reason = ''
+} = {}) {
+  if (!record || !record.lastSeenAt || cooldownDays <= 0) {
+    return { suppress: false, reason: '', weight: 0 };
+  }
+  const ageDays = daysBetween(record.lastSeenAt, now);
+  const suppress = ageDays < cooldownDays;
+  return {
+    suppress,
+    reason: suppress ? (reason || `recent_${entityType}`) : '',
+    ageDays,
+    weight: historyRecencyWeight(record, { now, cooldownDays })
   };
 }
 
@@ -102,7 +193,11 @@ function shouldSuppressHistoryRecord(record, {
 
 module.exports = {
   normalizeHistoryKeyword,
+  normalizeOfferId,
+  normalizeTitleFingerprint,
   buildHistoryKeys,
   normalizeHistoryRecord,
+  historyRecencyWeight,
+  shouldSuppressHistoryEntity,
   shouldSuppressHistoryRecord
 };

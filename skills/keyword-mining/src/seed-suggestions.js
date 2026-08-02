@@ -11,6 +11,9 @@ const { auditSeedPool, buildSeedProfile } = require('./seed-profile');
  */
 function prepareSeedSuggestions(candidates = [], { existingSeeds = [], maxSuggestions = 5, minQualityScore = 45 } = {}) {
   const rows = Array.isArray(candidates) ? candidates : [];
+  const suggestionLimit = Number.isFinite(Number(maxSuggestions))
+    ? Math.max(0, Number(maxSuggestions))
+    : 5;
   const existingFamilies = new Set(auditSeedPool(existingSeeds).profiles.map(seed => seed.familyKey).filter(Boolean));
   const acceptedFamilies = new Set();
   const accepted = [];
@@ -18,7 +21,7 @@ function prepareSeedSuggestions(candidates = [], { existingSeeds = [], maxSugges
 
   for (const raw of rows) {
     const sourceKeyword = String(raw.keyword || raw.word || '').trim();
-    if (accepted.length >= Number(maxSuggestions || 5)) {
+    if (accepted.length >= suggestionLimit) {
       rejected.push({ sourceKeyword, reason: 'suggestion_limit_reached' });
       continue;
     }

@@ -69,7 +69,16 @@ function applySeedFeedback(feedbackRows = [], { dataDir, eventType = 'feedback' 
     seed.stats = stats;
     seed.successCount = stats.verified;
     seed.failCount = stats.failures;
-    if (Number(feedback.runs || 0) > 0) seed.lastUsedAt = feedback.usedAt || now;
+    if (Number(feedback.runs || 0) > 0) {
+      const previousUsedAt = seed.lastUsedAt ? new Date(seed.lastUsedAt).getTime() : 0;
+      const usedAt = feedback.usedAt || now;
+      const currentUsedAt = new Date(usedAt).getTime();
+      const gapDays = previousUsedAt && Number.isFinite(currentUsedAt)
+        ? Math.max(0, (currentUsedAt - previousUsedAt) / 86400000)
+        : Infinity;
+      seed.consecutiveRuns = gapDays <= 2 ? Number(seed.consecutiveRuns || 0) + 1 : 1;
+      seed.lastUsedAt = usedAt;
+    }
     const previousStatus = seed.status || 'active';
     seed.status = nextLifecycle(seed, stats);
     if (seed.status !== previousStatus) {

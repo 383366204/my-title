@@ -3,10 +3,12 @@ const assert = require('node:assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { addSeed } = require('../../keyword-mining');
 const {
   flowDaily,
   flowMine,
   flowReviewCandidates,
+  flowSelectProducts,
   flowManualStart,
   flowEnrichManualProducts,
   flowVerify,
@@ -256,6 +258,53 @@ describe('pipeline-flow', () => {
     assert.strictEqual(result.level, 'strong_recommend');
   });
 
+  test('flowSelectProducts avoids recently distributed offers and persists diversity summary', async () => {
+    const dataDir = tempDataDir();
+    const historicalRun = path.join(dataDir, 'runs', 'historical');
+    fs.mkdirSync(historicalRun, { recursive: true });
+    fs.writeFileSync(path.join(historicalRun, 'run.json'), JSON.stringify({
+      status: 'workflow_complete',
+      updatedAt: new Date().toISOString(),
+      distribution: { status: 'completed', total: 1, confirmed: 1 }
+    }));
+    fs.writeFileSync(path.join(historicalRun, 'generated-products.jsonl'), JSON.stringify({
+      keyword: '宠物磨牙玩具',
+      url: 'https://detail.1688.com/offer/100001.html',
+      product: { '产品链接': 'https://detail.1688.com/offer/100001.html', '链接原标题': '宠物磨牙玩具球' }
+    }) + '\n');
+    fs.writeFileSync(
+      path.join(historicalRun, 'distribution-batch.txt'),
+      'https://detail.1688.com/offer/100001.html$$宠物磨牙玩具球$$宠物用品\n'
+    );
+
+    const runId = 'product_diversity';
+    flowManualStart({ dataDir, runId, items: [{ keyword: '宠物磨牙玩具', url: 'https://detail.1688.com/offer/999999.html' }] });
+    const run = getRun({ dataDir, runId }).run;
+    fs.writeFileSync(run.files.verifiedKeywords, JSON.stringify({
+      keyword: '宠物磨牙玩具',
+      coreProduct: '宠物玩具',
+      familyKey: '宠物玩具',
+      canGenerate: true,
+      decision: 'continue',
+      status: 'verified'
+    }) + '\n');
+
+    const result = await flowSelectProducts({
+      dataDir,
+      runId,
+      limit: 1,
+      productsPerKeyword: 1,
+      searchProducts: async () => [
+        mockProduct('宠物磨牙玩具', '100001'),
+        mockProduct('宠物磨牙玩具', '100002')
+      ]
+    });
+
+    assert.strictEqual(result.selected[0].offerId, '100002');
+    assert.strictEqual(result.diversity.filteredReasons.recent_distributed_offer, 1);
+    assert.strictEqual(getRun({ dataDir, runId }).run.diversity.product.uniqueOffers, 1);
+  });
+
   test('fetchSycmWithFallback switches to hot search when blue rows are insufficient', async () => {
     const calls = [];
     const result = await fetchSycmWithFallback('宠物玩具', {
@@ -317,6 +366,133 @@ describe('pipeline-flow', () => {
     const rows = readJsonl(run.files.candidates);
     assert.ok(rows.some(row => row.keyword === '纯银项链女'));
     assert.equal(run.counts.candidates, rows.length);
+  });
+
+  test('dynamic daily mining persists inspiration artifacts and reuses root-query metrics', async () => {
+    const dataDir = tempDataDir();
+    const keywordDataDir = path.join(dataDir, 'keyword-mining');
+    const rootQueries = [];
+    const mined = await flowMine({
+      dataDir,
+      keywordDataDir,
+      discoveryMode: 'inspiration',
+      source: 'inspiration',
+      date: '2026-08-02',
+      rootLimit: 2,
+      limit: 4,
+      fallbackCandidates: false,
+      inspirationUseLLM: false,
+      newsItems: [{ title: '多地进入高温天气', inspirationWord: '高温' }],
+      dictionaryWords: [],
+      trendItems: [],
+      sycmExtractor: async (keyword, options) => {
+        rootQueries.push({ keyword, options });
+        return {
+          data: [
+            { keyword },
+            { keyword: `${keyword}夏季`, searchPopularity: 1800, demandSupplyRatio: 1.8, clickRate: 20, conversionRate: 3 }
+          ]
+        };
+      }
+    });
+
+    assert.equal(rootQueries.length, 2);
+    assert.equal(rootQueries.every(call => call.options.maxPages === 1), true);
+    assert.ok(readJsonl(mined.inspiration ? path.join(mined.runDir, 'inspirations.jsonl') : '').length > 0);
+    assert.ok(readJsonl(path.join(mined.runDir, 'root-candidates.jsonl')).length > 0);
+    assert.equal(getRun({ dataDir, runId: mined.runId }).run.counts.selectedRoots, 2);
+
+    flowReviewCandidates({ dataDir, runId: mined.runId, approveAll: true });
+    let duplicateVerifyCalls = 0;
+    const verified = await flowVerify({
+      dataDir,
+      runId: mined.runId,
+      limit: 4,
+      sycmExtractor: async () => {
+        duplicateVerifyCalls += 1;
+        return { data: [] };
+      }
+    });
+    assert.equal(duplicateVerifyCalls, 0);
+    assert.ok(verified.verified.length > 0);
+    assert.ok(verified.verified.every(row => row.verifyMode === 'inspiration_cached'));
+  });
+
+  test('dynamic mining stops on the mine node when Chrome cannot query SYCM', async () => {
+    const dataDir = tempDataDir();
+    const result = await flowMine({
+      dataDir,
+      discoveryMode: 'inspiration',
+      source: 'inspiration',
+      date: '2026-08-02',
+      rootLimit: 1,
+      limit: 3,
+      fallbackCandidates: false,
+      inspirationUseLLM: false,
+      newsItems: [{ title: '多地进入高温天气', inspirationWord: '高温' }],
+      dictionaryWords: [],
+      trendItems: [],
+      sycmExtractor: async () => {
+        throw new Error('No Chrome tab found on port 9222');
+      }
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 'mining_manual_action_required');
+    assert.deepEqual(result.blockers, ['sycm_chrome_unavailable']);
+    assert.equal(result.stats.rootQueries.failed, 1);
+    const firstRun = getRun({ dataDir, runId: result.runId }).run;
+    assert.equal(firstRun.discovery.attempt, 1);
+    assert.match(firstRun.discovery.blockerReason, /No Chrome tab/);
+
+    const retried = await flowMine({
+      dataDir,
+      runId: result.runId,
+      discoveryMode: 'inspiration',
+      source: 'inspiration',
+      date: '2026-08-02',
+      rootLimit: 1,
+      limit: 3,
+      fallbackCandidates: false,
+      inspirationUseLLM: false,
+      newsItems: [{ title: '多地进入高温天气', inspirationWord: '高温' }],
+      dictionaryWords: [],
+      trendItems: [],
+      sycmExtractor: async keyword => ({
+        data: [{ keyword }, { keyword: `${keyword}夏季`, searchPopularity: 1800, demandSupplyRatio: 1.8 }]
+      })
+    });
+    assert.equal(retried.status, 'mined');
+    assert.equal(getRun({ dataDir, runId: result.runId }).run.discovery.attempt, 2);
+  });
+
+  test('hybrid discovery falls back to the legacy seed path only when inspiration returns no candidates', async () => {
+    const dataDir = tempDataDir();
+    const keywordDataDir = path.join(dataDir, 'keyword-mining');
+    addSeed('项链', { category: '饰品', dataDir: keywordDataDir });
+    const result = await flowMine({
+      dataDir,
+      keywordDataDir,
+      discoveryMode: 'hybrid',
+      source: 'inspiration',
+      seedSource: 'sycm_hot',
+      date: '2026-08-02',
+      rootLimit: 2,
+      limit: 3,
+      fallbackCandidates: false,
+      inspirationUseLLM: false,
+      newsItems: [{ title: '多地进入高温天气', inspirationWord: '高温' }],
+      dictionaryWords: [],
+      trendItems: [],
+      sycmExtractor: async keyword => keyword === '项链'
+        ? { data: [{ keyword }, { keyword: '纯银项链女', searchPopularity: 1500, demandSupplyRatio: 1.6, clickRate: 20 }] }
+        : { data: [] }
+    });
+
+    assert.equal(result.stats.fallbackUsed, true);
+    assert.equal(result.stats.fallbackMode, 'seed');
+    assert.ok(result.candidates.some(row => row.keyword === '纯银项链女'));
+    assert.ok(result.inspiration.stats.inspirationCount > 0);
   });
 
   test('flowReviewCandidates waits for manual keyword approval before SYCM verification', async () => {

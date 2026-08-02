@@ -59,6 +59,11 @@ function copyText(value) {
 
 const DEFAULT_WORKFLOW_MODE = 'daily';
 const ACTIVE_RUN_STATUSES = new Set(['pending', 'running', 'created', 'mined', 'verified', 'products_selected', 'generated', 'resuming', 'retrying', 'awaiting_keyword_review', 'awaiting_product_review']);
+const shouldCollapseSidebarInitially = () => (
+  typeof window !== 'undefined'
+  && typeof window.matchMedia === 'function'
+  && window.matchMedia('(max-width: 980px)').matches
+);
 
 const unwrapApiData = (payload) => payload?.data || payload || {};
 
@@ -166,8 +171,8 @@ const getCanvasNodeState = (nodeStates = {}, nodeId) => {
 };
 
 export default function WorkflowStudio({ initialMode: _initialMode }) {
-  const [leftSidebarCollapsed, setLeftSidebarCollapsed] = useState(false);
-  const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(false);
+  const [leftSidebarCollapsed, setLeftSidebarCollapsed] = useState(shouldCollapseSidebarInitially);
+  const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(shouldCollapseSidebarInitially);
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [selectedNodeId, setSelectedNodeId] = useState(null);

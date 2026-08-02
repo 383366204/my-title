@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useEffect, useRef } from 'react';
 import { ChevronLeft, Settings } from 'lucide-react';
 
 import {
@@ -17,9 +17,10 @@ const NodeOperationPanel = lazy(() => import('./node-operation-panel.jsx').then(
 })));
 
 const DAILY_START_FIELDS = [
-  { key: 'mine', label: '挖掘候选词', min: 1, max: 200 },
+  { key: 'mine', label: '候选词上限', min: 1, max: 200 },
   { key: 'rootLimit', label: '每日词根数', min: 1, max: 20 },
   { key: 'rootCooldownDays', label: '词根冷却天数', min: 0, max: 60 },
+  { key: 'familyCooldownDays', label: '商品族冷却天数', min: 0, max: 60 },
   { key: 'verify', label: '生意参谋校验', min: 1, max: 200 },
   { key: 'verifyReserve', label: '备用词补验数量', min: 0, max: 30 },
   { key: 'select', label: '货源选品', min: 1, max: 100 },
@@ -31,8 +32,9 @@ const DAILY_START_FIELDS = [
 ];
 
 const DAILY_START_OPTIONS = [
-  { key: 'source', label: '挖词来源', options: [{ value: 'sycm_hot', label: '生意参谋热搜关联词' }, { value: 'sycm_blue', label: '生意参谋蓝海关联词' }, { value: 'local', label: '本地规则扩展' }, { value: 'hybrid', label: '本地规则 + AI' }] },
-  { key: 'rootMode', label: '词根模式', options: [{ value: 'auto', label: '自动提取短词根' }, { value: 'seed', label: '直接使用种子词' }] },
+  { key: 'discoveryMode', label: '每日发现方式', options: [{ value: 'inspiration', label: '动态灵感（推荐）' }, { value: 'hybrid', label: '动态灵感 + 种子补位' }, { value: 'seed', label: '旧种子池模式' }] },
+  { key: 'source', label: '种子补位来源', seedOnly: true, options: [{ value: 'sycm_hot', label: '生意参谋热搜关联词' }, { value: 'sycm_blue', label: '生意参谋蓝海关联词' }, { value: 'local', label: '本地规则扩展' }, { value: 'hybrid', label: '本地规则 + AI' }] },
+  { key: 'rootMode', label: '种子词根模式', seedOnly: true, options: [{ value: 'auto', label: '自动提取短词根' }, { value: 'seed', label: '直接使用种子词' }] },
   { key: 'autoAllowReviewKeywords', label: '严格词为空时', options: [{ value: 'true', label: '继续少量可复核词' }, { value: 'false', label: '停在验真等待处理' }] }
 ];
 
@@ -56,6 +58,10 @@ export function WorkflowRightSidebar({
   updateNodeData
 }) {
   const distributionPreview = getWorkflowNodePanelKind(selectedNode?.id) === 'distribution-export';
+  const detailScrollRef = useRef(null);
+  useEffect(() => {
+    detailScrollRef.current?.scrollTo({ top: 0 });
+  }, [selectedNode?.id]);
   return (
 <div className={`w-[420px] max-w-[44vw] border-l border-slate-800 bg-slate-900/40 flex flex-col h-full shrink-0 workflow-right-sidebar ${collapsed ? 'is-collapsed' : ''}`}>
         <button
@@ -75,7 +81,7 @@ export function WorkflowRightSidebar({
         </div>
 
         {selectedNode ? (
-          <div className="p-5 flex-1 overflow-y-auto space-y-6">
+          <div ref={detailScrollRef} className="p-5 flex-1 overflow-y-auto space-y-6">
             <div className="workflow-detail-card">
               <div className="workflow-detail-card-head">
                 <span>{selectedNode.data?.label || selectedNode.id}</span>
@@ -185,7 +191,9 @@ export function WorkflowRightSidebar({
                   {activeTemplateView.modeHint}
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                  {DAILY_START_OPTIONS.map((field) => (
+                  {DAILY_START_OPTIONS.filter((field) => (
+                    !field.seedOnly || ['seed', 'hybrid'].includes(selectedNode.data.discoveryMode)
+                  )).map((field) => (
                     <label key={field.key} className="space-y-1 col-span-2">
                       <span className="text-[10px] font-bold text-slate-400 block">{field.label}</span>
                       <select

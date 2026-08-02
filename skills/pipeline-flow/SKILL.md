@@ -71,7 +71,9 @@ node bin/cli.js flow opportunities --json
 
 ```text
 flow mine
+-> flow review
 -> flow verify
+-> flow select
 -> flow generate
 -> flow export
 -> human review
@@ -80,7 +82,8 @@ flow mine
 
 ## What Each Step Does
 
-- `flow mine`: calls `keyword-mining`.
+- `flow mine`: calls `keyword-mining`. Daily mode defaults to dynamic inspiration discovery; `seed` and `hybrid` remain available.
+- `flow review`: records the human or automatic keyword screening decision before spending more platform requests.
 - `flow keyword`: creates a one-keyword run from the exact user keyword, then calls SYCM, title/product generation, and export. Use this for requests like "用这个词选品".
 - `flow verify`: calls `sycm-research` serially. It tries strict blue mode, relaxed blue mode, then hot mode when allowed. It must preserve `categoryAnalysis.recommendation.recommended.category` as `recommendedCategory`.
 - `flow generate`: calls `title-gen` only for SYCM-verified keywords.
@@ -106,6 +109,8 @@ flow mine
 ## Status Meanings
 
 - `mined`: candidates are ready; run verify next.
+- `mining_manual_action_required`: dynamic root lookup needs Chrome/SYCM; stop on the mining node and handle the platform action.
+- `mining_empty`: no dynamic candidate survived grounding, cooldown, diversity, and SYCM lookup; inspect root rejection reasons before retrying.
 - `verified`: SYCM verified at least one keyword; run generate next.
 - `verified_empty`: no keyword passed SYCM; stop.
 - `manual_action_required`: SYCM needs login, slider completion, or feature opening; stop.

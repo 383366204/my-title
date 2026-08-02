@@ -13,6 +13,7 @@ const {
   keywordSignature,
   clusterBySignature,
   diversifyCandidates,
+  selectDiverseCandidates,
   normalizeAIResponse,
   generateAIKeywordCandidates,
   parseAIJson,
@@ -21,6 +22,7 @@ const {
   gateCandidate,
   buildSeedProfile,
   auditSeedPool,
+  scheduleSeedProfiles,
   applySeedFeedback,
   loadSeeds,
   prepareSeedSuggestions,
@@ -146,6 +148,40 @@ describe('keyword-mining', () => {
     assert.strictEqual(buildSeedProfile({ keyword: '汽车冰垫' }).familyKey, '冰垫');
     assert.strictEqual(buildSeedProfile({ keyword: '办公室冰垫' }).familyKey, '冰垫');
     assert.strictEqual(buildSeedProfile({ keyword: '手持小风扇' }).familyKey, '小风扇');
+    assert.strictEqual(buildSeedProfile({ keyword: '床帘蚊帐' }).familyKey, '床帘');
+  });
+
+  test('seed scheduler rotates stale roots while reserving observing capacity', () => {
+    const now = new Date('2026-07-31T00:00:00.000Z');
+    const profiles = auditSeedPool([
+      { keyword: '项链', status: 'active', priority: 10, lastUsedAt: '2026-07-31T00:00:00.000Z', consecutiveRuns: 5 },
+      { keyword: '吊坠', status: 'active', priority: 8, lastUsedAt: '2026-07-20T00:00:00.000Z' },
+      { keyword: '小风扇', status: 'observing', priority: 6 }
+    ]).profiles;
+
+    const scheduled = scheduleSeedProfiles(profiles, { maxSeeds: 2, maxObservingSeeds: 1, now });
+
+    assert.deepStrictEqual(new Set(scheduled.map(seed => seed.keyword)), new Set(['吊坠', '小风扇']));
+    assert.ok(scheduled.every(seed => Number.isFinite(seed.rotationScore)));
+  });
+
+  test('seed scheduler retries expired cooling roots but never revives paused roots', () => {
+    const now = new Date('2026-07-31T00:00:00.000Z');
+    const profiles = auditSeedPool([
+      { keyword: '项链', status: 'active', priority: 8 },
+      { keyword: '手机壳', status: 'cooling', priority: 8, lastUsedAt: '2026-07-20T00:00:00.000Z' },
+      { keyword: '戒指', status: 'paused', priority: 10, lastUsedAt: '2026-07-01T00:00:00.000Z' }
+    ]).profiles;
+
+    const scheduled = scheduleSeedProfiles(profiles, {
+      maxSeeds: 2,
+      maxObservingSeeds: 1,
+      coolingRetryDays: 3,
+      now
+    });
+
+    assert.deepStrictEqual(new Set(scheduled.map(seed => seed.keyword)), new Set(['项链', '手机壳']));
+    assert.ok(!scheduled.some(seed => seed.keyword === '戒指'));
   });
 
   test('seed feedback updates outcome stats without reviving manually paused seeds', () => {
@@ -164,6 +200,7 @@ describe('keyword-mining', () => {
     assert.strictEqual(pendant.status, 'active');
     assert.strictEqual(pendant.stats.generationEligible, 1);
     assert.ok(pendant.lastUsedAt);
+    assert.strictEqual(pendant.consecutiveRuns, 1);
     assert.strictEqual(phoneCase.status, 'paused');
   });
 
@@ -219,6 +256,18 @@ describe('keyword-mining', () => {
     assert.strictEqual(result.summary.sourcesUsed, 2);
   });
 
+  test('seed suggestions respect a zero-capacity observing pool', () => {
+    const result = prepareSeedSuggestions([
+      { keyword: '便携小风扇', source: 'sycm_hot', searchPopularity: 900 }
+    ], {
+      existingSeeds: [],
+      maxSuggestions: 0
+    });
+
+    assert.strictEqual(result.accepted.length, 0);
+    assert.strictEqual(result.rejected[0].reason, 'suggestion_limit_reached');
+  });
+
   test('SYCM mining can replenish observing roots from already fetched related words', async () => {
     const dataDir = tempDataDir();
     addSeed('项链', { category: '饰品', priority: 10, dataDir });
@@ -242,6 +291,56 @@ describe('keyword-mining', () => {
     assert.strictEqual(result.stats.seedReplenishment.accepted, 1);
     assert.strictEqual(replenished.status, 'observing');
     assert.strictEqual(replenished.familyKey, '小风扇');
+  });
+
+  test('SYCM mining stops replenishing when the observing pool reaches capacity', async () => {
+    const dataDir = tempDataDir();
+    addSeed('项链', { category: '饰品', priority: 10, dataDir });
+    addSeed('小风扇', { category: '家居', priority: 6, status: 'observing', dataDir });
+
+    const result = await mineKeywords({
+      dataDir,
+      source: 'sycm_hot',
+      rootLimit: 1,
+      count: 3,
+      persist: false,
+      autoReplenishSeeds: true,
+      maxObservingPoolSize: 1,
+      sycmExtractor: async keyword => ({
+        data: [
+          { keyword },
+          { keyword: '宿舍遮光床帘', searchPopularity: 800, demandSupplyRatio: 1.6 }
+        ]
+      })
+    });
+
+    assert.strictEqual(result.stats.seedReplenishment.accepted, 0);
+    assert.strictEqual(result.stats.seedReplenishment.capacityReached, true);
+    assert.strictEqual(loadSeeds(dataDir).some(seed => seed.keyword === '床帘'), false);
+  });
+
+  test('SYCM mining respects an explicit zero daily replenishment limit', async () => {
+    const dataDir = tempDataDir();
+    addSeed('项链', { category: '饰品', priority: 10, dataDir });
+
+    const result = await mineKeywords({
+      dataDir,
+      source: 'sycm_hot',
+      rootLimit: 1,
+      count: 3,
+      persist: false,
+      autoReplenishSeeds: true,
+      maxNewSeeds: 0,
+      sycmExtractor: async keyword => ({
+        data: [
+          { keyword },
+          { keyword: '便携小风扇', searchPopularity: 900, demandSupplyRatio: 1.8 }
+        ]
+      })
+    });
+
+    assert.strictEqual(result.stats.seedReplenishment.accepted, 0);
+    assert.strictEqual(loadSeeds(dataDir).some(seed => seed.keyword === '小风扇'), false);
   });
 
   test('expandSeed blocks mechanical function and scene prefixes for incompatible seeds', () => {
@@ -348,6 +447,59 @@ describe('keyword-mining', () => {
 
     assert.strictEqual(selected.filter(item => item.coreProduct === '戒指').length, 2);
     assert.ok(selected.some(item => item.coreProduct === '发夹'));
+  });
+
+  test('history-aware selection favors fresh families without lowering the quality floor', () => {
+    const now = '2026-07-31T00:00:00.000Z';
+    const items = [
+      { keyword: '学生遮光床帘', coreProduct: '床帘', familyKey: '床帘', signature: '床帘|学生|遮光', localScore: 86, seed: '床帘', pattern: 'test' },
+      { keyword: '大学宿舍床帘', coreProduct: '床帘', familyKey: '床帘', signature: '床帘|大学|宿舍', localScore: 84, seed: '床帘', pattern: 'test' },
+      { keyword: '便携小风扇', coreProduct: '小风扇', familyKey: '小风扇', signature: '小风扇|便携', localScore: 80, seed: '小风扇', pattern: 'test' },
+      { keyword: '宠物磨牙玩具', coreProduct: '宠物玩具', familyKey: '宠物玩具', signature: '宠物玩具|磨牙', localScore: 79, seed: '宠物玩具', pattern: 'test' }
+    ];
+    const history = {
+      keywords: {},
+      signatures: {},
+      families: {
+        'family:床帘': { lastSeenAt: '2026-07-30T00:00:00.000Z', runCount: 4, status: 'generated' }
+      }
+    };
+
+    const result = selectDiverseCandidates(items, {
+      count: 3,
+      maxPerSeed: 3,
+      maxPerCategory: 10,
+      maxPerPattern: 10,
+      maxPerProductCore: 3,
+      history,
+      now,
+      mode: 'balanced'
+    });
+
+    assert.strictEqual(result.selected.length, 3);
+    assert.strictEqual(result.stats.familyCount, 3);
+    assert.ok(result.selected.every(item => item.localScore >= 79));
+    assert.ok(result.selected.some(item => item.diversity.noveltyStatus === 'new_family'));
+  });
+
+  test('history-aware selection counts exact history filtering once per keyword', () => {
+    const result = selectDiverseCandidates([
+      { keyword: '旧词', coreProduct: '戒指', signature: '戒指|旧', localScore: 90, seed: '戒指', pattern: 'test' },
+      { keyword: '新词一', coreProduct: '项链', signature: '项链|新', localScore: 80, seed: '项链', pattern: 'test' },
+      { keyword: '新词二', coreProduct: '吊坠', signature: '吊坠|新', localScore: 79, seed: '吊坠', pattern: 'test' }
+    ], {
+      count: 3,
+      history: {
+        keywords: {
+          'kw:旧词': { lastSeenAt: '2026-07-30T00:00:00.000Z', runCount: 1 }
+        }
+      },
+      now: '2026-07-31T00:00:00.000Z',
+      excludeExactHistory: true
+    });
+
+    assert.strictEqual(result.stats.exactHistoryFiltered, 1);
+    assert.strictEqual(result.stats.shortfall, 1);
   });
 
   test('mineKeywords returns ranked candidates without persisting when disabled', async () => {

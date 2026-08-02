@@ -2,8 +2,12 @@ const { test, describe } = require('node:test');
 const assert = require('node:assert');
 const {
   normalizeHistoryKeyword,
+  normalizeOfferId,
+  normalizeTitleFingerprint,
   buildHistoryKeys,
   normalizeHistoryRecord,
+  historyRecencyWeight,
+  shouldSuppressHistoryEntity,
   shouldSuppressHistoryRecord
 } = require('../history-record');
 
@@ -19,6 +23,32 @@ describe('history-record', () => {
     assert.strictEqual(keys.keywordKey, 'kw:纯银吊坠');
     assert.strictEqual(keys.signatureKey, 'sig:吊坠|纯银');
     assert.strictEqual(keys.coreProductKey, 'core:吊坠');
+    assert.strictEqual(keys.familyKey, 'family:吊坠');
+  });
+
+  test('builds stable product and supplier keys from common 1688 fields', () => {
+    const keys = buildHistoryKeys({
+      keyword: '宿舍床帘',
+      familyKey: '床帘',
+      url: 'https://detail.1688.com/offer/612111949602.html',
+      sourceTitle: ' 宿舍学生轨道床帘，下铺专用！ ',
+      product: { shopName: ' 义乌 家居厂 ' }
+    });
+
+    assert.strictEqual(keys.offerIdKey, 'offer:612111949602');
+    assert.strictEqual(keys.supplierKey, 'supplier:义乌家居厂');
+    assert.strictEqual(keys.titleFingerprintKey, 'title:宿舍学生轨道床帘下铺专用');
+    assert.strictEqual(keys.familyKey, 'family:床帘');
+  });
+
+  test('normalizes product identities without requiring a keyword', () => {
+    assert.strictEqual(normalizeOfferId({ productUrl: 'https://detail.1688.com/offer/123456.html' }), '123456');
+    assert.strictEqual(normalizeTitleFingerprint('新品 手机壳-透明款'), '新品手机壳透明款');
+    const record = normalizeHistoryRecord({
+      url: 'https://detail.1688.com/offer/123456.html',
+      title: '透明手机壳'
+    });
+    assert.strictEqual(record.id, 'offer:123456');
   });
 
   test('normalizes candidate records for browser and desktop stores', () => {
@@ -104,5 +134,22 @@ describe('history-record', () => {
 
     assert.strictEqual(decision.suppress, true);
     assert.strictEqual(decision.reason, 'recent_rejected_signature');
+  });
+
+  test('calculates recency weight and entity cooldown independently', () => {
+    const record = { lastSeenAt: '2026-06-25T00:00:00.000Z' };
+    assert.strictEqual(historyRecencyWeight(record, {
+      now: '2026-06-27T00:00:00.000Z',
+      cooldownDays: 4
+    }), 0.5);
+
+    const decision = shouldSuppressHistoryEntity(record, {
+      now: '2026-06-27T00:00:00.000Z',
+      entityType: 'offer',
+      cooldownDays: 30
+    });
+    assert.strictEqual(decision.suppress, true);
+    assert.strictEqual(decision.reason, 'recent_offer');
+    assert.ok(decision.weight > 0.9);
   });
 });

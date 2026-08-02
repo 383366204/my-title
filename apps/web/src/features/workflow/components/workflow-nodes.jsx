@@ -194,6 +194,32 @@ const WorkflowNodeOutputSummary = ({ view }) => {
   );
 };
 
+const WorkflowNodeDiversitySummary = ({ nodeId, data }) => {
+  const diversity = data?.output?.diversity || data?.diversity || null;
+  if (!diversity) return null;
+  const rows = nodeId === 'mine'
+    ? [
+        Number(data?.output?.inspirationCount || diversity.inspirations || 0) > 0 ? `${data?.output?.inspirationCount || diversity.inspirations} 条灵感` : '',
+        Number(data?.output?.selectedRoots || diversity.selectedRoots || 0) > 0 ? `${data?.output?.selectedRoots || diversity.selectedRoots} 个词根` : '',
+        Number(data?.output?.inspirationRejected || diversity.inspirationRejected || 0) > 0 ? `拦截 ${data?.output?.inspirationRejected || diversity.inspirationRejected} 条` : '',
+        Number(diversity.familyCount || 0) > 0 ? `${diversity.familyCount} 个词族` : '',
+        Number(diversity.newFamilyCount || 0) > 0 ? `新增 ${diversity.newFamilyCount} 个` : '',
+        Number(diversity.seedReplenished || 0) > 0 ? `补充种子 ${diversity.seedReplenished} 个` : '',
+        Number(diversity.seenFiltered || 0) > 0 ? `过滤旧词 ${diversity.seenFiltered} 个` : ''
+      ]
+    : nodeId === 'select'
+      ? [
+          Number(diversity.newOffers || 0) > 0 ? `新货源 ${diversity.newOffers} 个` : '',
+          Number(diversity.uniqueOffers || 0) > 0 ? `独立货源 ${diversity.uniqueOffers} 个` : '',
+          Number(diversity.suppliers || 0) > 0 ? `${diversity.suppliers} 家供应商` : '',
+          Number(diversity.historyFallbackCount || 0) > 0 ? `历史回退 ${diversity.historyFallbackCount} 个` : ''
+        ]
+      : [];
+  const visible = rows.filter(Boolean);
+  if (visible.length === 0) return null;
+  return <div className="workflow-node-diversity-summary">{visible.join(' · ')}</div>;
+};
+
 const shouldShowNodeActionChip = (status) => (
   ['blocked', 'waiting_manual', 'retryable', 'paused', 'failed'].includes(String(status || '').toLowerCase())
 );
@@ -294,6 +320,7 @@ export const MiningNode = ({ data }) => {
 
       <WorkflowProgressStrip view={view} />
       <WorkflowNodeOutputSummary view={view} />
+      <WorkflowNodeDiversitySummary nodeId="mine" data={data} />
       <WorkflowBlockerCallout view={view} />
       {shouldShowNodeActionChip(data.status) && view.primaryAction.action !== 'artifact' && <WorkflowNodeActionChip view={view} onAction={data.onAction} />}
       <WorkflowNodeArtifactButton data={data} />
@@ -420,6 +447,7 @@ export const ProductionNode = ({ id, data }) => {
 
       <WorkflowProgressStrip view={view} />
       <WorkflowNodeOutputSummary view={view} />
+      <WorkflowNodeDiversitySummary nodeId={id} data={data} />
       <WorkflowBlockerCallout view={view} />
       <WorkflowNodeOperationStatus data={data} />
       {!['artifact', 'inspect'].includes(view.primaryAction.action) && <WorkflowNodeActionChip view={view} onAction={data.onAction} />}

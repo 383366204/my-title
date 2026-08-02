@@ -10,7 +10,11 @@ const { loadSeen, recordSeen } = require('./seen-store');
 const { selectShortRoots, recordRootQueries } = require('./root-keywords');
 const { applySeedFeedback } = require('./seed-feedback');
 const { auditSeedPool } = require('./seed-profile');
+const { scheduleSeedProfiles } = require('./seed-profile');
 const { prepareSeedSuggestions } = require('./seed-suggestions');
+const { productFamily } = require('./product-words');
+const { selectDiverseCandidates } = require('./diversity-selector');
+const { discoverInspirationRoots } = require('./inspiration-engine');
 
 const CANDIDATES_FILE = 'candidates.jsonl';
 const MINING_PROGRESS_TOTAL = 6;
@@ -31,15 +35,6 @@ function writeCandidates(candidates, dataDir) {
   for (const item of candidates) {
     fs.appendFileSync(file, stringifyAsciiJson(item) + '\n', 'utf8');
   }
-}
-
-function belowLimit(map, key, limit) {
-  if (!limit || limit <= 0) return true;
-  return (map.get(key) || 0) < limit;
-}
-
-function inc(map, key) {
-  map.set(key, (map.get(key) || 0) + 1);
 }
 
 function clusterBySignature(items) {
@@ -67,35 +62,14 @@ function clusterBySignature(items) {
 }
 
 function diversifyCandidates(items, { count, maxPerSeed = 5, maxPerCategory = 20, maxPerPattern = 20, maxPerSignature = 1, maxPerProductCore = 3 } = {}) {
-  const selected = [];
-  const seedCounts = new Map();
-  const categoryCounts = new Map();
-  const patternCounts = new Map();
-  const signatureCounts = new Map();
-  const productCounts = new Map();
-
-  for (const item of items) {
-    const seed = item.seed || '';
-    const category = item.category || '';
-    const pattern = item.pattern || '';
-    const signature = item.signature || item.keyword || '';
-    const productCore = item.coreProduct || item.productSignature || '';
-    if (!belowLimit(seedCounts, seed, maxPerSeed)) continue;
-    if (!belowLimit(categoryCounts, category, maxPerCategory)) continue;
-    if (!belowLimit(patternCounts, pattern, maxPerPattern)) continue;
-    if (!belowLimit(signatureCounts, signature, maxPerSignature)) continue;
-    if (productCore && !belowLimit(productCounts, productCore, maxPerProductCore)) continue;
-
-    selected.push(item);
-    inc(seedCounts, seed);
-    inc(categoryCounts, category);
-    inc(patternCounts, pattern);
-    inc(signatureCounts, signature);
-    if (productCore) inc(productCounts, productCore);
-    if (selected.length >= count) break;
-  }
-
-  return selected;
+  return selectDiverseCandidates(items, {
+    count,
+    maxPerSeed,
+    maxPerCategory,
+    maxPerPattern,
+    maxPerSignature,
+    maxPerProductCore
+  }).selected;
 }
 
 function buildNextCommands(keyword) {
@@ -117,7 +91,7 @@ function thresholdForMode(mode) {
 
 function normalizeSource(source) {
   const value = String(source || 'local').trim().toLowerCase();
-  if (['local', 'ai', 'hybrid', 'sycm_hot', 'sycm_blue'].includes(value)) return value;
+  if (['local', 'ai', 'hybrid', 'sycm_hot', 'sycm_blue', 'inspiration'].includes(value)) return value;
   throw new Error(`Unsupported keyword mining source: ${source}`);
 }
 
@@ -231,29 +205,61 @@ function buildDirectKeywords(seeds, limit = 20) {
  * @param {number} [options.seenTtlDays=30] Recent seen keyword TTL.
  * @param {string} [options.mode=balanced] strict/balanced/explore threshold mode.
  * @param {Function} [options.onProgress] Optional progress callback.
+ * @param {object|null} [options.diversityHistory] Recent pipeline history snapshot.
  * @returns {Promise<{ok:boolean,date:string,seedsUsed:number,directKeywords:Array<object>,candidates:Array<object>,stats:object,precheckStats?:object}>}
  */
-async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds = 20, maxObservingSeeds = 3, maxPerSeed = 30, outputMaxPerSeed = 5, outputMaxPerCategory = 20, outputMaxPerPattern = 20, outputMaxPerProductCore = 3, persist = true, sycmPrecheck = false, minSearchPopularity = 50, includeDirect = false, excludeSeen = false, excludeKeywords = [], recordSeen: shouldRecordSeen = false, recordSeedFeedback = false, autoReplenishSeeds = false, maxNewSeeds = 3, seenTtlDays = 30, mode = 'balanced', source = 'local', aiCandidates = 80, aiBatchSize = 20, llmClient = null, onProgress = null, rootMode = 'auto', rootLimit = 5, rootCooldownDays = 7, recordRootHistory = true, sycmExtractor = null } = {}) {
+async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds = 20, maxObservingSeeds = 3, maxObservingPoolSize = 24, maxPerSeed = 30, outputMaxPerSeed = 5, outputMaxPerCategory = 20, outputMaxPerPattern = 20, outputMaxPerProductCore = 3, persist = true, sycmPrecheck = false, minSearchPopularity = 50, includeDirect = false, excludeSeen = false, excludeKeywords = [], recordSeen: shouldRecordSeen = false, recordSeedFeedback = false, autoReplenishSeeds = false, maxNewSeeds = 3, seenTtlDays = 30, mode = 'balanced', source = 'local', aiCandidates = 80, aiBatchSize = 20, llmClient = null, onProgress = null, rootMode = 'auto', rootLimit = 5, rootCooldownDays = 7, familyCooldownDays = 7, recordRootHistory = true, sycmExtractor = null, sycmMaxPages = 1, sycmPort = 9222, diversityHistory = null, allowHistoryFallback = false, date = new Date().toISOString().slice(0, 10), runAttempt = 0, newsItems = [], newsFeedUrls, dictionaryWords, trendItems = [], inspirationUseLLM = true } = {}) {
   const effectiveSource = normalizeSource(source);
-  const lifecycleSeeds = listSeeds({ dataDir, includePaused: true });
-  const activeSeeds = lifecycleSeeds.filter(seed => seed.status === 'active');
-  const observingSeeds = lifecycleSeeds.filter(seed => seed.status === 'observing').slice(0, Number(maxObservingSeeds || 3));
-  const storedSeeds = [...activeSeeds, ...observingSeeds].slice(0, maxSeeds);
-  const seeds = auditSeedPool(storedSeeds).profiles
-    .sort((a, b) => b.qualityScore - a.qualityScore || b.priorityScore - a.priorityScore);
+  const lifecycleSeeds = effectiveSource === 'inspiration' ? [] : listSeeds({ dataDir, includePaused: true });
+  const auditedSeeds = auditSeedPool(lifecycleSeeds).profiles;
+  const seeds = scheduleSeedProfiles(auditedSeeds, {
+    maxSeeds: Number(maxSeeds || 20),
+    maxObservingSeeds: Number(maxObservingSeeds || 3),
+    coolingRetryDays: 3
+  });
   const executableSeeds = seeds.filter(seed => ['discovery_root', 'direct_candidate'].includes(seed.role));
   const expandableBeforeDedupe = executableSeeds.filter(seed => seed.type !== 'direct' && seed.role === 'discovery_root');
   const expandableSeeds = dedupeSeedFamilies(expandableBeforeDedupe);
-  const date = new Date().toISOString().slice(0, 10);
   const reportProgress = createProgressReporter(onProgress);
   reportProgress({
-    stage: 'load-seeds',
+    stage: effectiveSource === 'inspiration' ? 'collect-inspirations' : 'load-seeds',
     current: 1,
     total: MINING_PROGRESS_TOTAL,
-    message: '读取种子池'
+    message: effectiveSource === 'inspiration' ? '收集新闻、字典与日历灵感' : '读取种子池'
   });
+  if (recordSeedFeedback && executableSeeds.length > 0) {
+    applySeedFeedback(executableSeeds.map(seed => ({
+      root: seed.keyword,
+      originalKeyword: seed.keyword,
+      runs: 1
+    })), { dataDir, eventType: 'seed-scheduled' });
+  }
   let aiMeta = null;
   let aiExpanded = [];
+  let inspirationDiscovery = null;
+  const rootResults = [];
+  if (effectiveSource === 'inspiration') {
+    inspirationDiscovery = await discoverInspirationRoots({
+      date,
+      runAttempt,
+      rootLimit: Number(rootLimit || 8),
+      rootCooldownDays: Number(rootCooldownDays ?? 14),
+      familyCooldownDays: Number(familyCooldownDays ?? 7),
+      history: diversityHistory,
+      llmClient,
+      useLLM: inspirationUseLLM,
+      newsItems,
+      newsFeedUrls,
+      dictionaryWords,
+      trendItems
+    });
+    reportProgress({
+      stage: 'productize-inspirations',
+      current: 2,
+      total: MINING_PROGRESS_TOTAL,
+      message: `灵感 ${inspirationDiscovery.stats.inspirationCount} 条，选出词根 ${inspirationDiscovery.selectedRoots.length} 个`
+    });
+  }
   if (effectiveSource === 'ai' || effectiveSource === 'hybrid') {
     reportProgress({
       stage: 'ai-expand',
@@ -310,14 +316,20 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
   }
 
   let sycmExpanded = [];
-  if (effectiveSource === 'sycm_hot' || effectiveSource === 'sycm_blue') {
+  if (effectiveSource === 'sycm_hot' || effectiveSource === 'sycm_blue' || effectiveSource === 'inspiration') {
     const isBlue = effectiveSource === 'sycm_blue';
     const sycmMode = isBlue ? 'blue' : 'hot';
-    const roots = rootMode === 'seed'
-      ? expandableSeeds.map(seed => ({ root: seed.keyword, originalKeyword: seed.keyword, category: seed.category || '' }))
-      : selectShortRoots(expandableSeeds, { dataDir, limit: rootLimit, cooldownDays: rootCooldownDays });
+    const roots = effectiveSource === 'inspiration'
+      ? inspirationDiscovery.selectedRoots.map(item => ({
+          ...item,
+          root: item.rootKeyword,
+          originalKeyword: item.rootKeyword,
+          category: item.category || item.familyKey || ''
+        }))
+      : rootMode === 'seed'
+        ? expandableSeeds.map(seed => ({ root: seed.keyword, originalKeyword: seed.keyword, category: seed.category || '' }))
+        : selectShortRoots(expandableSeeds, { dataDir, limit: rootLimit, cooldownDays: rootCooldownDays });
     const querySeeds = roots;
-    const rootResults = [];
     console.log(`🔌 开始生意参谋关联词挖掘模式: ${sycmMode}，查询 ${querySeeds.length} 个词根...`);
     for (let seedIndex = 0; seedIndex < querySeeds.length; seedIndex++) {
       const seed = querySeeds[seedIndex];
@@ -333,8 +345,8 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
         const extractor = sycmExtractor || require('../../sycm-research').extractSycmData;
         const sycmRes = await extractor(query, {
           mode: sycmMode,
-          maxPages: 2,
-          port: 9222
+          maxPages: Math.max(1, Number(sycmMaxPages || 1)),
+          port: Number(sycmPort || 9222)
         });
         const items = sycmRes.data || [];
         rootResults.push({ ...seed, result: items.length > 0 ? 'success' : 'empty', candidateCount: items.length });
@@ -350,6 +362,11 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
             category: seed.category || '',
             pattern: `sycm-${sycmMode}-related`,
             source: effectiveSource,
+            inspirationId: seed.inspirationId || '',
+            inspiration: seed.inspiration || null,
+            relationReason: seed.relationReason || '',
+            rootScore: seed.rootScore || null,
+            familyKey: seed.familyKey || '',
             sycmData: {
               searchPopularity: parseSearchPop(item.searchPopularity),
               clickRate: parsePercentOrNumber(item.clickRate),
@@ -364,7 +381,13 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
           });
         }
       } catch (err) {
-        rootResults.push({ ...seed, result: 'failed', error: err.message });
+        rootResults.push({
+          ...seed,
+          result: 'failed',
+          error: err.message,
+          status: err.status || '',
+          manualAction: err.details || err.manualAction || null
+        });
         console.error(`❌ 查询词根 "${query}" 失败:`, err.message);
       }
       reportProgress({
@@ -375,11 +398,10 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
       });
     }
     if (rootResults.length > 0 && recordRootHistory) recordRootQueries(rootResults, { dataDir });
-    if (rootResults.length > 0 && recordSeedFeedback) {
+    if (rootResults.length > 0 && recordSeedFeedback && effectiveSource !== 'inspiration') {
       applySeedFeedback(rootResults.map(root => ({
         root: root.root,
         originalKeyword: root.originalKeyword,
-        runs: 1,
         failures: root.result === 'failed' || root.result === 'empty' ? 1 : 0
       })), { dataDir, eventType: 'root-query' });
     }
@@ -435,6 +457,7 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
       nextAction,
       flags: scoredItem.flags,
       coreProduct: scoredItem.coreProduct,
+      familyKey: productFamily(scoredItem.coreProduct) || scoredItem.coreProduct || '',
       signature: scoredItem.signature,
       productSignature: scoredItem.productSignature,
       rigid: scoredItem.rigid,
@@ -447,6 +470,10 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
       aiRisk: item.aiRisk,
       intent: item.intent,
       targetCrowd: item.targetCrowd,
+      inspirationId: item.inspirationId || '',
+      inspiration: item.inspiration || null,
+      relationReason: item.relationReason || '',
+      rootScore: item.rootScore || null,
       sycmData: item.sycmData || null,
       nextCommands: buildNextCommands(scoredItem.keyword)
     };
@@ -525,13 +552,30 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
   const seenFiltered = Math.max(0, prechecked.length - unseenPrechecked.length);
   const seenPoolExhausted = excludeSeen && unseenPrechecked.length === 0 && prechecked.length > 0;
 
-  const candidates = diversifyCandidates(selectionPool, {
+  const targetSelectionSize = Math.min(Number(count || 50), selectionPool.length);
+  const shareBasedFamilyLimit = Math.max(1, Math.floor(targetSelectionSize * 0.3));
+  const selectableFamilyCount = new Set(selectionPool
+    .map(item => item.familyKey || productFamily(item.coreProduct || item.productSignature || '') || item.coreProduct)
+    .filter(Boolean)).size;
+  const coverageRequiredLimit = selectableFamilyCount > 0
+    ? Math.ceil(targetSelectionSize / selectableFamilyCount)
+    : Number(outputMaxPerProductCore || 3);
+  const effectiveProductCoreLimit = Math.min(
+    Number(outputMaxPerProductCore || 3),
+    Math.max(shareBasedFamilyLimit, coverageRequiredLimit)
+  );
+  const diversitySelection = selectDiverseCandidates(selectionPool, {
     count: Number(count || 50),
     maxPerSeed: outputMaxPerSeed,
     maxPerCategory: outputMaxPerCategory,
     maxPerPattern: outputMaxPerPattern,
-    maxPerProductCore: outputMaxPerProductCore
+    maxPerProductCore: effectiveProductCoreLimit,
+    history: diversityHistory,
+    mode,
+    excludeExactHistory: !!diversityHistory,
+    allowHistoryFallback
   });
+  const candidates = diversitySelection.selected;
 
   if (effectiveSource === 'hybrid' && !candidates.some(item => item.source === 'ai')) {
     const bestAi = prechecked.find(item => item.source === 'ai')
@@ -562,7 +606,12 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
     });
   }
   let seedReplenishment = null;
-  if (autoReplenishSeeds && sycmExpanded.length > 0) {
+  if (autoReplenishSeeds && effectiveSource !== 'inspiration' && sycmExpanded.length > 0) {
+    const existingSeeds = loadSeeds(dataDir);
+    const observingPoolSize = existingSeeds.filter(seed => ['observing', 'explore'].includes(String(seed.status || '').toLowerCase())).length;
+    const observingPoolCapacity = Math.max(0, Number(maxObservingPoolSize));
+    const availableSlots = Math.max(0, observingPoolCapacity - observingPoolSize);
+    const suggestionLimit = Math.min(Math.max(0, Number(maxNewSeeds)), availableSlots);
     seedReplenishment = prepareSeedSuggestions(sycmExpanded.map(item => ({
       keyword: item.keyword,
       category: item.category,
@@ -572,9 +621,16 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
       conversionRate: item.sycmData?.conversionRate || 0,
       reason: `从词根「${item.root || item.seed}」的生意参谋关联词中发现`
     })), {
-      existingSeeds: loadSeeds(dataDir),
-      maxSuggestions: Number(maxNewSeeds || 3)
+      existingSeeds,
+      maxSuggestions: suggestionLimit
     });
+    seedReplenishment.summary = {
+      ...seedReplenishment.summary,
+      observingPoolSize,
+      observingPoolCapacity,
+      availableSlots,
+      capacityReached: availableSlots === 0
+    };
     for (const suggestion of seedReplenishment.accepted) {
       addSeed(suggestion.keyword, {
         category: suggestion.category,
@@ -612,9 +668,19 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
       duplicateRootFamiliesRemoved: expandableBeforeDedupe.length - expandableSeeds.length,
       rootFamiliesUsed: expandableSeeds.length,
       observingSeedsUsed: seeds.filter(seed => seed.status === 'observing').length,
+      coolingSeedsRetried: seeds.filter(seed => seed.status === 'cooling').length,
+      diversity: diversitySelection.stats,
+      rootQueries: {
+        total: rootResults.length,
+        succeeded: rootResults.filter(item => item.result === 'success').length,
+        empty: rootResults.filter(item => item.result === 'empty').length,
+        failed: rootResults.filter(item => item.result === 'failed').length,
+        rows: rootResults
+      },
       seedReplenishment: seedReplenishment ? seedReplenishment.summary : null
     },
-    candidates
+    candidates,
+    inspiration: inspirationDiscovery
   };
   if (precheckStats) result.precheckStats = precheckStats;
   return result;

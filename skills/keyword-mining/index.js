@@ -20,10 +20,22 @@ const { classifySeed } = require('./src/seed-classifier');
 const { checkExpansionCompatibility } = require('./src/facet-compatibility');
 const { gateCandidate } = require('./src/candidate-gate');
 const { extractShortRoot, selectShortRoots, recordRootQueries } = require('./src/root-keywords');
-const { buildSeedProfile, auditSeedPool, scoreSeedQuality, recommendedStatus } = require('./src/seed-profile');
+const {
+  buildSeedProfile,
+  auditSeedPool,
+  scoreSeedQuality,
+  scoreSeedRotation,
+  scheduleSeedProfiles,
+  recommendedStatus
+} = require('./src/seed-profile');
 const { applySeedFeedback } = require('./src/seed-feedback');
 const { prepareSeedSuggestions } = require('./src/seed-suggestions');
 const { DEFAULT_SOURCE_QUOTAS, buildSeedReplenishmentPlan } = require('./src/seed-replenishment');
+const { selectDiverseCandidates } = require('./src/diversity-selector');
+const { collectInspirations, fetchNewsFeeds, parseFeedItems } = require('./src/inspiration-sources');
+const { assessInspiration, assessRootCandidate } = require('./src/inspiration-guard');
+const { productizeInspirations } = require('./src/inspiration-productizer');
+const { discoverInspirationRoots } = require('./src/inspiration-engine');
 
 module.exports = {
   DEFAULT_DATA_DIR,
@@ -40,6 +52,7 @@ module.exports = {
   mineKeywords,
   clusterBySignature,
   diversifyCandidates,
+  selectDiverseCandidates,
   generateAIKeywordCandidates,
   normalizeAIResponse,
   parseAIJson,
@@ -54,11 +67,20 @@ module.exports = {
   buildSeedProfile,
   auditSeedPool,
   scoreSeedQuality,
+  scoreSeedRotation,
+  scheduleSeedProfiles,
   recommendedStatus,
   applySeedFeedback,
   prepareSeedSuggestions,
   DEFAULT_SOURCE_QUOTAS,
   buildSeedReplenishmentPlan,
+  collectInspirations,
+  fetchNewsFeeds,
+  parseFeedItems,
+  assessInspiration,
+  assessRootCandidate,
+  productizeInspirations,
+  discoverInspirationRoots,
   keywordSignature,
   rejectCandidate,
   reverseMine

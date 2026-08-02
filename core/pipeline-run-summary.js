@@ -9,6 +9,8 @@ const STAGE_ORDER = ['seed', 'mined', 'keyword_review', 'verified', 'selected', 
 
 const STATUS_STAGE = {
   created: 'seed',
+  mining_manual_action_required: 'mined',
+  mining_empty: 'mined',
   mined: 'mined',
   awaiting_keyword_review: 'keyword_review',
   keywords_reviewed: 'keyword_review',
@@ -207,6 +209,8 @@ function safeRunFile(runDir, persistedPath, fallbackName) {
 
 function defaultFiles(runDir, files = {}) {
   return {
+    inspirations: safeRunFile(runDir, files.inspirations, 'inspirations.jsonl'),
+    rootCandidates: safeRunFile(runDir, files.rootCandidates, 'root-candidates.jsonl'),
     candidates: safeRunFile(runDir, files.candidates, 'candidates.jsonl'),
     reviewedCandidates: safeRunFile(runDir, files.reviewedCandidates, 'reviewed-candidates.jsonl'),
     sycmResults: safeRunFile(runDir, files.sycmResults, 'sycm-results.jsonl'),
@@ -271,6 +275,9 @@ function summarizePipelineRun({ dataDir = DEFAULT_PIPELINE_DIR, runId, previewLi
   const mustReview = status === 'needs_review' || run.mustReview === true;
 
   if (status === 'needs_review') blockers.push('review_rejected_rows');
+  if (status === 'mining_manual_action_required' || status === 'mining_empty') {
+    blockers.push(run.discovery?.blocker || 'no_inspiration_candidates');
+  }
   if (status === 'manual_action_required' || status === 'verified_partial_manual_required') {
     blockers.push('sycm_manual_action_required');
   }
@@ -289,6 +296,8 @@ function summarizePipelineRun({ dataDir = DEFAULT_PIPELINE_DIR, runId, previewLi
     startedAt: run.startedAt || '',
     updatedAt: run.updatedAt || run.startedAt || '',
     counts,
+    diversity: run.diversity || {},
+    discovery: run.discovery || null,
     files,
     batchCount: countNonEmptyLines(batchFile),
     batchFile,
@@ -300,6 +309,8 @@ function summarizePipelineRun({ dataDir = DEFAULT_PIPELINE_DIR, runId, previewLi
     blockers: uniqueStrings(blockers),
     nextCommand,
     previews: {
+      inspirations: readJsonlPreview(files.inspirations, previewLimit),
+      rootCandidates: readJsonlPreview(files.rootCandidates, previewLimit),
       candidates: readJsonlPreview(files.candidates, previewLimit),
       reviewedCandidates: readJsonlPreview(files.reviewedCandidates, previewLimit),
       verifiedKeywords: readJsonlPreview(files.verifiedKeywords, previewLimit),

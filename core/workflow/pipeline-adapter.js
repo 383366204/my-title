@@ -183,12 +183,16 @@ function workflowNodes(mode = 'daily') {
       }
     : {
         label: '开始',
-        description: '按种子池启动每日选品',
+        description: '从新闻、字典和趋势动态发现商品词根',
       mine: 50,
-      source: 'sycm_hot',
+      discoveryMode: 'inspiration',
+      source: 'inspiration',
       rootMode: 'auto',
-      rootLimit: 5,
-      rootCooldownDays: 7,
+      rootLimit: 8,
+      rootCooldownDays: 14,
+      familyCooldownDays: 7,
+      inspirationSycmPages: 1,
+      inspirationUseLLM: true,
         verify: 20,
         generate: 10,
         select: 10,
@@ -218,7 +222,7 @@ function workflowNodes(mode = 'daily') {
   }
   return withSteps(positionNodes([
     { id: WORKFLOW_NODE_IDS.start, type: 'production-start', data: startData },
-    { id: WORKFLOW_NODE_IDS.mine, type: 'pipeline-mine', data: { label: '选词挖掘', description: '从种子池扩展候选词' } },
+    { id: WORKFLOW_NODE_IDS.mine, type: 'pipeline-mine', data: { label: '灵感选词', description: '收集灵感、生成商品词根并查询关联词', discoveryMode: 'inspiration' } },
     { id: WORKFLOW_NODE_IDS.keywordReview, type: 'pipeline-keyword-review', data: { label: '人工筛词', description: '人工筛除不适合验真的候选词' } },
     { id: WORKFLOW_NODE_IDS.verify, type: 'pipeline-verify', data: { label: '生意参谋校验', description: '验证搜索人气和供需' } },
     { id: WORKFLOW_NODE_IDS.select, type: 'pipeline-select', data: { label: '货源选品', description: '搜索1688货源并评分筛选' } },
@@ -286,10 +290,10 @@ function template(id, name, mode, description, meta = {}) {
 function listProductionWorkflowTemplates() {
   return [
     template('daily-selection-v1', '每日蓝海选品流水线', 'daily', '选词、验真、生成标题并导出铺货清单', {
-      entryLabel: '入口：种子池',
+      entryLabel: '入口：动态灵感',
       scenarioLabel: '适合：每天自动发现新机会',
-      flowSummary: '流程：选词挖掘 → 人工筛词 → 生意参谋校验 → 货源选品 → 标题生成 → 导出复核',
-      modeHint: '从种子池自动扩展候选词，会先执行选词挖掘。'
+      flowSummary: '流程：灵感选词 → 人工筛词 → 生意参谋校验 → 货源选品 → 标题生成 → 导出复核',
+      modeHint: '从新闻、字典、日历和趋势动态发现词根，不要求预先维护种子池。'
     }),
     template('exact-keyword-v1', '精确关键词选品流水线', 'keyword', '按用户给定关键词生成铺货清单', {
       entryLabel: '入口：手动关键词',
@@ -339,15 +343,25 @@ function legacyManualWorkflowTemplate() {
  */
 function sanitizeWorkflowParams(mode, raw = {}) {
   if (mode === 'daily') {
+    const discoveryMode = ['inspiration', 'seed', 'hybrid'].includes(String(raw.discoveryMode || '').trim())
+      ? String(raw.discoveryMode).trim()
+      : 'inspiration';
     return {
       mine: clampInt(raw.mine, 50, 1, 200),
-      source: ['local', 'ai', 'hybrid', 'sycm_hot', 'sycm_blue'].includes(String(raw.source || '').trim()) ? String(raw.source).trim() : 'sycm_hot',
+      discoveryMode,
+      source: ['local', 'ai', 'hybrid', 'sycm_hot', 'sycm_blue', 'inspiration'].includes(String(raw.source || '').trim())
+        ? String(raw.source).trim()
+        : discoveryMode === 'inspiration' || discoveryMode === 'hybrid' ? 'inspiration' : 'sycm_hot',
       rootMode: String(raw.rootMode || 'auto') === 'seed' ? 'seed' : 'auto',
-      rootLimit: clampInt(raw.rootLimit, 5, 1, 20),
-      rootCooldownDays: clampInt(raw.rootCooldownDays, 7, 0, 60),
+      rootLimit: clampInt(raw.rootLimit, 8, 1, 20),
+      rootCooldownDays: clampInt(raw.rootCooldownDays, 14, 0, 60),
+      familyCooldownDays: clampInt(raw.familyCooldownDays, 7, 0, 60),
+      inspirationSycmPages: clampInt(raw.inspirationSycmPages, 1, 1, 1),
+      inspirationUseLLM: sanitizeBool(raw.inspirationUseLLM, true),
       maxObservingSeeds: clampInt(raw.maxObservingSeeds, 3, 0, 10),
+      maxObservingPoolSize: clampInt(raw.maxObservingPoolSize, 24, 3, 100),
       maxNewSeeds: clampInt(raw.maxNewSeeds, 3, 0, 10),
-      autoReplenishSeeds: sanitizeBool(raw.autoReplenishSeeds, true),
+      autoReplenishSeeds: sanitizeBool(raw.autoReplenishSeeds, discoveryMode === 'seed'),
       recordSeedFeedback: sanitizeBool(raw.recordSeedFeedback, true),
       verify: clampInt(raw.verify, 20, 1, 200),
       generate: clampInt(raw.generate, 10, 1, 100),
@@ -406,6 +420,12 @@ function buildPipelineCliArgs(mode, params = {}) {
   if (mode === 'daily') {
     const args = ['bin/cli.js', 'flow', 'daily'];
     pushFlag(args, '--mine', clean.mine);
+    pushFlag(args, '--discovery-mode', clean.discoveryMode);
+    pushFlag(args, '--source', clean.source);
+    pushFlag(args, '--root-mode', clean.rootMode);
+    pushFlag(args, '--root-limit', clean.rootLimit);
+    pushFlag(args, '--root-cooldown-days', clean.rootCooldownDays);
+    pushFlag(args, '--family-cooldown-days', clean.familyCooldownDays);
     pushFlag(args, '--verify', clean.verify);
     pushFlag(args, '--generate', clean.generate);
     pushFlag(args, '--export', clean.export);
@@ -418,6 +438,7 @@ function buildPipelineCliArgs(mode, params = {}) {
     if (!clean.fallbackHot) args.push('--no-hot-fallback');
     if (!clean.autoExpandVerify) args.push('--no-auto-expand-verify');
     if (!clean.autoAllowReviewKeywords) args.push('--no-auto-continue-review-keywords');
+    if (!clean.inspirationUseLLM) args.push('--no-inspiration-llm');
     args.push('--json');
     return args;
   }
@@ -524,7 +545,7 @@ function resolveProductionWorkflowLaunch(body = {}) {
     ...(body.params || {}),
     ...(body.options || {})
   };
-  for (const key of ['keyword', 'keywords', 'mine', 'source', 'rootMode', 'rootLimit', 'rootCooldownDays', 'maxObservingSeeds', 'maxNewSeeds', 'autoReplenishSeeds', 'recordSeedFeedback', 'verify', 'generate', 'export', 'productsPerKeyword', 'length', 'port', 'pages', 'minBlueRows', 'fallbackHot', 'autoApproveKeywords', 'autoExpandVerify', 'verifyReserve', 'autoAllowReviewKeywords', 'reviewKeywordLimit']) {
+  for (const key of ['keyword', 'keywords', 'mine', 'discoveryMode', 'source', 'rootMode', 'rootLimit', 'rootCooldownDays', 'familyCooldownDays', 'inspirationSycmPages', 'inspirationUseLLM', 'maxObservingSeeds', 'maxObservingPoolSize', 'maxNewSeeds', 'autoReplenishSeeds', 'recordSeedFeedback', 'verify', 'generate', 'export', 'productsPerKeyword', 'length', 'port', 'pages', 'minBlueRows', 'fallbackHot', 'autoApproveKeywords', 'autoExpandVerify', 'verifyReserve', 'autoAllowReviewKeywords', 'reviewKeywordLimit']) {
     if (Object.prototype.hasOwnProperty.call(body, key)) params[key] = body[key];
   }
 
@@ -614,7 +635,18 @@ function nodeStatusFromRuntimeProgress(progress) {
 function outputForNode(id, summary) {
   const counts = summary.counts || {};
   if (id === WORKFLOW_NODE_IDS.start) return { runId: summary.runId };
-  if (id === WORKFLOW_NODE_IDS.mine) return { count: Number(counts.candidates || 0), file: summary.files?.candidates || '' };
+  if (id === WORKFLOW_NODE_IDS.mine) return {
+    count: Number(counts.candidates || 0),
+    inspirationCount: Number(counts.inspirations || 0),
+    inspirationRejected: Number(counts.inspirationRejected || 0),
+    productizedRoots: Number(counts.productizedRoots || 0),
+    selectedRoots: Number(counts.selectedRoots || 0),
+    file: summary.files?.candidates || '',
+    inspirationFile: summary.files?.inspirations || '',
+    rootCandidatesFile: summary.files?.rootCandidates || '',
+    discovery: summary.discovery || null,
+    diversity: summary.diversity?.keyword || null
+  };
   if (id === WORKFLOW_NODE_IDS.keywordReview) {
     return {
       approved: Number(counts.keywordReviewApproved || 0),
@@ -639,7 +671,8 @@ function outputForNode(id, summary) {
       count,
       productCount: count,
       failed: Number(counts.productEnrichFailed || 0),
-      file: summary.files?.selectedProducts || ''
+      file: summary.files?.selectedProducts || '',
+      diversity: summary.diversity?.product || null
     };
   }
   if (id === WORKFLOW_NODE_IDS.generate) {
@@ -715,6 +748,45 @@ function sycmFailureIntervention(row) {
 
 function summaryInterventionForNode(summary, nodeId) {
   const status = summary.status || 'unknown';
+  if (nodeId === WORKFLOW_NODE_IDS.mine && ['mining_manual_action_required', 'mining_empty'].includes(status)) {
+    const chromeUnavailable = summary.discovery?.blocker === 'sycm_chrome_unavailable';
+    const blockerReason = summary.discovery?.blockerReason || '';
+    const manualAction = summary.discovery?.manualAction || null;
+    const platformBlocked = status === 'mining_manual_action_required';
+    return {
+      blocker: summary.discovery?.blocker || 'no_inspiration_candidates',
+      actionHint: chromeUnavailable
+        ? `动态词根无法连接生意参谋。${blockerReason}`
+        : blockerReason || '今日灵感没有形成可用候选词，请查看词根拦截原因后重试。',
+      platform: platformBlocked ? 'sycm' : null,
+      platformStatus: chromeUnavailable ? 'chrome_unavailable' : manualAction?.status || null,
+      manualAction: platformBlocked
+        ? manualAction || {
+            platform: 'sycm',
+            status: chromeUnavailable ? 'chrome_unavailable' : 'manual_action_required',
+            userMessage: chromeUnavailable
+              ? '请启动 Chrome 并登录生意参谋，然后重试当前节点。'
+              : '请在 Chrome 中处理生意参谋登录、滑块或权限问题后重试。'
+          }
+        : null,
+      nextRecommendedAction: chromeUnavailable
+        ? {
+            action: 'start-sycm-chrome',
+            label: '启动 Chrome',
+            description: '启动带远程调试端口的 Chrome，登录生意参谋后重试灵感选词。'
+          }
+        : platformBlocked ? {
+            action: 'resume-after-manual',
+            label: '我已处理，重试选词',
+            description: '完成生意参谋人工处理后重新运行当前节点。'
+          }
+        : {
+            action: 'retry-node',
+            label: '重新发现灵感',
+            description: '使用新的抽样序列重新收集灵感并生成商品词根。'
+          }
+    };
+  }
   if (nodeId === WORKFLOW_NODE_IDS.keywordReview) {
     if (status === 'awaiting_keyword_review') {
       return {
@@ -881,6 +953,12 @@ function statusPlanForSummary(summary) {
 
   if (status === 'workflow_complete') {
     completeThrough(states, WORKFLOW_NODE_IDS.end);
+    return states;
+  }
+
+  if (status === 'mining_manual_action_required' || status === 'mining_empty') {
+    completeBefore(states, WORKFLOW_NODE_IDS.mine);
+    states[WORKFLOW_NODE_IDS.mine] = 'blocked';
     return states;
   }
 
@@ -1089,6 +1167,7 @@ function pipelineSummaryToWorkflowRun(summary, options = {}) {
     logs: [],
     stage: summary.stage,
     counts: summary.counts || {},
+    diversity: summary.diversity || {},
     files: summary.files || {},
     batchFile: summary.batchFile || '',
     reviewFile: summary.reviewFile || '',
@@ -1168,6 +1247,18 @@ function readWorkflowNodeArtifact(runIdOrOptions, nodeId, options = {}) {
   const file = summary.files && summary.files[artifact.fileKey];
   if (!file) return null;
   if (artifact.type === 'jsonl') {
+    if (normalized.nodeId === WORKFLOW_NODE_IDS.mine) {
+      return {
+        runId: summary.runId,
+        nodeId: normalized.nodeId,
+        file,
+        type: 'jsonl',
+        rows: readJsonlPreview(file, normalized.limit || 50),
+        inspirationRows: readJsonlPreview(summary.files?.inspirations, normalized.limit || 50),
+        rootRows: readJsonlPreview(summary.files?.rootCandidates, normalized.limit || 100),
+        discovery: summary.discovery || null
+      };
+    }
     if (normalized.nodeId === WORKFLOW_NODE_IDS.keywordReview) {
       if (summary.options?.mode === 'manual') {
         const selectedFile = summary.files?.selectedProducts;

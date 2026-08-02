@@ -100,6 +100,8 @@ export function getPipelineSummaryVisualState(summary = null) {
     'awaiting_user_confirmation'
   ]);
   const pausedStatuses = new Set([
+    'mining_manual_action_required',
+    'mining_empty',
     'manual_action_required',
     'verified_partial_manual_required',
     'verified_empty',
@@ -476,7 +478,7 @@ export function getWorkflowResultSummaryView(nodeId, state = {}) {
   const normalized = String(nodeId || '');
   const manualProductInput = normalized === 'select' && state.manualDirectInput === true;
   const titles = {
-    mine: '选词挖掘结果',
+    mine: '灵感选词结果',
     keywordReview: '人工筛词结果',
     verify: '生意参谋校验结果',
     select: '货源选品结果',
@@ -487,7 +489,7 @@ export function getWorkflowResultSummaryView(nodeId, state = {}) {
   };
   if (manualProductInput) titles.select = '商品资料获取结果';
   const hints = {
-    mine: '候选词在下方结果列表中预览，完整内容保存在 candidates.jsonl。',
+    mine: '候选词及其灵感来源在下方预览，完整链路保存在运行产物中。',
     keywordReview: '人工确认后的关键词会保存到 reviewed-candidates.jsonl，只有通过项会进入生意参谋校验。',
     verify: '验真通过词在下方结果列表中预览，完整内容保存在 verified-keywords.jsonl。',
     select: '已选货源会按商品信息和机会分展示，完整内容保存在 selected-products.jsonl。',
@@ -524,6 +526,8 @@ export function getWorkflowResultSummaryView(nodeId, state = {}) {
 export function labelWorkflowBlockerReason(blocker) {
   const normalized = String(blocker || '').toLowerCase();
   const labels = {
+    sycm_chrome_unavailable: 'Chrome 调试连接不可用',
+    no_inspiration_candidates: '没有可用的动态候选词',
     verified_empty: '验真无结果',
     keyword_review_required: '需要人工筛词',
     no_keyword_review_approved: '没有通过筛词的关键词',
@@ -691,10 +695,10 @@ export function getWorkflowTemplateView(template = {}) {
         modeHint: '使用你输入的关键词，跳过选词挖掘，直接进入生意参谋校验。'
       }
     : {
-        entryLabel: '入口：种子池',
+        entryLabel: '入口：动态灵感',
         scenarioLabel: '适合：每天自动发现新机会',
-        flowSummary: '流程：选词挖掘 → 人工筛词 → 生意参谋校验 → 货源选品 → 标题生成 → 导出复核',
-        modeHint: '从种子池自动扩展候选词，会先执行选词挖掘。'
+        flowSummary: '流程：灵感选词 → 人工筛词 → 生意参谋校验 → 货源选品 → 标题生成 → 导出复核',
+        modeHint: '从新闻、字典、日历和趋势动态发现商品词根，不要求预先维护种子池。'
       };
   return {
     entryLabel: template.entryLabel || defaults.entryLabel,
@@ -739,7 +743,7 @@ function labelUnifiedRunStage(run = {}) {
   const stage = String(run.stage || '').toLowerCase();
   const labels = {
     seed: '种子启动',
-    mined: '选词挖掘',
+    mined: '灵感选词',
     keyword_review: '人工筛词',
     verified: '大盘验真',
     selected: '货源选品',
@@ -754,6 +758,8 @@ function labelUnifiedRunStage(run = {}) {
 function labelUnifiedRunStatus(status) {
   const normalized = String(status || '').toLowerCase();
   const labels = {
+    mining_manual_action_required: '灵感选词需人工处理',
+    mining_empty: '灵感选词无结果',
     verified_empty: '验真无结果',
     verified_no_generation_eligible: '无可生成词',
     ready_to_distribute: '待确认铺货',

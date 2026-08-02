@@ -30,6 +30,8 @@ const DEFAULT_STEPS = ['mine', 'keywordReview', 'verify', 'select', 'generate', 
 const KEYWORD_STEPS = ['start', 'verify', 'select', 'generate', 'export'];
 const MANUAL_STEPS = ['start', 'select', 'generate', 'export'];
 const STOP_STATUSES = new Set([
+  'mining_manual_action_required',
+  'mining_empty',
   'verified_empty',
   'verified_no_generation_eligible',
   'awaiting_keyword_review',
@@ -46,6 +48,8 @@ const STOP_STATUSES = new Set([
 ]);
 const FAILED_PIPELINE_STATUSES = new Set(['select_failed', 'generate_failed']);
 const BLOCKED_PIPELINE_STATUSES = new Set([
+  'mining_manual_action_required',
+  'mining_empty',
   'manual_action_required',
   'verified_partial_manual_required',
   'awaiting_keyword_review',
@@ -131,6 +135,11 @@ function createDefaultStepFns({ dataDir, runId, params, mode = 'daily' }) {
   const selectLimit = keywordMode ? 1 : (params.select || params.generate || 10);
   const generateLimit = keywordMode ? 1 : (params.generate || 10);
   const exportLimit = params.export || 20;
+  const recordSeedFeedback = mode === 'daily'
+    ? params.recordSeedFeedback !== false
+    : params.recordSeedFeedback === true;
+  const dailyDiscoveryMode = params.discoveryMode || 'inspiration';
+  const dailySource = params.source || (dailyDiscoveryMode === 'seed' ? 'sycm_hot' : 'inspiration');
 
   return {
     start: async ({ reportProgress }) => {
@@ -145,20 +154,25 @@ function createDefaultStepFns({ dataDir, runId, params, mode = 'daily' }) {
         dataDir,
         runId,
         limit: mineLimit,
-        source: params.source || 'local',
+        discoveryMode: mode === 'daily' ? dailyDiscoveryMode : params.discoveryMode,
+        source: mode === 'daily' ? dailySource : (params.source || 'local'),
         rootMode: params.rootMode || 'auto',
-        rootLimit: params.rootLimit || 5,
-        rootCooldownDays: params.rootCooldownDays || 7,
+        rootLimit: params.rootLimit || (mode === 'daily' ? 8 : 5),
+        rootCooldownDays: params.rootCooldownDays ?? (mode === 'daily' ? 14 : 7),
+        familyCooldownDays: params.familyCooldownDays ?? 7,
+        inspirationSycmPages: mode === 'daily' ? 1 : params.inspirationSycmPages,
         excludeSeen: params.excludeSeen !== false,
         recordSeen: params.recordSeen !== false,
-        recordSeedFeedback: params.recordSeedFeedback === true,
-        autoReplenishSeeds: params.autoReplenishSeeds === true,
+        recordSeedFeedback,
+        autoReplenishSeeds: mode === 'daily'
+          ? dailyDiscoveryMode === 'seed' && params.autoReplenishSeeds !== false
+          : params.autoReplenishSeeds === true,
         onProgress: reportProgress
       });
     },
     verify: async ({ reportProgress }) => {
       reportProgress({ current: 0, total: verifyLimit, message: '开始验真' });
-      return flowVerify({ ...params, dataDir, runId, limit: verifyLimit, recordSeedFeedback: params.recordSeedFeedback === true, onProgress: reportProgress });
+      return flowVerify({ ...params, dataDir, runId, limit: verifyLimit, recordSeedFeedback, onProgress: reportProgress });
     },
     keywordReview: async ({ reportProgress }) => {
       reportProgress({ current: 0, total: mineLimit, message: '等待人工筛词' });
@@ -176,12 +190,12 @@ function createDefaultStepFns({ dataDir, runId, params, mode = 'daily' }) {
         return flowEnrichManualProducts({ ...params, dataDir, runId, onProgress: reportProgress });
       }
       reportProgress({ current: 0, total: selectLimit, message: '开始货源选品' });
-      const result = await flowSelectProducts({ ...params, dataDir, runId, limit: selectLimit, manualMode, recordSeedFeedback: params.recordSeedFeedback === true });
+      const result = await flowSelectProducts({ ...params, dataDir, runId, limit: selectLimit, manualMode, recordSeedFeedback });
       return result;
     },
     generate: async ({ reportProgress }) => {
       reportProgress({ current: 0, total: generateLimit, message: '开始标题生成' });
-      return flowGenerate({ ...params, dataDir, runId, limit: generateLimit, manualMode, recordSeedFeedback: params.recordSeedFeedback === true });
+      return flowGenerate({ ...params, dataDir, runId, limit: generateLimit, manualMode, recordSeedFeedback });
     },
     export: async ({ reportProgress }) => {
       reportProgress({ current: 0, total: exportLimit, message: '开始导出清单' });

@@ -1,4 +1,4 @@
-import { RefreshCw } from 'lucide-react';
+import { ExternalLink, RefreshCw } from 'lucide-react';
 
 import { getWorkflowArtifactView, summarizeWorkflowArtifact } from '../../../workflow-ui.js';
 
@@ -36,6 +36,11 @@ export function ArtifactPanel({ state }) {
                 </div>
               )}
               {item.description && <p>{item.description}</p>}
+              {item.sourceUrl && (
+                <a className="artifact-source-link" href={item.sourceUrl} target="_blank" rel="noreferrer">
+                  <ExternalLink size={12} /> 打开灵感来源
+                </a>
+              )}
             </div>
           ))}
         </div>

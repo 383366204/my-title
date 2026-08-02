@@ -811,7 +811,7 @@ seedCommand
 
 program
   .command('mine-keywords')
-  .description('从种子词池挖掘每日候选蓝海词')
+  .description('从动态灵感或种子词池挖掘每日候选蓝海词')
   .option('--limit <number>', '输出候选词数量', '50')
   .option('--count <number>', '输出候选词数量（兼容旧参数，建议使用 --limit）')
   .option('--max-seeds <number>', '本次使用的最大种子数量', '20')
@@ -824,7 +824,7 @@ program
   .option('--sycm-precheck', '启用SYCM预检过滤（查询搜索人气，低于阈值的词直接丢弃）')
   .option('--min-popularity <number>', 'SYCM搜索人气最低阈值', '50')
   .option('--mode <mode>', '本地筛选强度: strict / balanced / explore', 'balanced')
-  .option('--source <source>', '挖词来源: local / ai / hybrid / sycm_hot / sycm_blue', 'local')
+  .option('--source <source>', '挖词来源: inspiration / local / ai / hybrid / sycm_hot / sycm_blue', 'local')
   .option('--root-mode <mode>', '生意参谋词根模式: auto / seed', 'auto')
   .option('--root-limit <number>', '每次生意参谋最多查询的词根数量', '5')
   .option('--root-cooldown-days <number>', '词根重复查询冷却天数', '7')
@@ -1030,8 +1030,15 @@ const flowCommand = program
 
 flowCommand
   .command('daily')
-  .description('执行第一版每日流水线，不自动铺货')
+  .description('执行每日动态灵感选品流水线，不自动铺货')
   .option('--mine <number>', '候选词数量', '50')
+  .option('--discovery-mode <mode>', '发现模式: inspiration/seed/hybrid', 'inspiration')
+  .option('--source <source>', '挖词来源；动态模式固定使用 inspiration', 'inspiration')
+  .option('--root-mode <mode>', '词根模式: auto/seed', 'auto')
+  .option('--root-limit <number>', '每日最多查询的短商品词根数', '8')
+  .option('--root-cooldown-days <number>', '相同词根冷却天数', '14')
+  .option('--family-cooldown-days <number>', '相同商品族冷却天数', '7')
+  .option('--no-inspiration-llm', '动态灵感商品化仅使用本地规则')
   .option('--verify <number>', '生意参谋校验数量', '20')
   .option('--generate <number>', '标题生成关键词数量', '10')
   .option('--export <number>', '导出铺货商品数量', '20')
@@ -1054,6 +1061,14 @@ flowCommand
       const { flowDaily } = require('../skills/pipeline-flow');
       const result = await flowDaily({
         mine: parseInt(options.mine, 10) || 50,
+        discoveryMode: options.discoveryMode,
+        source: options.source,
+        rootMode: options.rootMode,
+        rootLimit: parseInt(options.rootLimit, 10) || 8,
+        rootCooldownDays: Math.max(0, Number.parseInt(options.rootCooldownDays, 10) || 0),
+        familyCooldownDays: Math.max(0, Number.parseInt(options.familyCooldownDays, 10) || 0),
+        inspirationSycmPages: 1,
+        inspirationUseLLM: options.inspirationLlm !== false,
         verify: parseInt(options.verify, 10) || 20,
         generate: parseInt(options.generate, 10) || 10,
         export: parseInt(options.export, 10) || 20,

@@ -1,12 +1,20 @@
 # keyword-mining
 
-Use this skill to mine daily candidate keywords from the seed pool. It only produces candidates. It does not prove that a keyword is blue-ocean until SYCM verifies it.
+Use this skill to discover daily candidate keywords. The default daily workflow derives short product roots from news, dictionary, calendar, and trend inspirations; the legacy seed pool remains available for compatibility. It does not prove that a keyword is blue-ocean until SYCM verifies it.
 
 This skill is designed for weak agents. Prefer the CLI and follow the returned `nextCommands`.
 
 ## Weak Agent Golden Path
 
-Start with balanced local mining:
+Start the default dynamic daily pipeline:
+
+```bash
+node bin/cli.js flow daily --discovery-mode inspiration --root-limit 8 --json
+```
+
+Optional RSS/Atom feeds are configured with `INSPIRATION_NEWS_FEEDS`. Without feeds, dictionary and calendar inspiration still run.
+
+Use balanced local seed mining only for legacy/manual exploration:
 
 ```bash
 node bin/cli.js mine-keywords --limit 50 --mode balanced --json
@@ -32,15 +40,14 @@ node bin/cli.js mine-keywords --limit 50 --output-max-per-product-core 2 --json
 
 ## What The Tool Does
 
-1. Reads `data/keyword-mining/seeds.json`.
-2. Expands seed words into concrete candidate keywords.
-3. Applies reject rules and synonym normalization.
-4. Scores local candidates.
-5. Optionally asks an LLM for extra candidates in batches.
-6. Repairs/salvages LLM JSON where possible.
-7. Clusters near-duplicate directions by `signature`.
-8. Applies diversity limits by seed, category, pattern, and core product.
-9. Returns candidates and the next safe commands.
+1. Collects deterministic daily inspirations from configured news feeds, a dictionary, calendar context, and optional trends.
+2. Blocks sensitive news, brand/IP risks, banned words, and abstract non-products.
+3. Converts safe inspirations into short, concrete 1688 product roots with the configured LLM and local fallback rules.
+4. Applies root and product-family cooldowns plus source quotas and diversity limits.
+5. Queries each selected root through SYCM serially, at one page per root.
+6. Scores and clusters the returned long-tail candidates.
+7. Persists the inspiration, product-root, candidate, and rejection chain for node inspection.
+8. Stops on the mining node when Chrome/SYCM is unavailable instead of silently returning an empty review step.
 
 ## Output Fields To Trust
 
@@ -53,6 +60,9 @@ node bin/cli.js mine-keywords --limit 50 --output-max-per-product-core 2 --json
 - `nextCommands.hotCheck`: SYCM hot-search check.
 - `nextCommands.blueExplore`: SYCM blue-ocean exploration.
 - `stats.ai.failedBatches`: LLM batches that failed.
+- `inspiration.inspirations[]`: source provenance and safety decision.
+- `inspiration.roots[]`: productized roots, scores, cooldowns, and rejection reasons.
+- `stats.rootQueries`: serial SYCM root-query outcomes.
 
 ## Decision Rules
 
@@ -90,6 +100,7 @@ node bin/cli.js mine-keywords --include-direct-seeds --json
 - Too many duplicates: lower `--output-max-per-product-core`.
 - Too few keywords: use `--mode explore`, then verify with SYCM.
 - SYCM unavailable: stop and ask the user to fix Chrome login/CDP; do not mark keywords as verified.
+- No dynamic candidates: inspect `inspiration.roots[].rejectReason`; do not inject repeated static fallback words unless hybrid mode was selected.
 
 ## Never Do These
 
