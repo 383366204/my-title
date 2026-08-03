@@ -16,6 +16,7 @@ import { checkDistribution as checkDistributionRequest } from '../../../api/dist
 import { getWorkflowArtifact } from '../../../api/workflow-api.js';
 import { getWorkflowArtifactView } from '../../../workflow-ui.js';
 import { useDistributionJob } from '../hooks/use-distribution-job.js';
+import { usePersistentMap } from '../hooks/use-persistent-map.js';
 
 function rowSelectedKeyword(row = {}) {
   return String(row.selectedKeyword || row.keyword || row.blueOceanWord || row.product?.蓝海词 || row['蓝海词'] || '').trim();
@@ -183,9 +184,9 @@ export const DistributionExportPanel = ({ artifactState, onCopyText, currentRunI
   const storageKey = `ecom.exportSelection.${currentRunId || artifactState.artifact?.runId || 'draft'}`;
   const includeStorageKey = `ecom.exportManualInclude.${currentRunId || artifactState.artifact?.runId || 'draft'}`;
   const editStorageKey = `ecom.exportEdits.${currentRunId || artifactState.artifact?.runId || 'draft'}`;
-  const [removed, setRemoved] = useState({});
-  const [included, setIncluded] = useState({});
-  const [edits, setEdits] = useState({});
+  const [removed, setRemoved] = usePersistentMap(storageKey);
+  const [included, setIncluded] = usePersistentMap(includeStorageKey);
+  const [edits, setEdits] = usePersistentMap(editStorageKey);
   const [reviewArtifactState, setReviewArtifactState] = useState({ status: 'empty', artifact: null, error: '' });
   const [previewOpen, setPreviewOpen] = useState(false);
   const [distributionCheck, setDistributionCheck] = useState({ status: 'idle', result: null, error: '' });
@@ -227,63 +228,6 @@ export const DistributionExportPanel = ({ artifactState, onCopyText, currentRunI
       cancelled = true;
     };
   }, [currentRunId, sourceIsReview]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      const saved = JSON.parse(window.localStorage.getItem(storageKey) || '{}');
-      setRemoved(saved && typeof saved === 'object' ? saved : {});
-    } catch {
-      setRemoved({});
-    }
-  }, [storageKey]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      window.localStorage.setItem(storageKey, JSON.stringify(removed));
-    } catch {
-      // 浏览器可能禁用 localStorage，清单操作仍可在当前页面临时使用。
-    }
-  }, [storageKey, removed]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      const saved = JSON.parse(window.localStorage.getItem(includeStorageKey) || '{}');
-      setIncluded(saved && typeof saved === 'object' ? saved : {});
-    } catch {
-      setIncluded({});
-    }
-  }, [includeStorageKey]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      window.localStorage.setItem(includeStorageKey, JSON.stringify(included));
-    } catch {
-      // 浏览器可能禁用 localStorage，人工加入清单仍可在当前页面临时使用。
-    }
-  }, [includeStorageKey, included]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      const saved = JSON.parse(window.localStorage.getItem(editStorageKey) || '{}');
-      setEdits(saved && typeof saved === 'object' ? saved : {});
-    } catch {
-      setEdits({});
-    }
-  }, [editStorageKey]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      window.localStorage.setItem(editStorageKey, JSON.stringify(edits));
-    } catch {
-      // 浏览器禁用 localStorage 时，编辑仍保留到当前页面关闭为止。
-    }
-  }, [editStorageKey, edits]);
 
   useEffect(() => {
     if (sourceIsReview) {

@@ -35,6 +35,8 @@ const {
   sanitizeWorkflowParams,
   validateProductionWorkflow,
   resolveProductionWorkflowLaunch,
+  resolveProductionWorkflowDefinition,
+  writeWorkflowDefinition,
   listWorkflowRuns,
   getWorkflowRun,
   readWorkflowNodeArtifact,
@@ -493,12 +495,9 @@ app.post('/api/pipeline/start', (req, res) => {
     const launch = resolveProductionWorkflowLaunch(req.body || {});
     const params = sanitizeWorkflowParams(launch.mode, launch.params);
     const runId = createRunId();
-    const steps = launch.mode === 'daily'
-      ? [WORKFLOW_NODE_IDS.mine, WORKFLOW_NODE_IDS.keywordReview, WORKFLOW_NODE_IDS.verify, WORKFLOW_NODE_IDS.select, WORKFLOW_NODE_IDS.generate, WORKFLOW_NODE_IDS.export]
-      : launch.mode === 'manual'
-        ? [WORKFLOW_NODE_IDS.start, WORKFLOW_NODE_IDS.select, WORKFLOW_NODE_IDS.generate, WORKFLOW_NODE_IDS.export]
-      : undefined;
-    const promise = runPipelineRuntime({ runId, mode: launch.mode, params, steps });
+    const definition = resolveProductionWorkflowDefinition(req.body || {}, launch);
+    writeWorkflowDefinition({ runId, definition });
+    const promise = runPipelineRuntime({ runId, mode: launch.mode, params });
     const runState = { runId, mode: launch.mode, promise };
     activeWorkbenchProcess = runState;
 
@@ -521,7 +520,7 @@ app.post('/api/pipeline/start', (req, res) => {
       }
     });
   } catch (err) {
-    const status = /未知 workflow mode|未知 workflow template|关键词不能为空|1688 商品链接|商品缺少关键词|商品重复/.test(err.message) ? 400 : 500;
+    const status = /未知 workflow mode|未知 workflow template|工作流定义|工作流必须匹配|关键词不能为空|1688 商品链接|商品缺少关键词|商品重复/.test(err.message) ? 400 : 500;
     res.status(status).json({ ok: false, error: err.message });
   }
 });
@@ -1414,12 +1413,9 @@ app.post('/api/workflows/run', (req, res) => {
     const launch = resolveProductionWorkflowLaunch(req.body || {});
     const params = sanitizeWorkflowParams(launch.mode, launch.params);
     const runId = createRunId();
-    const steps = launch.mode === 'daily'
-      ? [WORKFLOW_NODE_IDS.mine, WORKFLOW_NODE_IDS.verify, WORKFLOW_NODE_IDS.generate, WORKFLOW_NODE_IDS.export]
-      : launch.mode === 'manual'
-        ? [WORKFLOW_NODE_IDS.start, WORKFLOW_NODE_IDS.select, WORKFLOW_NODE_IDS.generate, WORKFLOW_NODE_IDS.export]
-      : undefined;
-    const promise = runPipelineRuntime({ runId, mode: launch.mode, params, steps });
+    const definition = resolveProductionWorkflowDefinition(req.body || {}, launch);
+    writeWorkflowDefinition({ runId, definition });
+    const promise = runPipelineRuntime({ runId, mode: launch.mode, params });
     const runState = {
       runId,
       mode: launch.mode,
@@ -1447,7 +1443,7 @@ app.post('/api/workflows/run', (req, res) => {
     });
   } catch (err) {
     if (activeWorkbenchProcess && !activeWorkbenchProcess.pid && !activeWorkbenchProcess.promise) activeWorkbenchProcess = null;
-    const status = /未知 workflow mode|未知 workflow template|关键词不能为空|1688 商品链接|商品缺少关键词|商品重复/.test(err.message) ? 400 : 500;
+    const status = /未知 workflow mode|未知 workflow template|工作流定义|工作流必须匹配|关键词不能为空|1688 商品链接|商品缺少关键词|商品重复/.test(err.message) ? 400 : 500;
     res.status(status).json({ ok: false, error: err.message });
   }
 });

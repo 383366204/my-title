@@ -163,6 +163,17 @@ export function WorkflowRightSidebar({
                   />
                   <p className="text-[10px] text-slate-500 mt-1">此词会作为精确关键词流水线的启动参数。</p>
                 </div>
+                <label className="space-y-1 block">
+                  <span className="text-[10px] font-bold text-slate-400 block">标题长度</span>
+                  <input
+                    type="number"
+                    value={selectedNode.data.length ?? 60}
+                    onChange={(e) => updateNodeData(selectedNode.id, 'length', parseInt(e.target.value, 10) || 60)}
+                    className="w-full p-2.5 rounded-lg border border-slate-700 bg-slate-950 focus:border-blue-500 focus:outline-none text-slate-100 text-sm transition-all"
+                    min="30"
+                    max="80"
+                  />
+                </label>
               </div>
             )}
 
@@ -223,7 +234,7 @@ export function WorkflowRightSidebar({
             )}
 
             {/* 输入节点独有参数 */}
-            {!isViewingRun && isInputNodeType(selectedNode.type) && (
+            {!isViewingRun && selectedNode.id !== 'start' && isInputNodeType(selectedNode.type) && (
               <div className="space-y-4">
                 <div className="border-t border-slate-800/80 pt-4">
                   <label className="text-xs font-bold text-slate-300 block mb-2">搜索核心关键词</label>
@@ -241,8 +252,8 @@ export function WorkflowRightSidebar({
                   <label className="text-xs font-bold text-slate-300 block">标题最大长度 (字符)</label>
                   <input
                     type="number"
-                    value={selectedNode.data.maxLength || 60}
-                    onChange={(e) => updateNodeData(selectedNode.id, 'maxLength', parseInt(e.target.value) || 60)}
+                    value={selectedNode.data.length || 60}
+                    onChange={(e) => updateNodeData(selectedNode.id, 'length', parseInt(e.target.value) || 60)}
                     className="w-full p-2.5 rounded-lg border border-slate-700 bg-slate-950 focus:border-blue-500 focus:outline-none text-slate-100 text-sm transition-all"
                     min="10"
                     max="100"
@@ -259,8 +270,8 @@ export function WorkflowRightSidebar({
                   <label className="text-xs font-bold text-slate-300 block">最大挖掘候选词数量</label>
                   <input
                     type="number"
-                    value={selectedNode.data.count || 5}
-                    onChange={(e) => updateNodeData(selectedNode.id, 'count', parseInt(e.target.value) || 5)}
+                    value={selectedNode.data.mine ?? selectedNode.data.count ?? 5}
+                    onChange={(e) => updateNodeData(selectedNode.id, 'mine', parseInt(e.target.value, 10) || 5)}
                     className="w-full p-2.5 rounded-lg border border-slate-700 bg-slate-950 focus:border-blue-500 focus:outline-none text-slate-100 text-sm transition-all"
                     min="1"
                     max="20"

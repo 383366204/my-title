@@ -876,6 +876,41 @@ export function getStartNodeParams(nodes = []) {
   return params;
 }
 
+/**
+ * Collect executable parameters from the canvas using backend parameter names.
+ * @param {Array<object>} nodes Canvas nodes.
+ * @returns {object} Workflow launch parameters.
+ */
+export function getWorkflowLaunchParams(nodes = []) {
+  const params = { ...getStartNodeParams(nodes) };
+  const dataFor = (id) => nodes.find((node) => node.id === id)?.data || {};
+  const mine = dataFor('mine');
+  const verify = dataFor('verify');
+  const select = dataFor('select');
+  const generate = dataFor('generate');
+  const exportNode = dataFor('export');
+
+  if (params.maxLength != null && params.length == null) params.length = params.maxLength;
+  delete params.maxLength;
+  if (mine.mine != null || mine.count != null) params.mine = mine.mine ?? mine.count;
+  if (verify.verify != null || verify.limit != null || verify.count != null) {
+    params.verify = verify.verify ?? verify.limit ?? verify.count;
+  }
+  if (select.select != null || select.limit != null || select.count != null) {
+    params.select = select.select ?? select.limit ?? select.count;
+  }
+  if (generate.generate != null || generate.limit != null || generate.count != null) {
+    params.generate = generate.generate ?? generate.limit ?? generate.count;
+  }
+  if (generate.length != null || generate.maxLength != null) {
+    params.length = generate.length ?? generate.maxLength;
+  }
+  if (exportNode.export != null || exportNode.limit != null || exportNode.count != null) {
+    params.export = exportNode.export ?? exportNode.limit ?? exportNode.count;
+  }
+  return params;
+}
+
 export function getWorkflowLaunchBlocker(mode, nodes = []) {
   const params = getStartNodeParams(nodes);
   if (mode === 'manual') {

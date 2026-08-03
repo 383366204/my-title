@@ -2,7 +2,7 @@ import { useCallback } from 'react';
 
 import {
   buildWorkflowOperationRequest,
-  getStartNodeParams,
+  getWorkflowLaunchParams,
   getWorkflowLaunchBlocker,
   getWorkflowOperationMessage
 } from '../../../workflow-ui.js';
@@ -63,12 +63,13 @@ export function useWorkflowOperations(options) {
         target: edge.target
       }))
     };
+    const params = getWorkflowLaunchParams(nodes);
 
     try {
       const validationPayload = await validateWorkflow({
         templateId: activeTemplateId,
         mode: activeTemplateMode,
-        params: getStartNodeParams(nodes),
+        params,
         workflow: workflowDef
       });
       if (validationPayload.ok === false) {
@@ -93,7 +94,8 @@ export function useWorkflowOperations(options) {
       const data = await startWorkflow({
         templateId: activeTemplateId,
         mode: activeTemplateMode,
-        params: getStartNodeParams(nodes)
+        params,
+        workflow: workflowDef
       });
       const runId = data.runId || null;
       const message = data.message || '工作流已提交。';

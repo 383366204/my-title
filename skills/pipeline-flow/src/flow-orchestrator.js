@@ -12,6 +12,19 @@ const { flowSelectProducts } = require('./product-selection-flow');
 const { appendJsonl, getRun, initRun, writeRun } = require('./run-store');
 const { flowGenerate } = require('./title-generation-flow');
 
+function buildRunResponse(options, runId, runDir, payload = {}) {
+  const { run } = getRun({ dataDir: options.dataDir, runId });
+  return flowResponse({
+    ok: true,
+    runId,
+    runDir,
+    counts: run.counts,
+    status: run.status,
+    files: run.files,
+    ...payload
+  });
+}
+
 /**
  * Prepare a run for one exact keyword without mining or rewriting.
  * @param {object} [options] Flow options.
@@ -61,15 +74,8 @@ async function flowKeyword(options = {}) {
 
   const verify = await flowVerify({ ...options, runId, limit: 1 });
   if (verify.verified.length === 0 || verify.blockers.includes('sycm_manual_action_required')) {
-    const latest = getRun({ dataDir: options.dataDir, runId });
-    return flowResponse({
-      ok: true,
-      runId,
-      runDir,
+    return buildRunResponse(options, runId, runDir, {
       exactKeyword: keyword,
-      counts: latest.run.counts,
-      status: latest.run.status,
-      files: latest.run.files,
       blockers: verify.blockers.length ? verify.blockers : ['no_verified_keywords'],
       allowedCommands: [verify.nextCommand],
       nextCommand: verify.nextCommand,
@@ -91,15 +97,8 @@ async function flowKeyword(options = {}) {
   });
   const selectedCount = select.selected.filter(row => row.status === 'selected').length;
   if (selectedCount === 0) {
-    const latest = getRun({ dataDir: options.dataDir, runId });
-    return flowResponse({
-      ok: true,
-      runId,
-      runDir,
+    return buildRunResponse(options, runId, runDir, {
       exactKeyword: keyword,
-      counts: latest.run.counts,
-      status: latest.run.status,
-      files: latest.run.files,
       blockers: ['no_selected_products'],
       allowedCommands: [select.nextCommand],
       nextCommand: select.nextCommand,
@@ -122,15 +121,8 @@ async function flowKeyword(options = {}) {
   });
   const generatedCount = generate.generated.filter(row => row.status === 'generated').length;
   if (generatedCount === 0) {
-    const latest = getRun({ dataDir: options.dataDir, runId });
-    return flowResponse({
-      ok: true,
-      runId,
-      runDir,
+    return buildRunResponse(options, runId, runDir, {
       exactKeyword: keyword,
-      counts: latest.run.counts,
-      status: latest.run.status,
-      files: latest.run.files,
       blockers: ['no_generated_products'],
       allowedCommands: [generate.nextCommand],
       nextCommand: generate.nextCommand,
@@ -146,15 +138,8 @@ async function flowKeyword(options = {}) {
   }
 
   const exported = await flowExport({ ...options, runId, limit: options.export || 20 });
-  const latest = getRun({ dataDir: options.dataDir, runId });
-  return flowResponse({
-    ok: true,
-    runId,
-    runDir,
+  return buildRunResponse(options, runId, runDir, {
     exactKeyword: keyword,
-    counts: latest.run.counts,
-    status: latest.run.status,
-    files: latest.run.files,
     canSubmit: exported.canSubmit,
     mustReview: exported.mustReview,
     blockers: exported.blockers,
@@ -186,14 +171,8 @@ async function flowDaily(options = {}) {
     autoReplenishSeeds: options.autoReplenishSeeds !== false
   });
   if (['mining_manual_action_required', 'mining_empty'].includes(mine.status)) {
-    const { run } = getRun({ dataDir: options.dataDir, runId: mine.runId });
-    return flowResponse({
+    return buildRunResponse(options, mine.runId, mine.runDir, {
       ok: false,
-      runId: mine.runId,
-      runDir: mine.runDir,
-      counts: run.counts,
-      status: run.status,
-      files: run.files,
       blockers: mine.blockers,
       allowedCommands: mine.allowedCommands,
       nextCommand: mine.nextCommand,
@@ -206,14 +185,7 @@ async function flowDaily(options = {}) {
     approveAll: options.reviewMode === 'auto' || options.approveAll === true
   });
   if (keywordReview.status === 'awaiting_keyword_review' || keywordReview.status === 'keyword_review_empty') {
-    const { run } = getRun({ dataDir: options.dataDir, runId: mine.runId });
-    return flowResponse({
-      ok: true,
-      runId: mine.runId,
-      runDir: mine.runDir,
-      counts: run.counts,
-      status: run.status,
-      files: run.files,
+    return buildRunResponse(options, mine.runId, mine.runDir, {
       blockers: keywordReview.blockers,
       allowedCommands: keywordReview.allowedCommands,
       nextCommand: keywordReview.nextCommand,
@@ -230,14 +202,7 @@ async function flowDaily(options = {}) {
   }
   const verify = await flowVerify({ ...options, runId: mine.runId, limit: options.verify || 20 });
   if (verify.verified.length === 0 || verify.blockers.includes('sycm_manual_action_required')) {
-    const { run } = getRun({ dataDir: options.dataDir, runId: mine.runId });
-    return flowResponse({
-      ok: true,
-      runId: mine.runId,
-      runDir: mine.runDir,
-      counts: run.counts,
-      status: run.status,
-      files: run.files,
+    return buildRunResponse(options, mine.runId, mine.runDir, {
       blockers: verify.blockers.length ? verify.blockers : ['no_verified_keywords'],
       allowedCommands: [verify.nextCommand],
       nextCommand: verify.nextCommand,
@@ -261,14 +226,7 @@ async function flowDaily(options = {}) {
   });
   const selectedCount = select.selected.filter(row => row.status === 'selected').length;
   if (selectedCount === 0) {
-    const { run } = getRun({ dataDir: options.dataDir, runId: mine.runId });
-    return flowResponse({
-      ok: true,
-      runId: mine.runId,
-      runDir: mine.runDir,
-      counts: run.counts,
-      status: run.status,
-      files: run.files,
+    return buildRunResponse(options, mine.runId, mine.runDir, {
       blockers: ['no_selected_products'],
       allowedCommands: [select.nextCommand],
       nextCommand: select.nextCommand,
@@ -287,14 +245,7 @@ async function flowDaily(options = {}) {
   const generate = await flowGenerate({ ...options, runId: mine.runId, limit: options.generate || 10 });
   const generatedCount = generate.generated.filter(row => row.status === 'generated').length;
   if (generatedCount === 0) {
-    const { run } = getRun({ dataDir: options.dataDir, runId: mine.runId });
-    return flowResponse({
-      ok: true,
-      runId: mine.runId,
-      runDir: mine.runDir,
-      counts: run.counts,
-      status: run.status,
-      files: run.files,
+    return buildRunResponse(options, mine.runId, mine.runDir, {
       blockers: ['no_generated_products'],
       allowedCommands: [generate.nextCommand],
       nextCommand: generate.nextCommand,
@@ -311,14 +262,7 @@ async function flowDaily(options = {}) {
   }
 
   const exported = await flowExport({ ...options, runId: mine.runId, limit: options.export || 20 });
-  const { run } = getRun({ dataDir: options.dataDir, runId: mine.runId });
-  return flowResponse({
-    ok: true,
-    runId: mine.runId,
-    runDir: mine.runDir,
-    counts: run.counts,
-    status: run.status,
-    files: run.files,
+  return buildRunResponse(options, mine.runId, mine.runDir, {
     canSubmit: exported.canSubmit,
     mustReview: exported.mustReview,
     blockers: exported.blockers,

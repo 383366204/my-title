@@ -13,11 +13,13 @@ const {
   buildPipelineCliArgs,
   validateProductionWorkflow,
   resolveProductionWorkflowLaunch,
+  resolveProductionWorkflowDefinition,
   pipelineSummaryToWorkflowRun,
   listWorkflowRuns,
   getWorkflowRun,
   readWorkflowNodeArtifact,
   writeWorkflowDefinition,
+  readWorkflowDefinition,
   appendWorkflowEvent,
   readWorkflowEvents,
   deleteWorkflowRun
@@ -327,6 +329,7 @@ describe('workflow pipeline adapter', () => {
       autoReplenishSeeds: false,
       recordSeedFeedback: false,
       verify: 1,
+      select: 10,
       generate: 10,
       export: 100,
       productsPerKeyword: 1,
@@ -918,7 +921,61 @@ describe('workflow pipeline adapter', () => {
     assert.equal(definitionFile, path.join(dataDir, 'runs', runId, 'workflow-definition.json'));
     assert.equal(eventFile, path.join(dataDir, 'runs', runId, 'workflow-events.jsonl'));
     assert.deepEqual(JSON.parse(fs.readFileSync(definitionFile, 'utf8')), definition);
+    assert.deepEqual(readWorkflowDefinition({ dataDir, runId }), definition);
     assert.deepEqual(readWorkflowEvents({ dataDir, runId }), [event]);
+  });
+
+  it('restores the persisted workflow snapshot when mapping run history', () => {
+    const dataDir = tempPipelineDir();
+    const runId = 'snapshot_history_run';
+    const template = listProductionWorkflowTemplates().find(item => item.mode === 'daily');
+    const definition = {
+      id: template.id,
+      mode: template.mode,
+      nodes: template.workflow.nodes.map((node, index) => ({
+        ...node,
+        position: { x: 100 + index * 280, y: 240 },
+        data: { ...node.data, snapshotMarker: `node-${index}` }
+      })),
+      edges: template.workflow.edges
+    };
+    writeWorkflowDefinition({ dataDir, runId, definition });
+
+    const run = pipelineSummaryToWorkflowRun({
+      runId,
+      status: 'created',
+      options: { mode: 'daily' },
+      counts: {},
+      files: {}
+    }, { dataDir });
+
+    assert.deepEqual(run.workflow, definition);
+    assert.equal(run.workflow.nodes[0].position.y, 240);
+    assert.equal(run.workflow.nodes[0].data.snapshotMarker, 'node-0');
+  });
+
+  it('resolves a validated workflow snapshot and rejects template mismatches', () => {
+    const templates = listProductionWorkflowTemplates();
+    const daily = templates.find(item => item.mode === 'daily');
+    const launch = resolveProductionWorkflowLaunch({
+      templateId: daily.id,
+      mode: daily.mode,
+      workflow: daily.workflow,
+      params: { mine: 12 }
+    });
+
+    const definition = resolveProductionWorkflowDefinition({
+      templateId: daily.id,
+      workflow: daily.workflow
+    }, launch);
+    assert.equal(definition.id, daily.id);
+    assert.equal(definition.mode, 'daily');
+    assert.deepEqual(definition.nodes, daily.workflow.nodes);
+
+    assert.throws(() => resolveProductionWorkflowDefinition({
+      templateId: 'exact-keyword-v1',
+      workflow: daily.workflow
+    }, launch), /工作流定义与所选模板不一致/);
   });
 
   it('rejects unsafe workflow run ids for snapshots and events', () => {

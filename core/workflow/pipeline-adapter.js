@@ -126,6 +126,19 @@ function writeWorkflowDefinition({ dataDir = DEFAULT_PIPELINE_DIR, runId, defini
 }
 
 /**
+ * 读取 workflow 画布定义快照。
+ * @param {object} options 读取参数。
+ * @param {string} [options.dataDir] pipeline 数据目录。
+ * @param {string} options.runId pipeline runId。
+ * @returns {object|null} workflow 定义，不存在时返回 null。
+ */
+function readWorkflowDefinition({ dataDir = DEFAULT_PIPELINE_DIR, runId } = {}) {
+  const file = path.join(workflowRunDir(dataDir, runId), 'workflow-definition.json');
+  if (!fs.existsSync(file)) return null;
+  return JSON.parse(fs.readFileSync(file, 'utf8'));
+}
+
+/**
  * 追加 workflow 画布事件。
  * @param {object} options 写入参数。
  * @param {string} [options.dataDir] pipeline 数据目录。
@@ -184,15 +197,15 @@ function workflowNodes(mode = 'daily') {
     : {
         label: '开始',
         description: '从新闻、字典和趋势动态发现商品词根',
-      mine: 50,
-      discoveryMode: 'inspiration',
-      source: 'inspiration',
-      rootMode: 'auto',
-      rootLimit: 8,
-      rootCooldownDays: 14,
-      familyCooldownDays: 7,
-      inspirationSycmPages: 1,
-      inspirationUseLLM: true,
+        mine: 50,
+        discoveryMode: 'inspiration',
+        source: 'inspiration',
+        rootMode: 'auto',
+        rootLimit: 8,
+        rootCooldownDays: 14,
+        familyCooldownDays: 7,
+        inspirationSycmPages: 1,
+        inspirationUseLLM: true,
         verify: 20,
         generate: 10,
         select: 10,
@@ -364,6 +377,7 @@ function sanitizeWorkflowParams(mode, raw = {}) {
       autoReplenishSeeds: sanitizeBool(raw.autoReplenishSeeds, discoveryMode === 'seed'),
       recordSeedFeedback: sanitizeBool(raw.recordSeedFeedback, true),
       verify: clampInt(raw.verify, 20, 1, 200),
+      select: clampInt(raw.select, 10, 1, 100),
       generate: clampInt(raw.generate, 10, 1, 100),
       export: clampInt(raw.export, 20, 1, 100),
       productsPerKeyword: clampInt(raw.productsPerKeyword, 12, 1, 50),
@@ -545,7 +559,7 @@ function resolveProductionWorkflowLaunch(body = {}) {
     ...(body.params || {}),
     ...(body.options || {})
   };
-  for (const key of ['keyword', 'keywords', 'mine', 'discoveryMode', 'source', 'rootMode', 'rootLimit', 'rootCooldownDays', 'familyCooldownDays', 'inspirationSycmPages', 'inspirationUseLLM', 'maxObservingSeeds', 'maxObservingPoolSize', 'maxNewSeeds', 'autoReplenishSeeds', 'recordSeedFeedback', 'verify', 'generate', 'export', 'productsPerKeyword', 'length', 'port', 'pages', 'minBlueRows', 'fallbackHot', 'autoApproveKeywords', 'autoExpandVerify', 'verifyReserve', 'autoAllowReviewKeywords', 'reviewKeywordLimit']) {
+  for (const key of ['keyword', 'keywords', 'mine', 'discoveryMode', 'source', 'rootMode', 'rootLimit', 'rootCooldownDays', 'familyCooldownDays', 'inspirationSycmPages', 'inspirationUseLLM', 'maxObservingSeeds', 'maxObservingPoolSize', 'maxNewSeeds', 'autoReplenishSeeds', 'recordSeedFeedback', 'verify', 'select', 'generate', 'export', 'productsPerKeyword', 'length', 'port', 'pages', 'minBlueRows', 'fallbackHot', 'autoApproveKeywords', 'autoExpandVerify', 'verifyReserve', 'autoAllowReviewKeywords', 'reviewKeywordLimit']) {
     if (Object.prototype.hasOwnProperty.call(body, key)) params[key] = body[key];
   }
 
@@ -565,6 +579,42 @@ function resolveProductionWorkflowLaunch(body = {}) {
   }
 
   return { mode, params };
+}
+
+/**
+ * Resolve and validate the exact workflow definition persisted for a launch.
+ * @param {object} [body] Launch request body.
+ * @param {{mode:string,params:object}} [launch] Resolved launch data.
+ * @returns {object} Workflow definition snapshot.
+ */
+function resolveProductionWorkflowDefinition(body = {}, launch = resolveProductionWorkflowLaunch(body)) {
+  const templates = listProductionWorkflowTemplates();
+  const submitted = normalizeWorkflowGraph(body.workflow);
+  let template = null;
+
+  if (submitted) {
+    const validation = validateProductionWorkflow(submitted);
+    if (!validation.ok) throw new Error(validation.errors[0]?.message || '工作流定义无效');
+    template = templates.find(item => item.id === validation.templateId) || null;
+    const requestedTemplateId = body.templateId || body.template_id;
+    if (requestedTemplateId && requestedTemplateId !== validation.templateId) {
+      throw new Error('工作流定义与所选模板不一致');
+    }
+  } else {
+    const requestedTemplateId = body.templateId || body.template_id;
+    template = templates.find(item => item.id === requestedTemplateId)
+      || templates.find(item => item.mode === launch.mode)
+      || null;
+  }
+
+  if (!template) throw new Error('无法解析工作流定义');
+  const graph = submitted || template.workflow;
+  return {
+    id: template.id,
+    mode: launch.mode,
+    nodes: graph.nodes,
+    edges: graph.edges
+  };
 }
 
 function nodeState(id, type, status, output = null, summary = {}) {
@@ -1142,6 +1192,8 @@ function templateForSummary(summary) {
 /**
  * 将 pipeline summary 转为画布 workflow run 结构。
  * @param {object} summary pipeline-run-summary 输出。
+ * @param {object} [options] 映射选项。
+ * @param {string} [options.dataDir] pipeline 数据目录。
  * @returns {object|null} workflow run。
  */
 function pipelineSummaryToWorkflowRun(summary, options = {}) {
@@ -1152,9 +1204,10 @@ function pipelineSummaryToWorkflowRun(summary, options = {}) {
     runtime
   };
   const workflowTemplate = templateForSummary(summary);
-  const workflow = workflowTemplate
+  const workflowSnapshot = readWorkflowDefinition({ dataDir: options.dataDir, runId: summary.runId });
+  const workflow = workflowSnapshot || (workflowTemplate
     ? { id: workflowTemplate.id, mode: workflowTemplate.mode, ...workflowTemplate.workflow }
-    : null;
+    : null);
   return {
     runId: summary.runId,
     status: runtime?.status || summary.status || 'unknown',
@@ -1409,7 +1462,9 @@ module.exports = {
   buildPipelineCliArgs,
   validateProductionWorkflow,
   resolveProductionWorkflowLaunch,
+  resolveProductionWorkflowDefinition,
   writeWorkflowDefinition,
+  readWorkflowDefinition,
   appendWorkflowEvent,
   readWorkflowEvents,
   pipelineSummaryToWorkflowRun,

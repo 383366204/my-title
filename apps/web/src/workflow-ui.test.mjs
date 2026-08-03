@@ -14,6 +14,7 @@ import {
   getPipelineSummaryVisualState,
   normalizeWorkflowProgressEvent,
   getStartNodeParams,
+  getWorkflowLaunchParams,
   getWorkflowLaunchBlocker,
   getWorkflowBlockerActions,
   getMiningRecoveryHint,
@@ -1159,6 +1160,27 @@ test('getStartNodeParams extracts canvas start data without runtime fields', () 
     keyword: '纯银项链女',
     productsPerKeyword: 4,
     length: 60
+  });
+});
+
+test('getWorkflowLaunchParams maps executable node settings to backend names', () => {
+  const params = getWorkflowLaunchParams([
+    { id: 'start', type: 'production-start', data: { keyword: '收纳盒', maxLength: 55, select: 6 } },
+    { id: 'mine', type: 'pipeline-mine', data: { count: 18 } },
+    { id: 'verify', type: 'pipeline-verify', data: { limit: 7 } },
+    { id: 'select', type: 'pipeline-select', data: { count: 5 } },
+    { id: 'generate', type: 'pipeline-generate', data: { count: 4, maxLength: 58 } },
+    { id: 'export', type: 'pipeline-export', data: { limit: 9 } }
+  ]);
+
+  assert.deepEqual(params, {
+    keyword: '收纳盒',
+    length: 58,
+    mine: 18,
+    verify: 7,
+    select: 5,
+    generate: 4,
+    export: 9
   });
 });
 
