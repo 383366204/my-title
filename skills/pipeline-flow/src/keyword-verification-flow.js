@@ -7,7 +7,7 @@ const { extractSycmData } = require('../../sycm-research');
 const { scoreKeywordOpportunity } = require('./opportunity-scoring');
 const { appendOpportunity } = require('./opportunity-store');
 const { fetchSycmWithFallback, scoreSycmRows } = require('./sycm-verifier');
-const { appendJsonl, getRun, readJsonl, writeRun } = require('./run-store');
+const { appendJsonl, getRun, readJsonl, setRunStageMetrics, writeRun } = require('./run-store');
 const { sycmRecommendedCategory } = require('./product-normalizer');
 const {
   buildFlowCommand,
@@ -236,6 +236,18 @@ async function flowVerify(options = {}) {
   run.counts.sycmReserveChecked = sycmResults.filter(row => row.phase === 'reserve').length;
   run.counts.sycmAutoFallbackEligible = autoFallbackRows.length;
   run.counts.sycmRejected = rejected.length;
+  const verificationFailures = rejected.reduce((counts, row) => {
+    const reason = String(row.status || 'sycm_rejected');
+    counts[reason] = Number(counts[reason] || 0) + 1;
+    return counts;
+  }, {});
+  setRunStageMetrics(run, 'verify', {
+    input: verified.length + rejected.length,
+    passed: verified.length,
+    generationEligible: generationEligible.length,
+    review: opportunityReview.length,
+    rejected: rejected.length
+  }, verificationFailures);
   writeRun(runDir, run);
   const nextCommand = hasManualAction
     ? buildFlowCommand('inspect', run.runId)

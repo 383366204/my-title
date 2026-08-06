@@ -183,6 +183,8 @@ export const NodeOperationPanel = ({
           artifactState={artifactState}
           currentRunId={currentRunId}
           onConfirm={onConfirmProductReview}
+          onRetry={() => onRetryNode('select')}
+          canRetry={Boolean(currentRunId)}
         />
       )}
       {kind === 'product-select' && manualMode && <ArtifactPanel state={artifactState} />}

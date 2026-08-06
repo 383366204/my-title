@@ -11,6 +11,7 @@ const {
   initRun,
   readJsonl,
   readRecentPipelineCandidateKeywords,
+  setRunStageMetrics,
   writeRun
 } = require('./run-store');
 const {
@@ -218,6 +219,18 @@ async function flowMine(options = {}) {
     );
     run.discovery.manualAction = manualFailure?.manualAction || null;
   }
+  const mineRejected = Number(result.inspiration?.stats?.inspirationRejected || 0)
+    + Number(result.stats?.seenFiltered || 0);
+  setRunStageMetrics(run, 'mine', {
+    input: result.candidates.length + mineRejected,
+    passed: result.candidates.length,
+    rejected: mineRejected
+  }, {
+    inspiration_rejected: Number(result.inspiration?.stats?.inspirationRejected || 0),
+    recent_keyword_filtered: Number(result.stats?.seenFiltered || 0),
+    fallback_used: result.stats?.fallbackUsed ? 1 : 0,
+    [run.discovery?.blocker || 'mining_blocked']: ['mining_manual_action_required', 'mining_empty'].includes(run.status) ? 1 : 0
+  });
   writeRun(runDir, run);
   const miningBlocked = ['mining_manual_action_required', 'mining_empty'].includes(run.status);
   return flowResponse({

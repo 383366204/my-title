@@ -105,6 +105,15 @@ describe('pipeline run summary', () => {
         reviewCandidates: 1,
         rejectedBeforeDistribution: 1
       },
+      policy: { version: 2, productGate: 'strict', exportFill: true },
+      funnel: {
+        select: { input: 3, selected: 1, rejected: 2 },
+        export: { input: 2, passed: 1, review: 1 }
+      },
+      failureReasons: {
+        select: { product_opportunity_reject: 2 },
+        export: { product_opportunity_manual_review: 1 }
+      },
       diversity: {
         keyword: { familyCount: 2, newFamilyCount: 1 },
         product: { uniqueOffers: 1, newOffers: 1 }
@@ -139,6 +148,9 @@ describe('pipeline run summary', () => {
     assert.equal(summary.batchExists, true);
     assert.equal(summary.reviewExists, true);
     assert.equal(summary.mustReview, true);
+    assert.deepEqual(summary.policy, { version: 2, productGate: 'strict', exportFill: true });
+    assert.deepEqual(summary.funnel.export, { input: 2, passed: 1, review: 1 });
+    assert.deepEqual(summary.failureReasons.select, { product_opportunity_reject: 2 });
     assert.deepEqual(summary.diversity.keyword, { familyCount: 2, newFamilyCount: 1 });
     assert.equal(summary.nextActionCode, 'review_required');
     assert.equal(summary.requiresUserAction, true);

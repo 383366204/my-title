@@ -9,6 +9,7 @@ const {
   flowMine,
   flowReviewCandidates,
   flowSelectProducts,
+  flowReviewProducts,
   flowManualStart,
   flowEnrichManualProducts,
   flowVerify,
@@ -43,6 +44,16 @@ function mockProduct(keyword = '测试货源', id = '123') {
     shopName: '义乌宠物用品工厂店',
     categoryListName: '宠物用品 > 狗狗玩具'
   };
+}
+
+function writeSelectedProducts(run, keyword, products) {
+  fs.writeFileSync(run.files.selectedProducts, products.map(product => JSON.stringify({
+    status: 'selected',
+    keyword,
+    selectedKeyword: keyword,
+    url: product['产品链接'] || product.detailUrl,
+    product
+  })).join('\n') + '\n', 'utf8');
 }
 
 describe('pipeline-flow', () => {
@@ -305,6 +316,77 @@ describe('pipeline-flow', () => {
     assert.strictEqual(getRun({ dataDir, runId }).run.diversity.product.uniqueOffers, 1);
   });
 
+  test('flowSelectProducts keeps review and rejected products out of the selected pool', async () => {
+    const dataDir = tempDataDir();
+    const runId = 'product_quality_gate';
+    flowManualStart({ dataDir, runId, items: [{ keyword: '宠物磨牙玩具', url: 'https://detail.1688.com/offer/999999.html' }] });
+    const run = getRun({ dataDir, runId }).run;
+    fs.writeFileSync(run.files.verifiedKeywords, JSON.stringify({
+      keyword: '宠物磨牙玩具',
+      status: 'verified',
+      keywordOpportunity: { decision: 'continue', score: 85 }
+    }) + '\n');
+
+    const result = await flowSelectProducts({
+      dataDir,
+      runId,
+      limit: 1,
+      productsPerKeyword: 5,
+      searchProducts: async () => [
+        mockProduct('宠物磨牙玩具', '200001'),
+        {
+          title: '宠物普通用品',
+          detailUrl: 'https://detail.1688.com/offer/200002.html',
+          price: '',
+          sales30days: 0
+        },
+        { title: '无关商品', detailUrl: 'https://example.com/not-1688', price: 999 }
+      ]
+    });
+
+    assert.strictEqual(result.selected.filter(row => row.status === 'selected').length, 1);
+    assert.strictEqual(result.selected.filter(row => row.status === 'product_review').length, 1);
+    assert.strictEqual(result.selected.filter(row => row.status === 'product_rejected').length, 1);
+    const persisted = getRun({ dataDir, runId }).run;
+    assert.strictEqual(persisted.counts.productsEvaluated, 3);
+    assert.strictEqual(persisted.counts.selectedProducts, 1);
+    assert.deepStrictEqual(persisted.funnel.select, {
+      input: 3,
+      passedGate: 1,
+      selected: 1,
+      review: 1,
+      rejected: 1,
+      notSelected: 0
+    });
+  });
+
+  test('flowReviewProducts allows an explicit manual override for rejected 1688 candidates', () => {
+    const dataDir = tempDataDir();
+    const runId = 'manual_product_override';
+    flowManualStart({ dataDir, runId, items: [{ keyword: '胸针', url: 'https://detail.1688.com/offer/999999.html' }] });
+    const run = getRun({ dataDir, runId }).run;
+    fs.writeFileSync(run.files.selectedProducts, JSON.stringify({
+      status: 'product_rejected',
+      keyword: '胸针',
+      url: 'https://detail.1688.com/offer/200001.html',
+      sourceTitle: '复古胸针',
+      recommendedCategory: '饰品 > 胸针',
+      selectionDecision: 'opportunity_gate_rejected'
+    }) + '\n');
+
+    const result = flowReviewProducts({
+      dataDir,
+      runId,
+      approvedProductIds: ['https://detail.1688.com/offer/200001.html']
+    });
+
+    assert.strictEqual(result.status, 'products_selected');
+    assert.strictEqual(result.selected.length, 1);
+    assert.strictEqual(result.selected[0].status, 'selected');
+    assert.strictEqual(result.selected[0].manualSelectionPreviousStatus, 'product_rejected');
+    assert.strictEqual(result.selected[0].selectionDecision, 'manual_approved');
+  });
+
   test('fetchSycmWithFallback switches to hot search when blue rows are insufficient', async () => {
     const calls = [];
     const result = await fetchSycmWithFallback('宠物玩具', {
@@ -495,7 +577,7 @@ describe('pipeline-flow', () => {
       fallbackCandidates: false,
       inspirationUseLLM: false,
       newsItems: [{ title: '多地进入高温天气', inspirationWord: '高温' }],
-      dictionaryWords: [],
+      dictionaryWords: ['哲学'],
       trendItems: [],
       sycmExtractor: async keyword => keyword === '项链'
         ? { data: [{ keyword }, { keyword: '纯银项链女', searchPopularity: 1500, demandSupplyRatio: 1.6, clickRate: 20 }] }
@@ -775,6 +857,71 @@ describe('pipeline-flow', () => {
     assert.ok(candidates[0].flags.includes('user_exact_keyword'));
   });
 
+  test('flowKeyword processes multiple exact keywords in one run', async () => {
+    const dataDir = tempDataDir();
+    const keywords = ['宠物磨牙玩具', '宠物漏食玩具'];
+    const ids = new Map([
+      [keywords[0], '2049095335543'],
+      [keywords[1], '2049095335544']
+    ]);
+    const sycmCalls = [];
+    const generatorCalls = [];
+
+    const result = await flowKeyword({
+      dataDir,
+      keywords,
+      export: 2,
+      sycmExtractor: async keyword => {
+        sycmCalls.push(keyword);
+        return {
+          keyword,
+          data: [{
+            keyword,
+            demandSupplyRatio: 2.8,
+            searchPopularity: 500,
+            clickRate: 45,
+            conversionRate: '5% ~ 7.5%'
+          }],
+          categoryAnalysis: {
+            recommendation: {
+              recommended: { category: '宠物用品 > 狗狗玩具', score: 88 }
+            }
+          }
+        };
+      },
+      searchProducts: async (_coreWord, keyword) => [{
+        ...mockProduct(keyword, ids.get(keyword)),
+        subject: `${keyword}耐咬互动训练球幼犬磨牙益智用品`,
+        title: `${keyword}耐咬互动训练球幼犬磨牙益智用品`
+      }],
+      generator: async keyword => {
+        generatorCalls.push(keyword);
+        return {
+          ok: true,
+          products: [{
+            '产品链接': `https://detail.1688.com/offer/${ids.get(keyword)}.html`,
+            '铺货标题': `${keyword}耐咬互动训练球幼犬磨牙益智用品居家陪伴解闷用品日常训练奖励玩具`,
+            '商品原价': '15.8',
+            '30天销量': 1800,
+            shopName: '义乌宠物用品工厂店',
+            categoryListName: '宠物用品 > 狗狗玩具'
+          }]
+        };
+      }
+    });
+
+    assert.deepEqual(result.exactKeywords, keywords);
+    assert.equal(result.exactKeyword, keywords[0]);
+    assert.deepEqual(sycmCalls, keywords);
+    assert.deepEqual(generatorCalls, keywords);
+    assert.equal(result.steps.mined, 2);
+    assert.equal(result.steps.verified, 2);
+    assert.equal(result.steps.selected, 2);
+    assert.equal(result.steps.generated, 2);
+    assert.equal(result.steps.exported, 2);
+    assert.deepEqual(readJsonl(result.files.candidates).map(row => row.keyword), keywords);
+  });
+
   test('flowGenerate keeps a larger default candidate pool per keyword', async () => {
     const dataDir = tempDataDir();
     const mined = await flowMine({ dataDir, limit: 1 });
@@ -794,6 +941,7 @@ describe('pipeline-flow', () => {
       '30天销量': 20,
       '主图链接': 'https://img.example.com/a.jpg'
     }));
+    writeSelectedProducts(getRun({ dataDir, runId: mined.runId }).run, '陶瓷摆件', products);
 
     const generated = await flowGenerate({
       dataDir,
@@ -813,6 +961,9 @@ describe('pipeline-flow', () => {
       status: 'verified',
       sycmScore: { passed: true }
     }) + '\n', 'utf8');
+    writeSelectedProducts(getRun({ dataDir, runId: mined.runId }).run, '陶瓷摆件', [
+      mockProduct('陶瓷摆件', '123456')
+    ]);
     let receivedTimeout = 0;
 
     const generated = await flowGenerate({
@@ -838,6 +989,32 @@ describe('pipeline-flow', () => {
     assert.deepStrictEqual(generated.generated[0].retryWith, { count: 3, runTimeoutMs: 180000 });
   });
 
+  test('flowGenerate refuses to bypass product selection', async () => {
+    const dataDir = tempDataDir();
+    const mined = await flowMine({ dataDir, limit: 1 });
+    fs.writeFileSync(path.join(mined.runDir, 'verified-keywords.jsonl'), JSON.stringify({
+      keyword: '无选品词',
+      status: 'verified',
+      keywordOpportunity: { score: 88, decision: 'continue' }
+    }) + '\n', 'utf8');
+    let generatorCalled = false;
+
+    const generated = await flowGenerate({
+      dataDir,
+      runId: mined.runId,
+      generator: async () => {
+        generatorCalled = true;
+        return { products: [] };
+      }
+    });
+
+    assert.strictEqual(generatorCalled, false);
+    assert.strictEqual(generated.status, 'generate_failed');
+    assert.deepStrictEqual(generated.blockers, ['no_selected_products']);
+    assert.strictEqual(generated.generated[0].code, 'selected_products_required');
+    assert.strictEqual(getRun({ dataDir, runId: mined.runId }).run.failureReasons.generate.selected_products_required, 1);
+  });
+
   test('flowGenerate skips verified keywords that fail keyword opportunity scoring by default', async () => {
     const dataDir = tempDataDir();
     const mined = await flowMine({ dataDir, limit: 1 });
@@ -853,6 +1030,9 @@ describe('pipeline-flow', () => {
         keywordOpportunity: { score: 82, decision: 'continue', nextAction: 'search_1688' }
       })
     ].join('\n') + '\n', 'utf8');
+    writeSelectedProducts(getRun({ dataDir, runId: mined.runId }).run, '蓝海可生成词', [
+      mockProduct('蓝海可生成词', '123456')
+    ]);
 
     const calls = [];
     const generated = await flowGenerate({
@@ -916,6 +1096,42 @@ describe('pipeline-flow', () => {
     assert.ok(review.includes('Recommended Submit'));
     assert.ok(review.includes('Manual Review Candidates'));
     assert.ok(review.includes('Review Candidates: 1'));
+  });
+
+  test('flowExport ranks all candidates and fills the ready quota past rejected rows', async () => {
+    const dataDir = tempDataDir();
+    const mined = await flowMine({ dataDir, limit: 1 });
+    const generatedFile = path.join(mined.runDir, 'generated-products.jsonl');
+    const row = (id, category, score) => ({
+      status: 'generated',
+      keyword: '宠物玩具',
+      url: `https://detail.1688.com/offer/${id}.html`,
+      title: `宠物玩具狗狗互动耐咬训练解闷磨牙发声弹力球室内户外陪伴用品${id}`,
+      recommendedCategory: category,
+      product: category ? { categoryListName: category } : {},
+      productOpportunity: { decision: 'continue', level: 'candidate', score }
+    });
+    fs.writeFileSync(generatedFile, [
+      row('301', '', 100),
+      row('302', '', 99),
+      row('303', '宠物用品 > 狗狗玩具', 80),
+      row('304', '宠物用品 > 狗狗玩具', 79)
+    ].map(item => JSON.stringify(item)).join('\n') + '\n');
+
+    const exported = await flowExport({ dataDir, runId: mined.runId, limit: 2 });
+    const batch = fs.readFileSync(exported.file, 'utf8');
+    const persisted = getRun({ dataDir, runId: mined.runId }).run;
+
+    assert.strictEqual(exported.count, 2);
+    assert.strictEqual(exported.rejected, 2);
+    assert.strictEqual(exported.mustReview, false);
+    assert.strictEqual(exported.canSubmit, true);
+    assert.strictEqual(exported.status, 'ready_to_distribute');
+    assert.ok(batch.includes('offer/303.html'));
+    assert.ok(batch.includes('offer/304.html'));
+    assert.strictEqual(persisted.funnel.export.input, 4);
+    assert.strictEqual(persisted.funnel.export.passed, 2);
+    assert.strictEqual(persisted.failureReasons.export.missing_category, 2);
   });
 
   test('flowExport review warns for hot trend reference rows', async () => {
@@ -1170,6 +1386,13 @@ describe('pipeline-flow', () => {
         data: [{ keyword, demandSupplyRatio: 17.75, searchPopularity: 500, clickRate: 80, conversionRate: 5 }]
       })
     });
+    const selected = await flowSelectProducts({
+      dataDir,
+      runId: mined.runId,
+      limit: 1,
+      productsPerKeyword: 1,
+      searchProducts: async keyword => [mockProduct(keyword, '456')]
+    });
     const generated = await flowGenerate({
       dataDir,
       limit: 1,
@@ -1182,11 +1405,13 @@ describe('pipeline-flow', () => {
 
     assert.strictEqual(reviewed.runId, mined.runId);
     assert.strictEqual(verified.runId, mined.runId);
+    assert.strictEqual(selected.runId, mined.runId);
     assert.strictEqual(generated.runId, mined.runId);
     assert.strictEqual(exported.runId, mined.runId);
     assert.ok(mined.nextCommand.includes('flow review'));
     assert.ok(reviewed.nextCommand.includes('flow verify'));
     assert.ok(verified.nextCommand.includes('flow select'));
+    assert.ok(selected.nextCommand.includes('flow generate'));
     assert.ok(generated.nextCommand.includes('flow export'));
     assert.strictEqual(readJsonl(path.join(dataDir, 'runs', mined.runId, 'verified-keywords.jsonl')).length, 1);
   });

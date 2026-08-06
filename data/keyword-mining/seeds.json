@@ -7,7 +7,16 @@
     "status": "paused",
     "successCount": 0,
     "failCount": 0,
-    "reason": "饰品长期需求稳定"
+    "reason": "饰品长期需求稳定",
+    "stats": {
+      "runs": 0,
+      "candidates": 3,
+      "verified": 0,
+      "generationEligible": 0,
+      "selectedProducts": 0,
+      "generatedTitles": 0,
+      "failures": 0
+    }
   },
   {
     "keyword": "项链",
@@ -15,9 +24,18 @@
     "priority": 10,
     "source": "manual",
     "status": "paused",
-    "successCount": 0,
+    "successCount": 1,
     "failCount": 0,
-    "reason": "饰品长期需求稳定"
+    "reason": "饰品长期需求稳定",
+    "stats": {
+      "runs": 0,
+      "candidates": 3,
+      "verified": 1,
+      "generationEligible": 1,
+      "selectedProducts": 0,
+      "generatedTitles": 12,
+      "failures": 0
+    }
   },
   {
     "keyword": "手链",
@@ -65,9 +83,18 @@
     "priority": 10,
     "source": "manual",
     "status": "paused",
-    "successCount": 0,
+    "successCount": 1,
     "failCount": 0,
-    "reason": "宠物用品复购和长尾词多"
+    "reason": "宠物用品复购和长尾词多",
+    "stats": {
+      "runs": 0,
+      "candidates": 2,
+      "verified": 1,
+      "generationEligible": 0,
+      "selectedProducts": 0,
+      "generatedTitles": 0,
+      "failures": 0
+    }
   },
   {
     "keyword": "逗猫棒",
@@ -95,9 +122,18 @@
     "priority": 7,
     "source": "manual",
     "status": "paused",
-    "successCount": 0,
+    "successCount": 1,
     "failCount": 0,
-    "reason": "款式词丰富"
+    "reason": "款式词丰富",
+    "stats": {
+      "runs": 0,
+      "candidates": 1,
+      "verified": 1,
+      "generationEligible": 1,
+      "selectedProducts": 0,
+      "generatedTitles": 3,
+      "failures": 0
+    }
   },
   {
     "keyword": "手机挂绳",
@@ -137,7 +173,16 @@
     "status": "paused",
     "successCount": 0,
     "failCount": 0,
-    "reason": "厨房收纳长尾词多"
+    "reason": "厨房收纳长尾词多",
+    "stats": {
+      "runs": 0,
+      "candidates": 3,
+      "verified": 0,
+      "generationEligible": 0,
+      "selectedProducts": 0,
+      "generatedTitles": 0,
+      "failures": 0
+    }
   },
   {
     "keyword": "车载收纳",
@@ -187,7 +232,16 @@
     "status": "paused",
     "successCount": 0,
     "failCount": 0,
-    "reason": "节日和礼品属性明确"
+    "reason": "节日和礼品属性明确",
+    "stats": {
+      "runs": 0,
+      "candidates": 2,
+      "verified": 0,
+      "generationEligible": 0,
+      "selectedProducts": 0,
+      "generatedTitles": 0,
+      "failures": 0
+    }
   },
   {
     "keyword": "小夜灯",
@@ -195,9 +249,18 @@
     "priority": 7,
     "source": "manual",
     "status": "paused",
-    "successCount": 0,
+    "successCount": 2,
     "failCount": 0,
-    "reason": "场景和人群词丰富"
+    "reason": "场景和人群词丰富",
+    "stats": {
+      "runs": 0,
+      "candidates": 3,
+      "verified": 2,
+      "generationEligible": 2,
+      "selectedProducts": 0,
+      "generatedTitles": 24,
+      "failures": 0
+    }
   },
   {
     "keyword": "玛瑙戒指",
@@ -314,7 +377,16 @@
     "successCount": 0,
     "failCount": 0,
     "reason": "夏季户外旺季，泡沫/硅胶/发光款式多",
-    "type": "direct"
+    "type": "direct",
+    "stats": {
+      "runs": 0,
+      "candidates": 3,
+      "verified": 0,
+      "generationEligible": 0,
+      "selectedProducts": 0,
+      "generatedTitles": 0,
+      "failures": 0
+    }
   },
   {
     "keyword": "睫毛夹",
@@ -336,7 +408,16 @@
     "successCount": 0,
     "failCount": 0,
     "reason": "高客单场景，款式多，季节稳定",
-    "type": "direct"
+    "type": "direct",
+    "stats": {
+      "runs": 0,
+      "candidates": 3,
+      "verified": 0,
+      "generationEligible": 0,
+      "selectedProducts": 0,
+      "generatedTitles": 0,
+      "failures": 0
+    }
   },
   {
     "keyword": "多肉盆栽",
@@ -380,7 +461,16 @@
     "successCount": 0,
     "failCount": 0,
     "reason": "家居收纳小件，轻奢/创意/沥水等长尾多",
-    "type": "direct"
+    "type": "direct",
+    "stats": {
+      "runs": 0,
+      "candidates": 3,
+      "verified": 0,
+      "generationEligible": 0,
+      "selectedProducts": 0,
+      "generatedTitles": 0,
+      "failures": 0
+    }
   },
   {
     "keyword": "8到12岁儿童玩具",
@@ -402,7 +492,16 @@
     "status": "paused",
     "successCount": 0,
     "failCount": 0,
-    "reason": "6月入夏刚需，办公/座椅/汽车/宠物多场景"
+    "reason": "6月入夏刚需，办公/座椅/汽车/宠物多场景",
+    "stats": {
+      "runs": 0,
+      "candidates": 2,
+      "verified": 0,
+      "generationEligible": 0,
+      "selectedProducts": 0,
+      "generatedTitles": 0,
+      "failures": 0
+    }
   },
   {
     "keyword": "小风扇",
@@ -444,9 +543,18 @@
     "source": "manual",
     "type": "expand",
     "status": "paused",
-    "successCount": 0,
+    "successCount": 3,
     "failCount": 0,
-    "reason": "吸水速干，材质+场景长尾丰富"
+    "reason": "吸水速干，材质+场景长尾丰富",
+    "stats": {
+      "runs": 0,
+      "candidates": 3,
+      "verified": 3,
+      "generationEligible": 3,
+      "selectedProducts": 0,
+      "generatedTitles": 33,
+      "failures": 0
+    }
   },
   {
     "keyword": "化妆镜",
@@ -477,9 +585,18 @@
     "source": "manual",
     "type": "expand",
     "status": "paused",
-    "successCount": 0,
+    "successCount": 1,
     "failCount": 0,
-    "reason": "玻璃/陶瓷/旋转材质和形态丰富"
+    "reason": "玻璃/陶瓷/旋转材质和形态丰富",
+    "stats": {
+      "runs": 0,
+      "candidates": 3,
+      "verified": 1,
+      "generationEligible": 1,
+      "selectedProducts": 0,
+      "generatedTitles": 12,
+      "failures": 0
+    }
   },
   {
     "keyword": "汽车冰垫",
@@ -512,7 +629,16 @@
     "status": "paused",
     "successCount": 0,
     "failCount": 0,
-    "reason": "解放双手，USB/充电/静音功能词丰富"
+    "reason": "解放双手，USB/充电/静音功能词丰富",
+    "stats": {
+      "runs": 0,
+      "candidates": 2,
+      "verified": 0,
+      "generationEligible": 0,
+      "selectedProducts": 0,
+      "generatedTitles": 0,
+      "failures": 0
+    }
   },
   {
     "keyword": "手持小风扇",
@@ -596,14 +722,36 @@
     "category": "雨具防晒",
     "reason": "6月梅雨季刚需，折叠/全自动/晴雨两用长尾丰富",
     "priority": 10,
-    "status": "paused"
+    "status": "paused",
+    "stats": {
+      "runs": 0,
+      "candidates": 3,
+      "verified": 1,
+      "generationEligible": 1,
+      "selectedProducts": 0,
+      "generatedTitles": 11,
+      "failures": 0
+    },
+    "successCount": 1,
+    "failCount": 0
   },
   {
     "keyword": "遮阳帽",
     "category": "雨具防晒",
     "reason": "夏季防晒刚需，渔夫帽/空顶/大檐款式多",
     "priority": 10,
-    "status": "paused"
+    "status": "paused",
+    "stats": {
+      "runs": 0,
+      "candidates": 3,
+      "verified": 0,
+      "generationEligible": 0,
+      "selectedProducts": 0,
+      "generatedTitles": 0,
+      "failures": 0
+    },
+    "successCount": 0,
+    "failCount": 0
   },
   {
     "keyword": "防晒面罩",
@@ -617,14 +765,36 @@
     "category": "健身瑜伽",
     "reason": "夏季运动旺季，加厚/防滑/可折叠材质丰富",
     "priority": 10,
-    "status": "paused"
+    "status": "paused",
+    "stats": {
+      "runs": 0,
+      "candidates": 3,
+      "verified": 3,
+      "generationEligible": 3,
+      "selectedProducts": 0,
+      "generatedTitles": 19,
+      "failures": 0
+    },
+    "successCount": 3,
+    "failCount": 0
   },
   {
     "keyword": "弹力带",
     "category": "健身瑜伽",
     "reason": "居家健身爆款，阻力等级/乳胶/环形组合多",
     "priority": 10,
-    "status": "paused"
+    "status": "paused",
+    "stats": {
+      "runs": 0,
+      "candidates": 3,
+      "verified": 1,
+      "generationEligible": 1,
+      "selectedProducts": 0,
+      "generatedTitles": 12,
+      "failures": 0
+    },
+    "successCount": 1,
+    "failCount": 0
   },
   {
     "keyword": "泡沫轴",
@@ -640,9 +810,20 @@
     "source": "manual",
     "type": "expand",
     "status": "active",
-    "successCount": 0,
+    "successCount": 13,
     "failCount": 0,
-    "reason": "七夕旺季情侣穿搭需求"
+    "reason": "七夕旺季情侣穿搭需求",
+    "stats": {
+      "runs": 224,
+      "candidates": 14,
+      "verified": 13,
+      "generationEligible": 10,
+      "selectedProducts": 0,
+      "generatedTitles": 60,
+      "failures": 0
+    },
+    "lastUsedAt": "2026-08-06T15:19:57.088Z",
+    "consecutiveRuns": 219
   },
   {
     "keyword": "DIY手工礼物",
@@ -661,10 +842,23 @@
     "priority": 10,
     "source": "manual",
     "type": "expand",
-    "status": "active",
+    "status": "cooling",
     "successCount": 0,
     "failCount": 0,
-    "reason": "七夕情侣数码配件"
+    "reason": "七夕情侣数码配件",
+    "stats": {
+      "runs": 5,
+      "candidates": 0,
+      "verified": 0,
+      "generationEligible": 0,
+      "selectedProducts": 0,
+      "generatedTitles": 0,
+      "failures": 0
+    },
+    "lastUsedAt": "2026-08-04T12:50:28.062Z",
+    "statusReason": "连续运行未产生验真通过词，自动进入冷却。",
+    "statusUpdatedAt": "2026-07-28T12:59:33.603Z",
+    "consecutiveRuns": 1
   },
   {
     "keyword": "床帘蚊帐一体",
@@ -673,9 +867,20 @@
     "source": "manual",
     "type": "expand",
     "status": "active",
-    "successCount": 0,
-    "failCount": 0,
-    "reason": "开学季宿舍刚需"
+    "successCount": 8,
+    "failCount": 1,
+    "reason": "开学季宿舍刚需",
+    "stats": {
+      "runs": 223,
+      "candidates": 8,
+      "verified": 8,
+      "generationEligible": 2,
+      "selectedProducts": 0,
+      "generatedTitles": 16,
+      "failures": 1
+    },
+    "lastUsedAt": "2026-08-06T15:19:57.088Z",
+    "consecutiveRuns": 219
   },
   {
     "keyword": "宿舍好物",
@@ -695,9 +900,20 @@
     "source": "manual",
     "type": "expand",
     "status": "active",
-    "successCount": 0,
+    "successCount": 11,
     "failCount": 0,
-    "reason": "中秋节日装饰"
+    "reason": "中秋节日装饰",
+    "stats": {
+      "runs": 224,
+      "candidates": 11,
+      "verified": 11,
+      "generationEligible": 0,
+      "selectedProducts": 0,
+      "generatedTitles": 0,
+      "failures": 0
+    },
+    "lastUsedAt": "2026-08-06T15:19:57.088Z",
+    "consecutiveRuns": 219
   },
   {
     "keyword": "月饼包装礼盒",
@@ -705,10 +921,23 @@
     "priority": 10,
     "source": "manual",
     "type": "expand",
-    "status": "active",
+    "status": "cooling",
     "successCount": 0,
     "failCount": 0,
-    "reason": "中秋礼盒包装"
+    "reason": "中秋礼盒包装",
+    "stats": {
+      "runs": 5,
+      "candidates": 0,
+      "verified": 0,
+      "generationEligible": 0,
+      "selectedProducts": 0,
+      "generatedTitles": 0,
+      "failures": 0
+    },
+    "lastUsedAt": "2026-08-04T12:50:28.062Z",
+    "statusReason": "连续运行未产生验真通过词，自动进入冷却。",
+    "statusUpdatedAt": "2026-07-28T12:59:33.603Z",
+    "consecutiveRuns": 1
   },
   {
     "keyword": "吊坠",
@@ -717,18 +946,51 @@
     "source": "manual",
     "type": "expand",
     "status": "active",
-    "successCount": 1,
+    "successCount": 3,
     "failCount": 0,
     "reason": "",
     "stats": {
-      "runs": 1,
-      "candidates": 2,
-      "verified": 1,
+      "runs": 223,
+      "candidates": 4,
+      "verified": 3,
       "generationEligible": 1,
       "selectedProducts": 0,
-      "generatedTitles": 0,
+      "generatedTitles": 12,
       "failures": 0
     },
-    "lastUsedAt": "2026-07-25T06:47:19.320Z"
+    "lastUsedAt": "2026-08-06T15:19:57.088Z",
+    "consecutiveRuns": 219
+  },
+  {
+    "keyword": "床帘",
+    "category": "开学宿舍",
+    "priority": 6,
+    "source": "sycm_hot",
+    "type": "expand",
+    "status": "active",
+    "successCount": 9,
+    "failCount": 0,
+    "reason": "从词根「床帘蚊帐」的生意参谋关联词中发现",
+    "coreProduct": "床帘",
+    "familyKey": "床帘",
+    "role": "discovery_root",
+    "evidence": {
+      "searchPopularity": 300,
+      "demandSupplyRatio": 0.02,
+      "conversionRate": 0.05
+    },
+    "stats": {
+      "runs": 222,
+      "candidates": 46,
+      "verified": 9,
+      "generationEligible": 8,
+      "selectedProducts": 0,
+      "generatedTitles": 96,
+      "failures": 0
+    },
+    "lastUsedAt": "2026-08-06T15:19:57.088Z",
+    "statusReason": "历史产出达到活跃门槛，自动恢复。",
+    "statusUpdatedAt": "2026-07-30T13:38:19.160Z",
+    "consecutiveRuns": 219
   }
 ]

@@ -8,6 +8,7 @@ const {
   getRun,
   initRun,
   readJsonl,
+  setRunStageMetrics,
   writeRun
 } = require('./run-store');
 const {
@@ -89,6 +90,12 @@ function flowManualStart(options = {}) {
   run.counts.keywordReviewApproved = candidates.length;
   run.counts.keywordReviewPending = 0;
   run.counts.manualInputProducts = normalizedItems.length;
+  setRunStageMetrics(run, 'keywordReview', {
+    input: candidates.length,
+    passed: candidates.length,
+    rejected: 0,
+    pending: 0
+  });
   writeRun(runDir, run);
   return flowResponse({
     ok: true,
@@ -187,6 +194,16 @@ async function flowEnrichManualProducts(options = {}) {
   run.status = selected.length > 0 ? 'products_selected' : 'select_failed';
   run.counts.selectedProducts = selected.length;
   run.counts.productEnrichFailed = failed.length;
+  setRunStageMetrics(run, 'select', {
+    input: enriched.length,
+    passedGate: selected.length,
+    selected: selected.length,
+    review: 0,
+    rejected: failed.length,
+    notSelected: 0
+  }, {
+    product_detail_fetch_failed: failed.length
+  });
   writeRun(runDir, run);
   return flowResponse({
     ok: selected.length > 0,
@@ -216,12 +233,31 @@ function flowReviewProducts(options = {}) {
   if (approvedIds.size === 0 && manualProducts.length === 0 && options.approveAll !== true) {
     run.status = 'awaiting_product_review';
     run.counts.productReviewPending = rows.length;
+    setRunStageMetrics(run, 'select', {
+      input: rows.length,
+      passedGate: 0,
+      selected: 0,
+      review: rows.length,
+      rejected: 0,
+      notSelected: 0
+    });
     writeRun(runDir, run);
     return flowResponse({ ok: true, runId: run.runId, status: run.status, products: rows, blockers: ['product_review_required'], runDir });
   }
   const selected = rows
-    .filter(row => row.status === 'selected' && (options.approveAll === true || approvedIds.has(identity(row))))
-    .map(row => ({ ...row, manualSelectionStatus: 'approved', selectedAt: new Date().toISOString() }));
+    .filter(row => (
+      options.approveAll === true
+        ? row.status === 'selected'
+        : approvedIds.has(identity(row))
+    ))
+    .map(row => ({
+      ...row,
+      status: 'selected',
+      manualSelectionPreviousStatus: row.status,
+      manualSelectionStatus: 'approved',
+      selectionDecision: 'manual_approved',
+      selectedAt: new Date().toISOString()
+    }));
   for (const raw of manualProducts) {
     const url = String(raw.url || raw.productUrl || '').trim();
     const title = String(raw.title || raw.sourceTitle || '').trim();
@@ -246,6 +282,16 @@ function flowReviewProducts(options = {}) {
   run.status = unique.length > 0 ? 'products_selected' : 'select_failed';
   run.counts.selectedProducts = unique.length;
   run.counts.productReviewPending = 0;
+  setRunStageMetrics(run, 'select', {
+    input: rows.length + manualProducts.length,
+    passedGate: unique.length,
+    selected: unique.length,
+    review: 0,
+    rejected: Math.max(0, rows.length + manualProducts.length - unique.length),
+    notSelected: 0
+  }, {
+    manual_product_rejected: Math.max(0, rows.length + manualProducts.length - unique.length)
+  });
   writeRun(runDir, run);
   return flowResponse({ ok: unique.length > 0, runId: run.runId, status: run.status, selected: unique, runDir, blockers: unique.length > 0 ? [] : ['no_selected_products'] });
 }

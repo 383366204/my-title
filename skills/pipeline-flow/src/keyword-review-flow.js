@@ -1,7 +1,7 @@
 'use strict';
 
 const fs = require('fs');
-const { appendJsonl, getRun, readJsonl, writeRun } = require('./run-store');
+const { appendJsonl, getRun, readJsonl, setRunStageMetrics, writeRun } = require('./run-store');
 const { buildFlowCommand, flowResponse } = require('./flow-context');
 
 function normalizeKeywordReviewDecision(row = {}, decision = 'approved', reason = '') {
@@ -49,6 +49,12 @@ function flowReviewCandidates(options = {}) {
   if (!hasExplicitDecision) {
     run.status = 'awaiting_keyword_review';
     run.counts.keywordReviewPending = allCandidates.length;
+    setRunStageMetrics(run, 'keywordReview', {
+      input: allCandidates.length,
+      passed: 0,
+      rejected: 0,
+      pending: allCandidates.length
+    });
     writeRun(runDir, run);
     return flowResponse({
       ok: true,
@@ -81,6 +87,14 @@ function flowReviewCandidates(options = {}) {
   run.counts.keywordReviewApproved = approvedRows.length;
   run.counts.keywordReviewRejected = rejectedRows.length;
   run.counts.keywordReviewPending = 0;
+  setRunStageMetrics(run, 'keywordReview', {
+    input: reviewed.length,
+    passed: approvedRows.length,
+    rejected: rejectedRows.length,
+    pending: 0
+  }, {
+    manually_rejected: rejectedRows.length
+  });
   writeRun(runDir, run);
   return flowResponse({
     ok: true,

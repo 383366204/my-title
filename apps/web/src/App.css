@@ -974,7 +974,8 @@ code, pre {
 .node-inline-form input,
 .node-wide-input,
 .node-field input,
-.node-field textarea {
+.node-field textarea,
+.node-field select {
   width: 100%;
   min-width: 0;
   border: 1px solid #334155;
@@ -990,7 +991,8 @@ code, pre {
 .node-inline-form input:focus,
 .node-wide-input:focus,
 .node-field input:focus,
-.node-field textarea:focus {
+.node-field textarea:focus,
+.node-field select:focus {
   border-color: #3b82f6;
 }
 
@@ -1864,6 +1866,141 @@ code, pre {
   font-size: 11px;
 }
 
+.workflow-modal-close {
+  width: 32px;
+  height: 32px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid #334155;
+  border-radius: 7px;
+  background: #111c31;
+  color: #cbd5e1;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease, color 160ms ease;
+}
+
+.workflow-modal-close:hover {
+  border-color: #64748b;
+  background: #1e293b;
+  color: #f8fafc;
+}
+
+.workflow-node-overlay {
+  width: min(920px, calc(100vw - 44px));
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.workflow-node-overlay.is-wide {
+  width: min(1120px, calc(100vw - 44px));
+}
+
+.workflow-node-overlay-body {
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.workflow-node-overlay-body > .export-preview-direct {
+  min-height: min(620px, calc(100vh - 150px));
+}
+
+.workflow-overlay-diagnostics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.workflow-overlay-diagnostics > div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  border: 1px solid rgba(51, 65, 85, 0.85);
+  border-radius: 7px;
+  background: rgba(2, 6, 23, 0.5);
+  padding: 9px;
+}
+
+.workflow-overlay-diagnostics span {
+  color: #94a3b8;
+  font-size: 10px;
+}
+
+.workflow-overlay-diagnostics strong {
+  color: #e2e8f0;
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.start-configuration-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.start-configuration-hint,
+.workflow-diagnostic-notice {
+  margin: 0;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 7px;
+  background: rgba(30, 64, 175, 0.12);
+  color: #bfdbfe;
+  font-size: 11px;
+  line-height: 1.55;
+  padding: 10px;
+}
+
+.start-configuration-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.start-configuration-wide {
+  grid-column: 1 / -1;
+}
+
+.start-configuration-number {
+  max-width: 220px;
+}
+
+.start-configuration-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 2px;
+}
+
+.node-field span b {
+  float: right;
+  color: #64748b;
+}
+
+.node-field span b.is-invalid {
+  color: #f87171;
+}
+
+.node-field small,
+.workflow-diagnostic-caption {
+  color: #64748b;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.workflow-diagnostic-caption {
+  margin: 3px 0 0;
+}
+
+.workflow-diagnostic-path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  overflow-wrap: anywhere;
+}
+
+.workflow-diagnostic-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+}
+
 .export-preview-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1872,6 +2009,19 @@ code, pre {
 
 .artifact-preview-modal {
   width: min(960px, 100%);
+}
+
+.product-selection-modal {
+  width: min(960px, calc(100vw - 48px));
+  max-height: min(780px, calc(100vh - 48px));
+  display: flex;
+  flex-direction: column;
+}
+
+.product-selection-modal-body {
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
 }
 
 .artifact-preview-modal.is-distribution-preview {
@@ -4345,6 +4495,29 @@ textarea:focus {
 }
 
 @media (max-width: 760px) {
+  .workflow-modal-backdrop {
+    padding: 10px;
+  }
+
+  .workflow-node-overlay {
+    width: calc(100vw - 20px);
+    max-height: calc(100vh - 20px);
+  }
+
+  .workflow-overlay-diagnostics,
+  .start-configuration-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .start-configuration-number {
+    max-width: none;
+  }
+
+  .product-selection-modal {
+    width: calc(100vw - 20px);
+    max-height: calc(100vh - 20px);
+  }
+
   .manual-workflow-input-modal {
     width: calc(100vw - 20px);
     max-height: calc(100vh - 20px);

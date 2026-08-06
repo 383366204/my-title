@@ -13,6 +13,7 @@ import {
   getPipelineMonitorNodeStatus,
   getPipelineSummaryVisualState,
   normalizeWorkflowProgressEvent,
+  parseExactKeywords,
   getStartNodeParams,
   getWorkflowLaunchParams,
   getWorkflowLaunchBlocker,
@@ -38,6 +39,27 @@ import {
   getWorkflowNodeResultLocation,
   getWorkflowResultSummaryView
 } from './workflow-ui.js';
+
+test('exact keyword input parses batches and launch params preserve all words', () => {
+  assert.deepEqual(parseExactKeywords('纯银项链\n桌面收纳盒，纯银项链'), ['纯银项链', '桌面收纳盒']);
+  const nodes = [{
+    id: 'start',
+    type: 'production-start',
+    data: { keywordsText: '纯银项链\n桌面收纳盒，纯银项链', length: 60 }
+  }];
+  assert.deepEqual(getWorkflowLaunchParams(nodes), {
+    keyword: '纯银项链',
+    keywords: ['纯银项链', '桌面收纳盒'],
+    length: 60
+  });
+  assert.equal(getWorkflowLaunchBlocker('keyword', nodes), null);
+});
+
+test('exact keyword input blocks empty and oversized batches', () => {
+  assert.match(getWorkflowLaunchBlocker('keyword', [{ id: 'start', data: { keywordsText: '' } }]).error, /不能为空/);
+  const keywordsText = Array.from({ length: 21 }, (_, index) => `关键词${index + 1}`).join('\n');
+  assert.match(getWorkflowLaunchBlocker('keyword', [{ id: 'start', data: { keywordsText } }]).error, /最多输入 20 个/);
+});
 import {
   labelPipelineStatus,
   labelPipelineStage,
@@ -204,6 +226,18 @@ test('getWorkflowNodePanelKind maps production nodes to embedded panels', () => 
   assert.equal(getWorkflowNodePanelKind('other'), 'artifact');
 });
 
+test('start nodes expose their input configuration directly on the canvas', () => {
+  assert.deepEqual(getWorkflowNodeAction('start', { status: 'idle', manualInput: true }), {
+    label: '录入词和货源', action: 'manual-input', tone: 'warn'
+  });
+  assert.deepEqual(getWorkflowNodeAction('start', { status: 'idle', keywordsText: '' }), {
+    label: '输入关键词', action: 'manual-input', tone: 'warn'
+  });
+  assert.deepEqual(getWorkflowNodeAction('start', { status: 'idle', discoveryMode: 'inspiration' }), {
+    label: '配置输入', action: 'manual-input', tone: 'warn'
+  });
+});
+
 test('getPipelineSummaryText summarizes empty and active runs', () => {
   assert.equal(getPipelineSummaryText(null), '暂无当前流程');
   assert.equal(getPipelineSummaryText({
@@ -263,9 +297,9 @@ test('getWorkflowTemplateView explains daily and exact keyword differences', () 
     mode: 'keyword'
   }), {
     entryLabel: '入口：手动关键词',
-    scenarioLabel: '适合：验证一个明确目标词',
-    flowSummary: '流程：输入关键词 → 跳过挖词 → 生意参谋校验 → 货源选品 → 标题生成 → 导出复核',
-    modeHint: '使用你输入的关键词，跳过选词挖掘，直接进入生意参谋校验。'
+    scenarioLabel: '适合：批量验证明确目标词',
+    flowSummary: '流程：批量输入关键词 → 跳过挖词 → 生意参谋校验 → 货源选品 → 标题生成 → 导出复核',
+    modeHint: '每行输入一个关键词，系统会逐词验真、选品和生成标题。'
   });
 });
 
@@ -325,6 +359,20 @@ test('getWorkflowNodeAction maps review and terminal states to node actions', ()
   assert.deepEqual(getWorkflowNodeAction('select', { status: 'completed', manualDirectInput: true, output: { failed: 1 } }), {
     label: '重试失败项',
     action: 'retry-node',
+    tone: 'warn'
+  });
+  assert.deepEqual(getWorkflowNodeAction('select', 'completed'), {
+    label: '调整货源',
+    action: 'product-review',
+    tone: 'success'
+  });
+  assert.deepEqual(getWorkflowNodeAction('select', {
+    status: 'failed',
+    blocker: 'no_selected_products',
+    output: { count: 0 }
+  }), {
+    label: '勾选货源',
+    action: 'product-review',
     tone: 'warn'
   });
   assert.deepEqual(getWorkflowNodeAction('keywordReview', 'awaiting_keyword_review'), {
@@ -498,6 +546,20 @@ test('getWorkflowBlockerActions maps verified-empty blockers to useful next acti
   assert.deepEqual(actions.map(action => action.action), ['mine-more', 'retry-node']);
   assert.equal(actions[0].label, '补充候选词');
   assert.equal(actions[1].label, '重跑验真');
+});
+
+test('getWorkflowBlockerActions normalizes backend recommendations to executable UI actions', () => {
+  const reviewActions = getWorkflowBlockerActions('keywordReview', {
+    status: 'blocked',
+    nextRecommendedAction: { action: 'confirm-keyword-review', label: '确认筛词结果' }
+  });
+  assert.deepEqual(reviewActions.map((action) => action.action), ['keyword-review', 'resume']);
+
+  const resumeActions = getWorkflowBlockerActions('verify', {
+    status: 'blocked',
+    nextRecommendedAction: { action: 'resume-after-manual', label: '我已处理，继续流程' }
+  });
+  assert.deepEqual(resumeActions.map((action) => action.action), ['resume']);
 });
 
 test('getMiningRecoveryHint explains how to recover a verified-empty run', () => {

@@ -274,7 +274,7 @@ function summarizePipelineRun({ dataDir = DEFAULT_PIPELINE_DIR, runId, previewLi
   const blockers = uniqueStrings(run.blockers || []);
   const mustReview = status === 'needs_review' || run.mustReview === true;
 
-  if (status === 'needs_review') blockers.push('review_rejected_rows');
+  if (status === 'needs_review' && blockers.length === 0) blockers.push('review_rejected_rows');
   if (status === 'mining_manual_action_required' || status === 'mining_empty') {
     blockers.push(run.discovery?.blocker || 'no_inspiration_candidates');
   }
@@ -296,6 +296,9 @@ function summarizePipelineRun({ dataDir = DEFAULT_PIPELINE_DIR, runId, previewLi
     startedAt: run.startedAt || '',
     updatedAt: run.updatedAt || run.startedAt || '',
     counts,
+    policy: run.policy || {},
+    funnel: run.funnel || {},
+    failureReasons: run.failureReasons || {},
     diversity: run.diversity || {},
     discovery: run.discovery || null,
     files,
@@ -304,7 +307,7 @@ function summarizePipelineRun({ dataDir = DEFAULT_PIPELINE_DIR, runId, previewLi
     reviewFile,
     batchExists,
     reviewExists,
-    canSubmit: status === 'ready_to_distribute' && Number(counts.readyToDistribute || 0) > 0,
+    canSubmit: run.canSubmit === true || (status === 'ready_to_distribute' && Number(counts.readyToDistribute || 0) > 0),
     mustReview,
     blockers: uniqueStrings(blockers),
     nextCommand,

@@ -4,6 +4,13 @@ const fs = require('fs');
 const path = require('path');
 
 const DEFAULT_FLOW_DIR = path.join(process.cwd(), 'data', 'pipeline');
+const DEFAULT_PIPELINE_POLICY = Object.freeze({
+  version: 2,
+  reviewMode: 'auto',
+  keywordPolicy: 'candidate_keyword',
+  productGate: 'strict',
+  exportFill: true
+});
 
 function pad(num) {
   return String(num).padStart(2, '0');
@@ -104,6 +111,45 @@ function ensureRunFiles(run, runDir) {
 }
 
 /**
+ * Ensure quality-policy and funnel fields exist on new and historical runs.
+ * @param {object} run Pipeline run state.
+ * @param {object} [policy] Policy overrides used only when fields are absent.
+ * @returns {object} Updated run state.
+ */
+function ensureRunQualityState(run, policy = {}) {
+  run.policy = {
+    ...DEFAULT_PIPELINE_POLICY,
+    ...policy,
+    ...(run.policy || {})
+  };
+  if (!run.funnel || typeof run.funnel !== 'object' || Array.isArray(run.funnel)) run.funnel = {};
+  if (!run.failureReasons || typeof run.failureReasons !== 'object' || Array.isArray(run.failureReasons)) {
+    run.failureReasons = {};
+  }
+  return run;
+}
+
+/**
+ * Replace one stage's funnel snapshot and failure reasons.
+ * @param {object} run Pipeline run state.
+ * @param {string} stage Pipeline stage.
+ * @param {object} funnel Stage input/pass/reject counts.
+ * @param {object} [failureReasons] Stable reason counts for this stage.
+ * @returns {object} Updated run state.
+ */
+function setRunStageMetrics(run, stage, funnel, failureReasons = {}) {
+  ensureRunQualityState(run);
+  run.funnel[stage] = Object.fromEntries(Object.entries(funnel || {}).map(([key, value]) => [
+    key,
+    Math.max(0, Number(value) || 0)
+  ]));
+  run.failureReasons[stage] = Object.fromEntries(Object.entries(failureReasons || {})
+    .filter(([, value]) => Number(value) > 0)
+    .map(([key, value]) => [key, Number(value)]));
+  return run;
+}
+
+/**
  * Persist a pipeline run and refresh its update timestamp.
  * @param {string} runDir Run directory.
  * @param {object} run Run state.
@@ -127,12 +173,19 @@ function initRun({ dataDir = DEFAULT_FLOW_DIR, runId, options = {} } = {}) {
   ensureDir(resolved.runDir);
   const runFile = path.join(resolved.runDir, 'run.json');
   const existing = readJson(runFile, null);
+  const requestedPolicy = {
+    ...(options.policy || {}),
+    ...(options.reviewMode ? { reviewMode: options.reviewMode } : {})
+  };
   const run = existing || {
     runId: resolved.runId,
     status: 'created',
     startedAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     options,
+    policy: { ...DEFAULT_PIPELINE_POLICY, ...requestedPolicy },
+    funnel: {},
+    failureReasons: {},
     counts: {
       candidates: 0,
       keywordReviewApproved: 0,
@@ -156,6 +209,7 @@ function initRun({ dataDir = DEFAULT_FLOW_DIR, runId, options = {} } = {}) {
       distributionReview: path.join(resolved.runDir, 'distribution-review.md')
     }
   };
+  ensureRunQualityState(run, requestedPolicy);
   ensureRunFiles(run, resolved.runDir);
   writeRun(resolved.runDir, run);
   writeJson(path.join(dataDir, 'latest.json'), {
@@ -183,6 +237,7 @@ function getRun({ dataDir = DEFAULT_FLOW_DIR, runId } = {}) {
   const resolved = resolveRunDir({ dataDir, runId: targetRunId });
   const run = readJson(path.join(resolved.runDir, 'run.json'), null);
   if (!run) throw new Error('run.json 不存在: ' + resolved.runDir);
+  ensureRunQualityState(run);
   ensureRunFiles(run, resolved.runDir);
   return { ...resolved, run };
 }
@@ -242,14 +297,17 @@ function markRunDistributionComplete({ dataDir = DEFAULT_FLOW_DIR, runId, distri
 }
 
 module.exports = {
+  DEFAULT_PIPELINE_POLICY,
   DEFAULT_FLOW_DIR,
   appendJsonl,
   createRunId,
   ensureDir,
+  ensureRunQualityState,
   getRun,
   initRun,
   markRunDistributionComplete,
   readJsonl,
   readRecentPipelineCandidateKeywords,
+  setRunStageMetrics,
   writeRun
 };

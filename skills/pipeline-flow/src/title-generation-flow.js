@@ -8,7 +8,7 @@ const { searchAll } = require('../../alibaba1688');
 const { getLLMProviderInfo } = require('../../../core/llm');
 const { scoreProductOpportunity } = require('./opportunity-scoring');
 const { appendOpportunity } = require('./opportunity-store');
-const { appendJsonl, getRun, readJsonl, writeRun } = require('./run-store');
+const { appendJsonl, getRun, readJsonl, setRunStageMetrics, writeRun } = require('./run-store');
 const { productTitle, productUrl } = require('./product-normalizer');
 const { DEFAULT_PRODUCTS_PER_KEYWORD } = require('./flow-constants');
 const {
@@ -30,11 +30,15 @@ async function flowGenerate(options = {}) {
     : readJsonl(run.files.verifiedKeywords);
   const selectedProducts = readJsonl(run.files.selectedProducts)
     .filter(row => row.status === 'selected' && row.product);
-  const eligible = selectedProducts.length > 0
-    ? Array.from(new Map(selectedProducts.map(row => [row.keyword, row])).values())
-    : (options.includeReviewKeywords
+  const requireSelectedProducts = options.allowLegacyProductFallback !== true;
+  let eligible = [];
+  if (selectedProducts.length > 0) {
+    eligible = Array.from(new Map(selectedProducts.map(row => [row.keyword, row])).values());
+  } else if (!requireSelectedProducts) {
+    eligible = options.includeReviewKeywords
       ? verified
-      : verified.filter(isGenerationEligibleKeyword));
+      : verified.filter(isGenerationEligibleKeyword);
+  }
   const limit = Number(options.limit || options.generate || eligible.length || 0);
   const selected = eligible.slice(0, limit);
   const generator = options.generator || generateTitlePipeline;
@@ -46,6 +50,39 @@ async function flowGenerate(options = {}) {
   const generatedRows = [];
 
   fs.writeFileSync(run.files.generatedProducts, '', 'utf8');
+
+  if (requireSelectedProducts && selectedProducts.length === 0) {
+    const blockedRow = {
+      status: 'generate_blocked',
+      code: 'selected_products_required',
+      error: '没有通过货源选品的商品，标题生成已停止',
+      generatedAt: new Date().toISOString()
+    };
+    appendJsonl(run.files.generatedProducts, blockedRow);
+    run.status = 'generate_failed';
+    run.counts.titleGenerationInputs = 0;
+    run.counts.generatedProducts = 0;
+    run.counts.titleGenerationFailed = 1;
+    setRunStageMetrics(run, 'generate', {
+      input: 0,
+      passed: 0,
+      rejected: 1
+    }, {
+      selected_products_required: 1
+    });
+    writeRun(runDir, run);
+    const nextCommand = buildFlowCommand('select', run.runId, { limit: options.select || options.generate || 10 });
+    return flowResponse({
+      ok: true,
+      runId: run.runId,
+      status: run.status,
+      generated: [blockedRow],
+      runDir,
+      blockers: ['no_selected_products'],
+      allowedCommands: [nextCommand],
+      nextCommand
+    });
+  }
 
   for (const item of selected) {
     try {
@@ -68,6 +105,17 @@ async function flowGenerate(options = {}) {
       for (const product of products.slice(0, Number(options.productsPerKeyword || DEFAULT_PRODUCTS_PER_KEYWORD))) {
         const url = productUrl(product);
         const selectedProduct = productRowsForKeyword.find(row => row.url && row.url === url) || {};
+        if (requireSelectedProducts && !selectedProduct.product) {
+          generatedRows.push({
+            status: 'generate_rejected',
+            keyword: item.keyword,
+            url,
+            code: 'product_not_selected',
+            error: '标题生成结果中的商品未通过货源选品',
+            generatedAt: new Date().toISOString()
+          });
+          continue;
+        }
         const mergedProduct = selectedProduct.product
           ? { ...selectedProduct.product, ...product }
           : product;
@@ -144,6 +192,8 @@ async function flowGenerate(options = {}) {
     })), { runId: run.runId, dataDir: resolveOpportunityDir(options) });
   run.status = generatedRows.some(row => row.status === 'generated') ? 'generated' : 'generate_failed';
   run.counts.generatedProducts = generatedRows.filter(row => row.status === 'generated').length;
+  run.counts.titleGenerationInputs = selectedProducts.length;
+  run.counts.titleGenerationFailed = generatedRows.filter(row => row.status !== 'generated').length;
   if (options.recordSeedFeedback === true && run.counts.generatedProducts > 0) {
     const generatedByRoot = new Map();
     for (const row of generatedRows.filter(item => item.status === 'generated')) {
@@ -156,6 +206,18 @@ async function flowGenerate(options = {}) {
       eventType: 'title-generation-outcome'
     });
   }
+  const generationFailures = generatedRows
+    .filter(row => row.status !== 'generated')
+    .reduce((counts, row) => {
+      const reason = String(row.code || row.status || 'title_generation_failed');
+      counts[reason] = Number(counts[reason] || 0) + 1;
+      return counts;
+    }, {});
+  setRunStageMetrics(run, 'generate', {
+    input: selectedProducts.length,
+    passed: run.counts.generatedProducts,
+    rejected: run.counts.titleGenerationFailed
+  }, generationFailures);
   writeRun(runDir, run);
   return flowResponse({
     ok: true,

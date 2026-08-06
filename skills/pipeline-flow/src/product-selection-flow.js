@@ -13,6 +13,7 @@ const {
   appendJsonl,
   getRun,
   readJsonl,
+  setRunStageMetrics,
   writeRun
 } = require('./run-store');
 const {
@@ -59,6 +60,13 @@ async function flowSelectProducts(options = {}) {
     historyFallbackCount: 0,
     filteredReasons: {}
   };
+  const gateStats = {
+    input: 0,
+    passed: 0,
+    review: 0,
+    rejected: 0,
+    notSelected: 0
+  };
 
   fs.writeFileSync(run.files.selectedProducts, '', 'utf8');
 
@@ -84,7 +92,7 @@ async function flowSelectProducts(options = {}) {
           sycmScore: item.sycmScore
         });
         return {
-          status: 'selected',
+          status: 'evaluated',
           keyword: item.keyword,
           selectedKeyword: item.keyword,
           seed: item.seed || '',
@@ -115,7 +123,13 @@ async function flowSelectProducts(options = {}) {
           selectedAt: new Date().toISOString()
         };
       });
-      const diverseProducts = selectDiverseProducts(scoredProducts, {
+      const passedGate = scoredProducts.filter(row => row.decision === 'continue');
+      const reviewGate = scoredProducts.filter(row => row.decision === 'review');
+      const rejectedGate = scoredProducts.filter(row => row.decision === 'reject');
+      const selectionPool = options.includeReviewProducts === true
+        ? [...passedGate, ...reviewGate]
+        : passedGate;
+      const diverseProducts = selectDiverseProducts(selectionPool, {
         history: diversityHistory,
         state: diversityState,
         limit: productsPerKeyword,
@@ -125,7 +139,33 @@ async function flowSelectProducts(options = {}) {
         distributedOfferCooldownDays: Number(options.distributedOfferCooldownDays || 30),
         allowHistoryFallback: options.allowProductHistoryFallback !== false
       });
-      selectedRows.push(...diverseProducts.selected);
+      const selectedForKeyword = diverseProducts.selected.map(row => ({
+        ...row,
+        status: 'selected',
+        selectionDecision: row.decision === 'review' ? 'manual_override_pool' : 'strict_gate'
+      }));
+      const selectedUrls = new Set(selectedForKeyword.map(row => row.url).filter(Boolean));
+      const notSelectedRows = scoredProducts
+        .filter(row => !selectedUrls.has(row.url))
+        .map(row => ({
+          ...row,
+          status: row.decision === 'reject'
+            ? 'product_rejected'
+            : row.decision === 'review'
+              ? 'product_review'
+              : 'product_not_selected',
+          selectionDecision: row.decision === 'reject'
+            ? 'opportunity_gate_rejected'
+            : row.decision === 'review'
+              ? 'manual_review_required'
+              : 'diversity_or_limit'
+        }));
+      selectedRows.push(...selectedForKeyword, ...notSelectedRows);
+      gateStats.input += scoredProducts.length;
+      gateStats.passed += passedGate.length;
+      gateStats.review += reviewGate.length;
+      gateStats.rejected += rejectedGate.length;
+      gateStats.notSelected += notSelectedRows.filter(row => row.status === 'product_not_selected').length;
       diversityStats.input += diverseProducts.stats.input;
       diversityStats.selected += diverseProducts.stats.selected;
       diversityStats.newOffers += diverseProducts.stats.newOffers;
@@ -160,6 +200,10 @@ async function flowSelectProducts(options = {}) {
   }
   run.status = selectedCount > 0 ? 'products_selected' : 'select_failed';
   run.counts.selectedProducts = selectedCount;
+  run.counts.productsEvaluated = gateStats.input;
+  run.counts.productGatePassed = gateStats.passed;
+  run.counts.productReviewCandidates = gateStats.review;
+  run.counts.productRejected = gateStats.rejected;
   run.diversity = {
     ...(run.diversity || {}),
     product: {
@@ -169,12 +213,26 @@ async function flowSelectProducts(options = {}) {
       historyRunsScanned: Number(diversityHistory.stats?.runsScanned || 0)
     }
   };
+  setRunStageMetrics(run, 'select', {
+    input: gateStats.input,
+    passedGate: gateStats.passed,
+    selected: selectedCount,
+    review: gateStats.review,
+    rejected: gateStats.rejected,
+    notSelected: gateStats.notSelected
+  }, {
+    product_opportunity_reject: gateStats.rejected,
+    product_opportunity_review: gateStats.review,
+    diversity_or_limit: gateStats.notSelected,
+    ...diversityStats.filteredReasons
+  });
   writeRun(runDir, run);
   return flowResponse({
     ok: true,
     runId: run.runId,
     status: run.status,
     selected: selectedRows,
+    evaluated: selectedRows,
     diversity: run.diversity.product,
     runDir,
     blockers: selectedCount > 0 ? [] : ['no_selected_products'],

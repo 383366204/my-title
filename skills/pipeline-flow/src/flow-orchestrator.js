@@ -1,6 +1,7 @@
 'use strict';
 
 const fs = require('fs');
+const { normalizeExactKeywords } = require('../../../core/exact-keywords');
 const { exactKeywordCandidate } = require('./candidate-helpers');
 const { DEFAULT_PRODUCTS_PER_KEYWORD } = require('./flow-constants');
 const { buildFlowCommand, flowResponse } = require('./flow-context');
@@ -26,61 +27,68 @@ function buildRunResponse(options, runId, runDir, payload = {}) {
 }
 
 /**
- * Prepare a run for one exact keyword without mining or rewriting.
+ * Prepare a run for one or more exact keywords without mining or rewriting.
  * @param {object} [options] Flow options.
  * @returns {Promise<object>} Prepared run result.
  */
 async function flowKeywordStart(options = {}) {
-  const keyword = String(options.keyword || '').trim();
-  if (!keyword) throw new Error('keyword is required');
+  const keywords = normalizeExactKeywords(
+    Array.isArray(options.keywords) && options.keywords.length > 0 ? options.keywords : options.keyword
+  );
+  if (keywords.length === 0) throw new Error('keyword is required');
   const { runDir, run } = initRun({
     ...options,
     options: {
       ...(options.options || {}),
-      exactKeyword: keyword,
+      exactKeyword: keywords[0],
+      exactKeywords: keywords,
       mode: 'keyword'
     }
   });
-  const candidate = exactKeywordCandidate(keyword);
+  const candidates = keywords.map(exactKeywordCandidate);
   fs.writeFileSync(run.files.candidates, '', 'utf8');
-  appendJsonl(run.files.candidates, [candidate]);
+  appendJsonl(run.files.candidates, candidates);
   run.status = 'mined';
-  run.counts.candidates = 1;
+  run.counts.candidates = candidates.length;
   writeRun(runDir, run);
   return flowResponse({
     ok: true,
     runId: run.runId,
     runDir,
-    exactKeyword: keyword,
+    exactKeyword: keywords[0],
+    exactKeywords: keywords,
     status: run.status,
-    candidates: [candidate],
+    candidates,
     blockers: [],
-    allowedCommands: [buildFlowCommand('verify', run.runId, { limit: 1 })],
-    nextCommand: buildFlowCommand('verify', run.runId, { limit: 1 })
+    allowedCommands: [buildFlowCommand('verify', run.runId, { limit: keywords.length })],
+    nextCommand: buildFlowCommand('verify', run.runId, { limit: keywords.length })
   });
 }
 
 /**
- * Run the flow for one user-provided keyword without mining or rewriting.
+ * Run the flow for user-provided keywords without mining or rewriting.
  * @param {object} [options] Flow options.
  * @returns {Promise<object>} Exact keyword flow result.
  */
 async function flowKeyword(options = {}) {
-  const keyword = String(options.keyword || '').trim();
-  if (!keyword) throw new Error('keyword is required');
-  const prepared = await flowKeywordStart(options);
+  const keywords = normalizeExactKeywords(
+    Array.isArray(options.keywords) && options.keywords.length > 0 ? options.keywords : options.keyword
+  );
+  if (keywords.length === 0) throw new Error('keyword is required');
+  const prepared = await flowKeywordStart({ ...options, keywords });
   const runDir = prepared.runDir;
   const runId = prepared.runId;
+  const exactKeywordPayload = { exactKeyword: keywords[0], exactKeywords: keywords };
 
-  const verify = await flowVerify({ ...options, runId, limit: 1 });
+  const verify = await flowVerify({ ...options, runId, limit: keywords.length });
   if (verify.verified.length === 0 || verify.blockers.includes('sycm_manual_action_required')) {
     return buildRunResponse(options, runId, runDir, {
-      exactKeyword: keyword,
+      ...exactKeywordPayload,
       blockers: verify.blockers.length ? verify.blockers : ['no_verified_keywords'],
       allowedCommands: [verify.nextCommand],
       nextCommand: verify.nextCommand,
       steps: {
-        mined: 1,
+        mined: keywords.length,
         verified: 0,
         rejected: verify.rejected.length,
         generated: 0,
@@ -92,18 +100,18 @@ async function flowKeyword(options = {}) {
   const select = await flowSelectProducts({
     ...options,
     runId,
-    limit: 1,
+    limit: keywords.length,
     productsPerKeyword: options.productsPerKeyword || DEFAULT_PRODUCTS_PER_KEYWORD
   });
   const selectedCount = select.selected.filter(row => row.status === 'selected').length;
   if (selectedCount === 0) {
     return buildRunResponse(options, runId, runDir, {
-      exactKeyword: keyword,
+      ...exactKeywordPayload,
       blockers: ['no_selected_products'],
       allowedCommands: [select.nextCommand],
       nextCommand: select.nextCommand,
       steps: {
-        mined: 1,
+        mined: keywords.length,
         verified: verify.verified.length,
         selected: 0,
         rejected: verify.rejected.length,
@@ -116,18 +124,18 @@ async function flowKeyword(options = {}) {
   const generate = await flowGenerate({
     ...options,
     runId,
-    limit: 1,
+    limit: keywords.length,
     productsPerKeyword: options.productsPerKeyword || DEFAULT_PRODUCTS_PER_KEYWORD
   });
   const generatedCount = generate.generated.filter(row => row.status === 'generated').length;
   if (generatedCount === 0) {
     return buildRunResponse(options, runId, runDir, {
-      exactKeyword: keyword,
+      ...exactKeywordPayload,
       blockers: ['no_generated_products'],
       allowedCommands: [generate.nextCommand],
       nextCommand: generate.nextCommand,
       steps: {
-        mined: 1,
+        mined: keywords.length,
         verified: verify.verified.length,
         selected: selectedCount,
         rejected: verify.rejected.length,
@@ -139,14 +147,14 @@ async function flowKeyword(options = {}) {
 
   const exported = await flowExport({ ...options, runId, limit: options.export || 20 });
   return buildRunResponse(options, runId, runDir, {
-    exactKeyword: keyword,
+    ...exactKeywordPayload,
     canSubmit: exported.canSubmit,
     mustReview: exported.mustReview,
     blockers: exported.blockers,
     allowedCommands: exported.allowedCommands,
     nextCommand: exported.nextCommand,
     steps: {
-      mined: 1,
+      mined: keywords.length,
       verified: verify.verified.length,
       selected: selectedCount,
       rejected: verify.rejected.length,

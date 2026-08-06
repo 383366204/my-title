@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { normalizeExactKeywords } = require('../../../core/exact-keywords');
 const {
   DEFAULT_FLOW_DIR,
   createRunId,
@@ -93,8 +94,9 @@ function idleProgress() {
   return { status: 'idle', current: 0, total: 0, percent: 0, message: '' };
 }
 
-function completedProgress(message = '完成') {
-  return { status: 'completed', current: 1, total: 1, percent: 100, message };
+function completedProgress(message = '完成', previous = {}) {
+  const total = Math.max(1, Number(previous.total) || 1);
+  return { status: 'completed', current: total, total, percent: 100, message };
 }
 
 function resetProgressFromStep(progress, steps, startStep) {
@@ -130,10 +132,14 @@ function createReporter({ dataDir, getRunId, step }) {
 function createDefaultStepFns({ dataDir, runId, params, mode = 'daily' }) {
   const keywordMode = mode === 'keyword';
   const manualMode = mode === 'manual';
+  const exactKeywords = keywordMode
+    ? normalizeExactKeywords(Array.isArray(params.keywords) && params.keywords.length > 0 ? params.keywords : params.keyword)
+    : [];
+  const keywordCount = Math.max(1, exactKeywords.length);
   const mineLimit = params.mine || params.limit || 50;
-  const verifyLimit = keywordMode ? 1 : (params.verify || 20);
-  const selectLimit = keywordMode ? 1 : (params.select || params.generate || 10);
-  const generateLimit = keywordMode ? 1 : (params.generate || 10);
+  const verifyLimit = keywordMode ? keywordCount : (params.verify || 20);
+  const selectLimit = keywordMode ? keywordCount : (params.select || params.generate || 10);
+  const generateLimit = keywordMode ? keywordCount : (params.generate || 10);
   const exportLimit = params.export || 20;
   const recordSeedFeedback = mode === 'daily'
     ? params.recordSeedFeedback !== false
@@ -143,9 +149,9 @@ function createDefaultStepFns({ dataDir, runId, params, mode = 'daily' }) {
 
   return {
     start: async ({ reportProgress }) => {
-      reportProgress({ current: 0, total: 1, message: '准备精确关键词' });
+      reportProgress({ current: 0, total: keywordCount, message: keywordMode ? `准备 ${keywordCount} 个精确关键词` : '准备流程' });
       if (manualMode) return flowManualStart({ ...params, dataDir, runId });
-      return flowKeywordStart({ ...params, dataDir, runId, keyword: params.keyword });
+      return flowKeywordStart({ ...params, dataDir, runId, keywords: exactKeywords });
     },
     mine: async ({ reportProgress }) => {
       reportProgress({ current: 0, total: mineLimit, message: '开始挖词' });
@@ -206,8 +212,8 @@ function createDefaultStepFns({ dataDir, runId, params, mode = 'daily' }) {
       return { status: 'needs_review' };
     },
     keyword: async ({ reportProgress }) => {
-      reportProgress({ current: 0, total: 1, message: '开始精确关键词流程' });
-      return flowKeyword({ ...params, dataDir, runId, keyword: params.keyword });
+      reportProgress({ current: 0, total: keywordCount, message: `开始处理 ${keywordCount} 个精确关键词` });
+      return flowKeyword({ ...params, dataDir, runId, keywords: exactKeywords });
     }
   };
 }
@@ -343,12 +349,13 @@ async function runPipelineRuntime(options = {}) {
         runDir = lastResult.runDir || runtimeRunDir(dataDir, runId);
       }
 
+      const reportedProgress = readRuntimeState({ dataDir, runId })?.progress?.[step] || {};
       updateRuntimeState({
         dataDir,
         runId,
         patch: {
           progress: {
-            [step]: completedProgress()
+            [step]: completedProgress(reportedProgress.message || '完成', reportedProgress)
           }
         }
       });

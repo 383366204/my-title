@@ -13,6 +13,7 @@ const {
   readRuntimeState
 } = require('../../skills/pipeline-flow/runtime/store');
 const { getLLMProviderInfo } = require('../llm');
+const { normalizeExactKeywords } = require('../exact-keywords');
 
 const WORKFLOW_NODE_IDS = {
   start: 'start',
@@ -187,8 +188,9 @@ function workflowNodes(mode = 'daily') {
   const startData = mode === 'keyword'
     ? {
         label: '开始',
-        description: '输入精确关键词并启动',
+        description: '批量输入精确关键词并启动',
         keyword: '',
+        keywordsText: '',
         export: 20,
         productsPerKeyword: 12,
         length: 60,
@@ -310,9 +312,9 @@ function listProductionWorkflowTemplates() {
     }),
     template('exact-keyword-v1', '精确关键词选品流水线', 'keyword', '按用户给定关键词生成铺货清单', {
       entryLabel: '入口：手动关键词',
-      scenarioLabel: '适合：验证一个明确目标词',
-      flowSummary: '流程：输入关键词 → 跳过挖词 → 生意参谋校验 → 货源选品 → 标题生成 → 导出复核',
-      modeHint: '使用你输入的关键词，跳过挖词，直接进入生意参谋校验。'
+      scenarioLabel: '适合：批量验证明确目标词',
+      flowSummary: '流程：批量输入关键词 → 跳过挖词 → 生意参谋校验 → 货源选品 → 标题生成 → 导出复核',
+      modeHint: '每行输入一个关键词，系统会逐词验真、选品和生成标题。'
     }),
     template('manual-selection-v1', '人工选词人工选品流水线', 'manual', '输入关键词和 1688 货源，生成标题后确认铺货', {
       entryLabel: '入口：关键词 + 1688链接',
@@ -394,10 +396,13 @@ function sanitizeWorkflowParams(mode, raw = {}) {
     };
   }
   if (mode === 'keyword') {
-    const keyword = String(raw.keyword || '').trim();
-    if (!keyword) throw new Error('关键词不能为空');
+    const keywords = normalizeExactKeywords(
+      Array.isArray(raw.keywords) && raw.keywords.length > 0 ? raw.keywords : raw.keyword
+    );
+    if (keywords.length === 0) throw new Error('关键词不能为空');
     return {
-      keyword,
+      keyword: keywords[0],
+      ...(keywords.length > 1 ? { keywords } : {}),
       export: clampInt(raw.export, 20, 1, 100),
       productsPerKeyword: clampInt(raw.productsPerKeyword, 12, 1, 50),
       length: clampInt(raw.length, 60, 30, 80),
@@ -457,7 +462,8 @@ function buildPipelineCliArgs(mode, params = {}) {
     return args;
   }
   if (mode === 'keyword') {
-    const args = ['bin/cli.js', 'flow', 'keyword', clean.keyword];
+    const keywordInput = Array.isArray(clean.keywords) ? clean.keywords.join('\n') : clean.keyword;
+    const args = ['bin/cli.js', 'flow', 'keyword', keywordInput];
     pushFlag(args, '--export', clean.export);
     pushFlag(args, '--products-per-keyword', clean.productsPerKeyword);
     pushFlag(args, '--length', clean.length);
@@ -527,14 +533,19 @@ function validateProductionWorkflow(workflow) {
   };
 }
 
-function extractWorkflowKeyword(workflow) {
+function extractWorkflowKeywords(workflow) {
   const nodes = Array.isArray(workflow?.nodes) ? workflow.nodes : [];
   const keywordNode = nodes.find(node => {
-    if (!node || !node.data || typeof node.data.keyword !== 'string') return false;
+    if (!node || !node.data) return false;
+    const hasKeywords = node.data.keywordsText != null || node.data.keywords != null || node.data.keyword != null;
+    if (!hasKeywords) return false;
     if (node.id === WORKFLOW_NODE_IDS.start || node.type === 'keyword-input' || node.type === 'production-start') return true;
-    return node.data.keyword.trim().length > 0;
+    return normalizeExactKeywords(node.data.keywordsText ?? node.data.keywords ?? node.data.keyword).length > 0;
   });
-  return keywordNode ? keywordNode.data.keyword.trim() : '';
+  if (!keywordNode) return [];
+  return normalizeExactKeywords(
+    keywordNode.data.keywordsText ?? keywordNode.data.keywords ?? keywordNode.data.keyword
+  );
 }
 
 /**
@@ -564,14 +575,15 @@ function resolveProductionWorkflowLaunch(body = {}) {
   }
 
   if (!params.keyword && !params.keywords) {
-    const keyword = extractWorkflowKeyword(workflow);
-    if (keyword) params.keyword = keyword;
+    const keywords = extractWorkflowKeywords(workflow);
+    if (keywords.length > 0) params.keyword = keywords[0];
+    if (keywords.length > 1) params.keywords = keywords;
   }
 
   let mode = body.mode || workflow?.mode || template?.mode || '';
-  if (params.keywords && !hasExplicitMode && !hasExplicitTemplate) mode = 'manual';
+  if (params.keywords && !hasExplicitMode && !hasExplicitTemplate) mode = params.items ? 'manual' : 'keyword';
   if (params.keyword && !hasExplicitMode && !hasExplicitTemplate) mode = 'keyword';
-  if (!mode && params.keywords) mode = 'manual';
+  if (!mode && params.keywords) mode = params.items ? 'manual' : 'keyword';
   if (!mode && params.keyword) mode = 'keyword';
   if (mode === 'daily' && params.keyword && !body.mode && !template) mode = 'keyword';
   if (!mode) {
@@ -1220,6 +1232,9 @@ function pipelineSummaryToWorkflowRun(summary, options = {}) {
     logs: [],
     stage: summary.stage,
     counts: summary.counts || {},
+    policy: summary.policy || {},
+    funnel: summary.funnel || {},
+    failureReasons: summary.failureReasons || {},
     diversity: summary.diversity || {},
     files: summary.files || {},
     batchFile: summary.batchFile || '',

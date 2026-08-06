@@ -19,11 +19,18 @@ import { useWorkflowOperations } from './features/workflow/hooks/use-workflow-op
 import { useWorkflowRunCatalog } from './features/workflow/hooks/use-workflow-run-catalog.js';
 import { useSeedMiner } from './features/workflow/hooks/use-seed-miner.js';
 import { useTitleGeneration } from './features/workflow/hooks/use-title-generation.js';
+import { useWorkflowOverlay } from './features/workflow/hooks/use-workflow-overlay.js';
 import { WorkflowConsole } from './features/workflow/components/workflow-console.jsx';
 import { WorkflowLeftSidebar } from './features/workflow/components/workflow-left-sidebar.jsx';
 import { WorkflowCanvasWorkspace } from './features/workflow/components/workflow-canvas-workspace.jsx';
 import { WorkflowRightSidebar } from './features/workflow/components/workflow-right-sidebar.jsx';
-import { ManualWorkflowInputPanel } from './features/workflow/components/manual-workflow-input-panel.jsx';
+import { WorkflowOverlayManager } from './features/workflow/components/workflow-overlay-manager.jsx';
+import {
+  getWorkflowCommandAction,
+  getWorkflowActionRoute,
+  WORKFLOW_ACTION_KINDS,
+  WORKFLOW_OVERLAYS
+} from './features/workflow/workflow-action-registry.js';
 import { nodeTypes } from './features/workflow/workflow-node-types.js';
 import {
   ACTIVE_RUN_STATUSES,
@@ -68,7 +75,7 @@ const shouldCollapseSidebarInitially = () => (
 
 export default function WorkflowStudio({ initialMode: _initialMode }) {
   const [leftSidebarCollapsed, setLeftSidebarCollapsed] = useState(shouldCollapseSidebarInitially);
-  const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(shouldCollapseSidebarInitially);
+  const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(true);
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [selectedNodeId, setSelectedNodeId] = useState(null);
@@ -146,15 +153,7 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
     useVerifiedKeyword: useVerifiedKeywordForTitle,
     generateTitleFromNode
   } = useTitleGeneration({ active: selectedNodeId === 'generate', runId: currentRunId });
-  const [artifactPreviewOpen, setArtifactPreviewOpen] = useState(false);
-  const [artifactPreviewTargetNodeId, setArtifactPreviewTargetNodeId] = useState(null);
-  const [manualInputOpen, setManualInputOpen] = useState(false);
-
-  useEffect(() => {
-    if (!artifactPreviewTargetNodeId || selectedNodeId !== artifactPreviewTargetNodeId) return;
-    setArtifactPreviewOpen(true);
-    setArtifactPreviewTargetNodeId(null);
-  }, [artifactPreviewTargetNodeId, selectedNodeId]);
+  const { activeOverlay, closeOverlay, openOverlay } = useWorkflowOverlay();
 
   // 加载工作流模板
   const loadTemplate = (template) => {
@@ -182,6 +181,7 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
     setRunStatus('idle');
     setCurrentRunId(null);
     setLogs([]);
+    closeOverlay();
     setArtifactState({ status: 'empty', nodeId: null, artifact: null, error: '' });
   };
   const loadTemplateRef = useRef(loadTemplate);
@@ -360,20 +360,6 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
   };
 
   const runWorkflowOperation = async (action, nodeId = null) => {
-    const targetNodeId = nodeId || selectedNodeId;
-    if (action === 'open-review' || action === 'confirm-distribution' || action === 'keyword-review' || action === 'product-review') {
-      if (targetNodeId) setSelectedNodeId(targetNodeId);
-      if (action === 'open-review' || action === 'confirm-distribution') {
-        if (targetNodeId) setArtifactPreviewTargetNodeId(targetNodeId);
-        else setArtifactPreviewOpen(true);
-      }
-      setLogs((prev) => [...prev, {
-        timestamp: new Date().toISOString(),
-        level: action === 'confirm-distribution' || action === 'keyword-review' ? 'warn' : 'info',
-        message: getWorkflowOperationMessage(action, 'success')
-      }]);
-      return;
-    }
     return runRemoteOperation(action, nodeId);
   };
 
@@ -399,13 +385,19 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
   }, [currentRunId, setLogs, setNodes]);
 
   const handleNodeAction = async (action, nodeId) => {
-    if (action === 'manual-input') {
-      setSelectedNodeId(nodeId);
-      setManualInputOpen(true);
+    const targetNodeId = nodeId || selectedNodeId;
+    const route = getWorkflowActionRoute(action);
+    if (targetNodeId) setSelectedNodeId(targetNodeId);
+    if (route.kind === WORKFLOW_ACTION_KINDS.OVERLAY) {
+      openOverlay(route.overlay, targetNodeId, { sourceAction: action });
+      setLogs((prev) => [...prev, {
+        timestamp: new Date().toISOString(),
+        level: ['confirm-distribution', 'keyword-review', 'blocked'].includes(action) ? 'warn' : 'info',
+        message: getWorkflowOperationMessage(action, 'success')
+      }]);
       return;
     }
-    if (action === 'artifact' || action === 'inspect' || action === 'blocked' || action === 'review') {
-      setSelectedNodeId(nodeId);
+    if (route.kind === WORKFLOW_ACTION_KINDS.SELECT) {
       return;
     }
     if (action === 'pause-distribution') {
@@ -430,12 +422,12 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
       }
       return;
     }
-    return runWorkflowOperation(action, nodeId);
+    return runWorkflowOperation(getWorkflowCommandAction(action), nodeId);
   };
 
   const handleViewNodeArtifact = (nodeId) => {
     setSelectedNodeId(nodeId);
-    setArtifactPreviewTargetNodeId(nodeId);
+    openOverlay(WORKFLOW_OVERLAYS.ARTIFACT, nodeId, { sourceAction: 'artifact' });
   };
 
   // 画布节点由历史数据创建，事件入口必须始终指向当前 render 的运行上下文。
@@ -448,7 +440,7 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
   };
 
   const confirmKeywordReview = async (rows = [], manualKeywords = []) => {
-    if (!currentRunId) return;
+    if (!currentRunId) return false;
     const approvedKeywords = rows
       .filter((row) => row.reviewDecision !== 'rejected')
       .map((row) => candidateKeyword(row))
@@ -472,31 +464,40 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
       setArtifactState((current) => ({ ...current, status: 'loading' }));
       const artifact = await getWorkflowArtifact(currentRunId, 'keywordReview');
       setArtifactState({ status: artifact ? 'ready' : 'empty', nodeId: 'keywordReview', artifact, error: '' });
+      return true;
     } catch (err) {
       const message = `人工筛词确认失败: ${err.message}`;
       setLogs((prev) => [...prev, { timestamp: new Date().toISOString(), level: 'error', message }]);
       alert(message);
+      return false;
     }
   };
 
   const confirmProductReview = async ({ approvedProductIds = [], manualProducts = [] } = {}) => {
-    if (!currentRunId) return;
+    if (!currentRunId) return false;
     try {
-      const result = await confirmProductReviewRequest(currentRunId, { approvedProductIds, manualProducts });
+      const response = await confirmProductReviewRequest(currentRunId, { approvedProductIds, manualProducts });
+      const result = response.result || response;
       const selectedCount = result.selected?.length || 0;
       setLogs((prev) => [...prev, {
         timestamp: new Date().toISOString(),
         level: 'info',
-        message: `人工选品完成，已确认 ${selectedCount} 个商品，流程将继续生成标题。`
+        message: `人工选品完成，已确认 ${selectedCount} 个商品。${result.status === 'products_selected' ? '正在继续生成标题。' : '请检查选品结果后再继续。'}`
       }]);
-      await loadHistoryRun(currentRunId);
       setArtifactState({ status: 'loading', nodeId: 'select', artifact: null, error: '' });
       const artifact = await getWorkflowArtifact(currentRunId, 'select');
       setArtifactState({ status: artifact ? 'ready' : 'empty', nodeId: 'select', artifact, error: '' });
+      if (result.status === 'products_selected') {
+        await runWorkflowOperation('resume', 'select');
+      } else {
+        await loadHistoryRun(currentRunId);
+      }
+      return true;
     } catch (err) {
       const message = `人工选品确认失败: ${err.message}`;
       setLogs((prev) => [...prev, { timestamp: new Date().toISOString(), level: 'error', message }]);
       alert(message);
+      return false;
     }
   };
 
@@ -582,41 +583,36 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
       />
 
       <WorkflowRightSidebar
-        activeTemplateMode={activeTemplateMode}
-        activeTemplateView={activeTemplateView}
-        artifactPreviewOpen={artifactPreviewOpen}
-        artifactState={artifactState}
         collapsed={rightSidebarCollapsed}
-        copyText={copyText}
-        currentRunId={currentRunId}
         isViewingRun={isViewingRun}
-        onOpenManualInput={() => setManualInputOpen(true)}
         onToggle={() => setRightSidebarCollapsed((collapsed) => !collapsed)}
-        operationProps={nodeOperationProps}
         selectedNode={selectedNode}
-        setArtifactPreviewOpen={setArtifactPreviewOpen}
-        updateDistributionNodeJob={updateDistributionNodeJob}
-        updateNodeData={updateNodeData}
       />
       </div>
-      {manualInputOpen && (
-        <div className="workflow-modal-backdrop" role="presentation" onClick={() => setManualInputOpen(false)}>
-          <ManualWorkflowInputPanel
-            initialDefaultKeyword={nodes.find((node) => node.id === 'start')?.data?.defaultKeyword || ''}
-            initialItems={nodes.find((node) => node.id === 'start')?.data?.items || []}
-            onCancel={() => setManualInputOpen(false)}
-            onSave={({ defaultKeyword, items }) => {
-              updateNodeFields('start', { defaultKeyword, items });
-              setManualInputOpen(false);
-              setLogs((previous) => [...previous, {
-                timestamp: new Date().toISOString(),
-                level: 'info',
-                message: `已准备 ${items.length} 个商品，启动流水线后将直接获取商品资料。`
-              }]);
-            }}
-          />
-        </div>
-      )}
+      <WorkflowOverlayManager
+        activeOverlay={activeOverlay}
+        activeTemplateMode={activeTemplateMode}
+        activeTemplateView={activeTemplateView}
+        artifactState={artifactState}
+        copyText={copyText}
+        currentRunId={currentRunId}
+        nodeOperationProps={nodeOperationProps}
+        nodes={nodes}
+        onClose={closeOverlay}
+        onConfirmProductReview={confirmProductReview}
+        onRetryNode={retryWorkflowNode}
+        onSaveManualInput={({ defaultKeyword, items }) => {
+          updateNodeFields('start', { defaultKeyword, items });
+          closeOverlay();
+          setLogs((previous) => [...previous, {
+            timestamp: new Date().toISOString(),
+            level: 'info',
+            message: `已准备 ${items.length} 个商品，启动流水线后将直接获取商品资料。`
+          }]);
+        }}
+        onUpdateNodeData={updateNodeData}
+        updateDistributionNodeJob={updateDistributionNodeJob}
+      />
       <WorkflowConsole logs={logs} onClear={() => setLogs([])} />
     </div>
   );

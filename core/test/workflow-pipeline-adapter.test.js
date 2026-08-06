@@ -62,7 +62,7 @@ describe('workflow pipeline adapter', () => {
     assert.match(templates[0].flowSummary, /灵感选词/);
     assert.match(templates[1].flowSummary, /跳过挖词/);
     assert.match(templates[0].modeHint, /不要求预先维护种子池/);
-    assert.match(templates[1].modeHint, /直接进入生意参谋/);
+    assert.match(templates[1].modeHint, /逐词验真/);
     assert.match(templates[2].flowSummary, /录入词和货源/);
     assert.match(templates[2].flowSummary, /自动铺货/);
     const dailyStart = templates[0].workflow.nodes.find(node => node.id === WORKFLOW_NODE_IDS.start);
@@ -90,6 +90,7 @@ describe('workflow pipeline adapter', () => {
       'verify'
     ]);
     assert.equal(keywordStart.data.keyword, '');
+    assert.equal(keywordStart.data.keywordsText, '');
     assert.deepEqual(templates[2].workflow.nodes.find(node => node.id === WORKFLOW_NODE_IDS.start).data.items, []);
     for (const template of templates) {
       assert.equal(template.production, true);
@@ -266,6 +267,21 @@ describe('workflow pipeline adapter', () => {
     });
 
     assert.deepEqual(resolveProductionWorkflowLaunch({
+      workflow: {
+        nodes: [
+          { id: 'start', type: 'production-start', data: { keywordsText: '纯银耳环\n桌面收纳盒\n纯银耳环' } }
+        ],
+        edges: []
+      }
+    }), {
+      mode: 'keyword',
+      params: {
+        keyword: '纯银耳环',
+        keywords: ['纯银耳环', '桌面收纳盒']
+      }
+    });
+
+    assert.deepEqual(resolveProductionWorkflowLaunch({
       workflow: templates[0].workflow
     }), {
       mode: 'daily',
@@ -365,6 +381,20 @@ describe('workflow pipeline adapter', () => {
       fallbackHot: true
     });
 
+    assert.deepEqual(sanitizeWorkflowParams('keyword', {
+      keywords: [' 纯银项链女 ', '桌面收纳盒', '纯银项链女']
+    }), {
+      keyword: '纯银项链女',
+      keywords: ['纯银项链女', '桌面收纳盒'],
+      export: 20,
+      productsPerKeyword: 12,
+      length: 60,
+      port: 9222,
+      pages: 1,
+      minBlueRows: 1,
+      fallbackHot: true
+    });
+
     assert.throws(() => sanitizeWorkflowParams('keyword', { keyword: '   ' }), /关键词不能为空/);
     assert.deepEqual(sanitizeWorkflowParams('manual', {
       defaultKeyword: ' 法式连衣裙 ',
@@ -451,6 +481,11 @@ describe('workflow pipeline adapter', () => {
       '--min-blue-rows', '1',
       '--json'
     ]);
+
+    const batchKeywordArgs = buildPipelineCliArgs('keyword', {
+      keywords: ['纯银项链', '桌面收纳盒']
+    });
+    assert.equal(batchKeywordArgs[3], '纯银项链\n桌面收纳盒');
   });
 
   it('rejects unknown modes and never emits shell-like numeric params in CLI args', () => {
@@ -493,6 +528,9 @@ describe('workflow pipeline adapter', () => {
         keyword: { familyCount: 2, newFamilyCount: 1 },
         product: { uniqueOffers: 1, newOffers: 1, suppliers: 1 }
       },
+      policy: { version: 2, productGate: 'strict' },
+      funnel: { export: { input: 2, passed: 1, review: 1 } },
+      failureReasons: { export: { product_opportunity_manual_review: 1 } },
       files: {
         candidates: '/tmp/candidates.jsonl',
         verifiedKeywords: '/tmp/verified-keywords.jsonl',
@@ -513,6 +551,9 @@ describe('workflow pipeline adapter', () => {
     assert.equal(run.status, 'needs_review');
     assert.equal(run.workflow.id, 'daily-selection-v1');
     assert.equal(run.requiresUserAction, true);
+    assert.deepEqual(run.policy, { version: 2, productGate: 'strict' });
+    assert.deepEqual(run.funnel.export, { input: 2, passed: 1, review: 1 });
+    assert.deepEqual(run.failureReasons.export, { product_opportunity_manual_review: 1 });
     assert.deepEqual(run.blockers, ['review_rejected_rows']);
     assert.equal(run.nodeStates.start.status, 'completed');
     assert.equal(run.nodeStates.mine.status, 'completed');

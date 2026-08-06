@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Check } from 'lucide-react';
+import { Check, RefreshCw } from 'lucide-react';
 
 import { artifactItems } from '../workflow-data.js';
 
-export const ManualProductSelectionPanel = ({ artifactState, currentRunId, onConfirm }) => {
+export const ManualProductSelectionPanel = ({ artifactState, currentRunId, onConfirm, onRetry, canRetry = false }) => {
   const rows = useMemo(() => artifactItems(artifactState), [artifactState]);
   const [selected, setSelected] = useState({});
   const [manual, setManual] = useState({ url: '', title: '', category: '', keyword: '' });
@@ -83,7 +83,14 @@ export const ManualProductSelectionPanel = ({ artifactState, currentRunId, onCon
         <label className="node-field"><span>商品标题</span><input value={manual.title} onChange={(event) => setManual({ ...manual, title: event.target.value })} placeholder="商品原标题或自定义商品名" /></label>
         <label className="node-field"><span>类目</span><input value={manual.category} onChange={(event) => setManual({ ...manual, category: event.target.value })} placeholder="例如：饰品 > 项链" /></label>
         <label className="node-field"><span>关联关键词</span><input value={manual.keyword} onChange={(event) => setManual({ ...manual, keyword: event.target.value })} placeholder="例如：纯银项链" /></label>
-        <button type="button" className="node-primary-button" disabled={!currentRunId} onClick={submit}><Check size={13} /> 确认人工选品</button>
+        <div className="keyword-review-actions">
+          <button type="button" className="node-primary-button" disabled={!currentRunId} onClick={submit}>
+            <Check size={13} /> 确认并继续生成标题
+          </button>
+          <button type="button" className="node-secondary-button" disabled={!canRetry} onClick={onRetry}>
+            <RefreshCw size={13} /> 重新搜索货源
+          </button>
+        </div>
         {message && <div className="artifact-error">{message}</div>}
       </section>
     </div>

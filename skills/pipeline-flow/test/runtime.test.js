@@ -263,6 +263,26 @@ describe('pipeline runtime runner', () => {
     assert.equal(runtime.progress.export.status, 'completed');
   });
 
+  it('prepares every exact keyword before verification', async () => {
+    const dataDir = tempDataDir();
+    const keywords = ['纯银项链', '桌面收纳盒', '纯银项链'];
+    const result = await runPipelineRuntime({
+      dataDir,
+      mode: 'keyword',
+      params: { keywords },
+      steps: ['start']
+    });
+
+    const candidates = fs.readFileSync(path.join(result.runDir, 'candidates.jsonl'), 'utf8')
+      .trim()
+      .split(/\r?\n/)
+      .map(line => JSON.parse(line));
+    assert.deepEqual(candidates.map(row => row.keyword), ['纯银项链', '桌面收纳盒']);
+    const runtime = readRuntimeState({ dataDir, runId: result.runId });
+    assert.deepEqual(runtime.params.keywords, keywords);
+    assert.equal(runtime.progress.start.total, 2);
+  });
+
   it('keeps progress percent safe for unusual totals', async () => {
     const dataDir = tempDataDir();
     const result = await runPipelineRuntime({

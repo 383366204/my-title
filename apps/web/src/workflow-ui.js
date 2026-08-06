@@ -171,8 +171,13 @@ export function getWorkflowNodeAction(nodeId, state) {
   const normalizedNodeId = String(nodeId || '').toLowerCase();
   const stateDetails = state && typeof state === 'object' ? state : {};
   const normalizedState = String(stateDetails.status || stateDetails.state || state || '').toLowerCase();
-  if (normalizedNodeId === 'start' && stateDetails.manualInput === true && ['idle', 'pending'].includes(normalizedState)) {
-    return { label: '录入词和货源', action: 'manual-input', tone: 'warn' };
+  if (normalizedNodeId === 'start' && ['idle', 'pending'].includes(normalizedState)) {
+    const label = stateDetails.manualInput === true
+      ? '录入词和货源'
+      : Object.hasOwn(stateDetails, 'keywordsText') || Array.isArray(stateDetails.keywords)
+        ? '输入关键词'
+        : '配置输入';
+    return { label, action: 'manual-input', tone: 'warn' };
   }
   if (normalizedNodeId === 'select' && stateDetails.manualDirectInput === true && Number(stateDetails.output?.failed || 0) > 0 && normalizedState === 'completed') {
     return { label: '重试失败项', action: 'retry-node', tone: 'warn' };
@@ -181,7 +186,13 @@ export function getWorkflowNodeAction(nodeId, state) {
     return { label: '输入/筛词', action: 'keyword-review', tone: 'warn' };
   }
   if (normalizedNodeId === 'select' && ['awaiting_product_review', 'needs_review', 'waiting_confirmation'].includes(normalizedState)) {
-    return { label: '人工选品', action: 'product-review', tone: 'warn' };
+    return { label: '勾选货源', action: 'product-review', tone: 'warn' };
+  }
+  if (normalizedNodeId === 'select' && ['failed', 'blocked', 'retryable'].includes(normalizedState)) {
+    return { label: '勾选货源', action: 'product-review', tone: 'warn' };
+  }
+  if (normalizedNodeId === 'select' && normalizedState === 'completed') {
+    return { label: '调整货源', action: 'product-review', tone: 'success' };
   }
   if (normalizedNodeId === 'export' && ['needs_review'].includes(normalizedState)) {
     return { label: '处理铺货复核', action: 'open-review', tone: 'warn' };
@@ -296,8 +307,13 @@ export function getWorkflowBlockerActions(nodeId, state = {}) {
   );
 
   if (recommended && recommended.action && (!sycmChromeBlocked || recommended.action === 'start-sycm-chrome')) {
+    const recommendedAction = {
+      'confirm-keyword-review': 'keyword-review',
+      'resume-after-manual': 'resume',
+      'continue-or-fix-sycm': 'resume'
+    }[recommended.action] || recommended.action;
     actions.push({
-      action: recommended.action,
+      action: recommendedAction,
       label: recommended.label || '处理阻塞',
       description: recommended.description || ''
     });
@@ -340,9 +356,7 @@ export function getWorkflowBlockerActions(nodeId, state = {}) {
     });
   }
 
-  return actions.filter((action, index, list) => (
-    list.findIndex(item => item.action === action.action && item.label === action.label) === index
-  ));
+  return actions.filter((action, index, list) => list.findIndex(item => item.action === action.action) === index);
 }
 
 export function getMiningRecoveryHint(run = null) {
@@ -629,9 +643,11 @@ export function getWorkflowOperationMessage(action, result, error = '') {
   if (action === 'resume') return '已请求继续，流程会从当前节点恢复。';
   if (action === 'mine-more') return '已开始重新挖掘候选词，完成后会继续生意参谋校验。';
   if (action === 'retry-node') return '已请求重试，当前节点及下游步骤会重新执行。';
+  if (action === 'manual-input') return '已打开启动配置，完成输入后即可运行流水线。';
   if (action === 'open-review') return '复核报告已在节点产物中展示。';
   if (action === 'confirm-distribution') return '已打开导出清单预览，可复制铺货内容进行人工铺货，或确认后开始自动铺货。';
   if (action === 'keyword-review') return '已打开人工筛词，请保留或筛除关键词后确认。';
+  if (action === 'confirm-keyword-review') return '已打开人工筛词，请核对保留项和筛除项后确认。';
   if (action === 'product-review') return '已打开人工选品，请勾选 1688 货源或手动添加商品后确认。';
   if (action === 'start-sycm-chrome') return result?.userMessage || 'Chrome 已启动。请登录生意参谋后重跑验真。';
   return '操作已提交。';
@@ -690,9 +706,9 @@ export function getWorkflowTemplateView(template = {}) {
     : isKeyword
     ? {
         entryLabel: '入口：手动关键词',
-        scenarioLabel: '适合：验证一个明确目标词',
-        flowSummary: '流程：输入关键词 → 跳过挖词 → 生意参谋校验 → 货源选品 → 标题生成 → 导出复核',
-        modeHint: '使用你输入的关键词，跳过选词挖掘，直接进入生意参谋校验。'
+        scenarioLabel: '适合：批量验证明确目标词',
+        flowSummary: '流程：批量输入关键词 → 跳过挖词 → 生意参谋校验 → 货源选品 → 标题生成 → 导出复核',
+        modeHint: '每行输入一个关键词，系统会逐词验真、选品和生成标题。'
       }
     : {
         entryLabel: '入口：动态灵感',
@@ -876,6 +892,13 @@ export function getStartNodeParams(nodes = []) {
   return params;
 }
 
+export function parseExactKeywords(input) {
+  return [...new Set((Array.isArray(input) ? input : [input])
+    .flatMap((value) => String(value || '').split(/[\r\n,，;；、]+/))
+    .map((value) => value.trim())
+    .filter(Boolean))];
+}
+
 /**
  * Collect executable parameters from the canvas using backend parameter names.
  * @param {Array<object>} nodes Canvas nodes.
@@ -889,6 +912,14 @@ export function getWorkflowLaunchParams(nodes = []) {
   const select = dataFor('select');
   const generate = dataFor('generate');
   const exportNode = dataFor('export');
+
+  if (params.keywordsText != null || params.keywords != null) {
+    const keywords = parseExactKeywords(params.keywordsText ?? params.keywords);
+    params.keyword = keywords[0] || String(params.keyword || '').trim();
+    if (keywords.length > 1) params.keywords = keywords;
+    else delete params.keywords;
+    delete params.keywordsText;
+  }
 
   if (params.maxLength != null && params.length == null) params.length = params.maxLength;
   delete params.maxLength;
@@ -927,7 +958,21 @@ export function getWorkflowLaunchBlocker(mode, nodes = []) {
       }]
     };
   }
-  if (mode !== 'keyword' || String(params.keyword || '').trim()) return null;
+  if (mode !== 'keyword') return null;
+  const keywords = parseExactKeywords(params.keywordsText ?? params.keywords ?? params.keyword);
+  if (keywords.length > 20) {
+    const message = '一次最多输入 20 个关键词';
+    return {
+      status: 'blocked',
+      error: message,
+      logs: [{
+        timestamp: new Date().toISOString(),
+        level: 'error',
+        message: `[keywords_limit_exceeded] ${message}`
+      }]
+    };
+  }
+  if (keywords.length > 0) return null;
   const message = '关键词不能为空';
   return {
     status: 'blocked',

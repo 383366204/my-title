@@ -149,10 +149,19 @@ const WorkflowNodeSecondaryActions = ({ nodeId, data }) => {
 };
 
 // 铺货复核有专门的处理动作，避免和“查看产物”打开同一个清单弹窗。
-const ARTIFACT_NODE_IDS = new Set(['mine', 'verify', 'select', 'generate']);
+const ARTIFACT_NODE_IDS = new Set(['mine', 'keywordReview', 'verify', 'select', 'generate']);
 
 const WorkflowNodeArtifactButton = ({ data }) => {
-  if (!data?.onViewArtifact || !ARTIFACT_NODE_IDS.has(String(data.id || ''))) return null;
+  const status = String(data?.status || data?.state || '').toLowerCase();
+  const output = data?.output;
+  const hasOutput = Array.isArray(output)
+    ? output.length > 0
+    : output && typeof output === 'object'
+      ? Object.keys(output).length > 0
+      : Boolean(output);
+  const hasResult = ['completed', 'blocked', 'failed', 'retryable', 'needs_review', 'waiting_confirmation', 'waiting_manual'].includes(status)
+    && (hasOutput || status !== 'completed');
+  if (!data?.onViewArtifact || !hasResult || !ARTIFACT_NODE_IDS.has(String(data.id || ''))) return null;
   return (
     <span
       className="production-node-artifact-action"
