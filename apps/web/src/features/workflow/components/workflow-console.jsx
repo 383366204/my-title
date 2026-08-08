@@ -1,6 +1,15 @@
+import { useEffect, useRef } from 'react';
 import { FileText } from 'lucide-react';
 
 export function WorkflowConsole({ logs = [], onClear }) {
+  const terminalRef = useRef(null);
+
+  useEffect(() => {
+    if (terminalRef.current) {
+      terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
+    }
+  }, [logs]);
+
   return (
     <div className="workflow-console-panel">
       <div className="workflow-console-head">
@@ -9,7 +18,7 @@ export function WorkflowConsole({ logs = [], onClear }) {
           清空控制台
         </button>
       </div>
-      <div id="console-terminal" className="workflow-console-terminal">
+      <div id="console-terminal" ref={terminalRef} className="workflow-console-terminal">
         {logs.length === 0 ? (
           <div className="text-slate-600 italic">控制台处于闲置状态。点击“运行工作流”后即可捕获步骤执行的实时流式日志。</div>
         ) : logs.map((log, index) => {

@@ -73,39 +73,59 @@ const NODE_PANEL_COPY = {
 export const NodeOperationPanel = ({
   selectedNode,
   artifactState,
-  seedRows,
-  seedDraft,
-  seedLoading,
-  seedMessage,
-  onSeedDraftChange,
-  onLoadSeeds,
-  onAddSeed,
-  onToggleSeed,
-  onDeleteSeed,
-  onSetSeedStatus,
-  minerTab,
-  minerInput,
-  minerResults,
-  minerBusy,
-  onMinerTabChange,
-  onMinerInputChange,
-  onRunMiner,
-  verifiedRows,
-  titleForm,
-  titleLoading,
-  titleResult,
-  titleError,
-  onTitleFormChange,
-  onUseVerifiedKeyword,
-  onGenerateTitle,
-  onCopyText,
-  onConfirmKeywordReview,
-  onConfirmProductReview,
-  onRetryNode,
   currentRunId,
   manualMode,
-  onDistributionJobChange
+  seedWorkbench = {},
+  titleWorkbench = {},
+  reviewActions = {},
+  runtimeActions = {},
+  distributionWorkbench = {}
 }) => {
+  const {
+    seedRows,
+    seedDraft,
+    seedLoading,
+    seedMessage,
+    onSeedDraftChange,
+    onLoadSeeds,
+    onAddSeed,
+    onToggleSeed,
+    onDeleteSeed,
+    onSetSeedStatus,
+    minerTab,
+    minerInput,
+    minerResults,
+    minerBusy,
+    onMinerTabChange,
+    onMinerInputChange,
+    onRunMiner
+  } = seedWorkbench;
+
+  const {
+    verifiedRows,
+    titleForm,
+    titleLoading,
+    titleResult,
+    titleError,
+    onTitleFormChange,
+    onUseVerifiedKeyword,
+    onGenerateTitle
+  } = titleWorkbench;
+
+  const {
+    onConfirmKeywordReview,
+    onConfirmProductReview
+  } = reviewActions;
+
+  const {
+    onCopyText,
+    onRetryNode
+  } = runtimeActions;
+
+  const {
+    onDistributionJobChange
+  } = distributionWorkbench;
+
   const kind = getWorkflowNodePanelKind(selectedNode?.id);
   const copy = kind === 'product-select' && manualMode
     ? { title: '商品资料获取结果', description: '逐条查看1688商品标题、主图、类目和获取失败原因。' }
@@ -143,7 +163,7 @@ export const NodeOperationPanel = ({
           onMinerInputChange={onMinerInputChange}
           onRunMiner={onRunMiner}
           onCopyCandidate={onCopyText}
-          onRetryMine={() => onRetryNode('mine')}
+          onRetryMine={() => onRetryNode?.('mine')}
           canRetryMine={Boolean(currentRunId)}
         />
       )}
@@ -159,7 +179,7 @@ export const NodeOperationPanel = ({
           onUseVerifiedKeyword={onUseVerifiedKeyword}
           onGenerateTitle={onGenerateTitle}
           onCopyTitle={onCopyText}
-          onRetryGenerate={() => onRetryNode('generate')}
+          onRetryGenerate={() => onRetryNode?.('generate')}
           canRetryGenerate={Boolean(currentRunId)}
         />
       )}
@@ -173,7 +193,7 @@ export const NodeOperationPanel = ({
         <KeywordReviewOperationPanel
           artifactState={artifactState}
           onConfirmKeywordReview={onConfirmKeywordReview}
-          onRetryMine={() => onRetryNode('mine')}
+          onRetryMine={() => onRetryNode?.('mine')}
           canConfirm={Boolean(currentRunId)}
           canRetryMine={Boolean(currentRunId)}
         />
@@ -183,7 +203,7 @@ export const NodeOperationPanel = ({
           artifactState={artifactState}
           currentRunId={currentRunId}
           onConfirm={onConfirmProductReview}
-          onRetry={() => onRetryNode('select')}
+          onRetry={() => onRetryNode?.('select')}
           canRetry={Boolean(currentRunId)}
         />
       )}

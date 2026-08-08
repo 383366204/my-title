@@ -504,38 +504,48 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
   const nodeOperationProps = {
     selectedNode,
     artifactState,
-    seedRows,
-    seedDraft,
-    seedLoading,
-    seedMessage,
-    onSeedDraftChange: setSeedDraft,
-    onLoadSeeds: loadSeeds,
-    onAddSeed: addSeed,
-    onToggleSeed: toggleSeed,
-    onDeleteSeed: deleteSeed,
-    onSetSeedStatus: setSeedStatus,
-    minerTab,
-    minerInput,
-    minerResults,
-    minerBusy,
-    onMinerTabChange: setMinerTab,
-    onMinerInputChange: setMinerInput,
-    onRunMiner: runRootMiner,
-    verifiedRows,
-    titleForm,
-    titleLoading,
-    titleResult,
-    titleError,
-    onTitleFormChange: setTitleForm,
-    onUseVerifiedKeyword: useVerifiedKeywordForTitle,
-    onGenerateTitle: generateTitleFromNode,
-    onCopyText: copyText,
-    onConfirmKeywordReview: confirmKeywordReview,
-    onConfirmProductReview: confirmProductReview,
-    onRetryNode: retryWorkflowNode,
     currentRunId,
     manualMode: activeTemplateMode === 'manual',
-    onDistributionJobChange: updateDistributionNodeJob
+    seedWorkbench: {
+      seedRows,
+      seedDraft,
+      seedLoading,
+      seedMessage,
+      onSeedDraftChange: setSeedDraft,
+      onLoadSeeds: loadSeeds,
+      onAddSeed: addSeed,
+      onToggleSeed: toggleSeed,
+      onDeleteSeed: deleteSeed,
+      onSetSeedStatus: setSeedStatus,
+      minerTab,
+      minerInput,
+      minerResults,
+      minerBusy,
+      onMinerTabChange: setMinerTab,
+      onMinerInputChange: setMinerInput,
+      onRunMiner: runRootMiner
+    },
+    titleWorkbench: {
+      verifiedRows,
+      titleForm,
+      titleLoading,
+      titleResult,
+      titleError,
+      onTitleFormChange: setTitleForm,
+      onUseVerifiedKeyword: useVerifiedKeywordForTitle,
+      onGenerateTitle: generateTitleFromNode
+    },
+    reviewActions: {
+      onConfirmKeywordReview: confirmKeywordReview,
+      onConfirmProductReview: confirmProductReview
+    },
+    runtimeActions: {
+      onCopyText: copyText,
+      onRetryNode: retryWorkflowNode
+    },
+    distributionWorkbench: {
+      onDistributionJobChange: updateDistributionNodeJob
+    }
   };
 
   return (

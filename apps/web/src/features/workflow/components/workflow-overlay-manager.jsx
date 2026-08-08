@@ -113,6 +113,7 @@ export function WorkflowOverlayManager({
         sourceNodeId={node?.id}
         onDistributionJobChange={updateDistributionNodeJob}
         directPreview
+        onManualComplete={onClose}
       />
     );
   } else if (activeOverlay.type === WORKFLOW_OVERLAYS.ARTIFACT) {

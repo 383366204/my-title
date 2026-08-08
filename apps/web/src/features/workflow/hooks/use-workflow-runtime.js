@@ -12,7 +12,12 @@ import { useWorkflowEvents } from './use-workflow-events.js';
 
 const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'cancelled']);
 
-function runtimeNodeFields(state = {}) {
+/**
+ * Extract runtime node status and output fields from node state.
+ * @param {object} [state={}] Node state object.
+ * @returns {object} Extracted node runtime fields.
+ */
+export function runtimeNodeFields(state = {}) {
   return {
     status: state.status,
     output: state.output,
@@ -30,12 +35,60 @@ function runtimeNodeFields(state = {}) {
 }
 
 /**
+ * Extract progress fields for canvas node patching.
+ * @param {object} [currentData={}] Current node data.
+ * @param {object} [progress={}] Progress object.
+ * @returns {object} Progress fields patch object.
+ */
+export function progressNodeFields(currentData = {}, progress = {}) {
+  return {
+    status: progress.status || currentData.status,
+    progress,
+    blocker: progress.blocker || currentData.blocker || null,
+    actionHint: progress.actionHint || currentData.actionHint || null,
+    nextRecommendedAction: progress.nextRecommendedAction || currentData.nextRecommendedAction || null,
+    platformStatus: progress.platformStatus || currentData.platformStatus || null,
+    manualAction: progress.manualAction || currentData.manualAction || null,
+    cooldownRemainingMs: progress.cooldownRemainingMs || currentData.cooldownRemainingMs || 0
+  };
+}
+
+/**
+ * Immutably patch data of a single canvas node.
+ * @param {object} node React Flow node object.
+ * @param {object} dataPatch Object containing node data properties to update.
+ * @returns {object} Updated node object.
+ */
+export function patchCanvasNode(node, dataPatch) {
+  if (!dataPatch) return node;
+  return {
+    ...node,
+    data: {
+      ...node.data,
+      ...dataPatch
+    }
+  };
+}
+
+/**
+ * Immutably update target node data by node ID in a list of canvas nodes.
+ * @param {Array<object>} nodes Canvas nodes array.
+ * @param {string} nodeId Target node ID.
+ * @param {object} patchData Data patch object.
+ * @returns {Array<object>} Updated canvas nodes array.
+ */
+export function updateNodeById(nodes, nodeId, patchData) {
+  if (!nodeId) return nodes;
+  return nodes.map((node) => (node.id === nodeId ? patchCanvasNode(node, patchData) : node));
+}
+
+/**
  * Own workflow runtime state and translate SSE events into canvas updates.
  * @param {object} options Runtime dependencies.
- * @param {Function} options.setNodes React Flow node setter.
- * @param {Function} options.setSelectedNodeId Selected-node setter.
- * @param {Function} options.refreshHistory Refresh persisted run history.
- * @returns {object} Runtime state, setters, and event connection controls.
+ * @param {Function} options.setNodes State setter for canvas nodes.
+ * @param {Function} options.setSelectedNodeId State setter for selected node ID.
+ * @param {Function} options.refreshHistory Function to refresh history list.
+ * @returns {object} Runtime state and control callbacks.
  */
 export function useWorkflowRuntime({ setNodes, setSelectedNodeId, refreshHistory }) {
   const [currentRunId, setCurrentRunId] = useState(null);
@@ -46,14 +99,10 @@ export function useWorkflowRuntime({ setNodes, setSelectedNodeId, refreshHistory
     setNodes((currentNodes) => currentNodes.map((node) => {
       const state = getCanvasNodeState(nodeStates, node.id);
       if (!state) return node;
-      return {
-        ...node,
-        data: {
-          ...node.data,
-          ...runtimeNodeFields(state),
-          onSelect: () => setSelectedNodeId(node.id)
-        }
-      };
+      return patchCanvasNode(node, {
+        ...runtimeNodeFields(state),
+        onSelect: () => setSelectedNodeId(node.id)
+      });
     }));
   }, [setNodes, setSelectedNodeId]);
 
@@ -79,20 +128,12 @@ export function useWorkflowRuntime({ setNodes, setSelectedNodeId, refreshHistory
     if (data.event === 'node_change') {
       const { nodeId, state } = payload;
       const effectiveNodeId = effectiveCanvasNodeId(nodeId);
-      setNodes((currentNodes) => currentNodes.map((node) => (
-        node.id === effectiveNodeId
-          ? { ...node, data: { ...node.data, ...runtimeNodeFields(state) } }
-          : node
-      )));
+      setNodes((currentNodes) => updateNodeById(currentNodes, effectiveNodeId, runtimeNodeFields(state)));
       return;
     }
 
     if (data.event === 'log') {
       setLogs((previous) => [...previous, data.payload]);
-      setTimeout(() => {
-        const consoleElement = document.getElementById('console-terminal');
-        if (consoleElement) consoleElement.scrollTop = consoleElement.scrollHeight;
-      }, 50);
       return;
     }
 
@@ -100,23 +141,9 @@ export function useWorkflowRuntime({ setNodes, setSelectedNodeId, refreshHistory
     const progress = normalizeWorkflowProgressEvent(data);
     const nodeId = effectiveCanvasNodeId(progress.step || progress.nodeId);
     if (nodeId && !payload.replay) {
-      setNodes((currentNodes) => currentNodes.map((node) => {
-        if (node.id !== nodeId) return node;
-        return {
-          ...node,
-          data: {
-            ...node.data,
-            status: progress.status || node.data.status,
-            progress,
-            blocker: progress.blocker || node.data.blocker || null,
-            actionHint: progress.actionHint || node.data.actionHint || null,
-            nextRecommendedAction: progress.nextRecommendedAction || node.data.nextRecommendedAction || null,
-            platformStatus: progress.platformStatus || node.data.platformStatus || null,
-            manualAction: progress.manualAction || node.data.manualAction || null,
-            cooldownRemainingMs: progress.cooldownRemainingMs || node.data.cooldownRemainingMs || 0
-          }
-        };
-      }));
+      setNodes((currentNodes) => currentNodes.map((node) => (
+        node.id === nodeId ? patchCanvasNode(node, progressNodeFields(node.data, progress)) : node
+      )));
     }
     const message = progress.message || formatWorkflowProgressLabel(progress);
     if (message) {
@@ -140,10 +167,7 @@ export function useWorkflowRuntime({ setNodes, setSelectedNodeId, refreshHistory
   });
 
   useEffect(() => {
-    setNodes((currentNodes) => currentNodes.map((node) => ({
-      ...node,
-      data: { ...node.data, workflowRunStatus: runStatus }
-    })));
+    setNodes((currentNodes) => currentNodes.map((node) => patchCanvasNode(node, { workflowRunStatus: runStatus })));
   }, [runStatus, setNodes]);
 
   return {

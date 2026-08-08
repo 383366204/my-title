@@ -10,15 +10,17 @@ import {
 } from '../../../api/seed-api.js';
 import { MINER_TABS } from '../workflow-data.js';
 
-export function useSeedMiner({ active }) {
+/**
+ * 种子池管理 Hook
+ * @param {object} [options] - 配置项
+ * @param {boolean} [options.active] - 种子池是否处于激活状态
+ * @returns {object} 种子池状态与操作函数
+ */
+export function useSeedPool({ active } = {}) {
   const [seedRows, setSeedRows] = useState([]);
   const [seedDraft, setSeedDraft] = useState({ keyword: '', category: '', priority: 5, type: 'manual' });
   const [seedLoading, setSeedLoading] = useState(false);
   const [seedMessage, setSeedMessage] = useState('');
-  const [minerTab, setMinerTab] = useState('peer');
-  const [minerInput, setMinerInput] = useState('');
-  const [minerResults, setMinerResults] = useState([]);
-  const [minerBusy, setMinerBusy] = useState(false);
 
   const loadSeeds = useCallback(async () => {
     setSeedLoading(true);
@@ -90,33 +92,50 @@ export function useSeedMiner({ active }) {
     }
   };
 
-  const runRootMiner = async () => {
-    const tab = MINER_TABS.find((item) => item.id === minerTab) || MINER_TABS[0];
-    if (tab.needsInput && !minerInput.trim()) return;
-    setMinerBusy(true);
-    setMinerResults([]);
-    setSeedMessage('');
-    try {
-      const data = await mineKeywordRoots(tab.endpoint, tab.needsInput ? minerInput.trim() : '');
-      setMinerResults(Array.isArray(data) ? data : []);
-    } catch (error) {
-      setSeedMessage(`词根发现失败：${error.message}`);
-    } finally {
-      setMinerBusy(false);
-    }
-  };
-
   return {
     seedRows,
     seedDraft,
     setSeedDraft,
     seedLoading,
     seedMessage,
+    setSeedMessage,
     loadSeeds,
     addSeed: addSeedToPool,
     toggleSeed: toggleSeedInPool,
     setSeedStatus: updateSeedStatus,
-    deleteSeed: deleteSeedFromPool,
+    deleteSeed: deleteSeedFromPool
+  };
+}
+
+/**
+ * 词根挖掘 Hook
+ * @param {object} [options] - 配置项
+ * @param {Function} [options.setSeedMessage] - 设置消息提示的回调函数
+ * @returns {object} 词根挖掘状态与操作函数
+ */
+export function useRootMiner({ setSeedMessage } = {}) {
+  const [minerTab, setMinerTab] = useState('peer');
+  const [minerInput, setMinerInput] = useState('');
+  const [minerResults, setMinerResults] = useState([]);
+  const [minerBusy, setMinerBusy] = useState(false);
+
+  const runRootMiner = async () => {
+    const tab = MINER_TABS.find((item) => item.id === minerTab) || MINER_TABS[0];
+    if (tab.needsInput && !minerInput.trim()) return;
+    setMinerBusy(true);
+    setMinerResults([]);
+    if (typeof setSeedMessage === 'function') setSeedMessage('');
+    try {
+      const data = await mineKeywordRoots(tab.endpoint, tab.needsInput ? minerInput.trim() : '');
+      setMinerResults(Array.isArray(data) ? data : []);
+    } catch (error) {
+      if (typeof setSeedMessage === 'function') setSeedMessage(`词根发现失败：${error.message}`);
+    } finally {
+      setMinerBusy(false);
+    }
+  };
+
+  return {
     minerTab,
     setMinerTab,
     minerInput,
@@ -124,5 +143,36 @@ export function useSeedMiner({ active }) {
     minerResults,
     minerBusy,
     runRootMiner
+  };
+}
+
+/**
+ * 种子池与词根挖掘兼容组合 Hook
+ * @param {object} [options] - 配置项
+ * @param {boolean} [options.active] - 是否处于激活状态
+ * @returns {object} 包含种子池与词根挖掘的全量状态与操作函数
+ */
+export function useSeedMiner({ active } = {}) {
+  const seedPool = useSeedPool({ active });
+  const rootMiner = useRootMiner({ setSeedMessage: seedPool.setSeedMessage });
+
+  return {
+    seedRows: seedPool.seedRows,
+    seedDraft: seedPool.seedDraft,
+    setSeedDraft: seedPool.setSeedDraft,
+    seedLoading: seedPool.seedLoading,
+    seedMessage: seedPool.seedMessage,
+    loadSeeds: seedPool.loadSeeds,
+    addSeed: seedPool.addSeed,
+    toggleSeed: seedPool.toggleSeed,
+    setSeedStatus: seedPool.setSeedStatus,
+    deleteSeed: seedPool.deleteSeed,
+    minerTab: rootMiner.minerTab,
+    setMinerTab: rootMiner.setMinerTab,
+    minerInput: rootMiner.minerInput,
+    setMinerInput: rootMiner.setMinerInput,
+    minerResults: rootMiner.minerResults,
+    minerBusy: rootMiner.minerBusy,
+    runRootMiner: rootMiner.runRootMiner
   };
 }
