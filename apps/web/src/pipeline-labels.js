@@ -15,7 +15,7 @@ export const PIPELINE_STATUS_LABEL = {
   generated: '已生成标题',
   generate_failed: '生成失败',
   export_empty: '导出为空',
-  needs_review: '待铺货复核',
+  needs_review: '等待复核',
   ready_to_distribute: '待确认铺货',
   awaiting_user_confirmation: '等待确认',
   submitted: '已提交',

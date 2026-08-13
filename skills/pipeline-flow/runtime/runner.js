@@ -18,6 +18,15 @@ const {
   flowKeyword
 } = require('../index');
 const {
+  buildOrderSheet,
+  collectOrderSheetProducts
+} = require('../../order-sheet');
+const {
+  buildReviewSheet,
+  generateReviewDrafts,
+  importReviewSource
+} = require('../../review-sheet');
+const {
   assertRuntimeRunId,
   initRuntimeState,
   readRuntimeState,
@@ -30,6 +39,8 @@ const {
 const DEFAULT_STEPS = ['mine', 'keywordReview', 'verify', 'select', 'generate', 'export'];
 const KEYWORD_STEPS = ['start', 'verify', 'select', 'generate', 'export'];
 const MANUAL_STEPS = ['start', 'select', 'generate', 'export'];
+const ORDER_SHEET_STEPS = ['collectRank', 'generateSheet'];
+const REVIEW_SHEET_STEPS = ['importSheet', 'generateReviews', 'generateSheet'];
 const STOP_STATUSES = new Set([
   'mining_manual_action_required',
   'mining_empty',
@@ -207,6 +218,37 @@ function createDefaultStepFns({ dataDir, runId, params, mode = 'daily' }) {
       reportProgress({ current: 0, total: exportLimit, message: '开始导出清单' });
       return flowExport({ ...params, dataDir, runId, limit: exportLimit });
     },
+    collectRank: async ({ reportProgress }) => {
+      reportProgress({ current: 0, total: Math.max(1, Number(params.pages || 1)) + 2, message: '准备采集商品排行' });
+      return collectOrderSheetProducts({ ...params, dataDir, runId, onProgress: reportProgress });
+    },
+    generateSheet: async ({ reportProgress }) => {
+      reportProgress({ current: 0, total: 1, message: mode === 'review-sheet' ? '准备生成评价表' : '准备生成商品排行表格' });
+      const result = mode === 'review-sheet'
+        ? buildReviewSheet({ ...params, dataDir, runId, onProgress: reportProgress })
+        : buildOrderSheet({ ...params, dataDir, runId, onProgress: reportProgress });
+      const resolved = await result;
+      reportProgress({
+        current: 1,
+        total: 1,
+        message: mode === 'review-sheet'
+          ? `已生成 ${resolved.count || 0} 条评价表记录`
+          : `已生成 ${resolved.count || 0} 条表格记录`
+      });
+      return resolved;
+    },
+    importSheet: async ({ reportProgress }) => {
+      reportProgress({ current: 0, total: 1, message: '正在解析上传的刷单表' });
+      const result = await importReviewSource({ ...params, dataDir, runId });
+      reportProgress({ current: 1, total: 1, message: `已导入 ${result.count} 个商品` });
+      return result;
+    },
+    generateReviews: async ({ reportProgress }) => {
+      reportProgress({ current: 0, total: 1, message: '正在生成评价草稿' });
+      const result = await generateReviewDrafts({ ...params, dataDir, runId });
+      reportProgress({ current: result.count, total: result.count, message: `已生成 ${result.count} 条评价，等待复核` });
+      return result;
+    },
     review: async ({ reportProgress }) => {
       reportProgress({ current: 1, total: 1, message: '等待人工复核' });
       return { status: 'needs_review' };
@@ -265,7 +307,17 @@ async function runPipelineRuntime(options = {}) {
     : null;
   const params = options.params == null ? (existingRuntime?.params || {}) : options.params;
   const mode = options.mode || existingRuntime?.mode || 'daily';
-  const steps = options.steps || (mode === 'keyword' ? KEYWORD_STEPS : mode === 'manual' ? MANUAL_STEPS : DEFAULT_STEPS);
+  const steps = options.steps || (
+    mode === 'keyword'
+      ? KEYWORD_STEPS
+      : mode === 'manual'
+        ? MANUAL_STEPS
+        : mode === 'order-sheet'
+          ? ORDER_SHEET_STEPS
+          : mode === 'review-sheet'
+            ? REVIEW_SHEET_STEPS
+          : DEFAULT_STEPS
+  );
   const stepFns = injectedStepFns || createDefaultStepFns({ dataDir, runId, params, mode });
   const startStep = options.retryStep || options.resumeFromStep || existingRuntime?.activeStep || steps[0];
   const startIndex = Math.max(0, steps.indexOf(startStep));

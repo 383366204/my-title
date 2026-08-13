@@ -5,6 +5,7 @@ import { KeywordMiningOperationPanel } from './keyword-mining-operation-panel.js
 import { KeywordReviewOperationPanel } from './keyword-review-operation-panel.jsx';
 import { ManualProductSelectionPanel } from './manual-product-selection-panel.jsx';
 import { TitleGenerationOperationPanel } from './title-generation-operation-panel.jsx';
+import { ReviewDraftPanel } from './review-draft-panel.jsx';
 
 const NodeResultSummaryCard = ({ nodeId, state }) => {
   const summary = getWorkflowResultSummaryView(nodeId, state);
@@ -64,6 +65,10 @@ const NODE_PANEL_COPY = {
     title: '铺货清单与人工复核',
     description: '自动可铺货项和被系统拦截项在这里统一查看、加入、移除和复制。'
   },
+  'review-drafts': {
+    title: '评价生成与复核',
+    description: '逐条编辑评价草稿，确认后生成最终评价表。'
+  },
   completion: {
     title: '流程完成结果',
     description: '导出文件、批次结果和通过率会集中在这里展示。'
@@ -119,7 +124,9 @@ export const NodeOperationPanel = ({
 
   const {
     onCopyText,
-    onRetryNode
+    onRetryNode,
+    onConfirmReviews,
+    confirmingReviews
   } = runtimeActions;
 
   const {
@@ -217,7 +224,10 @@ export const NodeOperationPanel = ({
           onDistributionJobChange={onDistributionJobChange}
         />
       )}
-      {kind !== 'keyword-mining' && kind !== 'keyword-review' && kind !== 'product-select' && kind !== 'title-generate' && kind !== 'distribution-export' && (
+      {kind === 'review-drafts' && (
+        <ReviewDraftPanel artifactState={artifactState} onConfirm={onConfirmReviews} confirming={confirmingReviews} />
+      )}
+      {kind !== 'keyword-mining' && kind !== 'keyword-review' && kind !== 'product-select' && kind !== 'title-generate' && kind !== 'distribution-export' && kind !== 'review-drafts' && (
         <ArtifactPanel state={artifactState} />
       )}
     </div>

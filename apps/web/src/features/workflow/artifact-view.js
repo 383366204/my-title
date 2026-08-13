@@ -11,6 +11,7 @@ export function summarizeWorkflowArtifact(artifact) {
     const items = Array.isArray(artifact.items) ? artifact.items : artifact.rows;
     return `${Array.isArray(items) ? items.length : 0} 条数据`;
   }
+  if (type === 'xlsx') return `${Number(artifact.count || 0)} 条商品`;
   const text = typeof artifact.text === 'string' ? artifact.text : '';
   if (!text.trim()) return '暂无产物';
   if (type === 'markdown' || file.endsWith('.md')) return '复核报告';
@@ -436,6 +437,49 @@ export function getWorkflowArtifactView(artifact, nodeId = '') {
       title: '标题与货源链接',
       emptyText: '暂无标题与货源链接',
       rows: mapBusinessRows(items, effectiveNodeId),
+      text: ''
+    };
+  }
+  if (effectiveNodeId === 'collectRank' && Array.isArray(items)) {
+    const pages = Math.max(1, ...items.map((item) => Number(item.sourcePage || 1)));
+    return {
+      kind: 'business-list',
+      title: `商品排行（${pages} 页）`,
+      emptyText: '暂无商品排行数据',
+      rows: items.map((item, index) => {
+        const monetarySort = ['payAmt', 'sucRefundAmt'].includes(item.sortMetric);
+        const primaryValue = Number(item.sortValue ?? item.visitorCount ?? 0);
+        const metrics = [
+          `${item.sortLabel || '商品访客数'} ${monetarySort ? primaryValue.toFixed(2) : primaryValue}`
+        ];
+        if (item.sortMetric !== 'itmUv') metrics.push(`商品访客数 ${Number(item.visitorCount || 0)}`);
+        if (item.sortMetric !== 'payAmt') metrics.push(`支付金额 ${Number(item.paymentAmount || 0).toFixed(2)}`);
+        if (item.sortMetric !== 'payItmCnt') metrics.push(`支付件数 ${Number(item.paidItemCount || 0)}`);
+        if (item.sortMetric !== 'itemCartCnt') metrics.push(`加购件数 ${Number(item.cartItemCount || 0)}`);
+        return {
+          title: item.title || `第 ${index + 1} 名商品`,
+          meta: [
+            `排名 ${item.rank || index + 1}`,
+            `第 ${item.sourcePage || 1} 页`,
+            item.itemId ? `商品ID ${item.itemId}` : '',
+            item.storeName || ''
+          ].filter(Boolean).join(' · '),
+          metrics,
+          description: item.visitorChange ? `访客较上一周期 ${item.visitorChange}` : `按${item.sortLabel || '商品访客数'}降序采集`,
+          sourceUrl: item.productUrl || '',
+          raw: item
+        };
+      }),
+      text: ''
+    };
+  }
+  if (effectiveNodeId === 'generateSheet' && type === 'xlsx') {
+    const fileName = String(artifact.filename || artifact.file || '');
+    return {
+      kind: 'file',
+      title: fileName.includes('评价') ? '商品评价表' : '商品排行刷单表',
+      emptyText: '表格尚未生成',
+      rows: [],
       text: ''
     };
   }

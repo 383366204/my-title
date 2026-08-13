@@ -64,6 +64,10 @@ const {
   runPipelineRuntime
 } = require('../skills/pipeline-flow/runtime/runner');
 const {
+  confirmReviewDrafts,
+  saveReviewSourceUpload
+} = require('../skills/review-sheet');
+const {
   parseItems,
   checkDistributionReadiness,
   confirmDistributionLog,
@@ -1389,6 +1393,55 @@ app.delete('/api/workflows/runs/:runId', (req, res) => {
   }
 });
 
+app.post('/api/review-sheets/upload', express.raw({
+  type: ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/octet-stream'],
+  limit: '12mb'
+}), async (req, res) => {
+  try {
+    const encodedName = String(req.get('x-file-name') || '刷单表.xlsx');
+    let fileName = encodedName;
+    try { fileName = decodeURIComponent(encodedName); } catch (_) { /* Keep the supplied name. */ }
+    const result = await saveReviewSourceUpload({ buffer: req.body, fileName });
+    const { sourceFile: _sourceFile, ...publicResult } = result;
+    return res.json({ ok: true, data: publicResult });
+  } catch (err) {
+    return res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+app.post('/api/workflows/runs/:runId/review-confirm', (req, res) => {
+  if (activeWorkbenchProcess) {
+    return res.status(409).json({ ok: false, error: '已有工作流正在运行，请等待完成后再继续。' });
+  }
+  try {
+    const runId = req.params.runId;
+    const runtime = readRuntimeState({ runId });
+    if (!runtime || runtime.mode !== 'review-sheet') {
+      return res.status(409).json({ ok: false, error: '当前运行不是评价表流水线。' });
+    }
+    const confirmed = confirmReviewDrafts({ runId, reviews: req.body?.reviews || [] });
+    const promise = runPipelineRuntime({
+      runId,
+      mode: 'review-sheet',
+      params: runtime.params,
+      preserveRuntime: true,
+      resumeFromStep: 'generateSheet'
+    });
+    const runState = { runId, mode: 'review-sheet', promise };
+    activeWorkbenchProcess = runState;
+    promise.then(result => {
+      if (activeWorkbenchProcess === runState) activeWorkbenchProcess = null;
+      originalLog(`[Review Sheet] runtime 完成，runId=${result.runId}, status=${result.runtimeStatus || result.status}`);
+    }).catch(err => {
+      if (activeWorkbenchProcess === runState) activeWorkbenchProcess = null;
+      originalError(`[Review Sheet] runtime 失败，runId=${runId}:`, err.message);
+    });
+    return res.json({ ok: true, data: { status: 'resuming', count: confirmed.count, runId } });
+  } catch (err) {
+    return res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
 // 2.5 POST /api/workflows/validate - 运行前校验工作流图
 app.post('/api/workflows/validate', (req, res) => {
   try {
@@ -1573,6 +1626,9 @@ app.get('/api/workflows/runs/:runId/artifacts/:nodeId/raw', (req, res) => {
     if (!artifact || !artifact.file || !fs.existsSync(artifact.file)) {
       return res.status(404).type('text/plain').send('未找到该节点产物');
     }
+    if (artifact.type === 'xlsx') {
+      return res.download(artifact.file, artifact.filename || path.basename(artifact.file));
+    }
     res.type('text/plain; charset=utf-8').send(fs.readFileSync(artifact.file, 'utf8'));
   } catch (err) {
     res.status(500).type('text/plain').send(err.message);
@@ -1620,17 +1676,17 @@ app.post('/api/workflows/runs/:runId/retry-node', async (req, res) => {
     }
     const runtime = readRuntimeState({ runId });
     if (runtime) {
-      if (!['mine', 'keywordReview', 'verify', 'select', 'generate', 'export'].includes(nodeId)) {
+      if (!['mine', 'keywordReview', 'verify', 'select', 'generate', 'export', 'collectRank', 'generateSheet'].includes(nodeId)) {
         return res.status(400).json({ ok: false, error: '不支持的流程步骤。' });
       }
-      if (nodeId === 'verify') {
+      if (nodeId === 'verify' || nodeId === 'collectRank') {
         const port = parsePositiveNumber(runtime.params?.port || process.env.SYCM_DEBUG_PORT || 9222, 9222);
         const recovery = await recoverSycmAccessAfterChrome(port);
         if (!recovery.chromeReady) {
           return res.status(409).json({
             ok: false,
             code: 'SYCM_CHROME_REQUIRED',
-            error: `Chrome 调试连接仍不可用（端口 ${port}）。请先点击节点上的“启动 Chrome”，完成登录后再重跑验真。`
+            error: `Chrome 调试连接仍不可用（端口 ${port}）。请先点击节点上的“启动 Chrome”，完成登录后再重试当前节点。`
           });
         }
       }
@@ -1726,7 +1782,10 @@ app.post('/api/workflows/runs/:runId/pause', (req, res) => {
 app.post('/api/workflows/sycm/chrome/start', async (req, res) => {
   const port = parsePositiveNumber(req.body?.port || process.env.SYCM_DEBUG_PORT || 9222, 9222);
   const chromeProfileDir = req.body?.chromeProfileDir || process.env.SYCM_CHROME_PROFILE_DIR;
-  const sycmUrl = req.body?.url || process.env.SYCM_START_URL || SYCM_SELECTORS.SEARCH_URL;
+  const sycmUrl = req.body?.url
+    || (req.body?.nodeId === 'collectRank' ? 'https://sycm.taobao.com/cc/item_rank' : '')
+    || process.env.SYCM_START_URL
+    || SYCM_SELECTORS.SEARCH_URL;
   try {
     const launchResult = await getSycmChromeLauncher()(port, { userDataDir: chromeProfileDir });
     if (!launchResult || launchResult.success !== true) {
@@ -1866,8 +1925,9 @@ app.get('/api/workflows/runs/:runId/events', (req, res) => {
       const nextSnapshot = JSON.stringify({ status: latest.status, nodeStates: latest.nodeStates });
       if (nextSnapshot === lastSnapshot) return;
       lastSnapshot = nextSnapshot;
-      res.write(`data: ${JSON.stringify({ event: 'status_change', payload: { status: latest.status } })}\n\n`);
       res.write(`data: ${JSON.stringify({ event: 'init', payload: { status: latest.status, nodeStates: latest.nodeStates } })}\n\n`);
+      // 先同步节点终态，再通知客户端断开终态事件流，避免完成节点和下载按钮停留在旧状态。
+      res.write(`data: ${JSON.stringify({ event: 'status_change', payload: { status: latest.status } })}\n\n`);
     } catch (err) {
       res.write(`data: ${JSON.stringify({ event: 'log', payload: { level: 'error', message: err.message } })}\n\n`);
     }

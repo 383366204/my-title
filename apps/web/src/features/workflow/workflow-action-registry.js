@@ -9,6 +9,7 @@ export const WORKFLOW_OVERLAYS = Object.freeze({
   DISTRIBUTION: 'distribution',
   NODE_WORKBENCH: 'node-workbench',
   PRODUCT_SELECT: 'product-select',
+  SHEET_CONFIG: 'sheet-config',
   START_CONFIG: 'start-config'
 });
 
@@ -18,11 +19,13 @@ const overlay = (target) => Object.freeze({ kind: WORKFLOW_ACTION_KINDS.OVERLAY,
 
 export const WORKFLOW_ACTION_ROUTES = Object.freeze({
   'manual-input': overlay(WORKFLOW_OVERLAYS.START_CONFIG),
+  'configure-sheet': overlay(WORKFLOW_OVERLAYS.SHEET_CONFIG),
   'keyword-review': overlay(WORKFLOW_OVERLAYS.NODE_WORKBENCH),
   'confirm-keyword-review': overlay(WORKFLOW_OVERLAYS.NODE_WORKBENCH),
   'product-review': overlay(WORKFLOW_OVERLAYS.PRODUCT_SELECT),
   'open-review': overlay(WORKFLOW_OVERLAYS.DISTRIBUTION),
   'confirm-distribution': overlay(WORKFLOW_OVERLAYS.DISTRIBUTION),
+  'review-drafts': overlay(WORKFLOW_OVERLAYS.NODE_WORKBENCH),
   artifact: overlay(WORKFLOW_OVERLAYS.ARTIFACT),
   blocked: overlay(WORKFLOW_OVERLAYS.NODE_WORKBENCH),
   review: overlay(WORKFLOW_OVERLAYS.NODE_WORKBENCH),

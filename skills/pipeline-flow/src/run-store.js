@@ -108,6 +108,11 @@ function ensureRunFiles(run, runDir) {
   run.files.generatedProducts = run.files.generatedProducts || path.join(runDir, 'generated-products.jsonl');
   run.files.distributionBatch = run.files.distributionBatch || path.join(runDir, 'distribution-batch.txt');
   run.files.distributionReview = run.files.distributionReview || path.join(runDir, 'distribution-review.md');
+  run.files.productRank = run.files.productRank || path.join(runDir, 'sycm-product-rank.jsonl');
+  run.files.orderSheet = run.files.orderSheet || path.join(runDir, '商品排行刷单表.xlsx');
+  run.files.reviewSource = run.files.reviewSource || path.join(runDir, 'uploaded-order-sheet.xlsx');
+  run.files.reviewGroups = run.files.reviewGroups || path.join(runDir, 'review-order-groups.json');
+  run.files.reviewDrafts = run.files.reviewDrafts || path.join(runDir, 'review-drafts.jsonl');
 }
 
 /**
@@ -206,7 +211,12 @@ function initRun({ dataDir = DEFAULT_FLOW_DIR, runId, options = {} } = {}) {
       selectedProducts: path.join(resolved.runDir, 'selected-products.jsonl'),
       generatedProducts: path.join(resolved.runDir, 'generated-products.jsonl'),
       distributionBatch: path.join(resolved.runDir, 'distribution-batch.txt'),
-      distributionReview: path.join(resolved.runDir, 'distribution-review.md')
+      distributionReview: path.join(resolved.runDir, 'distribution-review.md'),
+      productRank: path.join(resolved.runDir, 'sycm-product-rank.jsonl'),
+      orderSheet: path.join(resolved.runDir, '商品排行刷单表.xlsx'),
+      reviewSource: path.join(resolved.runDir, 'uploaded-order-sheet.xlsx'),
+      reviewGroups: path.join(resolved.runDir, 'review-order-groups.json'),
+      reviewDrafts: path.join(resolved.runDir, 'review-drafts.jsonl')
     }
   };
   ensureRunQualityState(run, requestedPolicy);

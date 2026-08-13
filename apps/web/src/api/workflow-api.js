@@ -5,7 +5,10 @@ const workflowRunPath = (runId) => `/api/workflows/runs/${encodeURIComponent(run
 export const listWorkflowTemplates = () => requestJson('/api/workflows/templates');
 export const listWorkflowRuns = () => requestJson('/api/workflows/runs');
 export const getWorkflowRun = (runId) => requestJson(workflowRunPath(runId));
-export const deleteWorkflowRun = (runId) => requestJson(workflowRunPath(runId), { method: 'DELETE' });
+export const deleteWorkflowRun = (runId) => requestJson(workflowRunPath(runId), {
+  method: 'DELETE',
+  body: { confirm: true }
+});
 export const validateWorkflow = (input) => requestPayload('/api/workflows/validate', {
   method: 'POST',
   body: input,
@@ -22,6 +25,27 @@ export const retryWorkflowNode = (runId, nodeId) => requestJson(`${workflowRunPa
 export const confirmKeywordReview = (runId, input) => requestJson(`${workflowRunPath(runId)}/keyword-review`, { method: 'POST', body: input });
 export const confirmProductReview = (runId, input) => requestJson(`${workflowRunPath(runId)}/product-review`, { method: 'POST', body: input });
 export const workflowEventsUrl = (runId) => `${workflowRunPath(runId)}/events`;
+
+export async function uploadReviewSource(file) {
+  const response = await fetch('/api/review-sheets/upload', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'X-File-Name': encodeURIComponent(file.name)
+    },
+    body: file
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.ok === false) {
+    throw new ApiError(payload.error || `上传失败: ${response.status}`, { status: response.status, payload });
+  }
+  return payload.data ?? payload;
+}
+
+export const confirmReviewSheet = (runId, reviews) => requestJson(`${workflowRunPath(runId)}/review-confirm`, {
+  method: 'POST',
+  body: { reviews }
+});
 
 export async function getWorkflowArtifact(runId, nodeId, { limit } = {}) {
   const query = limit ? `?limit=${encodeURIComponent(limit)}` : '';

@@ -22,7 +22,22 @@ const DAILY_START_OPTIONS = [
   { key: 'autoAllowReviewKeywords', label: '严格词为空时', options: [{ value: 'true', label: '继续少量可复核词' }, { value: 'false', label: '停在验真等待处理' }] }
 ];
 
-export function StartConfigurationPanel({ mode, modeHint, node, onDone, onUpdateField }) {
+const ORDER_SHEET_DATE_OPTIONS = [
+  { value: 'latest_day', label: '最近可用单日' },
+  { value: 'last_7_days', label: '最近 7 天' },
+  { value: 'last_30_days', label: '最近 30 天' },
+  { value: 'custom', label: '自定义日期范围' }
+];
+
+const ORDER_SHEET_SORT_OPTIONS = [
+  { value: 'itmUv', label: '商品访客数' },
+  { value: 'payAmt', label: '支付金额' },
+  { value: 'payItmCnt', label: '支付件数' },
+  { value: 'itemCartCnt', label: '商品加购件数' },
+  { value: 'sucRefundAmt', label: '成功退款金额' }
+];
+
+export function StartConfigurationPanel({ mode, modeHint, node, onDone, onUpdateField, readOnly = false }) {
   if (!node) return <div className="artifact-empty">启动节点不存在。</div>;
   const data = node.data || {};
 
@@ -56,6 +71,60 @@ export function StartConfigurationPanel({ mode, modeHint, node, onDone, onUpdate
         </label>
         <div className="start-configuration-actions">
           <button type="button" className="node-primary-button" onClick={onDone}>完成配置</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (mode === 'order-sheet') {
+    const customDate = data.dateMode === 'custom';
+    return (
+      <div className="start-configuration-panel">
+        <p className="start-configuration-hint">{modeHint}</p>
+        <fieldset className="sheet-config-fields" disabled={readOnly}>
+        <div className="start-configuration-grid">
+          <label className="node-field start-configuration-wide">
+            <span>日期范围</span>
+            <select
+              value={data.dateMode || 'latest_day'}
+              onChange={(event) => onUpdateField(node.id, 'dateMode', event.target.value)}
+            >
+              {ORDER_SHEET_DATE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </label>
+          {customDate && (
+            <>
+              <label className="node-field">
+                <span>开始日期</span>
+                <input type="date" value={data.startDate || ''} onChange={(event) => onUpdateField(node.id, 'startDate', event.target.value)} />
+              </label>
+              <label className="node-field">
+                <span>结束日期</span>
+                <input type="date" value={data.endDate || ''} onChange={(event) => onUpdateField(node.id, 'endDate', event.target.value)} />
+              </label>
+            </>
+          )}
+          <label className="node-field">
+            <span>采集页数</span>
+            <input
+              type="number"
+              min="1"
+              max="5"
+              value={data.pages ?? 1}
+              onChange={(event) => onUpdateField(node.id, 'pages', Number.parseInt(event.target.value, 10) || 1)}
+            />
+          </label>
+          <label className="node-field">
+            <span>降序排序指标</span>
+            <select value={data.sortMetric || 'itmUv'} onChange={(event) => onUpdateField(node.id, 'sortMetric', event.target.value)}>
+              {ORDER_SHEET_SORT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </label>
+        </div>
+        {customDate && <div className="start-configuration-hint">自定义日期最少 1 天、最多 31 天，以生意参谋当前可选日期为准。</div>}
+        </fieldset>
+        <div className="start-configuration-actions">
+          <button type="button" className="node-primary-button" onClick={onDone}>{readOnly ? '关闭' : '完成配置'}</button>
         </div>
       </div>
     );

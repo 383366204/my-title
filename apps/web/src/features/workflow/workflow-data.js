@@ -61,7 +61,9 @@ export function normalizeRunList(payload) {
   const rawRuns = Array.isArray(data)
     ? data
     : data?.runs || data?.items || data?.history || [];
-  return Array.isArray(rawRuns) ? rawRuns : [];
+  return Array.isArray(rawRuns)
+    ? rawRuns.filter((run) => run && typeof run === 'object' && (run.runId || run.id))
+    : [];
 }
 
 /**
@@ -80,9 +82,10 @@ export function getTemplateMode(template) {
  * @param {Function} actionHandler Node action callback.
  * @param {Function} artifactHandler Artifact callback.
  * @param {object} supportedNodeTypes Registered React Flow node types.
+ * @param {Function} updateHandler Node field update callback.
  * @returns {object} Canvas-ready node.
  */
-export function normalizeCanvasNode(node, selectNode, actionHandler, artifactHandler, supportedNodeTypes = {}) {
+export function normalizeCanvasNode(node, selectNode, actionHandler, artifactHandler, supportedNodeTypes = {}, updateHandler) {
   const renderType = supportedNodeTypes[node.type] ? node.type : 'task';
   return {
     ...node,
@@ -106,6 +109,7 @@ export function normalizeCanvasNode(node, selectNode, actionHandler, artifactHan
       workflowRunStatus: node.data?.workflowRunStatus || 'idle',
       onSelect: () => selectNode(node.id),
       onAction: (action) => actionHandler?.(action, node.id),
+      onUpdate: (field, value) => updateHandler?.(node.id, field, value),
       onViewArtifact: () => artifactHandler?.(node.id)
     }
   };
@@ -119,12 +123,32 @@ export function normalizeCanvasNode(node, selectNode, actionHandler, artifactHan
 export function normalizeWorkflowForCanvas(workflow = {}) {
   const rawNodes = Array.isArray(workflow.nodes) ? workflow.nodes : [];
   const rawEdges = Array.isArray(workflow.edges) ? workflow.edges : [];
+  const startData = rawNodes.find((node) => node?.id === 'start')?.data || {};
+  const hasGenerateSheet = rawNodes.some((node) => node?.id === 'generateSheet');
   const nodes = rawNodes
     .filter((node) => node?.id !== 'review')
     .map((node, index, visibleNodes) => ({
       ...node,
       data: {
         ...node.data,
+        ...(node.id === 'generateSheet' ? {
+          sheetConfig: true,
+          sheetType: node.data?.sheetType || startData.sheetType || 'order',
+          storeName: node.data?.storeName ?? startData.storeName ?? '',
+          orderDate: node.data?.orderDate || startData.orderDate || '',
+          productLimit: node.data?.productLimit ?? 0,
+          includeRawData: node.data?.includeRawData !== false,
+          includeImages: node.data?.includeImages !== false,
+          amountMode: node.data?.amountMode || 'average',
+          missingAmountPolicy: node.data?.missingAmountPolicy || 'blank',
+          cartQuantity: node.data?.cartQuantity ?? 1,
+          rowSpan: node.data?.rowSpan ?? 3,
+          workRequirement: node.data?.workRequirement || startData.workRequirement || '',
+          orderNote: node.data?.orderNote || '',
+          reviewGroupSize: node.data?.reviewGroupSize ?? 4,
+          includeSpacerRow: node.data?.includeSpacerRow !== false
+        } : {}),
+        ...(node.id === 'end' && hasGenerateSheet ? { orderSheetDownload: true } : {}),
         stepIndex: index + 1,
         stepTotal: visibleNodes.length
       }

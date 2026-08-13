@@ -29,6 +29,21 @@ const STEP_NODE = {
   submit: 'review'
 };
 
+const ORDER_SHEET_DATE_LABELS = {
+  latest_day: '最近可用单日',
+  last_7_days: '最近 7 天',
+  last_30_days: '最近 30 天',
+  custom: '自定义日期'
+};
+
+const ORDER_SHEET_SORT_LABELS = {
+  itmUv: '商品访客数',
+  payAmt: '支付金额',
+  payItmCnt: '支付件数',
+  itemCartCnt: '商品加购件数',
+  sucRefundAmt: '成功退款金额'
+};
+
 export function getPipelineFirstNavItems() {
   return PIPELINE_FIRST_NAV_ITEMS.map((item) => ({ ...item }));
 }
@@ -53,6 +68,7 @@ export function getWorkflowNodePanelKind(nodeId) {
   if (normalized === 'verify') return 'sycm-verify';
   if (normalized === 'select') return 'product-select';
   if (normalized === 'generate') return 'title-generate';
+  if (normalized === 'generateReviews') return 'review-drafts';
   if (normalized === 'export') return 'distribution-export';
   if (normalized === 'review') return 'distribution-export';
   if (normalized === 'end') return 'completion';
@@ -171,13 +187,45 @@ export function getWorkflowNodeAction(nodeId, state) {
   const normalizedNodeId = String(nodeId || '').toLowerCase();
   const stateDetails = state && typeof state === 'object' ? state : {};
   const normalizedState = String(stateDetails.status || stateDetails.state || state || '').toLowerCase();
+  if (normalizedNodeId === 'start' && stateDetails.reviewUpload === true) {
+    return {
+      label: stateDetails.uploadId ? '查看上传信息' : '上传刷单表',
+      action: 'manual-input',
+      tone: stateDetails.uploadId ? 'success' : 'warn'
+    };
+  }
+  if (normalizedNodeId === 'generatereviews' && ['needs_review', 'waiting_confirmation'].includes(normalizedState)) {
+    return { label: '复核评价', action: 'review-drafts', tone: 'warn' };
+  }
+  if (normalizedNodeId === 'start' && stateDetails.orderSheetConfig === true) {
+    const readOnly = stateDetails.workflowReadOnly === true || !['idle', 'pending'].includes(normalizedState);
+    return {
+      label: readOnly ? '查看采集条件' : '详细设置',
+      action: 'manual-input',
+      tone: readOnly ? 'default' : 'warn'
+    };
+  }
   if (normalizedNodeId === 'start' && ['idle', 'pending'].includes(normalizedState)) {
+    if (stateDetails.autoStart === true) {
+      return { label: '无需配置', action: 'inspect', tone: 'default' };
+    }
     const label = stateDetails.manualInput === true
       ? '录入词和货源'
       : Object.hasOwn(stateDetails, 'keywordsText') || Array.isArray(stateDetails.keywords)
         ? '输入关键词'
         : '配置输入';
     return { label, action: 'manual-input', tone: 'warn' };
+  }
+  if (
+    normalizedNodeId === 'generatesheet'
+    && stateDetails.sheetConfig === true
+  ) {
+    const readOnly = stateDetails.workflowReadOnly === true || !['idle', 'pending'].includes(normalizedState);
+    return {
+      label: readOnly ? '查看设置' : '详细设置',
+      action: 'configure-sheet',
+      tone: readOnly ? 'default' : 'warn'
+    };
   }
   if (normalizedNodeId === 'select' && stateDetails.manualDirectInput === true && Number(stateDetails.output?.failed || 0) > 0 && normalizedState === 'completed') {
     return { label: '重试失败项', action: 'retry-node', tone: 'warn' };
@@ -216,7 +264,11 @@ export function getWorkflowNodeAction(nodeId, state) {
     return { label: '重试节点', action: 'retry-node', tone: 'warn' };
   }
   if (normalizedState === 'failed') {
-    return { label: '重试节点', action: 'retry-node', tone: 'warn' };
+    return {
+      label: normalizedNodeId === 'collectrank' ? '重试采集' : '重试节点',
+      action: 'retry-node',
+      tone: 'warn'
+    };
   }
   if (normalizedState === 'blocked') {
     return { label: '查看阻塞', action: 'blocked', tone: 'danger' };
@@ -296,7 +348,7 @@ export function getWorkflowBlockerActions(nodeId, state = {}) {
     return actions;
   }
   const chromeFailureText = `${blocker} ${error} ${actionHint} ${platformStatus}`;
-  const sycmChromeBlocked = nodeId === 'verify' && (
+  const sycmChromeBlocked = ['verify', 'collectRank'].includes(nodeId) && (
     blocker.includes('browser_cdp_unavailable') ||
     blocker.includes('cdp_unavailable') ||
     platformStatus.includes('cdp_unavailable') ||
@@ -329,8 +381,10 @@ export function getWorkflowBlockerActions(nodeId, state = {}) {
     }
     actions.push({
       action: 'retry-node',
-      label: '重跑验真',
-      description: 'Chrome 就绪并完成登录后，从生意参谋校验节点重新执行。'
+      label: nodeId === 'collectRank' ? '重试采集' : '重跑验真',
+      description: nodeId === 'collectRank'
+        ? 'Chrome 就绪并完成登录后，重新采集商品排行第一页。'
+        : 'Chrome 就绪并完成登录后，从生意参谋校验节点重新执行。'
     });
   } else if (nodeId === 'verify' && (blocker === 'verified_empty' || blocker === 'no_generation_eligible_keywords')) {
     actions.push({
@@ -418,8 +472,52 @@ export function getWorkflowNodeViewModel(nodeId, state = {}) {
     durationMs: Number.isFinite(Number(state.durationMs)) ? Number(state.durationMs) : null,
     outputSummary: active ? '' : state.outputSummary || successLabel || '',
     successLabel,
-    resultLocation
+    resultLocation,
+    configSummary: String(nodeId) === 'start' && state.reviewUpload === true
+      ? (state.uploadId ? `${state.uploadName || '刷单表'} · ${state.uploadSummary?.parsedSheetCount || state.groups?.length || 0} 个订单组 · ${state.uploadSummary?.productCount || 0} 个商品` : '尚未上传刷单表')
+      : String(nodeId) === 'start' && state.orderSheetConfig === true
+      ? getOrderSheetConfigSummary(state)
+      : String(nodeId) === 'generateSheet' && state.sheetConfig === true
+        ? getSheetConfigSummary(state)
+        : ''
   };
+}
+
+/**
+ * 格式化刷单表流水线的采集条件，供开始节点回显。
+ * @param {object} state 开始节点配置。
+ * @returns {string} 日期、页数和排序指标摘要。
+ */
+export function getOrderSheetConfigSummary(state = {}) {
+  const dateMode = String(state.dateMode || 'latest_day');
+  const dateLabel = dateMode === 'custom' && state.startDate && state.endDate
+    ? `${state.startDate} 至 ${state.endDate}`
+    : ORDER_SHEET_DATE_LABELS[dateMode] || ORDER_SHEET_DATE_LABELS.latest_day;
+  const pages = Math.max(1, Math.min(5, Number.parseInt(state.pages, 10) || 1));
+  const sortLabel = ORDER_SHEET_SORT_LABELS[state.sortMetric] || ORDER_SHEET_SORT_LABELS.itmUv;
+  return `${dateLabel} · ${pages} 页 · ${sortLabel}降序`;
+}
+
+/**
+ * 格式化生成业务表格节点的输出配置。
+ * @param {object} state 制表节点配置。
+ * @returns {string} 表格类型、数量和关键版式摘要。
+ */
+export function getSheetConfigSummary(state = {}) {
+  const sheetType = state.sheetType === 'review' ? 'review' : 'order';
+  const limit = Math.max(0, Number.parseInt(state.productLimit, 10) || 0);
+  const countLabel = limit > 0 ? `${limit} 个商品` : '全部商品';
+  if (sheetType === 'review') {
+    if (state.reviewSourceUpload === true) return '评价表 · 按上传订单组';
+    const groupSize = [1, 2, 4].includes(Number(state.reviewGroupSize)) ? Number(state.reviewGroupSize) : 4;
+    return `评价表 · ${countLabel} · ${groupSize} 个/组`;
+  }
+  const amountLabel = {
+    average: '平均实付',
+    payment: '支付金额',
+    blank: '金额留空'
+  }[state.amountMode] || '平均实付';
+  return `刷单表 · ${countLabel} · ${amountLabel}${state.includeImages === false ? ' · 无主图' : ''}`;
 }
 
 export function getWorkflowNodeSuccessLabel(nodeId, state = {}) {
@@ -466,6 +564,32 @@ export function getWorkflowNodeSuccessLabel(nodeId, state = {}) {
     const count = Number(output.count ?? state.count ?? 0);
     return count > 0 ? `成功 ${count} 条铺货清单` : '';
   }
+  if (normalized === 'collectRank') {
+    const count = Number(output.count ?? state.count ?? 0);
+    const pages = Number(output.pages ?? 0);
+    const sortLabel = output.sortLabel || '商品访客数';
+    return count > 0 ? `采集 ${pages || 1} 页、${count} 条商品，按${sortLabel}降序` : '';
+  }
+  if (normalized === 'importSheet') {
+    const groups = Number(output.groupCount || 0);
+    const products = Number(output.productCount || 0);
+    return products > 0 ? `识别 ${groups} 个订单组、${products} 个商品` : '';
+  }
+  if (normalized === 'generateReviews') {
+    const count = Number(output.count || 0);
+    if (count <= 0) return '';
+    return output.degraded === true
+      ? `已生成 ${count} 条评价草稿，部分使用本地规则`
+      : `已生成 ${count} 条评价草稿`;
+  }
+  if (normalized === 'generateSheet') {
+    const count = Number(output.count ?? state.count ?? 0);
+    const imageCount = Number(output.imageCount ?? 0);
+    if (count <= 0) return '';
+    return output.sheetType === 'review'
+      ? `生成评价表，写入 ${count} 条商品`
+      : `生成刷单表，写入 ${count} 条商品和 ${imageCount} 张主图`;
+  }
   return '';
 }
 
@@ -477,6 +601,8 @@ export function getWorkflowNodeResultLocation(nodeId, state = {}) {
   if (normalized === 'verify') return output.file || '';
   if (normalized === 'select') return output.file || '';
   if (normalized === 'generate') return output.file || '';
+  if (normalized === 'collectRank') return output.file || '';
+  if (normalized === 'generateSheet') return output.file || '';
   if (normalized === 'export') {
     const locations = [
       output.batchFile ? `铺货清单：${output.batchFile}` : '',
@@ -491,12 +617,15 @@ export function getWorkflowNodeResultLocation(nodeId, state = {}) {
 export function getWorkflowResultSummaryView(nodeId, state = {}) {
   const normalized = String(nodeId || '');
   const manualProductInput = normalized === 'select' && state.manualDirectInput === true;
+  const sheetType = state.output?.sheetType === 'review' ? 'review' : 'order';
   const titles = {
     mine: '灵感选词结果',
     keywordReview: '人工筛词结果',
     verify: '生意参谋校验结果',
     select: '货源选品结果',
     generate: '标题生成结果',
+    collectRank: '商品排行采集结果',
+    generateSheet: sheetType === 'review' ? '商品评价表' : '商品排行刷单表',
     export: '铺货清单与复核结果',
     review: '铺货清单与复核结果',
     end: '流程完成结果'
@@ -508,6 +637,10 @@ export function getWorkflowResultSummaryView(nodeId, state = {}) {
     verify: '验真通过词在下方结果列表中预览，完整内容保存在 verified-keywords.jsonl。',
     select: '已选货源会按商品信息和机会分展示，完整内容保存在 selected-products.jsonl。',
     generate: '每条标题记录会关联已选货源；完整内容保存在 generated-products.jsonl。',
+    collectRank: '按开始节点设置的日期、页数和排序指标展示商品排行，可逐条打开淘宝商品核对。',
+    generateSheet: sheetType === 'review'
+      ? 'Excel 按1拖多评价格式写入刷单日期、店铺和商品标题，并附带生意参谋原始指标。'
+      : 'Excel 按动销一拖多格式写入标题、主图、下单金额、做单要求和店铺，并附带生意参谋原始指标。',
     export: '自动导出的清单和被拦截的复核项会合并在下方操作台。',
     review: '自动导出的清单和被拦截的复核项会合并在下方操作台。',
     end: '流程完成后可从各节点查看对应产物。'
@@ -519,6 +652,8 @@ export function getWorkflowResultSummaryView(nodeId, state = {}) {
     verify: '查看验真词',
     select: '查看已选货源',
     generate: '查看标题结果',
+    collectRank: '查看商品排行',
+    generateSheet: '下载 Excel',
     export: '查看铺货复核',
     review: '查看铺货复核',
     end: '查看完成结果'
@@ -541,6 +676,7 @@ export function labelWorkflowBlockerReason(blocker) {
   const normalized = String(blocker || '').toLowerCase();
   const labels = {
     sycm_chrome_unavailable: 'Chrome 调试连接不可用',
+    chrome_unavailable: 'Chrome 调试连接不可用',
     no_inspiration_candidates: '没有可用的动态候选词',
     verified_empty: '验真无结果',
     keyword_review_required: '需要人工筛词',
@@ -696,7 +832,15 @@ export function getWorkflowTemplateView(template = {}) {
   const id = String(template.id || '').toLowerCase();
   const isKeyword = mode === 'keyword' || id === 'exact-keyword-v1';
   const isManual = mode === 'manual' || id === 'manual-selection-v1';
-  const defaults = isManual
+  const isOrderSheet = mode === 'order-sheet' || id === 'sycm-order-sheet-v1';
+  const defaults = isOrderSheet
+    ? {
+        entryLabel: '入口：生意参谋商品排行',
+        scenarioLabel: '适合：按指定范围制作商品动销表',
+        flowSummary: '流程：设置日期/页数/指标 → 商品排行 → 降序采集 → Excel',
+        modeHint: '选择日期范围、采集页数和排序指标，使用当前 Chrome 登录态生成可下载表格。'
+      }
+    : isManual
     ? {
         entryLabel: '入口：手动关键词',
         scenarioLabel: '适合：精确控制词和商品',
@@ -750,13 +894,23 @@ function inferRunTitle(run = {}) {
   const workflowMode = String(run.workflow?.mode || run.mode || '').toLowerCase();
   if (workflowId === 'daily-selection-v1' || workflowMode === 'daily') return '每日蓝海选品流水线';
   if (workflowId === 'exact-keyword-v1' || workflowMode === 'keyword') return '精确关键词选品流水线';
+  if (workflowId === 'sycm-order-sheet-v1' || workflowMode === 'order-sheet') return '制作刷单表格流水线';
   const nodes = Array.isArray(run.workflow?.nodes) ? run.workflow.nodes : [];
   const start = nodes.find((node) => node.id === 'start') || nodes[0] || {};
   return String(start.data?.keyword || start.data?.label || run.runId || '未命名流程').trim();
 }
 
+function isOrderSheetRun(run = {}) {
+  const workflowId = String(run.workflow?.id || run.templateId || '').toLowerCase();
+  const workflowMode = String(run.workflow?.mode || run.mode || run.options?.mode || '').toLowerCase();
+  return workflowId === 'sycm-order-sheet-v1' || workflowMode === 'order-sheet';
+}
+
 function labelUnifiedRunStage(run = {}) {
   const stage = String(run.stage || '').toLowerCase();
+  if (isOrderSheetRun(run) && ['submitted', 'workflow_complete'].includes(stage)) {
+    return '表格已生成';
+  }
   const labels = {
     seed: '种子启动',
     mined: '灵感选词',
@@ -912,6 +1066,8 @@ export function getWorkflowLaunchParams(nodes = []) {
   const select = dataFor('select');
   const generate = dataFor('generate');
   const exportNode = dataFor('export');
+  const generateSheet = dataFor('generateSheet');
+  const generateReviews = dataFor('generateReviews');
 
   if (params.keywordsText != null || params.keywords != null) {
     const keywords = parseExactKeywords(params.keywordsText ?? params.keywords);
@@ -939,11 +1095,32 @@ export function getWorkflowLaunchParams(nodes = []) {
   if (exportNode.export != null || exportNode.limit != null || exportNode.count != null) {
     params.export = exportNode.export ?? exportNode.limit ?? exportNode.count;
   }
+  for (const key of ['sheetType', 'storeName', 'orderDate', 'productLimit', 'fileName', 'includeRawData', 'includeImages', 'amountMode', 'missingAmountPolicy', 'cartQuantity', 'rowSpan', 'workRequirement', 'orderNote', 'reviewGroupSize', 'includeSpacerRow']) {
+    if (generateSheet[key] != null) params[key] = generateSheet[key];
+  }
+  for (const key of ['reviewTone', 'reviewLength', 'useAI']) {
+    if (generateReviews[key] != null) params[key] = generateReviews[key];
+  }
   return params;
 }
 
 export function getWorkflowLaunchBlocker(mode, nodes = []) {
   const params = getStartNodeParams(nodes);
+  if (mode === 'review-sheet') {
+    const groups = Array.isArray(params.groups) ? params.groups : [];
+    if (!params.uploadId || groups.length === 0) {
+      const message = '请先在上传刷单表节点选择并解析 .xlsx 文件';
+      return { status: 'blocked', error: message, logs: [{ timestamp: new Date().toISOString(), level: 'error', message: `[review_source_required] ${message}` }] };
+    }
+    const missing = groups.flatMap((group, index) => ['orderDate', 'storeName', 'buyerName', 'buyerPhone', 'orderNumber']
+      .filter((field) => !String(group?.[field] || '').trim())
+      .map((field) => `${index + 1}:${field}`));
+    if (missing.length > 0) {
+      const message = `还有 ${missing.length} 项订单信息未补全，请填写日期、店铺、旺旺、手机号和订单号`;
+      return { status: 'blocked', error: message, logs: [{ timestamp: new Date().toISOString(), level: 'error', message: `[review_order_info_required] ${message}` }] };
+    }
+    return null;
+  }
   if (mode === 'manual') {
     const items = Array.isArray(params.items) ? params.items : [];
     if (items.length > 0 && items.every((item) => String(item?.keyword || params.defaultKeyword || '').trim() && /1688\.com/i.test(String(item?.url || '')))) return null;
@@ -957,6 +1134,27 @@ export function getWorkflowLaunchBlocker(mode, nodes = []) {
         message: `[keywords_required] ${message}`
       }]
     };
+  }
+  if (mode === 'order-sheet' && params.dateMode === 'custom') {
+    const startDate = String(params.startDate || '');
+    const endDate = String(params.endDate || '');
+    const start = /^\d{4}-\d{2}-\d{2}$/.test(startDate) ? new Date(`${startDate}T00:00:00Z`) : null;
+    const end = /^\d{4}-\d{2}-\d{2}$/.test(endDate) ? new Date(`${endDate}T00:00:00Z`) : null;
+    const days = start && end ? Math.floor((end.getTime() - start.getTime()) / 86400000) + 1 : 0;
+    const message = !start || !end
+      ? '请选择完整的开始日期和结束日期'
+      : days < 1
+        ? '开始日期不能晚于结束日期'
+        : days > 31
+          ? '生意参谋自定义日期范围最多选择 31 天'
+          : '';
+    if (message) {
+      return {
+        status: 'blocked',
+        error: message,
+        logs: [{ timestamp: new Date().toISOString(), level: 'error', message: `[date_range_invalid] ${message}` }]
+      };
+    }
   }
   if (mode !== 'keyword') return null;
   const keywords = parseExactKeywords(params.keywordsText ?? params.keywords ?? params.keyword);

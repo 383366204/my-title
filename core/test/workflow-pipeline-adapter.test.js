@@ -50,13 +50,17 @@ describe('workflow pipeline adapter', () => {
       generate: 'generate',
       export: 'export',
       review: 'review',
+      collectRank: 'collectRank',
+      importSheet: 'importSheet',
+      generateReviews: 'generateReviews',
+      generateSheet: 'generateSheet',
       end: 'end'
     });
 
     const templates = listProductionWorkflowTemplates();
 
-    assert.deepEqual(templates.map(template => template.id), ['daily-selection-v1', 'exact-keyword-v1', 'manual-selection-v1']);
-    assert.deepEqual(templates.map(template => template.entryLabel), ['入口：动态灵感', '入口：手动关键词', '入口：关键词 + 1688链接']);
+    assert.deepEqual(templates.map(template => template.id), ['daily-selection-v1', 'exact-keyword-v1', 'manual-selection-v1', 'sycm-order-sheet-v1', 'uploaded-review-sheet-v1']);
+    assert.deepEqual(templates.map(template => template.entryLabel), ['入口：动态灵感', '入口：手动关键词', '入口：关键词 + 1688链接', '入口：生意参谋商品排行', '入口：已执行的刷单表']);
     assert.match(templates[0].scenarioLabel, /每天自动发现/);
     assert.match(templates[1].scenarioLabel, /明确目标词/);
     assert.match(templates[0].flowSummary, /灵感选词/);
@@ -65,6 +69,21 @@ describe('workflow pipeline adapter', () => {
     assert.match(templates[1].modeHint, /逐词验真/);
     assert.match(templates[2].flowSummary, /录入词和货源/);
     assert.match(templates[2].flowSummary, /自动铺货/);
+    assert.match(templates[3].flowSummary, /指标降序/);
+    const orderSheetStart = templates[3].workflow.nodes.find(node => node.id === WORKFLOW_NODE_IDS.start);
+    const orderSheetGenerate = templates[3].workflow.nodes.find(node => node.id === WORKFLOW_NODE_IDS.generateSheet);
+    assert.equal(orderSheetStart.data.orderSheetConfig, true);
+    assert.equal(orderSheetStart.data.pages, 1);
+    assert.equal(orderSheetStart.data.sortMetric, 'itmUv');
+    assert.equal(orderSheetGenerate.data.sheetConfig, true);
+    assert.equal(orderSheetGenerate.data.sheetType, 'order');
+    assert.equal(orderSheetGenerate.data.orderSheetOnly, true);
+    assert.equal(orderSheetGenerate.data.rowSpan, 3);
+    const reviewSheetStart = templates[4].workflow.nodes.find(node => node.id === WORKFLOW_NODE_IDS.start);
+    const reviewSheetGenerate = templates[4].workflow.nodes.find(node => node.id === WORKFLOW_NODE_IDS.generateSheet);
+    assert.equal(reviewSheetStart.data.reviewUpload, true);
+    assert.equal(reviewSheetGenerate.data.reviewSourceUpload, true);
+    assert.equal(reviewSheetGenerate.data.sheetType, 'review');
     const dailyStart = templates[0].workflow.nodes.find(node => node.id === WORKFLOW_NODE_IDS.start);
     const keywordStart = templates[1].workflow.nodes.find(node => node.id === WORKFLOW_NODE_IDS.start);
     assert.deepEqual(Object.keys(dailyStart.data).sort(), [
@@ -146,6 +165,17 @@ describe('workflow pipeline adapter', () => {
       'export->end'
     ]);
     assert.ok(templates[2].workflow.edges.every(edge => edge.type === 'straight'));
+    assert.deepEqual(templates[3].workflow.nodes.map(node => node.id), [
+      WORKFLOW_NODE_IDS.start,
+      WORKFLOW_NODE_IDS.collectRank,
+      WORKFLOW_NODE_IDS.generateSheet,
+      WORKFLOW_NODE_IDS.end
+    ]);
+    assert.deepEqual(templates[3].workflow.edges.map(edge => `${edge.source}->${edge.target}`), [
+      'start->collectRank',
+      'collectRank->generateSheet',
+      'generateSheet->end'
+    ]);
   });
 
   it('keeps production workflow template nodes compact and ordered for canvas fit', () => {
@@ -164,7 +194,22 @@ describe('workflow pipeline adapter', () => {
       const nodeHeight = 118;
       const minGap = 24;
 
-      const expectedIds = template.mode === 'keyword'
+      const expectedIds = template.mode === 'order-sheet'
+        ? [
+            WORKFLOW_NODE_IDS.start,
+            WORKFLOW_NODE_IDS.collectRank,
+            WORKFLOW_NODE_IDS.generateSheet,
+            WORKFLOW_NODE_IDS.end
+          ]
+        : template.mode === 'review-sheet'
+          ? [
+              WORKFLOW_NODE_IDS.start,
+              WORKFLOW_NODE_IDS.importSheet,
+              WORKFLOW_NODE_IDS.generateReviews,
+              WORKFLOW_NODE_IDS.generateSheet,
+              WORKFLOW_NODE_IDS.end
+            ]
+        : template.mode === 'keyword'
         ? [
             WORKFLOW_NODE_IDS.start,
             WORKFLOW_NODE_IDS.verify,
@@ -421,6 +466,82 @@ describe('workflow pipeline adapter', () => {
       ]
     }), /商品重复/);
     assert.throws(() => sanitizeWorkflowParams('manual', { items: [] }), /1688 商品链接/);
+    assert.deepEqual(sanitizeWorkflowParams('order-sheet', {
+      port: 9223,
+      dateMode: 'custom',
+      startDate: '2026-08-05',
+      endDate: '2026-08-09',
+      orderDate: '2026-08-12',
+      storeName: '竹里人',
+      sheetType: 'review',
+      pages: 9,
+      sortMetric: 'payAmt'
+    }), {
+      port: 9223,
+      dateMode: 'custom',
+      startDate: '2026-08-05',
+      endDate: '2026-08-09',
+      orderDate: '2026-08-12',
+      storeName: '竹里人',
+      sheetType: 'order',
+      pages: 5,
+      sortMetric: 'payAmt',
+      productLimit: 0,
+      fileName: '',
+      includeRawData: true,
+      includeImages: true,
+      amountMode: 'average',
+      missingAmountPolicy: 'blank',
+      cartQuantity: 1,
+      rowSpan: 3,
+      workRequirement: '',
+      orderNote: '',
+      reviewGroupSize: 4,
+      includeSpacerRow: true
+    });
+    assert.deepEqual(sanitizeWorkflowParams('review-sheet', {
+      uploadId: '2f9e14d8-57f0-4c12-b2bd-f5efc3e34721',
+      uploadName: '竹里人动销一拖多.xlsx',
+      groups: [{
+        id: 'group-1',
+        orderDate: '2026-08-13',
+        storeName: '竹里人',
+        buyerName: '买家一',
+        buyerPhone: '13800000001',
+        orderNumber: 'ORDER-1',
+        products: [{ title: '不应进入启动参数' }]
+      }],
+      reviewTone: '生活化',
+      reviewLength: 120,
+      useAI: false,
+      fileName: '评价表'
+    }), {
+      uploadId: '2f9e14d8-57f0-4c12-b2bd-f5efc3e34721',
+      uploadName: '竹里人动销一拖多.xlsx',
+      groups: [{
+        id: 'group-1',
+        orderDate: '2026-08-13',
+        storeName: '竹里人',
+        buyerName: '买家一',
+        buyerPhone: '13800000001',
+        orderNumber: 'ORDER-1'
+      }],
+      reviewTone: '生活化',
+      reviewLength: 100,
+      useAI: false,
+      fileName: '评价表',
+      includeSpacerRow: true,
+      sheetType: 'review'
+    });
+    assert.throws(() => sanitizeWorkflowParams('review-sheet', {}), /请先上传刷单表/);
+    assert.throws(() => sanitizeWorkflowParams('order-sheet', {
+      dateMode: 'custom',
+      startDate: '2026-07-01',
+      endDate: '2026-08-09'
+    }), /最多选择 31 天/);
+    assert.throws(() => sanitizeWorkflowParams('order-sheet', {
+      orderDate: '2026-02-30'
+    }), /刷单日期无效/);
     assert.throws(() => sanitizeWorkflowParams('unknown', {}), /未知 workflow mode/);
   });
 

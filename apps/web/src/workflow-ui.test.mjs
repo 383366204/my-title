@@ -37,7 +37,9 @@ import {
   getWorkflowNodePanelKind,
   getWorkflowNodeSuccessLabel,
   getWorkflowNodeResultLocation,
-  getWorkflowResultSummaryView
+  getWorkflowResultSummaryView,
+  getOrderSheetConfigSummary,
+  getSheetConfigSummary
 } from './workflow-ui.js';
 
 test('exact keyword input parses batches and launch params preserve all words', () => {
@@ -59,6 +61,85 @@ test('exact keyword input blocks empty and oversized batches', () => {
   assert.match(getWorkflowLaunchBlocker('keyword', [{ id: 'start', data: { keywordsText: '' } }]).error, /不能为空/);
   const keywordsText = Array.from({ length: 21 }, (_, index) => `关键词${index + 1}`).join('\n');
   assert.match(getWorkflowLaunchBlocker('keyword', [{ id: 'start', data: { keywordsText } }]).error, /最多输入 20 个/);
+});
+
+test('order sheet start config validates custom date ranges', () => {
+  assert.equal(getWorkflowNodeAction('start', { status: 'idle', orderSheetConfig: true }).label, '详细设置');
+  assert.equal(getWorkflowNodeAction('start', { status: 'completed', orderSheetConfig: true, workflowReadOnly: true }).label, '查看采集条件');
+  assert.equal(getWorkflowLaunchBlocker('order-sheet', [{
+    id: 'start',
+    data: { dateMode: 'custom', startDate: '2026-08-05', endDate: '2026-08-09', pages: 2, sortMetric: 'payAmt' }
+  }]), null);
+  assert.match(getWorkflowLaunchBlocker('order-sheet', [{
+    id: 'start',
+    data: { dateMode: 'custom', startDate: '2026-07-01', endDate: '2026-08-09' }
+  }]).error, /最多选择 31 天/);
+  assert.match(getWorkflowLaunchBlocker('order-sheet', [{
+    id: 'start',
+    data: { dateMode: 'custom', startDate: '', endDate: '' }
+  }]).error, /请选择完整/);
+});
+
+test('order sheet start node summarizes selected collection conditions', () => {
+  const state = {
+    orderSheetConfig: true,
+    dateMode: 'custom',
+    startDate: '2026-08-05',
+    endDate: '2026-08-09',
+    pages: 2,
+    sortMetric: 'payAmt'
+  };
+
+  assert.equal(getOrderSheetConfigSummary(state), '2026-08-05 至 2026-08-09 · 2 页 · 支付金额降序');
+  assert.equal(getWorkflowNodeViewModel('start', state).configSummary, '2026-08-05 至 2026-08-09 · 2 页 · 支付金额降序');
+  assert.equal(getSheetConfigSummary({ sheetType: 'order', productLimit: 12, amountMode: 'payment' }), '刷单表 · 12 个商品 · 支付金额');
+  assert.equal(getSheetConfigSummary({ sheetType: 'review', productLimit: 0, reviewGroupSize: 2 }), '评价表 · 全部商品 · 2 个/组');
+  assert.equal(getWorkflowNodeAction('generateSheet', { status: 'idle', sheetConfig: true }).action, 'configure-sheet');
+  assert.equal(getWorkflowNodeAction('generateSheet', { status: 'completed', sheetConfig: true, workflowReadOnly: true }).label, '查看设置');
+  assert.equal(getWorkflowNodeAction('collectRank', { status: 'failed' }).label, '重试采集');
+});
+
+test('uploaded review sheet workflow requires complete local order groups', () => {
+  assert.equal(getWorkflowNodeAction('start', { status: 'idle', reviewUpload: true }).label, '上传刷单表');
+  assert.equal(getWorkflowNodeAction('generateReviews', { status: 'needs_review' }).label, '复核评价');
+  assert.equal(getSheetConfigSummary({ sheetType: 'review', reviewSourceUpload: true }), '评价表 · 按上传订单组');
+
+  assert.match(getWorkflowLaunchBlocker('review-sheet', [{ id: 'start', data: {} }]).error, /选择并解析/);
+  assert.match(getWorkflowLaunchBlocker('review-sheet', [{ id: 'start', data: {
+    uploadId: 'upload-1',
+    groups: [{ id: 'group-1', orderDate: '2026-08-13', storeName: '竹里人' }]
+  } }]).error, /订单信息未补全/);
+
+  const nodes = [
+    { id: 'start', data: {
+      uploadId: 'upload-1',
+      uploadName: '刷单表.xlsx',
+      groups: [{
+        id: 'group-1',
+        orderDate: '2026-08-13',
+        storeName: '竹里人',
+        buyerName: '买家一',
+        buyerPhone: '13800000001',
+        orderNumber: 'ORDER-1'
+      }]
+    } },
+    { id: 'generateReviews', data: { reviewTone: '生活化', reviewLength: 45, useAI: false } },
+    { id: 'generateSheet', data: { fileName: '竹里人评价表', includeSpacerRow: false } }
+  ];
+  assert.equal(getWorkflowLaunchBlocker('review-sheet', nodes), null);
+  assert.deepEqual(getWorkflowLaunchParams(nodes), {
+    uploadId: 'upload-1',
+    uploadName: '刷单表.xlsx',
+    groups: nodes[0].data.groups,
+    reviewTone: '生活化',
+    reviewLength: 45,
+    useAI: false,
+    fileName: '竹里人评价表',
+    includeSpacerRow: false
+  });
+  assert.equal(getWorkflowNodeSuccessLabel('generateReviews', {
+    output: { count: 20, degraded: true }
+  }), '已生成 20 条评价草稿，部分使用本地规则');
 });
 import {
   labelPipelineStatus,
@@ -90,6 +171,7 @@ test('pipeline labels localize status, stage, counts, and next commands', () => 
   assert.equal(labelPipelineStatus('mining_manual_action_required'), '灵感选词需人工处理');
   assert.equal(labelPipelineStatus('mining_empty'), '灵感选词无结果');
   assert.equal(labelPipelineStatus('awaiting_keyword_review'), '等待人工筛词');
+  assert.equal(labelPipelineStatus('needs_review'), '等待复核');
   assert.equal(labelPipelineStatus('ready_to_distribute'), '待确认铺货');
   assert.equal(labelPipelineStage('keyword_review'), '人工筛词');
   assert.equal(labelPipelineStage('verified'), '大盘验真');
@@ -512,6 +594,22 @@ test('getWorkflowResultSummaryView explains count, location, and next action', (
     status: 'blocked',
     output: { verified: 0, rejected: 5, file: '/tmp/verified-keywords.jsonl' }
   }).countLabel, '验真通过 0 个，可生成 0 个，需复核/拒绝 0 个，验真拒绝 5 个');
+
+  const orderSheetView = getWorkflowResultSummaryView('generateSheet', {
+    status: 'completed',
+    output: { count: 20, imageCount: 20, sheetType: 'order', file: '/tmp/order.xlsx' }
+  });
+  assert.equal(orderSheetView.title, '商品排行刷单表');
+  assert.match(orderSheetView.countLabel, /生成刷单表/);
+  assert.match(orderSheetView.hint, /动销一拖多/);
+
+  const reviewSheetView = getWorkflowResultSummaryView('generateSheet', {
+    status: 'completed',
+    output: { count: 20, sheetType: 'review', file: '/tmp/review.xlsx' }
+  });
+  assert.equal(reviewSheetView.title, '商品评价表');
+  assert.match(reviewSheetView.countLabel, /生成评价表/);
+  assert.match(reviewSheetView.hint, /1拖多评价/);
 });
 
 test('getWorkflowNodeViewModel describes rate cooldown and retryable failures', () => {
@@ -873,6 +971,13 @@ test('getUnifiedWorkflowHistoryItem normalizes pipeline and workflow runs for on
     status: 'blocked',
     workflow: { id: 'daily-selection-v1', mode: 'daily' }
   }).visualState, 'paused');
+
+  assert.equal(getUnifiedWorkflowHistoryItem({
+    runId: '2026-08-11-004428',
+    status: 'workflow_complete',
+    stage: 'submitted',
+    workflow: { id: 'sycm-order-sheet-v1', mode: 'order-sheet' }
+  }).subtitle, '表格已生成');
 });
 
 test('summarizeWorkflowArtifact describes jsonl, markdown, text, and empty artifacts', () => {
@@ -1124,6 +1229,26 @@ test('getWorkflowArtifactView treats start nodes as no-artifact nodes', () => {
   assert.equal(view.emptyText, '开始节点没有产物。');
 });
 
+test('getWorkflowArtifactView does not repeat the product-rank sort metric', () => {
+  const view = getWorkflowArtifactView({
+    type: 'json',
+    items: [{
+      title: '测试商品',
+      sourcePage: 2,
+      sortMetric: 'payAmt',
+      sortLabel: '支付金额',
+      sortValue: 68.6,
+      paymentAmount: 68.6,
+      visitorCount: 12,
+      paidItemCount: 3,
+      cartItemCount: 4
+    }]
+  }, 'collectRank');
+
+  assert.equal(view.title, '商品排行（2 页）');
+  assert.deepEqual(view.rows[0].metrics, ['支付金额 68.60', '商品访客数 12', '支付件数 3', '加购件数 4']);
+});
+
 test('normalizeCandidateForTitle carries mining metrics into title context', () => {
   const candidate = normalizeCandidateForTitle({
     keyword: '纯银项链女',
@@ -1243,6 +1368,39 @@ test('getWorkflowLaunchParams maps executable node settings to backend names', (
     select: 5,
     generate: 4,
     export: 9
+  });
+});
+
+test('getWorkflowLaunchParams merges table-generation settings from the generation node', () => {
+  const params = getWorkflowLaunchParams([
+    { id: 'start', data: { dateMode: 'latest_day', pages: 2, sortMetric: 'itmUv' } },
+    {
+      id: 'generateSheet',
+      data: {
+        sheetType: 'order',
+        productLimit: 20,
+        includeRawData: false,
+        includeImages: false,
+        amountMode: 'payment',
+        cartQuantity: 2,
+        rowSpan: 2,
+        orderNote: '暗号 8'
+      }
+    }
+  ]);
+
+  assert.deepEqual(params, {
+    dateMode: 'latest_day',
+    pages: 2,
+    sortMetric: 'itmUv',
+    sheetType: 'order',
+    productLimit: 20,
+    includeRawData: false,
+    includeImages: false,
+    amountMode: 'payment',
+    cartQuantity: 2,
+    rowSpan: 2,
+    orderNote: '暗号 8'
   });
 });
 

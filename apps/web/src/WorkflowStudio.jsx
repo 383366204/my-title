@@ -10,6 +10,7 @@ import {
 import {
   confirmKeywordReview as confirmKeywordReviewRequest,
   confirmProductReview as confirmProductReviewRequest,
+  confirmReviewSheet,
   getWorkflowArtifact,
   getWorkflowRun
 } from './api/workflow-api.js';
@@ -79,8 +80,10 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [selectedNodeId, setSelectedNodeId] = useState(null);
+  const [confirmingReviews, setConfirmingReviews] = useState(false);
   const initialTemplateLoadedRef = useRef(false);
   const nodeInteractionRef = useRef({ onAction: null, onViewArtifact: null });
+  const nodeUpdateRef = useRef(null);
   const loadHistoryRunRef = useRef(null);
   const completedDistributionJobsRef = useRef(new Set());
   const reloadRun = useCallback((...args) => loadHistoryRunRef.current?.(...args), []);
@@ -89,6 +92,9 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
   }, []);
   const dispatchNodeArtifactView = useCallback((nodeId) => {
     return nodeInteractionRef.current.onViewArtifact?.(nodeId);
+  }, []);
+  const dispatchNodeUpdate = useCallback((nodeId, field, value) => {
+    return nodeUpdateRef.current?.(nodeId, field, value);
   }, []);
 
   const [activeTemplateId, setActiveTemplateId] = useState(null);
@@ -164,11 +170,12 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
       ...n,
       data: {
         ...n.data,
+        workflowReadOnly: false,
         status: 'idle',
         output: null,
         error: null
       }
-    }, setSelectedNodeId, dispatchNodeAction, dispatchNodeArtifactView, nodeTypes));
+    }, setSelectedNodeId, dispatchNodeAction, dispatchNodeArtifactView, nodeTypes, dispatchNodeUpdate));
     setNodes(formattedNodes);
     setEdges((defaultWorkflow.edges || []).map(e => ({
       ...e,
@@ -213,6 +220,15 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
 
   const isRunActive = ACTIVE_RUN_STATUSES.has(String(runStatus || '').toLowerCase());
   const isViewingRun = Boolean(currentRunId);
+  useEffect(() => {
+    setNodes((currentNodes) => currentNodes.map((node) => ({
+      ...node,
+      data: {
+        ...node.data,
+        workflowRunId: currentRunId || null
+      }
+    })));
+  }, [currentRunId, setNodes]);
   const activeTemplate = useMemo(() => (
     templates.find((template) => template.id === activeTemplateId) || templates[0] || null
   ), [templates, activeTemplateId]);
@@ -255,6 +271,10 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
 
   // 修改节点配置参数
   const updateNodeData = (nodeId, field, value) => {
+    if (currentRunId && nodeId === 'start' && ['dateMode', 'pages'].includes(field)) {
+      prepareNewRunFromHistory({ nodeId, fields: { [field]: value } });
+      return;
+    }
     setNodes((nds) =>
       nds.map((node) => {
         if (node.id === nodeId) {
@@ -277,6 +297,43 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
     )));
   };
 
+  const prepareNewRunFromHistory = (override = null) => {
+    const overrideNodeId = override?.nodeId || null;
+    const overrideFields = override?.fields && typeof override.fields === 'object' ? override.fields : {};
+    disconnectRunEvents();
+    setNodes((currentNodes) => currentNodes.map((node) => normalizeCanvasNode({
+      ...node,
+      data: {
+        ...node.data,
+        ...(node.id === overrideNodeId ? overrideFields : {}),
+        workflowReadOnly: false,
+        status: 'idle',
+        output: null,
+        error: null,
+        progress: null,
+        blocker: null,
+        actionHint: null,
+        nextRecommendedAction: null,
+        platformStatus: null,
+        manualAction: null,
+        outputSummary: null,
+        workflowRunStatus: 'idle'
+      }
+    }, setSelectedNodeId, dispatchNodeAction, dispatchNodeArtifactView, nodeTypes, dispatchNodeUpdate)));
+    setCurrentRunId(null);
+    setRunStatus('idle');
+    setSelectedNodeId(overrideNodeId || 'start');
+    setLogs([{
+      timestamp: new Date().toISOString(),
+      level: 'info',
+      message: overrideNodeId
+        ? '已基于历史配置新建流程，并更新采集条件。确认无误后即可运行。'
+        : '已复制历史配置。请调整日期、页数或表格设置后运行。'
+    }]);
+    closeOverlay();
+    setArtifactState({ status: 'empty', nodeId: null, artifact: null, error: '' });
+  };
+
   // 加载指定历史运行记录的详情和日志
   const loadHistoryRun = async (runId, { preserveLogs = false } = {}) => {
     try {
@@ -286,14 +343,18 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
       setRunStatus('pending');
 
       const run = await getWorkflowRun(runId);
+      if (!run || typeof run !== 'object') {
+        throw new Error('历史运行记录为空或已被删除');
+      }
       const defaultWorkflow = normalizeWorkflowForCanvas(run.workflow || { nodes: [], edges: [] });
 
       setNodes((defaultWorkflow.nodes || []).map(n => {
-        const state = getCanvasNodeState(run.nodeStates, n.id);
+        const state = getCanvasNodeState(run.nodeStates, n.id) || {};
         return normalizeCanvasNode({
           ...n,
           data: {
             ...n.data,
+            workflowReadOnly: true,
             status: state.status || 'idle',
             output: state.output || null,
             error: state.error || null,
@@ -307,7 +368,7 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
             outputSummary: state.outputSummary || null,
             cooldownRemainingMs: state.cooldownRemainingMs || 0
           }
-        }, setSelectedNodeId, dispatchNodeAction, dispatchNodeArtifactView, nodeTypes);
+        }, setSelectedNodeId, dispatchNodeAction, dispatchNodeArtifactView, nodeTypes, dispatchNodeUpdate);
       }));
 
       setEdges((defaultWorkflow.edges || []).map(e => ({
@@ -430,9 +491,33 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
     openOverlay(WORKFLOW_OVERLAYS.ARTIFACT, nodeId, { sourceAction: 'artifact' });
   };
 
+  const confirmReviewDrafts = async (reviews) => {
+    if (!currentRunId || confirmingReviews) return false;
+    setConfirmingReviews(true);
+    try {
+      await confirmReviewSheet(currentRunId, reviews);
+      setLogs((previous) => [...previous, {
+        timestamp: new Date().toISOString(),
+        level: 'info',
+        message: `已确认 ${reviews.length} 条评价，正在生成最终评价表。`
+      }]);
+      setRunStatus('resuming');
+      closeOverlay();
+      listenToRunEvents(currentRunId);
+      await loadHistoryRunRef.current?.(currentRunId, { preserveLogs: true });
+      return true;
+    } catch (error) {
+      alert(`确认评价失败：${error.message}`);
+      return false;
+    } finally {
+      setConfirmingReviews(false);
+    }
+  };
+
   // 画布节点由历史数据创建，事件入口必须始终指向当前 render 的运行上下文。
   nodeInteractionRef.current.onAction = handleNodeAction;
   nodeInteractionRef.current.onViewArtifact = handleViewNodeArtifact;
+  nodeUpdateRef.current = updateNodeData;
 
   const retryWorkflowNode = async (nodeId) => {
     if (!currentRunId) return;
@@ -541,7 +626,9 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
     },
     runtimeActions: {
       onCopyText: copyText,
-      onRetryNode: retryWorkflowNode
+      onRetryNode: retryWorkflowNode,
+      onConfirmReviews: confirmReviewDrafts,
+      confirmingReviews
     },
     distributionWorkbench: {
       onDistributionJobChange: updateDistributionNodeJob
@@ -584,6 +671,7 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
         onNodeClick={onNodeClick}
         onNodesChange={onNodesChange}
         onPause={() => runWorkflowOperation('pause')}
+        onPrepareNewRun={prepareNewRunFromHistory}
         onRun={handleRunWorkflow}
         onSelectNode={setSelectedNodeId}
         orderedWorkflowNodes={orderedWorkflowNodes}

@@ -23,6 +23,9 @@ const STATUS_STAGE = {
   products_selected: 'selected',
   select_failed: 'selected',
   generated: 'generated',
+  product_rank_collected: 'selected',
+  review_source_imported: 'selected',
+  review_approved: 'generated',
   generate_failed: 'generated',
   needs_review: 'review',
   ready_to_distribute: 'ready',
@@ -218,7 +221,12 @@ function defaultFiles(runDir, files = {}) {
     selectedProducts: safeRunFile(runDir, files.selectedProducts, 'selected-products.jsonl'),
     generatedProducts: safeRunFile(runDir, files.generatedProducts, 'generated-products.jsonl'),
     distributionBatch: safeRunFile(runDir, files.distributionBatch, 'distribution-batch.txt'),
-    distributionReview: safeRunFile(runDir, files.distributionReview, 'distribution-review.md')
+    distributionReview: safeRunFile(runDir, files.distributionReview, 'distribution-review.md'),
+    productRank: safeRunFile(runDir, files.productRank, 'sycm-product-rank.jsonl'),
+    orderSheet: safeRunFile(runDir, files.orderSheet, '商品排行刷单表.xlsx'),
+    reviewSource: safeRunFile(runDir, files.reviewSource, 'uploaded-order-sheet.xlsx'),
+    reviewGroups: safeRunFile(runDir, files.reviewGroups, 'review-order-groups.json'),
+    reviewDrafts: safeRunFile(runDir, files.reviewDrafts, 'review-drafts.jsonl')
   };
 }
 
@@ -301,6 +309,9 @@ function summarizePipelineRun({ dataDir = DEFAULT_PIPELINE_DIR, runId, previewLi
     failureReasons: run.failureReasons || {},
     diversity: run.diversity || {},
     discovery: run.discovery || null,
+    options: run.options || {},
+    productRank: run.productRank || null,
+    reviewGeneration: run.reviewGeneration || null,
     files,
     batchCount: countNonEmptyLines(batchFile),
     batchFile,
@@ -319,7 +330,8 @@ function summarizePipelineRun({ dataDir = DEFAULT_PIPELINE_DIR, runId, previewLi
       verifiedKeywords: readJsonlPreview(files.verifiedKeywords, previewLimit),
       selectedProducts: readJsonlPreview(files.selectedProducts, previewLimit),
       generatedProducts: readJsonlPreview(files.generatedProducts, previewLimit),
-      distributionReview: readTextPreview(reviewFile, reviewChars)
+      distributionReview: readTextPreview(reviewFile, reviewChars),
+      reviewDrafts: readJsonlPreview(files.reviewDrafts, previewLimit)
     }
   });
 

@@ -14,6 +14,10 @@ test('normalizes wrapped template and run API responses', () => {
   const validTemplate = { id: 'daily', workflow: { nodes: [], edges: [] } };
   assert.deepEqual(normalizeTemplateList({ data: { templates: [validTemplate, { id: 'invalid' }] } }), [validTemplate]);
   assert.deepEqual(normalizeRunList({ data: { history: [{ runId: 'run-1' }] } }), [{ runId: 'run-1' }]);
+  assert.deepEqual(normalizeRunList({ runs: [null, {}, { id: 'legacy-run' }, { runId: 'run-2' }] }), [
+    { id: 'legacy-run' },
+    { runId: 'run-2' }
+  ]);
 });
 
 test('removes retired review nodes and repairs the export edge', () => {
@@ -41,7 +45,8 @@ test('normalizes node rendering and delegates interactions', () => {
     (nodeId) => events.push(`select:${nodeId}`),
     (action, nodeId) => events.push(`action:${action}:${nodeId}`),
     (nodeId) => events.push(`artifact:${nodeId}`),
-    { 'pipeline-mine': true }
+    { 'pipeline-mine': true },
+    (nodeId, field, value) => events.push(`update:${nodeId}:${field}:${value}`)
   );
 
   assert.equal(node.type, 'pipeline-mine');
@@ -49,7 +54,41 @@ test('normalizes node rendering and delegates interactions', () => {
   node.data.onSelect();
   node.data.onAction('retry-node');
   node.data.onViewArtifact();
-  assert.deepEqual(events, ['select:mine', 'action:retry-node:mine', 'artifact:mine']);
+  node.data.onUpdate('sheetType', 'review');
+  assert.deepEqual(events, ['select:mine', 'action:retry-node:mine', 'artifact:mine', 'update:mine:sheetType:review']);
+});
+
+test('adds sheet controls to legacy order-sheet snapshots', () => {
+  const workflow = normalizeWorkflowForCanvas({
+    nodes: [
+      { id: 'start', data: { sheetType: 'review', storeName: '竹里人' } },
+      { id: 'collectRank', data: {} },
+      { id: 'generateSheet', data: {} },
+      { id: 'end', data: {} }
+    ],
+    edges: []
+  });
+  const generateSheet = workflow.nodes.find((node) => node.id === 'generateSheet');
+  const end = workflow.nodes.find((node) => node.id === 'end');
+
+  assert.equal(generateSheet.data.sheetConfig, true);
+  assert.equal(generateSheet.data.sheetType, 'review');
+  assert.equal(generateSheet.data.storeName, '竹里人');
+  assert.equal(generateSheet.data.reviewGroupSize, 4);
+  assert.equal(end.data.orderSheetDownload, true);
+});
+
+test('does not add Excel download capability to ordinary selection workflows', () => {
+  const workflow = normalizeWorkflowForCanvas({
+    nodes: [
+      { id: 'start', data: {} },
+      { id: 'generate', data: {} },
+      { id: 'end', data: {} }
+    ],
+    edges: []
+  });
+
+  assert.equal(workflow.nodes.find((node) => node.id === 'end').data.orderSheetDownload, undefined);
 });
 
 test('merges active legacy review state into the export node', () => {

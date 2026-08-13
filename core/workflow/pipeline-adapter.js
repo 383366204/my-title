@@ -24,6 +24,10 @@ const WORKFLOW_NODE_IDS = {
   generate: 'generate',
   export: 'export',
   review: 'review',
+  collectRank: 'collectRank',
+  importSheet: 'importSheet',
+  generateReviews: 'generateReviews',
+  generateSheet: 'generateSheet',
   end: 'end'
 };
 
@@ -37,7 +41,11 @@ const ARTIFACT_BY_NODE = {
   [WORKFLOW_NODE_IDS.select]: { fileKey: 'selectedProducts', type: 'jsonl' },
   [WORKFLOW_NODE_IDS.generate]: { fileKey: 'generatedProducts', type: 'jsonl' },
   [WORKFLOW_NODE_IDS.export]: { fileKey: 'distributionBatch', type: 'text' },
-  [WORKFLOW_NODE_IDS.review]: { fileKey: 'distributionReview', type: 'text' }
+  [WORKFLOW_NODE_IDS.review]: { fileKey: 'distributionReview', type: 'text' },
+  [WORKFLOW_NODE_IDS.collectRank]: { fileKey: 'productRank', type: 'jsonl' },
+  [WORKFLOW_NODE_IDS.importSheet]: { fileKey: 'reviewGroups', type: 'json' },
+  [WORKFLOW_NODE_IDS.generateReviews]: { fileKey: 'reviewDrafts', type: 'jsonl' },
+  [WORKFLOW_NODE_IDS.generateSheet]: { fileKey: 'orderSheet', type: 'xlsx' }
 };
 
 function clampInt(value, fallback, min, max) {
@@ -52,6 +60,42 @@ function sanitizeBool(value, fallback = true) {
   if (['false', '0', 'no', 'off'].includes(String(value).toLowerCase())) return false;
   if (['true', '1', 'yes', 'on'].includes(String(value).toLowerCase())) return true;
   return fallback;
+}
+
+function sanitizeOrderSheetDateRange(raw = {}) {
+  const dateMode = ['latest_day', 'last_7_days', 'last_30_days', 'custom'].includes(String(raw.dateMode || ''))
+    ? String(raw.dateMode)
+    : 'latest_day';
+  const startDate = String(raw.startDate || '').trim();
+  const endDate = String(raw.endDate || '').trim();
+  if (dateMode !== 'custom') return { dateMode, startDate: '', endDate: '' };
+  const pattern = /^\d{4}-\d{2}-\d{2}$/;
+  if (!pattern.test(startDate) || !pattern.test(endDate)) throw new Error('自定义日期范围必须填写开始日期和结束日期');
+  const start = new Date(`${startDate}T00:00:00Z`);
+  const end = new Date(`${endDate}T00:00:00Z`);
+  if (start.toISOString().slice(0, 10) !== startDate || end.toISOString().slice(0, 10) !== endDate) {
+    throw new Error('自定义日期范围包含无效日期');
+  }
+  const days = Math.floor((end.getTime() - start.getTime()) / 86400000) + 1;
+  if (!Number.isFinite(days) || days < 1) throw new Error('开始日期不能晚于结束日期');
+  if (days > 31) throw new Error('生意参谋自定义日期范围最多选择 31 天');
+  return { dateMode, startDate, endDate };
+}
+
+function localIsoDate(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function sanitizeOrderDate(value) {
+  const orderDate = String(value || '').trim() || localIsoDate();
+  const pattern = /^\d{4}-\d{2}-\d{2}$/;
+  if (!pattern.test(orderDate)) throw new Error('刷单日期格式无效');
+  const parsed = new Date(`${orderDate}T00:00:00Z`);
+  if (parsed.toISOString().slice(0, 10) !== orderDate) throw new Error('刷单日期无效');
+  return orderDate;
 }
 
 function normalizeManualOfferUrl(value) {
@@ -216,6 +260,47 @@ function workflowNodes(mode = 'daily') {
         length: 60,
         pages: 1
       };
+  if (mode === 'order-sheet') {
+    return withSteps(positionNodes([
+      { id: WORKFLOW_NODE_IDS.start, type: 'production-start', data: { label: '开始', description: '设置商品排行的采集范围和排序方式', orderSheetConfig: true, port: 9222, dateMode: 'latest_day', startDate: '', endDate: '', pages: 1, sortMetric: 'itmUv' } },
+      { id: WORKFLOW_NODE_IDS.collectRank, type: 'pipeline-collect-rank', data: { label: '采集商品排行', description: '按配置的日期、页数和指标读取商品排行' } },
+      {
+        id: WORKFLOW_NODE_IDS.generateSheet,
+        type: 'pipeline-generate-sheet',
+        data: {
+          label: '生成业务表格',
+          description: '配置格式和内容后生成可下载的 Excel',
+          sheetConfig: true,
+          sheetType: 'order',
+          orderSheetOnly: true,
+          storeName: '',
+          orderDate: localIsoDate(),
+          productLimit: 0,
+          fileName: '',
+          includeRawData: true,
+          includeImages: true,
+          amountMode: 'average',
+          missingAmountPolicy: 'blank',
+          cartQuantity: 1,
+          rowSpan: 3,
+          workRequirement: '点一两款其他店同行的产品看一下，然后再下单',
+          orderNote: '',
+          reviewGroupSize: 4,
+          includeSpacerRow: true
+        }
+      },
+      { id: WORKFLOW_NODE_IDS.end, type: 'production-end', data: { label: '完成', description: '下载 Excel 并核对待补充信息' } }
+    ], { startX: 250, stepX: 300 }));
+  }
+  if (mode === 'review-sheet') {
+    return withSteps(positionNodes([
+      { id: WORKFLOW_NODE_IDS.start, type: 'production-start', data: { label: '上传刷单表', description: '上传已执行的刷单表并确认订单分组', reviewUpload: true, uploadId: '', uploadName: '', groups: [] } },
+      { id: WORKFLOW_NODE_IDS.importSheet, type: 'pipeline-import-sheet', data: { label: '解析订单分组', description: '识别工作表、商品和订单信息缺失项' } },
+      { id: WORKFLOW_NODE_IDS.generateReviews, type: 'pipeline-generate-reviews', data: { label: '评价生成与复核', description: '生成评价草稿并在页面逐条确认', reviewConfig: true, reviewTone: '自然真实', reviewLength: 35, useAI: true } },
+      { id: WORKFLOW_NODE_IDS.generateSheet, type: 'pipeline-generate-sheet', data: { label: '生成评价表', description: '按确认后的订单组生成评价 Excel', sheetConfig: true, sheetType: 'review', reviewSourceUpload: true, fileName: '', includeSpacerRow: true } },
+      { id: WORKFLOW_NODE_IDS.end, type: 'production-end', data: { label: '完成', description: '下载评价表并核对内容' } }
+    ], { startX: 120, stepX: 280 }));
+  }
   if (mode === 'manual') {
     return withSteps(positionNodes([
       { id: WORKFLOW_NODE_IDS.start, type: 'production-start', data: { label: '录入词和货源', description: '输入关键词和 1688 商品链接', manualInput: true, defaultKeyword: '', items: [], length: 60, export: 20 } },
@@ -248,7 +333,20 @@ function workflowNodes(mode = 'daily') {
 }
 
 function workflowEdges(mode = 'daily') {
-  const pairs = mode === 'keyword'
+  const pairs = mode === 'order-sheet'
+    ? [
+        [WORKFLOW_NODE_IDS.start, WORKFLOW_NODE_IDS.collectRank],
+        [WORKFLOW_NODE_IDS.collectRank, WORKFLOW_NODE_IDS.generateSheet],
+        [WORKFLOW_NODE_IDS.generateSheet, WORKFLOW_NODE_IDS.end]
+      ]
+    : mode === 'review-sheet'
+      ? [
+          [WORKFLOW_NODE_IDS.start, WORKFLOW_NODE_IDS.importSheet],
+          [WORKFLOW_NODE_IDS.importSheet, WORKFLOW_NODE_IDS.generateReviews],
+          [WORKFLOW_NODE_IDS.generateReviews, WORKFLOW_NODE_IDS.generateSheet],
+          [WORKFLOW_NODE_IDS.generateSheet, WORKFLOW_NODE_IDS.end]
+        ]
+    : mode === 'keyword'
     ? [
         [WORKFLOW_NODE_IDS.start, WORKFLOW_NODE_IDS.verify],
         [WORKFLOW_NODE_IDS.verify, WORKFLOW_NODE_IDS.select],
@@ -321,6 +419,18 @@ function listProductionWorkflowTemplates() {
       scenarioLabel: '适合：已经确定词和货源',
       flowSummary: '流程：录入词和货源 → 获取商品资料 → AI生成标题 → 铺货复核 → 自动铺货',
       modeHint: '一次输入关键词和 1688 链接，系统准备好标题与类目后只需复核一次。'
+    }),
+    template('sycm-order-sheet-v1', '制作刷单表格流水线', 'order-sheet', '按条件读取生意参谋商品排行并生成 Excel', {
+      entryLabel: '入口：生意参谋商品排行',
+      scenarioLabel: '适合：制作动销刷单表',
+      flowSummary: '流程：设置采集条件 → 商品排行 → 指标降序 → 生成 Excel',
+      modeHint: '开始节点设置商品排行采集条件，生成业务表格节点设置刷单表内容与版式。'
+    }),
+    template('uploaded-review-sheet-v1', '根据刷单表生成评价表', 'review-sheet', '上传已执行的刷单表，补全订单信息并生成评价表', {
+      entryLabel: '入口：已执行的刷单表',
+      scenarioLabel: '适合：刷单完成后整理评价任务',
+      flowSummary: '流程：上传刷单表 → 解析订单组 → 生成并复核评价 → 导出评价表',
+      modeHint: '上传实际使用过的 .xlsx 刷单表；订单号、手机号和旺旺只保存在本机。'
     })
   ];
 }
@@ -419,6 +529,63 @@ function sanitizeWorkflowParams(mode, raw = {}) {
       items: manualInput.items,
       export: clampInt(raw.export, 20, 1, 100),
       length: clampInt(raw.length, 60, 30, 80)
+    };
+  }
+  if (mode === 'order-sheet') {
+    const dateRange = sanitizeOrderSheetDateRange(raw);
+    const amountMode = ['average', 'payment', 'blank'].includes(String(raw.amountMode || ''))
+      ? String(raw.amountMode)
+      : 'average';
+    const missingAmountPolicy = ['blank', 'mark', 'skip'].includes(String(raw.missingAmountPolicy || ''))
+      ? String(raw.missingAmountPolicy)
+      : 'blank';
+    const reviewGroupSize = [1, 2, 4].includes(Number(raw.reviewGroupSize))
+      ? Number(raw.reviewGroupSize)
+      : 4;
+    return {
+      port: clampInt(raw.port, 9222, 1, 65535),
+      ...dateRange,
+      sheetType: 'order',
+      orderDate: sanitizeOrderDate(raw.orderDate),
+      storeName: String(raw.storeName || '').trim().slice(0, 50),
+      pages: clampInt(raw.pages, 1, 1, 5),
+      sortMetric: ['payAmt', 'sucRefundAmt', 'payItmCnt', 'itemCartCnt', 'itmUv'].includes(String(raw.sortMetric || ''))
+        ? String(raw.sortMetric)
+        : 'itmUv',
+      productLimit: clampInt(raw.productLimit, 0, 0, 500),
+      fileName: String(raw.fileName || '').trim().slice(0, 80),
+      includeRawData: sanitizeBool(raw.includeRawData, true),
+      includeImages: sanitizeBool(raw.includeImages, true),
+      amountMode,
+      missingAmountPolicy,
+      cartQuantity: clampInt(raw.cartQuantity, 1, 1, 20),
+      rowSpan: clampInt(raw.rowSpan, 3, 1, 5),
+      workRequirement: String(raw.workRequirement || '').trim().slice(0, 200),
+      orderNote: String(raw.orderNote || '').trim().slice(0, 100),
+      reviewGroupSize,
+      includeSpacerRow: sanitizeBool(raw.includeSpacerRow, true)
+    };
+  }
+  if (mode === 'review-sheet') {
+    const groups = Array.isArray(raw.groups) ? raw.groups.slice(0, 200).map(group => ({
+      id: String(group?.id || '').slice(0, 80),
+      orderDate: sanitizeOrderDate(group?.orderDate),
+      storeName: String(group?.storeName || '').trim().slice(0, 50),
+      buyerName: String(group?.buyerName || '').trim().slice(0, 80),
+      buyerPhone: String(group?.buyerPhone || '').trim().slice(0, 30),
+      orderNumber: String(group?.orderNumber || '').trim().slice(0, 80)
+    })) : [];
+    if (!String(raw.uploadId || '').trim()) throw new Error('请先上传刷单表');
+    return {
+      uploadId: String(raw.uploadId).trim(),
+      uploadName: String(raw.uploadName || '').trim().slice(0, 120),
+      groups,
+      reviewTone: String(raw.reviewTone || '自然真实').trim().slice(0, 30),
+      reviewLength: clampInt(raw.reviewLength, 35, 15, 100),
+      useAI: sanitizeBool(raw.useAI, true),
+      fileName: String(raw.fileName || '').trim().slice(0, 80),
+      includeSpacerRow: sanitizeBool(raw.includeSpacerRow, true),
+      sheetType: 'review'
     };
   }
   throw new Error(`未知 workflow mode: ${mode}`);
@@ -570,7 +737,7 @@ function resolveProductionWorkflowLaunch(body = {}) {
     ...(body.params || {}),
     ...(body.options || {})
   };
-  for (const key of ['keyword', 'keywords', 'mine', 'discoveryMode', 'source', 'rootMode', 'rootLimit', 'rootCooldownDays', 'familyCooldownDays', 'inspirationSycmPages', 'inspirationUseLLM', 'maxObservingSeeds', 'maxObservingPoolSize', 'maxNewSeeds', 'autoReplenishSeeds', 'recordSeedFeedback', 'verify', 'select', 'generate', 'export', 'productsPerKeyword', 'length', 'port', 'pages', 'minBlueRows', 'fallbackHot', 'autoApproveKeywords', 'autoExpandVerify', 'verifyReserve', 'autoAllowReviewKeywords', 'reviewKeywordLimit']) {
+  for (const key of ['keyword', 'keywords', 'mine', 'discoveryMode', 'source', 'rootMode', 'rootLimit', 'rootCooldownDays', 'familyCooldownDays', 'inspirationSycmPages', 'inspirationUseLLM', 'maxObservingSeeds', 'maxObservingPoolSize', 'maxNewSeeds', 'autoReplenishSeeds', 'recordSeedFeedback', 'verify', 'select', 'generate', 'export', 'productsPerKeyword', 'length', 'port', 'pages', 'minBlueRows', 'fallbackHot', 'autoApproveKeywords', 'autoExpandVerify', 'verifyReserve', 'autoAllowReviewKeywords', 'reviewKeywordLimit', 'workRequirement', 'dateMode', 'startDate', 'endDate', 'orderDate', 'storeName', 'sheetType', 'sortMetric', 'productLimit', 'fileName', 'includeRawData', 'includeImages', 'amountMode', 'missingAmountPolicy', 'cartQuantity', 'rowSpan', 'orderNote', 'reviewGroupSize', 'includeSpacerRow', 'uploadId', 'uploadName', 'groups', 'reviewTone', 'reviewLength', 'useAI']) {
     if (Object.prototype.hasOwnProperty.call(body, key)) params[key] = body[key];
   }
 
@@ -755,10 +922,50 @@ function outputForNode(id, summary) {
       mustReview: !!summary.mustReview
     };
   }
+  if (id === WORKFLOW_NODE_IDS.collectRank) {
+    return {
+      count: Number(counts.productRank || 0),
+      pages: Number(counts.productRankPages || summary.productRank?.pagesCollected || 0),
+      file: summary.files?.productRank || '',
+      period: summary.productRank?.period || '',
+      dateMode: summary.productRank?.dateMode || '',
+      startDate: summary.productRank?.startDate || '',
+      endDate: summary.productRank?.endDate || '',
+      sort: summary.productRank?.sort || '',
+      sortMetric: summary.productRank?.sortMetric || '',
+      sortLabel: summary.productRank?.sortLabel || '',
+      storeName: summary.productRank?.storeName || '',
+      statDate: summary.productRank?.statDate || ''
+    };
+  }
+  if (id === WORKFLOW_NODE_IDS.importSheet) {
+    return {
+      groupCount: Number(counts.reviewGroups || 0),
+      productCount: Number(counts.reviewSourceProducts || 0),
+      file: summary.files?.reviewGroups || ''
+    };
+  }
+  if (id === WORKFLOW_NODE_IDS.generateReviews) {
+    return {
+      count: Number(counts.reviewDrafts || 0),
+      degraded: summary.reviewGeneration?.degraded === true,
+      file: summary.files?.reviewDrafts || ''
+    };
+  }
+  if (id === WORKFLOW_NODE_IDS.generateSheet) {
+    return {
+      count: Number(counts.orderSheetRows || 0),
+      imageCount: Number(counts.orderSheetImages || 0),
+      skippedCount: Number(counts.orderSheetSkipped || 0),
+      sheetType: summary.options?.sheetType === 'review' ? 'review' : 'order',
+      includeRawData: summary.options?.includeRawData !== false,
+      file: summary.files?.orderSheet || ''
+    };
+  }
   if (id === WORKFLOW_NODE_IDS.review) {
     return { reviewFile: summary.reviewFile || summary.files?.distributionReview || '', mustReview: !!summary.mustReview };
   }
-  if (id === WORKFLOW_NODE_IDS.end) return { canSubmit: !!summary.canSubmit };
+  if (id === WORKFLOW_NODE_IDS.end) return { canSubmit: !!summary.canSubmit, runId: summary.runId || '' };
   return null;
 }
 
@@ -810,6 +1017,20 @@ function sycmFailureIntervention(row) {
 
 function summaryInterventionForNode(summary, nodeId) {
   const status = summary.status || 'unknown';
+  if (nodeId === WORKFLOW_NODE_IDS.collectRank && status === 'manual_action_required') {
+    const manualAction = summary.runtime?.manualAction || summary.manualAction || null;
+    const chromeUnavailable = String(manualAction?.status || '').includes('chrome');
+    return {
+      blocker: manualAction?.status || 'sycm_manual_action_required',
+      actionHint: manualAction?.userMessage || '请在 Chrome 中登录生意参谋并处理安全验证后重试。',
+      platform: 'sycm',
+      platformStatus: manualAction?.status || 'manual_action_required',
+      manualAction,
+      nextRecommendedAction: chromeUnavailable
+        ? { action: 'start-sycm-chrome', label: '启动 Chrome', description: '打开商品排行页面并完成登录。' }
+        : { action: 'retry-node', label: '重试采集', description: '完成人工处理后重新采集商品排行。' }
+    };
+  }
   if (nodeId === WORKFLOW_NODE_IDS.mine && ['mining_manual_action_required', 'mining_empty'].includes(status)) {
     const chromeUnavailable = summary.discovery?.blocker === 'sycm_chrome_unavailable';
     const blockerReason = summary.discovery?.blockerReason || '';
@@ -1012,6 +1233,45 @@ function statusPlanForSummary(summary) {
     memo[nodeId] = 'idle';
     return memo;
   }, {});
+  const mode = summary.runtime?.mode || summary.options?.mode || '';
+  if (mode === 'order-sheet') {
+    states[WORKFLOW_NODE_IDS.start] = 'completed';
+    if (status === 'workflow_complete') {
+      states[WORKFLOW_NODE_IDS.collectRank] = 'completed';
+      states[WORKFLOW_NODE_IDS.generateSheet] = 'completed';
+      states[WORKFLOW_NODE_IDS.end] = 'completed';
+    } else if (status === 'product_rank_collected') {
+      states[WORKFLOW_NODE_IDS.collectRank] = 'completed';
+      states[WORKFLOW_NODE_IDS.generateSheet] = 'running';
+    } else if (status === 'manual_action_required') {
+      states[WORKFLOW_NODE_IDS.collectRank] = 'blocked';
+    } else {
+      states[WORKFLOW_NODE_IDS.collectRank] = 'running';
+    }
+    return states;
+  }
+  if (mode === 'review-sheet') {
+    states[WORKFLOW_NODE_IDS.start] = 'completed';
+    if (status === 'workflow_complete') {
+      states[WORKFLOW_NODE_IDS.importSheet] = 'completed';
+      states[WORKFLOW_NODE_IDS.generateReviews] = 'completed';
+      states[WORKFLOW_NODE_IDS.generateSheet] = 'completed';
+      states[WORKFLOW_NODE_IDS.end] = 'completed';
+    } else if (status === 'review_approved') {
+      states[WORKFLOW_NODE_IDS.importSheet] = 'completed';
+      states[WORKFLOW_NODE_IDS.generateReviews] = 'completed';
+      states[WORKFLOW_NODE_IDS.generateSheet] = 'running';
+    } else if (status === 'needs_review') {
+      states[WORKFLOW_NODE_IDS.importSheet] = 'completed';
+      states[WORKFLOW_NODE_IDS.generateReviews] = 'needs_review';
+    } else if (status === 'review_source_imported') {
+      states[WORKFLOW_NODE_IDS.importSheet] = 'completed';
+      states[WORKFLOW_NODE_IDS.generateReviews] = 'running';
+    } else {
+      states[WORKFLOW_NODE_IDS.importSheet] = 'running';
+    }
+    return states;
+  }
 
   if (status === 'workflow_complete') {
     completeThrough(states, WORKFLOW_NODE_IDS.end);
@@ -1168,6 +1428,7 @@ function buildNodeStates(summary) {
       : runtime?.activeStep;
   if (runtime && activeStep && states[activeStep]) {
     const runtimeStatus = nodeStatusFromRuntimeProgress({ status: runtime.status }) || 'running';
+    const runtimeFailed = runtimeStatus === 'failed';
     const activeProgress = states[activeStep].progress || {};
     states[activeStep] = {
       ...states[activeStep],
@@ -1178,12 +1439,15 @@ function buildNodeStates(summary) {
         status: runtimeStatus,
         message: activeProgress.message || (runtimeStatus === 'paused' ? '已暂停' : '')
       }),
-      blocker: runtime.blocker || states[activeStep].blocker || null,
-      actionHint: runtime.actionHint || states[activeStep].actionHint || null,
-      nextRecommendedAction: runtime.nextRecommendedAction || states[activeStep].nextRecommendedAction || null,
-      platform: runtime.platform || states[activeStep].platform || null,
-      platformStatus: runtime.platformStatus || states[activeStep].platformStatus || null,
-      manualAction: runtime.manualAction || states[activeStep].manualAction || null,
+      error: runtime.error || states[activeStep].error || null,
+      blocker: runtimeFailed ? null : runtime.blocker || states[activeStep].blocker || null,
+      actionHint: runtimeFailed ? '请确认生意参谋页面状态后重试当前节点。' : runtime.actionHint || states[activeStep].actionHint || null,
+      nextRecommendedAction: runtimeFailed
+        ? { action: 'retry-node', label: activeStep === WORKFLOW_NODE_IDS.collectRank ? '重试采集' : '重试节点', description: '保留当前运行参数并重新执行该节点。' }
+        : runtime.nextRecommendedAction || states[activeStep].nextRecommendedAction || null,
+      platform: runtimeFailed ? null : runtime.platform || states[activeStep].platform || null,
+      platformStatus: runtimeFailed ? null : runtime.platformStatus || states[activeStep].platformStatus || null,
+      manualAction: runtimeFailed ? null : runtime.manualAction || states[activeStep].manualAction || null,
       durationMs: runtime.durationMs || states[activeStep].durationMs || null,
       outputSummary: runtime.outputSummary || states[activeStep].outputSummary || null
     };
@@ -1193,11 +1457,19 @@ function buildNodeStates(summary) {
 
 function templateForSummary(summary) {
   const options = summary.options || {};
-  const mode = summary.options?.mode || (options.keyword || summary.exactKeyword ? 'keyword' : 'daily');
+  const mode = summary.runtime?.mode || summary.options?.mode || (options.keyword || summary.exactKeyword ? 'keyword' : 'daily');
   if (mode === 'manual' && Number(options.workflowVersion || 1) < 2) {
     return { id: 'manual-selection-v1', mode: 'manual', workflow: legacyManualWorkflowTemplate() };
   }
-  const id = mode === 'keyword' ? 'exact-keyword-v1' : mode === 'manual' ? 'manual-selection-v1' : 'daily-selection-v1';
+  const id = mode === 'keyword'
+    ? 'exact-keyword-v1'
+    : mode === 'manual'
+      ? 'manual-selection-v1'
+      : mode === 'order-sheet'
+        ? 'sycm-order-sheet-v1'
+        : mode === 'review-sheet'
+          ? 'uploaded-review-sheet-v1'
+        : 'daily-selection-v1';
   return listProductionWorkflowTemplates().find(item => item.id === id);
 }
 
@@ -1314,6 +1586,21 @@ function readWorkflowNodeArtifact(runIdOrOptions, nodeId, options = {}) {
   if (!summary || !artifact) return null;
   const file = summary.files && summary.files[artifact.fileKey];
   if (!file) return null;
+  if (artifact.type === 'json') {
+    if (!fs.existsSync(file)) return null;
+    try {
+      const value = JSON.parse(fs.readFileSync(file, 'utf8'));
+      return {
+        runId: summary.runId,
+        nodeId: normalized.nodeId,
+        file,
+        type: 'json',
+        ...value
+      };
+    } catch (_error) {
+      return null;
+    }
+  }
   if (artifact.type === 'jsonl') {
     if (normalized.nodeId === WORKFLOW_NODE_IDS.mine) {
       return {
@@ -1412,6 +1699,18 @@ function readWorkflowNodeArtifact(runIdOrOptions, nodeId, options = {}) {
       file,
       type: 'jsonl',
       rows: readJsonlPreview(file, normalized.limit || 50)
+    };
+  }
+  if (artifact.type === 'xlsx') {
+    if (!fs.existsSync(file)) return null;
+    return {
+      runId: summary.runId,
+      nodeId: normalized.nodeId,
+      file,
+      filename: path.basename(file),
+      type: 'xlsx',
+      count: Number(summary.counts?.orderSheetRows || 0),
+      downloadUrl: `/api/workflows/runs/${encodeURIComponent(summary.runId)}/artifacts/${encodeURIComponent(normalized.nodeId)}/raw`
     };
   }
   return {

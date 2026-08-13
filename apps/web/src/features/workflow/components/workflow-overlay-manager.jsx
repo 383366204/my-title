@@ -7,6 +7,8 @@ import { DistributionExportPanel } from './distribution-export-panel.jsx';
 import { ManualProductSelectionPanel } from './manual-product-selection-panel.jsx';
 import { ManualWorkflowInputPanel } from './manual-workflow-input-panel.jsx';
 import { NodeOperationPanel } from './node-operation-panel.jsx';
+import { ReviewSourceUploadPanel } from './review-source-upload-panel.jsx';
+import { SheetConfigurationPanel } from './sheet-configuration-panel.jsx';
 import { StartConfigurationPanel } from './start-configuration-panel.jsx';
 
 const OVERLAY_COPY = {
@@ -14,6 +16,7 @@ const OVERLAY_COPY = {
   [WORKFLOW_OVERLAYS.DISTRIBUTION]: ['铺货清单与复核', '核对标题和类目，可复制内容人工铺货，也可确认后自动铺货。'],
   [WORKFLOW_OVERLAYS.NODE_WORKBENCH]: ['节点操作', '处理当前节点的阻塞、筛选或重试。'],
   [WORKFLOW_OVERLAYS.PRODUCT_SELECT]: ['勾选 1688 货源', '保留合适货源，也可以粘贴新的 1688 链接。'],
+  [WORKFLOW_OVERLAYS.SHEET_CONFIG]: ['配置业务表格', '设置表格类型、输出范围和版式内容。'],
   [WORKFLOW_OVERLAYS.START_CONFIG]: ['配置流水线输入', '配置完成后返回画布启动流水线。']
 };
 
@@ -77,6 +80,19 @@ export function WorkflowOverlayManager({
     );
   }
 
+  if (activeOverlay.type === WORKFLOW_OVERLAYS.START_CONFIG && activeTemplateMode === 'review-sheet') {
+    return (
+      <WorkflowOverlayShell label="上传并确认刷单表" description={activeTemplateView.modeHint} onClose={onClose} wide>
+        <ReviewSourceUploadPanel
+          node={node || nodes.find((item) => item.id === 'start')}
+          onDone={onClose}
+          onUpdateField={onUpdateNodeData}
+          readOnly={Boolean(currentRunId)}
+        />
+      </WorkflowOverlayShell>
+    );
+  }
+
   let content = null;
   if (activeOverlay.type === WORKFLOW_OVERLAYS.START_CONFIG) {
     content = (
@@ -86,6 +102,16 @@ export function WorkflowOverlayManager({
         node={node || nodes.find((item) => item.id === 'start')}
         onDone={onClose}
         onUpdateField={onUpdateNodeData}
+        readOnly={Boolean(currentRunId)}
+      />
+    );
+  } else if (activeOverlay.type === WORKFLOW_OVERLAYS.SHEET_CONFIG) {
+    content = (
+      <SheetConfigurationPanel
+        node={node || nodes.find((item) => item.id === 'generateSheet')}
+        onDone={onClose}
+        onUpdateField={onUpdateNodeData}
+        readOnly={Boolean(currentRunId)}
       />
     );
   } else if (activeOverlay.type === WORKFLOW_OVERLAYS.PRODUCT_SELECT) {
@@ -138,7 +164,7 @@ export function WorkflowOverlayManager({
       label={label}
       description={defaultDescription}
       onClose={onClose}
-      wide={[WORKFLOW_OVERLAYS.DISTRIBUTION, WORKFLOW_OVERLAYS.NODE_WORKBENCH, WORKFLOW_OVERLAYS.PRODUCT_SELECT].includes(activeOverlay.type)}
+      wide={[WORKFLOW_OVERLAYS.DISTRIBUTION, WORKFLOW_OVERLAYS.NODE_WORKBENCH, WORKFLOW_OVERLAYS.PRODUCT_SELECT, WORKFLOW_OVERLAYS.SHEET_CONFIG].includes(activeOverlay.type)}
     >
       {content}
     </WorkflowOverlayShell>

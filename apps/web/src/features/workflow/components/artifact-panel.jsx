@@ -1,4 +1,4 @@
-import { ExternalLink, RefreshCw } from 'lucide-react';
+import { Download, ExternalLink, RefreshCw } from 'lucide-react';
 
 import { getWorkflowArtifactView, summarizeWorkflowArtifact } from '../../../workflow-ui.js';
 
@@ -38,7 +38,7 @@ export function ArtifactPanel({ state }) {
               {item.description && <p>{item.description}</p>}
               {item.sourceUrl && (
                 <a className="artifact-source-link" href={item.sourceUrl} target="_blank" rel="noreferrer">
-                  <ExternalLink size={12} /> 打开灵感来源
+                  <ExternalLink size={12} /> {state.nodeId === 'collectRank' ? '打开淘宝商品' : '打开灵感来源'}
                 </a>
               )}
             </div>
@@ -58,6 +58,17 @@ export function ArtifactPanel({ state }) {
         <pre className="artifact-text">
           {view.text || view.emptyText}
         </pre>
+      )}
+      {state.status === 'ready' && artifact && view.kind === 'file' && (
+        <div className="artifact-file-card">
+          <div>
+            <strong>{artifact.filename || '商品排行表格.xlsx'}</strong>
+            <span>{artifact.count ? `共 ${artifact.count} 条商品` : 'Excel 文件已生成'}</span>
+          </div>
+          <a className="artifact-download-button" href={artifact.downloadUrl} download={artifact.filename || undefined}>
+            <Download size={14} /> 下载表格
+          </a>
+        </div>
       )}
     </div>
   );

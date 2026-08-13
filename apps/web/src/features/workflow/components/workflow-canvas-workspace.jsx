@@ -4,7 +4,7 @@ import {
   MiniMap,
   ReactFlow
 } from '@xyflow/react';
-import { Play, Square } from 'lucide-react';
+import { CopyPlus, Play, Square } from 'lucide-react';
 
 import { isWorkflowInputNodeType, labelWorkflowNodeStatus } from '../../../workflow-ui.js';
 import { nodeTypes } from '../workflow-node-types.js';
@@ -25,6 +25,7 @@ export function WorkflowCanvasWorkspace({
   onNodeClick,
   onNodesChange,
   onPause,
+  onPrepareNewRun,
   onRun,
   onSelectNode,
   orderedWorkflowNodes,
@@ -77,13 +78,23 @@ export function WorkflowCanvasWorkspace({
                 </button>
               </>
             ) : (
-              <button
-                onClick={onRun}
-                disabled={nodes.length === 0 || isViewingRun}
-                className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-bold rounded-md flex items-center gap-1.5 shadow-lg shadow-blue-900/20 transition-all"
-              >
-                <Play size={13} fill="currentColor" /> {isViewingRun ? '历史运行只读' : '运行工作流'}
-              </button>
+              isViewingRun ? (
+                <button
+                  type="button"
+                  onClick={onPrepareNewRun}
+                  className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-md flex items-center gap-1.5 shadow-lg shadow-blue-900/20 transition-all"
+                >
+                  <CopyPlus size={13} /> 按此配置新建
+                </button>
+              ) : (
+                <button
+                  onClick={onRun}
+                  disabled={nodes.length === 0}
+                  className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-bold rounded-md flex items-center gap-1.5 shadow-lg shadow-blue-900/20 transition-all"
+                >
+                  <Play size={13} fill="currentColor" /> 运行工作流
+                </button>
+              )
             )}
           </div>
         </div>
