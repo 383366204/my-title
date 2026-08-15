@@ -19,7 +19,8 @@ const {
 } = require('../index');
 const {
   buildOrderSheet,
-  collectOrderSheetProducts
+  collectOrderSheetProducts,
+  prepareOrderSheetDraft
 } = require('../../order-sheet');
 const {
   buildReviewSheet,
@@ -39,7 +40,7 @@ const {
 const DEFAULT_STEPS = ['mine', 'keywordReview', 'verify', 'select', 'generate', 'export'];
 const KEYWORD_STEPS = ['start', 'verify', 'select', 'generate', 'export'];
 const MANUAL_STEPS = ['start', 'select', 'generate', 'export'];
-const ORDER_SHEET_STEPS = ['collectRank', 'generateSheet'];
+const ORDER_SHEET_STEPS = ['collectRank', 'confirmProducts', 'generateSheet'];
 const REVIEW_SHEET_STEPS = ['importSheet', 'generateReviews', 'generateSheet'];
 const STOP_STATUSES = new Set([
   'mining_manual_action_required',
@@ -221,6 +222,12 @@ function createDefaultStepFns({ dataDir, runId, params, mode = 'daily' }) {
     collectRank: async ({ reportProgress }) => {
       reportProgress({ current: 0, total: Math.max(1, Number(params.pages || 1)) + 2, message: '准备采集商品排行' });
       return collectOrderSheetProducts({ ...params, dataDir, runId, onProgress: reportProgress });
+    },
+    confirmProducts: async ({ reportProgress }) => {
+      reportProgress({ current: 0, total: 1, message: '等待确认商品与编组' });
+      const result = await prepareOrderSheetDraft({ ...params, dataDir, runId, onProgress: reportProgress });
+      reportProgress({ current: 1, total: 1, message: `已准备 ${result.count || 0} 个商品，等待人工确认` });
+      return result;
     },
     generateSheet: async ({ reportProgress }) => {
       reportProgress({ current: 0, total: 1, message: mode === 'review-sheet' ? '准备生成评价表' : '准备生成商品排行表格' });

@@ -442,11 +442,25 @@ export function getWorkflowArtifactView(artifact, nodeId = '') {
   }
   if (effectiveNodeId === 'collectRank' && Array.isArray(items)) {
     const pages = Math.max(1, ...items.map((item) => Number(item.sourcePage || 1)));
+    const manualCount = items.filter(item => item.sourceType === 'manual').length;
     return {
       kind: 'business-list',
-      title: `商品排行（${pages} 页）`,
-      emptyText: '暂无商品排行数据',
+      title: manualCount > 0 ? `商品资料（含 ${manualCount} 个指定商品）` : `商品排行（${pages} 页）`,
+      emptyText: '暂无商品资料',
       rows: items.map((item, index) => {
+        if (item.sourceType === 'manual') {
+          return {
+            title: item.title || `待补标题商品 ${index + 1}`,
+            meta: [item.itemId ? `商品ID ${item.itemId}` : '短链接商品', item.storeName || '', '用户指定'].filter(Boolean).join(' · '),
+            metrics: [
+              item.orderAmount != null ? `下单金额 ${Number(item.orderAmount).toFixed(2)}` : '下单金额待填写',
+              item.referencePrice != null ? `页面参考价 ${Number(item.referencePrice).toFixed(2)}` : ''
+            ].filter(Boolean),
+            description: item.enrichmentError ? `自动读取失败：${item.enrichmentError}` : '指定商品资料已保存',
+            sourceUrl: item.productUrl || '',
+            raw: item
+          };
+        }
         const monetarySort = ['payAmt', 'sucRefundAmt'].includes(item.sortMetric);
         const primaryValue = Number(item.sortValue ?? item.visitorCount ?? 0);
         const metrics = [

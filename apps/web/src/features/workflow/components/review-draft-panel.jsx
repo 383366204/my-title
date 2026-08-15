@@ -2,12 +2,13 @@ import { useEffect, useState } from 'react';
 import { Check, RefreshCw } from 'lucide-react';
 
 export function ReviewDraftPanel({ artifactState, onConfirm, confirming = false }) {
-  const sourceRows = Array.isArray(artifactState?.artifact?.rows) ? artifactState.artifact.rows : [];
+  const artifactRows = artifactState?.artifact?.rows;
   const [rows, setRows] = useState([]);
 
   useEffect(() => {
+    const sourceRows = Array.isArray(artifactRows) ? artifactRows : [];
     setRows(sourceRows.map((row) => ({ ...row })));
-  }, [artifactState?.artifact]);
+  }, [artifactRows]);
 
   if (artifactState?.status === 'loading') return <div className="artifact-empty"><RefreshCw size={13} className="animate-spin" /> 正在加载评价草稿…</div>;
   if (artifactState?.status === 'error') return <div className="artifact-error">{artifactState.error || '评价草稿加载失败'}</div>;

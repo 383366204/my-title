@@ -7,8 +7,34 @@ import {
   normalizeCanvasNode,
   normalizeRunList,
   normalizeTemplateList,
-  normalizeWorkflowForCanvas
+  normalizeWorkflowForCanvas,
+  resetWorkflowNodeData
 } from './workflow-data.js';
+
+test('clears prior runtime state while preserving inputs for a repeated run', () => {
+  const data = resetWorkflowNodeData({
+    pages: 3,
+    dateMode: 'custom',
+    uploadId: 'upload-1',
+    workflowReadOnly: true,
+    workflowRunId: 'run-old',
+    status: 'completed',
+    output: { count: 20 },
+    durationMs: 900,
+    distributionJob: { jobId: 'job-old' }
+  }, { pages: 5 });
+
+  assert.equal(data.pages, 5);
+  assert.equal(data.dateMode, 'custom');
+  assert.equal(data.uploadId, 'upload-1');
+  assert.equal(data.workflowReadOnly, false);
+  assert.equal(data.workflowRunId, null);
+  assert.equal(data.workflowRunStatus, 'idle');
+  assert.equal(data.status, 'idle');
+  assert.equal(data.output, null);
+  assert.equal(data.durationMs, null);
+  assert.equal(data.distributionJob, null);
+});
 
 test('normalizes wrapped template and run API responses', () => {
   const validTemplate = { id: 'daily', workflow: { nodes: [], edges: [] } };

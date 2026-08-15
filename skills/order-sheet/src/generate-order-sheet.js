@@ -3,6 +3,7 @@
 const path = require('path');
 const axios = require('axios');
 const ExcelJS = require('exceljs');
+const { flattenOrderGroups } = require('./order-groups');
 
 const REVIEW_HEADERS = [
   '刷单日期',
@@ -228,6 +229,8 @@ function normalizeSheetType(value) {
 }
 
 function orderAmount(row, mode) {
+  const explicitAmount = Number(row.orderAmount);
+  if (Number.isFinite(explicitAmount) && explicitAmount > 0) return Math.round(explicitAmount * 100) / 100;
   if (mode === 'blank') return null;
   if (mode === 'payment') {
     const value = Number(row.paymentAmount);
@@ -294,11 +297,14 @@ async function createOrderSheet(workbook, rows, meta, options = {}) {
     const startRow = 2 + index * rowSpan;
     const endRow = startRow + rowSpan - 1;
     styleBlock(sheet, startRow, endRow);
+    const isGrouped = Boolean(row.groupId);
+    const roleLabel = row.role === 'main' ? '主商品' : row.role === 'sub' ? '搭配商品' : '';
     const titleCell = sheet.getCell(startRow, 1);
+    const displayTitle = roleLabel ? `【${roleLabel}】${String(row.title || '')}` : String(row.title || '');
     titleCell.value = row.productUrl
-      ? { text: String(row.title || ''), hyperlink: String(row.productUrl) }
-      : String(row.title || '');
-    titleCell.font = { name: '宋体', size: 11, color: { argb: 'FF000000' } };
+      ? { text: displayTitle, hyperlink: String(row.productUrl) }
+      : displayTitle;
+    titleCell.font = { name: '宋体', size: 11, bold: row.role === 'main', color: { argb: 'FF000000' } };
     titleCell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
     const amountCell = sheet.getCell(startRow, 3);
     const amount = orderAmount(row, amountMode);
@@ -312,12 +318,21 @@ async function createOrderSheet(workbook, rows, meta, options = {}) {
     sheet.getCell(startRow, 4).value = cartQuantity;
     sheet.getCell(startRow, 4).alignment = { vertical: 'middle', horizontal: 'right' };
     const requirementCell = sheet.getCell(startRow, 5);
-    requirementCell.value = workRequirement;
+    requirementCell.value = String(row.workRequirement || workRequirement);
     requirementCell.font = { name: '宋体', size: 11, bold: true, color: { argb: 'FFFF0000' } };
     requirementCell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
-    sheet.getCell(startRow, 6).value = String(meta.storeName || '');
+    sheet.getCell(startRow, 6).value = String(row.storeName || meta.storeName || '');
     sheet.getCell(startRow, 6).alignment = { vertical: 'middle', horizontal: 'center' };
-    sheet.getCell(startRow, 7).value = orderNote;
+    sheet.getCell(startRow, 7).value = String(row.orderNote || orderNote);
+    const nextRow = rows[index + 1];
+    if (isGrouped && (!nextRow || nextRow.groupId !== row.groupId)) {
+      for (let column = 1; column <= ORDER_HEADERS.length; column += 1) {
+        sheet.getCell(endRow, column).border = {
+          ...sheet.getCell(endRow, column).border,
+          bottom: { style: 'medium', color: { argb: 'FF64748B' } }
+        };
+      }
+    }
     if (includeImages && await addProductImage(workbook, sheet, row, startRow, imageLoader)) imageCount += 1;
     onProgress({ current: index + 1, total: rows.length, message: `正在写入第 ${index + 1}/${rows.length} 个商品` });
   }
@@ -347,7 +362,9 @@ async function createOrderSheet(workbook, rows, meta, options = {}) {
  * @returns {Promise<{file:string,count:number,imageCount:number}>} 生成结果。
  */
 async function generateOrderSheet(options) {
-  const sourceRows = Array.isArray(options?.rows) ? options.rows : [];
+  const sourceRows = Array.isArray(options?.groups) && options.groups.length > 0
+    ? flattenOrderGroups(options.groups)
+    : (Array.isArray(options?.rows) ? options.rows : []);
   if (sourceRows.length === 0) throw new Error('没有商品排行数据，无法生成表格');
   const meta = options.meta || {};
   const outputFile = String(options.outputFile || '').trim();
@@ -371,6 +388,7 @@ async function generateOrderSheet(options) {
   const order = sheetType === 'order'
     ? await createOrderSheet(workbook, rows, meta, options)
     : null;
+  const rawRows = Array.isArray(options?.rows) && options.rows.length > 0 ? options.rows : sourceRows;
 
   const rawSheet = options.includeRawData === false ? null : workbook.addWorksheet('商品排行原始数据', {
     views: [{ state: 'frozen', ySplit: 1, showGridLines: false }]
@@ -382,8 +400,8 @@ async function generateOrderSheet(options) {
   ];
   if (rawSheet) rawSheet.getRow(1).values = RAW_HEADERS;
   if (rawSheet) styleHeader(rawSheet.getRow(1));
-  if (rawSheet) rawSheet.autoFilter = { from: 'A1', to: `P${sourceRows.length + 1}` };
-  if (rawSheet) sourceRows.forEach((row, index) => {
+  if (rawSheet) rawSheet.autoFilter = { from: 'A1', to: `P${rawRows.length + 1}` };
+  if (rawSheet) rawRows.forEach((row, index) => {
     const dataRow = rawSheet.getRow(index + 2);
     dataRow.values = [
       row.rank || index + 1,

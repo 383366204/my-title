@@ -24,6 +24,7 @@ const STATUS_STAGE = {
   select_failed: 'selected',
   generated: 'generated',
   product_rank_collected: 'selected',
+  products_confirmed: 'generated',
   review_source_imported: 'selected',
   review_approved: 'generated',
   generate_failed: 'generated',
@@ -223,6 +224,7 @@ function defaultFiles(runDir, files = {}) {
     distributionBatch: safeRunFile(runDir, files.distributionBatch, 'distribution-batch.txt'),
     distributionReview: safeRunFile(runDir, files.distributionReview, 'distribution-review.md'),
     productRank: safeRunFile(runDir, files.productRank, 'sycm-product-rank.jsonl'),
+    productGroups: safeRunFile(runDir, files.productGroups, 'order-product-groups.json'),
     orderSheet: safeRunFile(runDir, files.orderSheet, '商品排行刷单表.xlsx'),
     reviewSource: safeRunFile(runDir, files.reviewSource, 'uploaded-order-sheet.xlsx'),
     reviewGroups: safeRunFile(runDir, files.reviewGroups, 'review-order-groups.json'),
@@ -287,7 +289,9 @@ function summarizePipelineRun({ dataDir = DEFAULT_PIPELINE_DIR, runId, previewLi
     blockers.push(run.discovery?.blocker || 'no_inspiration_candidates');
   }
   if (status === 'manual_action_required' || status === 'verified_partial_manual_required') {
-    blockers.push('sycm_manual_action_required');
+    const orderSheetDetailsRequired = run.options?.mode === 'order-sheet'
+      && blockers.includes('order_sheet_product_details_required');
+    if (!orderSheetDetailsRequired) blockers.push('sycm_manual_action_required');
   }
   if (status === 'verified_no_generation_eligible') blockers.push('no_generation_eligible_keywords');
   if (status === 'awaiting_keyword_review') blockers.push('keyword_review_required');
@@ -311,6 +315,7 @@ function summarizePipelineRun({ dataDir = DEFAULT_PIPELINE_DIR, runId, previewLi
     discovery: run.discovery || null,
     options: run.options || {},
     productRank: run.productRank || null,
+    manualAction: run.manualAction || null,
     reviewGeneration: run.reviewGeneration || null,
     files,
     batchCount: countNonEmptyLines(batchFile),

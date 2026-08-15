@@ -20,6 +20,35 @@ export const MINER_TABS = [
   { id: 'sycm-market', label: '参谋关联词', endpoint: '/api/miner/sycm-market', needsInput: true }
 ];
 
+/**
+ * Preserve node inputs while clearing fields owned by a previous workflow run.
+ * @param {object} [data={}] Existing canvas node data.
+ * @param {object} [overrides={}] Input fields to override for the new run.
+ * @returns {object} Editable node data ready for a new workflow run.
+ */
+export function resetWorkflowNodeData(data = {}, overrides = {}) {
+  return {
+    ...data,
+    ...overrides,
+    workflowReadOnly: false,
+    workflowRunId: null,
+    workflowRunStatus: 'idle',
+    status: 'idle',
+    output: null,
+    error: null,
+    progress: null,
+    blocker: null,
+    actionHint: null,
+    nextRecommendedAction: null,
+    platformStatus: null,
+    manualAction: null,
+    durationMs: null,
+    outputSummary: null,
+    cooldownRemainingMs: 0,
+    distributionJob: null
+  };
+}
+
 export function artifactItems(state) {
   const artifact = state?.artifact || null;
   if (!artifact) return [];

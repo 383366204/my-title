@@ -14,6 +14,8 @@ const {
 } = require('../../skills/pipeline-flow/runtime/store');
 const { getLLMProviderInfo } = require('../llm');
 const { normalizeExactKeywords } = require('../exact-keywords');
+const { parseManualItems } = require('../../skills/order-sheet/src/manual-items');
+const { autoGroupOrderProducts } = require('../../skills/order-sheet/src/order-groups');
 
 const WORKFLOW_NODE_IDS = {
   start: 'start',
@@ -25,6 +27,7 @@ const WORKFLOW_NODE_IDS = {
   export: 'export',
   review: 'review',
   collectRank: 'collectRank',
+  confirmProducts: 'confirmProducts',
   importSheet: 'importSheet',
   generateReviews: 'generateReviews',
   generateSheet: 'generateSheet',
@@ -43,6 +46,7 @@ const ARTIFACT_BY_NODE = {
   [WORKFLOW_NODE_IDS.export]: { fileKey: 'distributionBatch', type: 'text' },
   [WORKFLOW_NODE_IDS.review]: { fileKey: 'distributionReview', type: 'text' },
   [WORKFLOW_NODE_IDS.collectRank]: { fileKey: 'productRank', type: 'jsonl' },
+  [WORKFLOW_NODE_IDS.confirmProducts]: { fileKey: 'productGroups', type: 'json' },
   [WORKFLOW_NODE_IDS.importSheet]: { fileKey: 'reviewGroups', type: 'json' },
   [WORKFLOW_NODE_IDS.generateReviews]: { fileKey: 'reviewDrafts', type: 'jsonl' },
   [WORKFLOW_NODE_IDS.generateSheet]: { fileKey: 'orderSheet', type: 'xlsx' }
@@ -262,8 +266,9 @@ function workflowNodes(mode = 'daily') {
       };
   if (mode === 'order-sheet') {
     return withSteps(positionNodes([
-      { id: WORKFLOW_NODE_IDS.start, type: 'production-start', data: { label: '开始', description: '设置商品排行的采集范围和排序方式', orderSheetConfig: true, port: 9222, dateMode: 'latest_day', startDate: '', endDate: '', pages: 1, sortMetric: 'itmUv' } },
-      { id: WORKFLOW_NODE_IDS.collectRank, type: 'pipeline-collect-rank', data: { label: '采集商品排行', description: '按配置的日期、页数和指标读取商品排行' } },
+      { id: WORKFLOW_NODE_IDS.start, type: 'production-start', data: { label: '开始', description: '选择商品排行或输入指定商品', orderSheetConfig: true, inputMode: 'rank', manualItemsText: '', manualItems: [], port: 9222, dateMode: 'latest_day', startDate: '', endDate: '', pages: 1, sortMetric: 'itmUv' } },
+      { id: WORKFLOW_NODE_IDS.collectRank, type: 'pipeline-collect-rank', data: { label: '获取商品资料', description: '采集排行或补全指定商品的标题、主图和店铺' } },
+      { id: WORKFLOW_NODE_IDS.confirmProducts, type: 'pipeline-confirm-products', data: { label: '确认商品与编组', description: '核对商品资料、编辑下单金额、配置 1 拖 N 编组' } },
       {
         id: WORKFLOW_NODE_IDS.generateSheet,
         type: 'pipeline-generate-sheet',
@@ -290,7 +295,7 @@ function workflowNodes(mode = 'daily') {
         }
       },
       { id: WORKFLOW_NODE_IDS.end, type: 'production-end', data: { label: '完成', description: '下载 Excel 并核对待补充信息' } }
-    ], { startX: 250, stepX: 300 }));
+    ], { startX: 120, stepX: 280 }));
   }
   if (mode === 'review-sheet') {
     return withSteps(positionNodes([
@@ -336,7 +341,8 @@ function workflowEdges(mode = 'daily') {
   const pairs = mode === 'order-sheet'
     ? [
         [WORKFLOW_NODE_IDS.start, WORKFLOW_NODE_IDS.collectRank],
-        [WORKFLOW_NODE_IDS.collectRank, WORKFLOW_NODE_IDS.generateSheet],
+        [WORKFLOW_NODE_IDS.collectRank, WORKFLOW_NODE_IDS.confirmProducts],
+        [WORKFLOW_NODE_IDS.confirmProducts, WORKFLOW_NODE_IDS.generateSheet],
         [WORKFLOW_NODE_IDS.generateSheet, WORKFLOW_NODE_IDS.end]
       ]
     : mode === 'review-sheet'
@@ -420,11 +426,11 @@ function listProductionWorkflowTemplates() {
       flowSummary: '流程：录入词和货源 → 获取商品资料 → AI生成标题 → 铺货复核 → 自动铺货',
       modeHint: '一次输入关键词和 1688 链接，系统准备好标题与类目后只需复核一次。'
     }),
-    template('sycm-order-sheet-v1', '制作刷单表格流水线', 'order-sheet', '按条件读取生意参谋商品排行并生成 Excel', {
-      entryLabel: '入口：生意参谋商品排行',
+    template('sycm-order-sheet-v1', '制作刷单表格流水线', 'order-sheet', '从商品排行或指定商品生成 Excel', {
+      entryLabel: '入口：商品排行或指定商品',
       scenarioLabel: '适合：制作动销刷单表',
-      flowSummary: '流程：设置采集条件 → 商品排行 → 指标降序 → 生成 Excel',
-      modeHint: '开始节点设置商品排行采集条件，生成业务表格节点设置刷单表内容与版式。'
+      flowSummary: '流程：选择商品来源 → 获取商品资料 → 确认商品与编组 → 生成 Excel',
+      modeHint: '可以读取生意参谋商品排行，也可以直接输入淘宝或天猫商品 ID、链接。'
     }),
     template('uploaded-review-sheet-v1', '根据刷单表生成评价表', 'review-sheet', '上传已执行的刷单表，补全订单信息并生成评价表', {
       entryLabel: '入口：已执行的刷单表',
@@ -532,7 +538,18 @@ function sanitizeWorkflowParams(mode, raw = {}) {
     };
   }
   if (mode === 'order-sheet') {
-    const dateRange = sanitizeOrderSheetDateRange(raw);
+    const inputMode = ['rank', 'manual', 'hybrid'].includes(String(raw.inputMode || ''))
+      ? String(raw.inputMode)
+      : 'rank';
+    const manualItems = parseManualItems(raw.manualItems, raw.manualItemsText);
+    if (inputMode === 'manual' && manualItems.length === 0) {
+      throw new Error('manual 模式下必须包含至少 1 条手工商品');
+    }
+    const effectiveInputMode = (inputMode === 'hybrid' && manualItems.length === 0) ? 'rank' : inputMode;
+
+    const dateRange = effectiveInputMode === 'manual'
+      ? { dateMode: 'latest_day', startDate: '', endDate: '' }
+      : sanitizeOrderSheetDateRange(raw);
     const amountMode = ['average', 'payment', 'blank'].includes(String(raw.amountMode || ''))
       ? String(raw.amountMode)
       : 'average';
@@ -543,6 +560,9 @@ function sanitizeWorkflowParams(mode, raw = {}) {
       ? Number(raw.reviewGroupSize)
       : 4;
     return {
+      inputMode: effectiveInputMode,
+      manualItemsText: String(raw.manualItemsText || '').trim(),
+      manualItems,
       port: clampInt(raw.port, 9222, 1, 65535),
       ...dateRange,
       sheetType: 'order',
@@ -737,7 +757,7 @@ function resolveProductionWorkflowLaunch(body = {}) {
     ...(body.params || {}),
     ...(body.options || {})
   };
-  for (const key of ['keyword', 'keywords', 'mine', 'discoveryMode', 'source', 'rootMode', 'rootLimit', 'rootCooldownDays', 'familyCooldownDays', 'inspirationSycmPages', 'inspirationUseLLM', 'maxObservingSeeds', 'maxObservingPoolSize', 'maxNewSeeds', 'autoReplenishSeeds', 'recordSeedFeedback', 'verify', 'select', 'generate', 'export', 'productsPerKeyword', 'length', 'port', 'pages', 'minBlueRows', 'fallbackHot', 'autoApproveKeywords', 'autoExpandVerify', 'verifyReserve', 'autoAllowReviewKeywords', 'reviewKeywordLimit', 'workRequirement', 'dateMode', 'startDate', 'endDate', 'orderDate', 'storeName', 'sheetType', 'sortMetric', 'productLimit', 'fileName', 'includeRawData', 'includeImages', 'amountMode', 'missingAmountPolicy', 'cartQuantity', 'rowSpan', 'orderNote', 'reviewGroupSize', 'includeSpacerRow', 'uploadId', 'uploadName', 'groups', 'reviewTone', 'reviewLength', 'useAI']) {
+  for (const key of ['keyword', 'keywords', 'mine', 'discoveryMode', 'source', 'rootMode', 'rootLimit', 'rootCooldownDays', 'familyCooldownDays', 'inspirationSycmPages', 'inspirationUseLLM', 'maxObservingSeeds', 'maxObservingPoolSize', 'maxNewSeeds', 'autoReplenishSeeds', 'recordSeedFeedback', 'verify', 'select', 'generate', 'export', 'productsPerKeyword', 'length', 'port', 'pages', 'minBlueRows', 'fallbackHot', 'autoApproveKeywords', 'autoExpandVerify', 'verifyReserve', 'autoAllowReviewKeywords', 'reviewKeywordLimit', 'workRequirement', 'dateMode', 'startDate', 'endDate', 'orderDate', 'storeName', 'sheetType', 'sortMetric', 'productLimit', 'fileName', 'includeRawData', 'includeImages', 'amountMode', 'missingAmountPolicy', 'cartQuantity', 'rowSpan', 'orderNote', 'reviewGroupSize', 'includeSpacerRow', 'uploadId', 'uploadName', 'groups', 'reviewTone', 'reviewLength', 'useAI', 'inputMode', 'manualItems', 'manualItemsText']) {
     if (Object.prototype.hasOwnProperty.call(body, key)) params[key] = body[key];
   }
 
@@ -935,7 +955,18 @@ function outputForNode(id, summary) {
       sortMetric: summary.productRank?.sortMetric || '',
       sortLabel: summary.productRank?.sortLabel || '',
       storeName: summary.productRank?.storeName || '',
-      statDate: summary.productRank?.statDate || ''
+      statDate: summary.productRank?.statDate || '',
+      inputMode: summary.productRank?.inputMode || summary.options?.inputMode || 'rank',
+      rankCount: Number(counts.rankCount ?? summary.productRank?.rankCount ?? counts.productRank ?? 0),
+      manualCount: Number(counts.manualCount ?? summary.productRank?.manualCount ?? 0)
+    };
+  }
+  if (id === WORKFLOW_NODE_IDS.confirmProducts) {
+    return {
+      groupCount: Number(counts.orderGroups ?? summary.productRank?.groupCount ?? summary.orderGroups?.length ?? 0),
+      productCount: Number(counts.productRank ?? counts.confirmedProducts ?? summary.productRank?.totalCount ?? 0),
+      file: summary.files?.productGroups || summary.files?.productRank || '',
+      status: summary.status || ''
     };
   }
   if (id === WORKFLOW_NODE_IDS.importSheet) {
@@ -1019,6 +1050,20 @@ function summaryInterventionForNode(summary, nodeId) {
   const status = summary.status || 'unknown';
   if (nodeId === WORKFLOW_NODE_IDS.collectRank && status === 'manual_action_required') {
     const manualAction = summary.runtime?.manualAction || summary.manualAction || null;
+    if (manualAction?.status === 'product_details_required' || summary.blockers?.includes('order_sheet_product_details_required')) {
+      return {
+        blocker: 'order_sheet_product_details_required',
+        actionHint: manualAction?.userMessage || '部分指定商品没有读取到标题，请补充商品资料后继续生成表格。',
+        platform: 'taobao',
+        platformStatus: 'product_details_required',
+        manualAction,
+        nextRecommendedAction: {
+          action: 'complete-order-sheet-products',
+          label: '补充商品资料',
+          description: '补充缺失的商品标题或下单金额，然后继续生成表格。'
+        }
+      };
+    }
     const chromeUnavailable = String(manualAction?.status || '').includes('chrome');
     return {
       blocker: manualAction?.status || 'sycm_manual_action_required',
@@ -1029,6 +1074,17 @@ function summaryInterventionForNode(summary, nodeId) {
       nextRecommendedAction: chromeUnavailable
         ? { action: 'start-sycm-chrome', label: '启动 Chrome', description: '打开商品排行页面并完成登录。' }
         : { action: 'retry-node', label: '重试采集', description: '完成人工处理后重新采集商品排行。' }
+    };
+  }
+  if (nodeId === WORKFLOW_NODE_IDS.confirmProducts && ['needs_review', 'awaiting_product_confirmation', 'awaiting_user_confirmation'].includes(status)) {
+    return {
+      blocker: 'product_confirmation_required',
+      actionHint: '请在页面核对商品资料、编辑下单金额并确认 1 拖 N 编组。',
+      nextRecommendedAction: {
+        action: 'confirm-order-sheet-products',
+        label: '确认商品与编组',
+        description: '核对商品资料与编组后，继续生成刷单表格。'
+      }
     };
   }
   if (nodeId === WORKFLOW_NODE_IDS.mine && ['mining_manual_action_required', 'mining_empty'].includes(status)) {
@@ -1238,11 +1294,19 @@ function statusPlanForSummary(summary) {
     states[WORKFLOW_NODE_IDS.start] = 'completed';
     if (status === 'workflow_complete') {
       states[WORKFLOW_NODE_IDS.collectRank] = 'completed';
+      states[WORKFLOW_NODE_IDS.confirmProducts] = 'completed';
       states[WORKFLOW_NODE_IDS.generateSheet] = 'completed';
       states[WORKFLOW_NODE_IDS.end] = 'completed';
+    } else if (status === 'products_confirmed') {
+      states[WORKFLOW_NODE_IDS.collectRank] = 'completed';
+      states[WORKFLOW_NODE_IDS.confirmProducts] = 'completed';
+      states[WORKFLOW_NODE_IDS.generateSheet] = 'running';
+    } else if (status === 'needs_review' || status === 'awaiting_product_confirmation') {
+      states[WORKFLOW_NODE_IDS.collectRank] = 'completed';
+      states[WORKFLOW_NODE_IDS.confirmProducts] = 'needs_review';
     } else if (status === 'product_rank_collected') {
       states[WORKFLOW_NODE_IDS.collectRank] = 'completed';
-      states[WORKFLOW_NODE_IDS.generateSheet] = 'running';
+      states[WORKFLOW_NODE_IDS.confirmProducts] = 'running';
     } else if (status === 'manual_action_required') {
       states[WORKFLOW_NODE_IDS.collectRank] = 'blocked';
     } else {
@@ -1587,19 +1651,39 @@ function readWorkflowNodeArtifact(runIdOrOptions, nodeId, options = {}) {
   const file = summary.files && summary.files[artifact.fileKey];
   if (!file) return null;
   if (artifact.type === 'json') {
-    if (!fs.existsSync(file)) return null;
-    try {
-      const value = JSON.parse(fs.readFileSync(file, 'utf8'));
-      return {
-        runId: summary.runId,
-        nodeId: normalized.nodeId,
-        file,
-        type: 'json',
-        ...value
-      };
-    } catch (_error) {
-      return null;
+    if (fs.existsSync(file)) {
+      try {
+        const value = JSON.parse(fs.readFileSync(file, 'utf8'));
+        return {
+          runId: summary.runId,
+          nodeId: normalized.nodeId,
+          file,
+          type: 'json',
+          ...value
+        };
+      } catch (_error) {
+        return null;
+      }
     }
+    if (normalized.nodeId === WORKFLOW_NODE_IDS.confirmProducts) {
+      const rankFile = summary.files?.productRank;
+      if (rankFile && fs.existsSync(rankFile)) {
+        const rankRows = readJsonlPreview(rankFile, normalized.limit || 100);
+        const dragCount = Number.isFinite(Number(summary.options?.dragCount)) ? Number(summary.options.dragCount) : 0;
+        const groups = autoGroupOrderProducts(rankRows, { dragCount });
+        return {
+          runId: summary.runId,
+          nodeId: normalized.nodeId,
+          file: rankFile,
+          type: 'json',
+          groups,
+          items: rankRows,
+          totalCount: rankRows.length,
+          groupCount: groups.length
+        };
+      }
+    }
+    return null;
   }
   if (artifact.type === 'jsonl') {
     if (normalized.nodeId === WORKFLOW_NODE_IDS.mine) {

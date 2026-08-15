@@ -4,7 +4,7 @@ import {
   MiniMap,
   ReactFlow
 } from '@xyflow/react';
-import { CopyPlus, Play, Square } from 'lucide-react';
+import { Play, RotateCcw, Settings2, Square } from 'lucide-react';
 
 import { isWorkflowInputNodeType, labelWorkflowNodeStatus } from '../../../workflow-ui.js';
 import { nodeTypes } from '../workflow-node-types.js';
@@ -26,6 +26,7 @@ export function WorkflowCanvasWorkspace({
   onNodesChange,
   onPause,
   onPrepareNewRun,
+  onRepeatRun,
   onRun,
   onSelectNode,
   orderedWorkflowNodes,
@@ -79,13 +80,23 @@ export function WorkflowCanvasWorkspace({
               </>
             ) : (
               isViewingRun ? (
-                <button
-                  type="button"
-                  onClick={onPrepareNewRun}
-                  className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-md flex items-center gap-1.5 shadow-lg shadow-blue-900/20 transition-all"
-                >
-                  <CopyPlus size={13} /> 按此配置新建
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => onPrepareNewRun()}
+                    className="secondary-button px-3 py-1.5 text-xs font-semibold"
+                  >
+                    <Settings2 size={13} /> 新建并调整
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onRepeatRun}
+                    disabled={nodes.length === 0}
+                    className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-bold rounded-md flex items-center gap-1.5 shadow-lg shadow-blue-900/20 transition-all"
+                  >
+                    <RotateCcw size={13} /> 再次运行
+                  </button>
+                </>
               ) : (
                 <button
                   onClick={onRun}

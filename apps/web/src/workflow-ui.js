@@ -69,6 +69,8 @@ export function getWorkflowNodePanelKind(nodeId) {
   if (normalized === 'select') return 'product-select';
   if (normalized === 'generate') return 'title-generate';
   if (normalized === 'generateReviews') return 'review-drafts';
+  if (normalized === 'collectRank') return 'order-sheet-products';
+  if (normalized === 'confirmProducts') return 'order-sheet-groups';
   if (normalized === 'export') return 'distribution-export';
   if (normalized === 'review') return 'distribution-export';
   if (normalized === 'end') return 'completion';
@@ -242,6 +244,12 @@ export function getWorkflowNodeAction(nodeId, state) {
   if (normalizedNodeId === 'select' && normalizedState === 'completed') {
     return { label: '调整货源', action: 'product-review', tone: 'success' };
   }
+  if (normalizedNodeId === 'confirmproducts' && ['needs_review', 'waiting_confirmation', 'paused', 'blocked'].includes(normalizedState)) {
+    return { label: '确认商品与编组', action: 'confirm-order-sheet-products', tone: 'warn' };
+  }
+  if (normalizedNodeId === 'confirmproducts' && normalizedState === 'completed') {
+    return { label: '查看组合方案', action: 'confirm-order-sheet-products', tone: 'success' };
+  }
   if (normalizedNodeId === 'export' && ['needs_review'].includes(normalizedState)) {
     return { label: '处理铺货复核', action: 'open-review', tone: 'warn' };
   }
@@ -348,6 +356,9 @@ export function getWorkflowBlockerActions(nodeId, state = {}) {
     return actions;
   }
   const chromeFailureText = `${blocker} ${error} ${actionHint} ${platformStatus}`;
+  const productDetailsBlocked = nodeId === 'collectRank' && (
+    blocker === 'order_sheet_product_details_required' || platformStatus === 'product_details_required'
+  );
   const sycmChromeBlocked = ['verify', 'collectRank'].includes(nodeId) && (
     blocker.includes('browser_cdp_unavailable') ||
     blocker.includes('cdp_unavailable') ||
@@ -394,7 +405,7 @@ export function getWorkflowBlockerActions(nodeId, state = {}) {
         ? '调整候选词或人工放行后，从生意参谋校验节点重新执行。'
         : '补充候选词或调整参数后，从生意参谋校验节点重新执行。'
     });
-  } else if (['waiting_manual', 'paused', 'blocked'].includes(status)) {
+  } else if (!productDetailsBlocked && ['waiting_manual', 'paused', 'blocked'].includes(status)) {
     actions.push({
       action: 'resume',
       label: '继续流程',
@@ -566,9 +577,19 @@ export function getWorkflowNodeSuccessLabel(nodeId, state = {}) {
   }
   if (normalized === 'collectRank') {
     const count = Number(output.count ?? state.count ?? 0);
+    const manualCount = Number(output.manualCount ?? 0);
+    const rankCount = Number(output.rankCount ?? Math.max(0, count - manualCount));
+    if (manualCount > 0) {
+      return rankCount > 0 ? `获取 ${rankCount} 个排行商品，追加 ${manualCount} 个指定商品` : `获取 ${manualCount} 个指定商品资料`;
+    }
     const pages = Number(output.pages ?? 0);
     const sortLabel = output.sortLabel || '商品访客数';
     return count > 0 ? `采集 ${pages || 1} 页、${count} 条商品，按${sortLabel}降序` : '';
+  }
+  if (normalized === 'confirmProducts') {
+    const groups = Number(output.groupCount ?? state.groupCount ?? 0);
+    const products = Number(output.productCount ?? state.productCount ?? 0);
+    return groups > 0 ? `已编排 ${groups} 个任务组、${products} 个商品` : '';
   }
   if (normalized === 'importSheet') {
     const groups = Number(output.groupCount || 0);
@@ -602,6 +623,7 @@ export function getWorkflowNodeResultLocation(nodeId, state = {}) {
   if (normalized === 'select') return output.file || '';
   if (normalized === 'generate') return output.file || '';
   if (normalized === 'collectRank') return output.file || '';
+  if (normalized === 'confirmProducts') return output.file || '';
   if (normalized === 'generateSheet') return output.file || '';
   if (normalized === 'export') {
     const locations = [
@@ -624,7 +646,8 @@ export function getWorkflowResultSummaryView(nodeId, state = {}) {
     verify: '生意参谋校验结果',
     select: '货源选品结果',
     generate: '标题生成结果',
-    collectRank: '商品排行采集结果',
+    collectRank: '商品资料获取结果',
+    confirmProducts: '商品确认与组合方案',
     generateSheet: sheetType === 'review' ? '商品评价表' : '商品排行刷单表',
     export: '铺货清单与复核结果',
     review: '铺货清单与复核结果',
@@ -637,7 +660,8 @@ export function getWorkflowResultSummaryView(nodeId, state = {}) {
     verify: '验真通过词在下方结果列表中预览，完整内容保存在 verified-keywords.jsonl。',
     select: '已选货源会按商品信息和机会分展示，完整内容保存在 selected-products.jsonl。',
     generate: '每条标题记录会关联已选货源；完整内容保存在 generated-products.jsonl。',
-    collectRank: '按开始节点设置的日期、页数和排序指标展示商品排行，可逐条打开淘宝商品核对。',
+    collectRank: '排行商品与指定商品会统一展示；自动读取失败的指定商品可在当前节点补充后继续。',
+    confirmProducts: '只有确认后的任务组会进入刷单表；备选池中的商品不会输出。',
     generateSheet: sheetType === 'review'
       ? 'Excel 按1拖多评价格式写入刷单日期、店铺和商品标题，并附带生意参谋原始指标。'
       : 'Excel 按动销一拖多格式写入标题、主图、下单金额、做单要求和店铺，并附带生意参谋原始指标。',
@@ -652,7 +676,8 @@ export function getWorkflowResultSummaryView(nodeId, state = {}) {
     verify: '查看验真词',
     select: '查看已选货源',
     generate: '查看标题结果',
-    collectRank: '查看商品排行',
+    collectRank: '核对商品资料',
+    confirmProducts: '查看组合方案',
     generateSheet: '下载 Excel',
     export: '查看铺货复核',
     review: '查看铺货复核',
@@ -692,7 +717,9 @@ export function labelWorkflowBlockerReason(blocker) {
     platform_cooldown: '平台请求冷却',
     generate_failed: '标题生成失败',
     export_empty: '导出无结果',
-    review_rejected_rows: '需要人工复核'
+    review_rejected_rows: '需要人工复核',
+    order_sheet_product_details_required: '指定商品资料不完整',
+    product_confirmation_required: '需要确认商品与编组'
   };
   return labels[normalized] || String(blocker || '');
 }
@@ -1053,6 +1080,94 @@ export function parseExactKeywords(input) {
     .filter(Boolean))];
 }
 
+function isAllowedOrderSheetItemUrl(url) {
+  const hostname = url.hostname.toLowerCase();
+  const allowedHost = ['item.taobao.com', 'detail.tmall.com', 'detail.tmall.hk'].includes(hostname)
+    || hostname === 'm.taobao.com'
+    || hostname.endsWith('.m.taobao.com')
+    || hostname === 'tb.cn'
+    || hostname.endsWith('.tb.cn');
+  const defaultPort = url.protocol === 'https:' ? ['', '443'] : url.protocol === 'http:' ? ['', '80'] : [];
+  return allowedHost && defaultPort.includes(url.port);
+}
+
+function parseOrderSheetManualItem(value) {
+  const text = String(value || '').trim();
+  if (!text) return null;
+  if (/^\d+$/.test(text)) {
+    return { itemId: text, productUrl: `https://item.taobao.com/item.htm?id=${text}` };
+  }
+  const urlText = text.match(/https?:\/\/[^\s，,；;]+/i)?.[0] || '';
+  if (!urlText) return null;
+  try {
+    const url = new URL(urlText);
+    if (!isAllowedOrderSheetItemUrl(url)) return null;
+    const queryId = url.searchParams.get('id') || url.searchParams.get('itemId');
+    const pathId = url.pathname.match(/\/(?:item\/|i?)(\d+)(?:\.html?)?/i)?.[1] || '';
+    const itemId = /^\d+$/.test(String(queryId || '')) ? String(queryId) : pathId;
+    return {
+      itemId,
+      productUrl: url.href,
+      ...(itemId ? {} : { sourceKey: `url:${url.href}` })
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Parse order-sheet item IDs and Taobao/Tmall links for immediate UI feedback.
+ * Backend validation repeats the same trust boundary before starting a run.
+ * @param {string} input Multiline product input.
+ * @param {Array<object>} [overrides=[]] User-entered product details.
+ * @returns {{items:Array<object>, totalCount:number, duplicateCount:number, invalidCount:number, truncatedCount:number}}
+ */
+export function parseOrderSheetManualItems(input, overrides = []) {
+  const tokens = String(input || '').split(/[\r\n,，;；、]+/).map((item) => item.trim()).filter(Boolean);
+  const byKey = new Map();
+  let duplicateCount = 0;
+  let invalidCount = 0;
+  let truncatedCount = 0;
+  for (const token of tokens) {
+    const parsed = parseOrderSheetManualItem(token);
+    if (!parsed) {
+      invalidCount += 1;
+      continue;
+    }
+    const key = parsed.itemId || parsed.sourceKey;
+    if (byKey.has(key)) {
+      duplicateCount += 1;
+      continue;
+    }
+    if (byKey.size >= 100) {
+      truncatedCount += 1;
+      continue;
+    }
+    byKey.set(key, {
+      ...parsed,
+      title: '',
+      imageUrl: '',
+      storeName: '',
+      orderAmount: null,
+      sourceType: 'manual',
+      enrichmentStatus: 'pending'
+    });
+  }
+  for (const override of Array.isArray(overrides) ? overrides : []) {
+    const key = String(override?.itemId || override?.sourceKey || '').trim();
+    if (!key || !byKey.has(key)) continue;
+    const current = byKey.get(key);
+    byKey.set(key, {
+      ...current,
+      ...(String(override.title || '').trim() ? { title: String(override.title).trim() } : {}),
+      ...(String(override.imageUrl || '').trim() ? { imageUrl: String(override.imageUrl).trim() } : {}),
+      ...(String(override.storeName || '').trim() ? { storeName: String(override.storeName).trim() } : {}),
+      ...(Number(override.orderAmount) > 0 ? { orderAmount: Number(override.orderAmount) } : {})
+    });
+  }
+  return { items: [...byKey.values()], totalCount: tokens.length, duplicateCount, invalidCount, truncatedCount };
+}
+
 /**
  * Collect executable parameters from the canvas using backend parameter names.
  * @param {Array<object>} nodes Canvas nodes.
@@ -1135,7 +1250,19 @@ export function getWorkflowLaunchBlocker(mode, nodes = []) {
       }]
     };
   }
-  if (mode === 'order-sheet' && params.dateMode === 'custom') {
+  if (mode === 'order-sheet') {
+    const inputMode = ['rank', 'manual', 'hybrid'].includes(params.inputMode) ? params.inputMode : 'rank';
+    const parsed = parseOrderSheetManualItems(params.manualItemsText || '', params.manualItems || []);
+    if (inputMode === 'manual' && parsed.items.length === 0) {
+      const message = '请至少输入一个有效的淘宝或天猫商品 ID／链接';
+      return {
+        status: 'blocked',
+        error: message,
+        logs: [{ timestamp: new Date().toISOString(), level: 'error', message: `[order_sheet_items_required] ${message}` }]
+      };
+    }
+  }
+  if (mode === 'order-sheet' && params.inputMode !== 'manual' && params.dateMode === 'custom') {
     const startDate = String(params.startDate || '');
     const endDate = String(params.endDate || '');
     const start = /^\d{4}-\d{2}-\d{2}$/.test(startDate) ? new Date(`${startDate}T00:00:00Z`) : null;

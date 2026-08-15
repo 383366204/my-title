@@ -4,6 +4,8 @@ import { DistributionExportPanel } from './distribution-export-panel.jsx';
 import { KeywordMiningOperationPanel } from './keyword-mining-operation-panel.jsx';
 import { KeywordReviewOperationPanel } from './keyword-review-operation-panel.jsx';
 import { ManualProductSelectionPanel } from './manual-product-selection-panel.jsx';
+import { OrderSheetProductPanel } from './order-sheet-product-panel.jsx';
+import { OrderSheetGroupPanel } from './order-sheet-group-panel.jsx';
 import { TitleGenerationOperationPanel } from './title-generation-operation-panel.jsx';
 import { ReviewDraftPanel } from './review-draft-panel.jsx';
 
@@ -69,6 +71,14 @@ const NODE_PANEL_COPY = {
     title: '评价生成与复核',
     description: '逐条编辑评价草稿，确认后生成最终评价表。'
   },
+  'order-sheet-products': {
+    title: '商品资料操作台',
+    description: '核对指定商品的标题、店铺和下单金额，资料齐全后继续生成 Excel。'
+  },
+  'order-sheet-groups': {
+    title: '确认商品与编组',
+    description: '确认参与制表的商品，设置 1拖N，并按实际做单顺序排列组合。'
+  },
   completion: {
     title: '流程完成结果',
     description: '导出文件、批次结果和通过率会集中在这里展示。'
@@ -125,6 +135,8 @@ export const NodeOperationPanel = ({
   const {
     onCopyText,
     onRetryNode,
+    onConfirmOrderSheetProducts,
+    confirmingOrderSheetProducts,
     onConfirmReviews,
     confirmingReviews
   } = runtimeActions;
@@ -134,6 +146,9 @@ export const NodeOperationPanel = ({
   } = distributionWorkbench;
 
   const kind = getWorkflowNodePanelKind(selectedNode?.id);
+  const selectedStatus = String(selectedNode?.data?.status || selectedNode?.data?.state || '').toLowerCase();
+  const canConfirmOrderSheetProducts = Boolean(currentRunId)
+    && ['blocked', 'paused', 'waiting_manual', 'manual_action_required'].includes(selectedStatus);
   const copy = kind === 'product-select' && manualMode
     ? { title: '商品资料获取结果', description: '逐条查看1688商品标题、主图、类目和获取失败原因。' }
     : NODE_PANEL_COPY[kind];
@@ -201,7 +216,7 @@ export const NodeOperationPanel = ({
           artifactState={artifactState}
           onConfirmKeywordReview={onConfirmKeywordReview}
           onRetryMine={() => onRetryNode?.('mine')}
-          canConfirm={Boolean(currentRunId)}
+          canConfirm={canConfirmOrderSheetProducts}
           canRetryMine={Boolean(currentRunId)}
         />
       )}
@@ -227,7 +242,22 @@ export const NodeOperationPanel = ({
       {kind === 'review-drafts' && (
         <ReviewDraftPanel artifactState={artifactState} onConfirm={onConfirmReviews} confirming={confirmingReviews} />
       )}
-      {kind !== 'keyword-mining' && kind !== 'keyword-review' && kind !== 'product-select' && kind !== 'title-generate' && kind !== 'distribution-export' && kind !== 'review-drafts' && (
+      {kind === 'order-sheet-products' && (
+        <OrderSheetProductPanel
+          artifactState={artifactState}
+          canConfirm={Boolean(currentRunId)}
+          confirming={confirmingOrderSheetProducts}
+          onConfirm={onConfirmOrderSheetProducts}
+        />
+      )}
+      {kind === 'order-sheet-groups' && (
+        <OrderSheetGroupPanel
+          currentRunId={currentRunId}
+          confirming={confirmingOrderSheetProducts}
+          onConfirm={onConfirmOrderSheetProducts}
+        />
+      )}
+      {kind !== 'keyword-mining' && kind !== 'keyword-review' && kind !== 'product-select' && kind !== 'title-generate' && kind !== 'distribution-export' && kind !== 'review-drafts' && kind !== 'order-sheet-products' && kind !== 'order-sheet-groups' && (
         <ArtifactPanel state={artifactState} />
       )}
     </div>

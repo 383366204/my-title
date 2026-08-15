@@ -21,6 +21,14 @@ test('workflow action registry routes workbenches to canvas overlays', () => {
     kind: WORKFLOW_ACTION_KINDS.OVERLAY,
     overlay: WORKFLOW_OVERLAYS.DISTRIBUTION
   });
+  assert.deepEqual(getWorkflowActionRoute('complete-order-sheet-products'), {
+    kind: WORKFLOW_ACTION_KINDS.OVERLAY,
+    overlay: WORKFLOW_OVERLAYS.NODE_WORKBENCH
+  });
+  assert.deepEqual(getWorkflowActionRoute('confirm-order-sheet-products'), {
+    kind: WORKFLOW_ACTION_KINDS.OVERLAY,
+    overlay: WORKFLOW_OVERLAYS.NODE_WORKBENCH
+  });
 });
 
 test('workflow action registry keeps immediate operations as commands', () => {

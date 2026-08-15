@@ -22,6 +22,8 @@ export const WORKFLOW_ACTION_ROUTES = Object.freeze({
   'configure-sheet': overlay(WORKFLOW_OVERLAYS.SHEET_CONFIG),
   'keyword-review': overlay(WORKFLOW_OVERLAYS.NODE_WORKBENCH),
   'confirm-keyword-review': overlay(WORKFLOW_OVERLAYS.NODE_WORKBENCH),
+  'complete-order-sheet-products': overlay(WORKFLOW_OVERLAYS.NODE_WORKBENCH),
+  'confirm-order-sheet-products': overlay(WORKFLOW_OVERLAYS.NODE_WORKBENCH),
   'product-review': overlay(WORKFLOW_OVERLAYS.PRODUCT_SELECT),
   'open-review': overlay(WORKFLOW_OVERLAYS.DISTRIBUTION),
   'confirm-distribution': overlay(WORKFLOW_OVERLAYS.DISTRIBUTION),

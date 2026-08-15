@@ -51,6 +51,7 @@ describe('workflow pipeline adapter', () => {
       export: 'export',
       review: 'review',
       collectRank: 'collectRank',
+      confirmProducts: 'confirmProducts',
       importSheet: 'importSheet',
       generateReviews: 'generateReviews',
       generateSheet: 'generateSheet',
@@ -60,7 +61,7 @@ describe('workflow pipeline adapter', () => {
     const templates = listProductionWorkflowTemplates();
 
     assert.deepEqual(templates.map(template => template.id), ['daily-selection-v1', 'exact-keyword-v1', 'manual-selection-v1', 'sycm-order-sheet-v1', 'uploaded-review-sheet-v1']);
-    assert.deepEqual(templates.map(template => template.entryLabel), ['入口：动态灵感', '入口：手动关键词', '入口：关键词 + 1688链接', '入口：生意参谋商品排行', '入口：已执行的刷单表']);
+    assert.deepEqual(templates.map(template => template.entryLabel), ['入口：动态灵感', '入口：手动关键词', '入口：关键词 + 1688链接', '入口：商品排行或指定商品', '入口：已执行的刷单表']);
     assert.match(templates[0].scenarioLabel, /每天自动发现/);
     assert.match(templates[1].scenarioLabel, /明确目标词/);
     assert.match(templates[0].flowSummary, /灵感选词/);
@@ -69,12 +70,17 @@ describe('workflow pipeline adapter', () => {
     assert.match(templates[1].modeHint, /逐词验真/);
     assert.match(templates[2].flowSummary, /录入词和货源/);
     assert.match(templates[2].flowSummary, /自动铺货/);
-    assert.match(templates[3].flowSummary, /指标降序/);
+    assert.match(templates[3].flowSummary, /获取商品资料/);
+    assert.match(templates[3].flowSummary, /确认商品与编组/);
     const orderSheetStart = templates[3].workflow.nodes.find(node => node.id === WORKFLOW_NODE_IDS.start);
+    const orderSheetConfirm = templates[3].workflow.nodes.find(node => node.id === WORKFLOW_NODE_IDS.confirmProducts);
     const orderSheetGenerate = templates[3].workflow.nodes.find(node => node.id === WORKFLOW_NODE_IDS.generateSheet);
     assert.equal(orderSheetStart.data.orderSheetConfig, true);
+    assert.equal(orderSheetStart.data.inputMode, 'rank');
     assert.equal(orderSheetStart.data.pages, 1);
     assert.equal(orderSheetStart.data.sortMetric, 'itmUv');
+    assert.equal(templates[3].workflow.nodes.find(node => node.id === WORKFLOW_NODE_IDS.collectRank).data.label, '获取商品资料');
+    assert.equal(orderSheetConfirm.data.label, '确认商品与编组');
     assert.equal(orderSheetGenerate.data.sheetConfig, true);
     assert.equal(orderSheetGenerate.data.sheetType, 'order');
     assert.equal(orderSheetGenerate.data.orderSheetOnly, true);
@@ -168,12 +174,14 @@ describe('workflow pipeline adapter', () => {
     assert.deepEqual(templates[3].workflow.nodes.map(node => node.id), [
       WORKFLOW_NODE_IDS.start,
       WORKFLOW_NODE_IDS.collectRank,
+      WORKFLOW_NODE_IDS.confirmProducts,
       WORKFLOW_NODE_IDS.generateSheet,
       WORKFLOW_NODE_IDS.end
     ]);
     assert.deepEqual(templates[3].workflow.edges.map(edge => `${edge.source}->${edge.target}`), [
       'start->collectRank',
-      'collectRank->generateSheet',
+      'collectRank->confirmProducts',
+      'confirmProducts->generateSheet',
       'generateSheet->end'
     ]);
   });
@@ -198,6 +206,7 @@ describe('workflow pipeline adapter', () => {
         ? [
             WORKFLOW_NODE_IDS.start,
             WORKFLOW_NODE_IDS.collectRank,
+            WORKFLOW_NODE_IDS.confirmProducts,
             WORKFLOW_NODE_IDS.generateSheet,
             WORKFLOW_NODE_IDS.end
           ]
@@ -477,6 +486,9 @@ describe('workflow pipeline adapter', () => {
       pages: 9,
       sortMetric: 'payAmt'
     }), {
+      inputMode: 'rank',
+      manualItemsText: '',
+      manualItems: [],
       port: 9223,
       dateMode: 'custom',
       startDate: '2026-08-05',
@@ -499,6 +511,69 @@ describe('workflow pipeline adapter', () => {
       reviewGroupSize: 4,
       includeSpacerRow: true
     });
+
+    assert.deepEqual(sanitizeWorkflowParams('order-sheet', {
+      inputMode: 'hybrid',
+      manualItemsText: '748392010293\nhttps://detail.tmall.com/item.htm?id=987654321'
+    }), {
+      inputMode: 'hybrid',
+      manualItemsText: '748392010293\nhttps://detail.tmall.com/item.htm?id=987654321',
+      manualItems: [
+        {
+          itemId: '748392010293',
+          title: '',
+          productUrl: 'https://item.taobao.com/item.htm?id=748392010293',
+          imageUrl: '',
+          storeName: '',
+          orderAmount: null,
+          paymentAmount: null,
+          sourceType: 'manual',
+          enrichmentStatus: 'normalized'
+        },
+        {
+          itemId: '987654321',
+          title: '',
+          productUrl: 'https://detail.tmall.com/item.htm?id=987654321',
+          imageUrl: '',
+          storeName: '',
+          orderAmount: null,
+          paymentAmount: null,
+          sourceType: 'manual',
+          enrichmentStatus: 'normalized'
+        }
+      ],
+      port: 9222,
+      dateMode: 'latest_day',
+      startDate: '',
+      endDate: '',
+      orderDate: new Date().toISOString().slice(0, 10),
+      storeName: '',
+      sheetType: 'order',
+      pages: 1,
+      sortMetric: 'itmUv',
+      productLimit: 0,
+      fileName: '',
+      includeRawData: true,
+      includeImages: true,
+      amountMode: 'average',
+      missingAmountPolicy: 'blank',
+      cartQuantity: 1,
+      rowSpan: 3,
+      workRequirement: '',
+      orderNote: '',
+      reviewGroupSize: 4,
+      includeSpacerRow: true
+    });
+
+    assert.throws(() => sanitizeWorkflowParams('order-sheet', {
+      inputMode: 'manual',
+      manualItemsText: ''
+    }), /manual 模式下必须包含至少 1 条手工商品/);
+
+    assert.equal(sanitizeWorkflowParams('order-sheet', {
+      inputMode: 'hybrid',
+      manualItemsText: ''
+    }).inputMode, 'rank');
     assert.deepEqual(sanitizeWorkflowParams('review-sheet', {
       uploadId: '2f9e14d8-57f0-4c12-b2bd-f5efc3e34721',
       uploadName: '竹里人动销一拖多.xlsx',

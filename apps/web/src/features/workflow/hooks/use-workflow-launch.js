@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 
 import {
   getWorkflowLaunchParams,
@@ -59,24 +59,26 @@ export function useWorkflowLaunch(options = {}) {
     setLogs = () => {},
     setRunStatus = () => {}
   } = options || {};
+  const launchingRef = useRef(false);
 
-  const handleRunWorkflow = useCallback(async () => {
-    if (runStatus === 'running') return;
-
-    setLogs([]);
-    setRunStatus('pending');
-    const launchBlocker = getWorkflowLaunchBlocker(activeTemplateMode, nodes);
-    if (launchBlocker) {
-      setRunStatus(launchBlocker.status);
-      setLogs(launchBlocker.logs);
-      setCurrentRunId(null);
-      return;
-    }
-
-    const workflowDef = buildWorkflowDefinition(nodes, edges);
-    const params = getWorkflowLaunchParams(nodes);
+  const launchWorkflow = useCallback(async ({ workflowNodes = nodes, workflowEdges = edges } = {}) => {
+    if (runStatus === 'running' || launchingRef.current) return false;
+    launchingRef.current = true;
 
     try {
+      setLogs([]);
+      setRunStatus('pending');
+      const launchBlocker = getWorkflowLaunchBlocker(activeTemplateMode, workflowNodes);
+      if (launchBlocker) {
+        setRunStatus(launchBlocker.status);
+        setLogs(launchBlocker.logs);
+        setCurrentRunId(null);
+        return false;
+      }
+
+      const workflowDef = buildWorkflowDefinition(workflowNodes, workflowEdges);
+      const params = getWorkflowLaunchParams(workflowNodes);
+
       const validationPayload = await validateWorkflow({
         templateId: activeTemplateId,
         mode: activeTemplateMode,
@@ -93,7 +95,7 @@ export function useWorkflowLaunch(options = {}) {
             level: 'error',
             message: `[${error.code || 'validation_error'}] ${error.message}`
           })));
-          return;
+          return false;
         }
         setLogs(errors.map((error) => ({
           timestamp: new Date().toISOString(),
@@ -123,9 +125,13 @@ export function useWorkflowLaunch(options = {}) {
         setRunStatus('completed');
         await refreshHistory();
       }
+      return true;
     } catch (error) {
       alert(`启动请求失败: ${error.message}`);
       setRunStatus('failed');
+      return false;
+    } finally {
+      launchingRef.current = false;
     }
   }, [
     activeTemplateId,
@@ -140,5 +146,7 @@ export function useWorkflowLaunch(options = {}) {
     setRunStatus
   ]);
 
-  return { handleRunWorkflow };
+  const handleRunWorkflow = useCallback(() => launchWorkflow(), [launchWorkflow]);
+
+  return { handleRunWorkflow, launchWorkflow };
 }

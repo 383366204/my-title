@@ -68,6 +68,12 @@ const {
   saveReviewSourceUpload
 } = require('../skills/review-sheet');
 const {
+  confirmOrderSheetProducts,
+  getOrderSheetDraft,
+  saveOrderSheetDraft,
+  updateOrderSheetManualProducts
+} = require('../skills/order-sheet');
+const {
   parseItems,
   checkDistributionReadiness,
   confirmDistributionLog,
@@ -1442,6 +1448,168 @@ app.post('/api/workflows/runs/:runId/review-confirm', (req, res) => {
   }
 });
 
+app.get('/api/workflows/runs/:runId/order-sheet/draft', (req, res) => {
+  try {
+    const runId = req.params.runId;
+    const runtime = readRuntimeState({ runId });
+    if (!runtime || runtime.mode !== 'order-sheet') {
+      return res.status(409).json({ ok: false, error: '当前运行不是刷单表流水线。' });
+    }
+    const draft = getOrderSheetDraft({ runId });
+    return res.json({ ok: true, data: draft });
+  } catch (err) {
+    return res.status(400).json({ ok: false, error: err.message });
+  }
+});
+app.get('/api/workflows/runs/:runId/order-sheet-draft', (req, res) => {
+  try {
+    const runId = req.params.runId;
+    const runtime = readRuntimeState({ runId });
+    if (!runtime || runtime.mode !== 'order-sheet') {
+      return res.status(409).json({ ok: false, error: '当前运行不是刷单表流水线。' });
+    }
+    const draft = getOrderSheetDraft({ runId });
+    return res.json({ ok: true, data: draft });
+  } catch (err) {
+    return res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+app.post('/api/workflows/runs/:runId/order-sheet/draft', (req, res) => {
+  try {
+    const runId = req.params.runId;
+    const runtime = readRuntimeState({ runId });
+    if (!runtime || runtime.mode !== 'order-sheet') {
+      return res.status(409).json({ ok: false, error: '当前运行不是刷单表流水线。' });
+    }
+    const saved = saveOrderSheetDraft({
+      runId,
+      items: Array.isArray(req.body?.items) ? req.body.items : undefined,
+      groups: Array.isArray(req.body?.groups) ? req.body.groups : undefined,
+      unassignedItems: Array.isArray(req.body?.unassignedItems) ? req.body.unassignedItems : undefined,
+      dragCount: req.body?.dragCount,
+      expectedRevision: req.body?.revision
+    });
+    return res.json({ ok: true, data: saved });
+  } catch (err) {
+    return res.status(err.code === 'ORDER_SHEET_DRAFT_CONFLICT' ? 409 : 400).json({ ok: false, error: err.message });
+  }
+});
+app.post('/api/workflows/runs/:runId/order-sheet-draft', (req, res) => {
+  try {
+    const runId = req.params.runId;
+    const runtime = readRuntimeState({ runId });
+    if (!runtime || runtime.mode !== 'order-sheet') {
+      return res.status(409).json({ ok: false, error: '当前运行不是刷单表流水线。' });
+    }
+    const saved = saveOrderSheetDraft({
+      runId,
+      items: Array.isArray(req.body?.items) ? req.body.items : undefined,
+      groups: Array.isArray(req.body?.groups) ? req.body.groups : undefined,
+      unassignedItems: Array.isArray(req.body?.unassignedItems) ? req.body.unassignedItems : undefined,
+      dragCount: req.body?.dragCount,
+      expectedRevision: req.body?.revision
+    });
+    return res.json({ ok: true, data: saved });
+  } catch (err) {
+    return res.status(err.code === 'ORDER_SHEET_DRAFT_CONFLICT' ? 409 : 400).json({ ok: false, error: err.message });
+  }
+});
+
+function handleConfirmOrderSheet(req, res) {
+  if (activeWorkbenchProcess) {
+    return res.status(409).json({ ok: false, error: '已有工作流正在运行，请等待完成后再继续。' });
+  }
+  try {
+    const runId = req.params.runId;
+    const runtime = readRuntimeState({ runId });
+    if (!runtime || runtime.mode !== 'order-sheet') {
+      return res.status(409).json({ ok: false, error: '当前运行不是刷单表流水线。' });
+    }
+    if (runtime.status === 'running' || runtime.status === 'resuming') {
+      return res.status(409).json({ ok: false, error: '流水线已在运行中，请勿重复提交。' });
+    }
+
+    const items = Array.isArray(req.body?.items) ? req.body.items : undefined;
+    const groups = Array.isArray(req.body?.groups) ? req.body.groups : undefined;
+
+    if (items) {
+      const updated = updateOrderSheetManualProducts({ runId, items });
+      if (updated.missingCount > 0) {
+        updateRuntimeState({
+          runId,
+          patch: {
+            status: 'blocked',
+            activeStep: 'collectRank',
+            blocker: 'order_sheet_product_details_required',
+            actionHint: `仍有 ${updated.missingCount} 个指定商品缺少标题，请补充后继续。`,
+            manualAction: { platform: 'taobao', status: 'product_details_required', missingCount: updated.missingCount }
+          }
+        });
+        return res.status(409).json({ ok: false, error: `仍有 ${updated.missingCount} 个商品缺少标题。`, data: updated });
+      }
+    }
+
+    const confirmed = confirmOrderSheetProducts({
+      runId,
+      items,
+      groups,
+      unassignedItems: Array.isArray(req.body?.unassignedItems) ? req.body.unassignedItems : undefined,
+      dragCount: req.body?.dragCount,
+      expectedRevision: req.body?.revision
+    });
+
+    const params = {
+      ...(runtime.params || {}),
+      ...(confirmed.groups ? { groups: confirmed.groups } : {})
+    };
+
+    updateRuntimeState({
+      runId,
+      patch: {
+        status: 'paused',
+        activeStep: 'generateSheet',
+        params,
+        blocker: null,
+        actionHint: null,
+        platform: null,
+        platformStatus: null,
+        manualAction: null,
+        progress: {
+          collectRank: { status: 'completed', current: confirmed.count, total: confirmed.count, percent: 100, message: `已确认 ${confirmed.count} 个商品资料` },
+          confirmProducts: { status: 'completed', current: confirmed.groupCount, total: confirmed.groupCount, percent: 100, message: `已确认 ${confirmed.groupCount} 个商品组` },
+          generateSheet: { status: 'idle', current: 0, total: 1, percent: 0, message: '等待生成表格' }
+        }
+      }
+    });
+
+    const promise = getPipelineRuntimeRunner()({
+      runId,
+      mode: 'order-sheet',
+      params,
+      preserveRuntime: true,
+      resumeFromStep: 'generateSheet',
+      steps: runtime.steps
+    });
+    const runState = { runId, mode: 'order-sheet-confirm', promise };
+    activeWorkbenchProcess = runState;
+    promise.then(result => {
+      originalLog(`[Order Sheet] runtime 完成，runId=${result.runId}, status=${result.runtimeStatus || result.status}`);
+    }).catch(err => {
+      originalError(`[Order Sheet] runtime 失败，runId=${runId}:`, err.message);
+    }).finally(() => {
+      if (activeWorkbenchProcess === runState) activeWorkbenchProcess = null;
+    });
+    return res.json({ ok: true, data: { status: 'resuming', count: confirmed.count, groupCount: confirmed.groupCount, runId } });
+  } catch (err) {
+    return res.status(err.code === 'ORDER_SHEET_DRAFT_CONFLICT' ? 409 : 400).json({ ok: false, error: err.message });
+  }
+}
+
+app.post('/api/workflows/runs/:runId/order-sheet/confirm', handleConfirmOrderSheet);
+app.post('/api/workflows/runs/:runId/order-sheet-confirm', handleConfirmOrderSheet);
+app.post('/api/workflows/runs/:runId/order-sheet-products', handleConfirmOrderSheet);
+
 // 2.5 POST /api/workflows/validate - 运行前校验工作流图
 app.post('/api/workflows/validate', (req, res) => {
   try {
@@ -1679,7 +1847,10 @@ app.post('/api/workflows/runs/:runId/retry-node', async (req, res) => {
       if (!['mine', 'keywordReview', 'verify', 'select', 'generate', 'export', 'collectRank', 'generateSheet'].includes(nodeId)) {
         return res.status(400).json({ ok: false, error: '不支持的流程步骤。' });
       }
-      if (nodeId === 'verify' || nodeId === 'collectRank') {
+      const manualOrderSheetCollection = nodeId === 'collectRank'
+        && runtime.mode === 'order-sheet'
+        && runtime.params?.inputMode === 'manual';
+      if ((nodeId === 'verify' || nodeId === 'collectRank') && !manualOrderSheetCollection) {
         const port = parsePositiveNumber(runtime.params?.port || process.env.SYCM_DEBUG_PORT || 9222, 9222);
         const recovery = await recoverSycmAccessAfterChrome(port);
         if (!recovery.chromeReady) {

@@ -7,11 +7,11 @@ export { buildWorkflowDefinition } from './use-workflow-launch.js';
  * Composite hook combining launch/validation and in-flight operations.
  * Maintains existing public interface for WorkflowStudio.
  * @param {object} options Operation dependencies and state callbacks.
- * @returns {object} handleCancelWorkflow, handleRunWorkflow, runRemoteOperation.
+ * @returns {object} Workflow launch, repeat-launch, cancellation, and node operation callbacks.
  */
 export function useWorkflowOperations(options) {
-  const { handleRunWorkflow } = useWorkflowLaunch(options);
+  const { handleRunWorkflow, launchWorkflow } = useWorkflowLaunch(options);
   const { handleCancelWorkflow, runRemoteOperation } = useWorkflowCommands(options);
 
-  return { handleCancelWorkflow, handleRunWorkflow, runRemoteOperation };
+  return { handleCancelWorkflow, handleRunWorkflow, launchWorkflow, runRemoteOperation };
 }

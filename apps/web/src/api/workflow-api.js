@@ -46,6 +46,15 @@ export const confirmReviewSheet = (runId, reviews) => requestJson(`${workflowRun
   method: 'POST',
   body: { reviews }
 });
+export const getOrderSheetDraft = (runId) => requestJson(`${workflowRunPath(runId)}/order-sheet/draft`);
+export const saveOrderSheetDraft = (runId, input) => requestJson(`${workflowRunPath(runId)}/order-sheet/draft`, {
+  method: 'POST',
+  body: input
+});
+export const confirmOrderSheetProducts = (runId, input) => requestJson(`${workflowRunPath(runId)}/order-sheet/confirm`, {
+  method: 'POST',
+  body: Array.isArray(input) ? { items: input } : input
+});
 
 export async function getWorkflowArtifact(runId, nodeId, { limit } = {}) {
   const query = limit ? `?limit=${encodeURIComponent(limit)}` : '';

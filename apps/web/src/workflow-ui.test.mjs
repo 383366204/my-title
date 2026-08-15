@@ -14,6 +14,7 @@ import {
   getPipelineSummaryVisualState,
   normalizeWorkflowProgressEvent,
   parseExactKeywords,
+  parseOrderSheetManualItems,
   getStartNodeParams,
   getWorkflowLaunchParams,
   getWorkflowLaunchBlocker,
@@ -41,6 +42,53 @@ import {
   getOrderSheetConfigSummary,
   getSheetConfigSummary
 } from './workflow-ui.js';
+
+test('order-sheet item input parses direct IDs, links, short links, duplicates, and overrides', () => {
+  const parsed = parseOrderSheetManualItems([
+    '748392010293',
+    'https://detail.tmall.com/item.htm?id=987654321',
+    '748392010293',
+    'https://m.tb.cn/h.shortLink',
+    'https://example.com/not-supported'
+  ].join('\n'), [{
+    itemId: '748392010293',
+    title: '人工标题',
+    orderAmount: 88
+  }]);
+
+  assert.equal(parsed.totalCount, 5);
+  assert.equal(parsed.items.length, 3);
+  assert.equal(parsed.duplicateCount, 1);
+  assert.equal(parsed.invalidCount, 1);
+  assert.equal(parsed.items[0].title, '人工标题');
+  assert.equal(parsed.items[0].orderAmount, 88);
+  assert.equal(parsed.items[2].itemId, '');
+  assert.match(parsed.items[2].sourceKey, /^url:https:\/\/m\.tb\.cn/);
+});
+
+test('order-sheet item input accepts Taobao share subdomains and rejects nonstandard ports', () => {
+  const parsed = parseOrderSheetManualItems([
+    'https://e.tb.cn/h.shareLink',
+    'https://z.tb.cn/h.anotherShare',
+    'https://item.taobao.com:8443/item.htm?id=748392010293',
+    '1001'
+  ].join('\n'));
+  assert.equal(parsed.items.length, 3);
+  assert.equal(parsed.invalidCount, 1);
+  assert.equal(parsed.items[2].itemId, '1001');
+});
+
+test('order-sheet confirmation node opens the grouping workbench and summarizes groups', () => {
+  assert.equal(getWorkflowNodePanelKind('confirmProducts'), 'order-sheet-groups');
+  assert.deepEqual(getWorkflowNodeAction('confirmProducts', { status: 'needs_review' }), {
+    label: '确认商品与编组',
+    action: 'confirm-order-sheet-products',
+    tone: 'warn'
+  });
+  assert.equal(getWorkflowNodeSuccessLabel('confirmProducts', {
+    output: { groupCount: 2, productCount: 5 }
+  }), '已编排 2 个任务组、5 个商品');
+});
 
 test('exact keyword input parses batches and launch params preserve all words', () => {
   assert.deepEqual(parseExactKeywords('纯银项链\n桌面收纳盒，纯银项链'), ['纯银项链', '桌面收纳盒']);
@@ -658,6 +706,16 @@ test('getWorkflowBlockerActions normalizes backend recommendations to executable
     nextRecommendedAction: { action: 'resume-after-manual', label: '我已处理，继续流程' }
   });
   assert.deepEqual(resumeActions.map((action) => action.action), ['resume']);
+});
+
+test('getWorkflowBlockerActions opens product detail completion without a misleading resume action', () => {
+  const actions = getWorkflowBlockerActions('collectRank', {
+    status: 'blocked',
+    blocker: 'order_sheet_product_details_required',
+    platformStatus: 'product_details_required',
+    nextRecommendedAction: { action: 'complete-order-sheet-products', label: '补充商品资料' }
+  });
+  assert.deepEqual(actions.map(action => action.action), ['complete-order-sheet-products']);
 });
 
 test('getMiningRecoveryHint explains how to recover a verified-empty run', () => {
@@ -1433,6 +1491,22 @@ test('getWorkflowLaunchBlocker keeps daily start parameters runnable', () => {
   ]);
 
   assert.equal(blocker, null);
+});
+
+test('getWorkflowLaunchBlocker requires products only for manual order-sheet input', () => {
+  const missing = getWorkflowLaunchBlocker('order-sheet', [{
+    id: 'start',
+    type: 'production-start',
+    data: { inputMode: 'manual', manualItemsText: '' }
+  }]);
+  const ready = getWorkflowLaunchBlocker('order-sheet', [{
+    id: 'start',
+    type: 'production-start',
+    data: { inputMode: 'manual', manualItemsText: '748392010293' }
+  }]);
+
+  assert.match(missing.error, /淘宝或天猫商品/);
+  assert.equal(ready, null);
 });
 
 test('getWorkflowLaunchBlocker requires keyword-bound 1688 items for manual mode', () => {

@@ -10,6 +10,7 @@ import {
 import {
   confirmKeywordReview as confirmKeywordReviewRequest,
   confirmProductReview as confirmProductReviewRequest,
+  confirmOrderSheetProducts as confirmOrderSheetProductsRequest,
   confirmReviewSheet,
   getWorkflowArtifact,
   getWorkflowRun
@@ -43,7 +44,8 @@ import {
   normalizeCanvasNode,
   normalizeRunList,
   normalizeTemplateList,
-  normalizeWorkflowForCanvas
+  normalizeWorkflowForCanvas,
+  resetWorkflowNodeData
 } from './features/workflow/workflow-data.js';
 import { controlDistributionRun } from './api/distribution-api.js';
 
@@ -81,6 +83,7 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [selectedNodeId, setSelectedNodeId] = useState(null);
   const [confirmingReviews, setConfirmingReviews] = useState(false);
+  const [confirmingOrderSheetProducts, setConfirmingOrderSheetProducts] = useState(false);
   const initialTemplateLoadedRef = useRef(false);
   const nodeInteractionRef = useRef({ onAction: null, onViewArtifact: null });
   const nodeUpdateRef = useRef(null);
@@ -128,7 +131,7 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
   const [artifactState, setArtifactState] = useNodeArtifact({
     runId: currentRunId,
     nodeId: selectedNodeId,
-    limit: selectedNodeId === 'generate' ? 200 : undefined
+    limit: selectedNodeId === 'generate' || selectedNodeId === 'collectRank' ? 200 : undefined
   });
   const {
     seedRows,
@@ -240,6 +243,7 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
   const {
     handleCancelWorkflow,
     handleRunWorkflow,
+    launchWorkflow,
     runRemoteOperation
   } = useWorkflowOperations({
     activeTemplateId,
@@ -297,41 +301,50 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
     )));
   };
 
-  const prepareNewRunFromHistory = (override = null) => {
+  const buildFreshRunNodes = (sourceNodes, override = null) => {
     const overrideNodeId = override?.nodeId || null;
     const overrideFields = override?.fields && typeof override.fields === 'object' ? override.fields : {};
-    disconnectRunEvents();
-    setNodes((currentNodes) => currentNodes.map((node) => normalizeCanvasNode({
+    return sourceNodes.map((node) => normalizeCanvasNode({
       ...node,
-      data: {
-        ...node.data,
-        ...(node.id === overrideNodeId ? overrideFields : {}),
-        workflowReadOnly: false,
-        status: 'idle',
-        output: null,
-        error: null,
-        progress: null,
-        blocker: null,
-        actionHint: null,
-        nextRecommendedAction: null,
-        platformStatus: null,
-        manualAction: null,
-        outputSummary: null,
-        workflowRunStatus: 'idle'
-      }
-    }, setSelectedNodeId, dispatchNodeAction, dispatchNodeArtifactView, nodeTypes, dispatchNodeUpdate)));
+      data: resetWorkflowNodeData(
+        node.data,
+        node.id === overrideNodeId ? overrideFields : {}
+      )
+    }, setSelectedNodeId, dispatchNodeAction, dispatchNodeArtifactView, nodeTypes, dispatchNodeUpdate));
+  };
+
+  const resetRunView = (freshNodes, selectedId, message) => {
+    disconnectRunEvents();
+    setNodes(freshNodes);
     setCurrentRunId(null);
     setRunStatus('idle');
-    setSelectedNodeId(overrideNodeId || 'start');
-    setLogs([{
+    setSelectedNodeId(selectedId);
+    setLogs(message ? [{
       timestamp: new Date().toISOString(),
       level: 'info',
-      message: overrideNodeId
-        ? '已基于历史配置新建流程，并更新采集条件。确认无误后即可运行。'
-        : '已复制历史配置。请调整日期、页数或表格设置后运行。'
-    }]);
+      message
+    }] : []);
     closeOverlay();
     setArtifactState({ status: 'empty', nodeId: null, artifact: null, error: '' });
+  };
+
+  const prepareNewRunFromHistory = (override = null) => {
+    const overrideNodeId = override?.nodeId || null;
+    const freshNodes = buildFreshRunNodes(nodes, override);
+    resetRunView(
+      freshNodes,
+      overrideNodeId || 'start',
+      overrideNodeId
+        ? '已基于历史配置新建流程，并更新采集条件。确认无误后即可运行。'
+        : '已复制历史配置。请调整日期、页数或表格设置后运行。'
+    );
+  };
+
+  const repeatWorkflow = async () => {
+    if (isRunActive || nodes.length === 0) return false;
+    const freshNodes = buildFreshRunNodes(nodes);
+    resetRunView(freshNodes, 'start', '已按当前配置创建新运行。');
+    return launchWorkflow({ workflowNodes: freshNodes, workflowEdges: edges });
   };
 
   // 加载指定历史运行记录的详情和日志
@@ -514,6 +527,36 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
     }
   };
 
+  const confirmOrderSheetProducts = async (input) => {
+    if (!currentRunId || confirmingOrderSheetProducts) return false;
+    setConfirmingOrderSheetProducts(true);
+    try {
+      const payload = Array.isArray(input) ? { items: input } : input;
+      const result = await confirmOrderSheetProductsRequest(currentRunId, payload);
+      const productCount = Number(result?.count) || payload?.groups?.reduce((total, group) => total + 1 + (group.subProducts?.length || 0), 0) || 0;
+      const groupCount = Number(result?.groupCount) || payload?.groups?.length || 0;
+      setLogs((previous) => [...previous, {
+        timestamp: new Date().toISOString(),
+        level: 'info',
+        message: groupCount > 0
+          ? `已确认 ${groupCount} 个任务组、${productCount} 个商品，正在生成刷单表。`
+          : `已确认 ${productCount} 个商品资料，正在生成刷单表。`
+      }]);
+      setRunStatus('resuming');
+      closeOverlay();
+      listenToRunEvents(currentRunId);
+      await loadHistoryRunRef.current?.(currentRunId, { preserveLogs: true });
+      return true;
+    } catch (error) {
+      const message = `保存商品资料失败：${error.message}`;
+      setLogs((previous) => [...previous, { timestamp: new Date().toISOString(), level: 'error', message }]);
+      alert(message);
+      return false;
+    } finally {
+      setConfirmingOrderSheetProducts(false);
+    }
+  };
+
   // 画布节点由历史数据创建，事件入口必须始终指向当前 render 的运行上下文。
   nodeInteractionRef.current.onAction = handleNodeAction;
   nodeInteractionRef.current.onViewArtifact = handleViewNodeArtifact;
@@ -627,6 +670,8 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
     runtimeActions: {
       onCopyText: copyText,
       onRetryNode: retryWorkflowNode,
+      onConfirmOrderSheetProducts: confirmOrderSheetProducts,
+      confirmingOrderSheetProducts,
       onConfirmReviews: confirmReviewDrafts,
       confirmingReviews
     },
@@ -672,6 +717,7 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
         onNodesChange={onNodesChange}
         onPause={() => runWorkflowOperation('pause')}
         onPrepareNewRun={prepareNewRunFromHistory}
+        onRepeatRun={repeatWorkflow}
         onRun={handleRunWorkflow}
         onSelectNode={setSelectedNodeId}
         orderedWorkflowNodes={orderedWorkflowNodes}

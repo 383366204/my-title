@@ -71,9 +71,26 @@ const WorkflowCollectionQuickActions = ({ data, view }) => {
   if (data?.orderSheetConfig !== true) return null;
   const isHistoricalConfig = data.workflowReadOnly === true;
   const readOnly = !isHistoricalConfig && !['idle', 'pending'].includes(String(data.status || data.state || 'idle').toLowerCase());
+  const inputMode = ['rank', 'manual', 'hybrid'].includes(data.inputMode) ? data.inputMode : 'rank';
+  const usesRank = inputMode !== 'manual';
+  const manualCount = Array.isArray(data.manualItems) ? data.manualItems.length : 0;
   return (
     <div className="production-collection-actions" aria-label="采集条件">
-      <label>
+      <label className="production-collection-source">
+        <span>来源</span>
+        <select
+          aria-label="刷单表商品来源"
+          value={inputMode === 'manual' ? 'manual' : 'rank'}
+          disabled={readOnly}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
+          onChange={(event) => data.onUpdate?.('inputMode', event.target.value)}
+        >
+          <option value="rank">商品排行</option>
+          <option value="manual">指定商品</option>
+        </select>
+      </label>
+      {usesRank && <label>
         <span>日期</span>
         <select
           aria-label="采集日期范围"
@@ -88,8 +105,8 @@ const WorkflowCollectionQuickActions = ({ data, view }) => {
           <option value="last_30_days">最近 30 天</option>
           <option value="custom">自定义</option>
         </select>
-      </label>
-      <label>
+      </label>}
+      {usesRank && <label>
         <span>页数</span>
         <input
           aria-label="采集页数"
@@ -102,7 +119,9 @@ const WorkflowCollectionQuickActions = ({ data, view }) => {
           onClick={(event) => event.stopPropagation()}
           onChange={(event) => data.onUpdate?.('pages', Math.min(5, Math.max(1, Number.parseInt(event.target.value, 10) || 1)))}
         />
-      </label>
+      </label>}
+      {!usesRank && <div className="production-collection-count"><span>商品</span><strong>{manualCount} 个</strong></div>}
+      {inputMode === 'hybrid' && <div className="production-collection-count"><span>追加</span><strong>{manualCount} 个</strong></div>}
       <button
         type="button"
         className="production-sheet-settings"
@@ -113,7 +132,7 @@ const WorkflowCollectionQuickActions = ({ data, view }) => {
           data.onAction?.('manual-input');
         }}
       >
-        <Settings2 size={12} /> {view.primaryAction.label}
+        <Settings2 size={12} /> {usesRank && inputMode !== 'hybrid' ? view.primaryAction.label : '输入商品'}
       </button>
     </div>
   );

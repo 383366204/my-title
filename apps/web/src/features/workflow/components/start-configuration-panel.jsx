@@ -1,4 +1,4 @@
-import { parseExactKeywords } from '../../../workflow-ui.js';
+import { parseExactKeywords, parseOrderSheetManualItems } from '../../../workflow-ui.js';
 
 const DAILY_START_FIELDS = [
   { key: 'mine', label: '候选词上限', min: 1, max: 200 },
@@ -77,11 +77,113 @@ export function StartConfigurationPanel({ mode, modeHint, node, onDone, onUpdate
   }
 
   if (mode === 'order-sheet') {
+    const inputMode = ['rank', 'manual', 'hybrid'].includes(data.inputMode) ? data.inputMode : 'rank';
+    const usesRank = inputMode !== 'manual';
+    const usesManual = inputMode !== 'rank';
     const customDate = data.dateMode === 'custom';
+    const manualInput = parseOrderSheetManualItems(data.manualItemsText || '', data.manualItems || []);
+    const updateManualText = (value) => {
+      const parsed = parseOrderSheetManualItems(value, data.manualItems || []);
+      onUpdateField(node.id, 'manualItemsText', value);
+      onUpdateField(node.id, 'manualItems', parsed.items);
+    };
+    const updateManualItem = (item, field, value) => {
+      const key = item.itemId || item.sourceKey;
+      const nextItems = manualInput.items.map((row) => (
+        (row.itemId || row.sourceKey) === key ? { ...row, [field]: value } : row
+      ));
+      onUpdateField(node.id, 'manualItems', nextItems);
+    };
     return (
       <div className="start-configuration-panel">
         <p className="start-configuration-hint">{modeHint}</p>
         <fieldset className="sheet-config-fields" disabled={readOnly}>
+        <section className="sheet-config-section order-sheet-source-section">
+          <h3>商品来源</h3>
+          <div className="node-segmented sheet-type-segmented" role="group" aria-label="刷单表商品来源">
+            <button
+              type="button"
+              className={usesRank ? 'active' : ''}
+              aria-pressed={usesRank}
+              onClick={() => onUpdateField(node.id, 'inputMode', inputMode === 'hybrid' ? 'hybrid' : 'rank')}
+            >
+              生意参谋排行
+            </button>
+            <button
+              type="button"
+              className={inputMode === 'manual' ? 'active' : ''}
+              aria-pressed={inputMode === 'manual'}
+              onClick={() => onUpdateField(node.id, 'inputMode', 'manual')}
+            >
+              指定商品
+            </button>
+          </div>
+          {usesRank && (
+            <label className="sheet-config-toggle order-sheet-append-toggle">
+              <input
+                type="checkbox"
+                checked={inputMode === 'hybrid'}
+                onChange={(event) => onUpdateField(node.id, 'inputMode', event.target.checked ? 'hybrid' : 'rank')}
+              />
+              <span>在排行榜后追加指定商品</span>
+            </label>
+          )}
+        </section>
+
+        {usesManual && (
+          <section className="sheet-config-section order-sheet-manual-section">
+            <h3>指定商品</h3>
+            <label className="node-field">
+              <span>淘宝／天猫商品 ID 或链接</span>
+              <textarea
+                className="node-field-textarea"
+                rows="7"
+                value={data.manualItemsText || ''}
+                onChange={(event) => updateManualText(event.target.value)}
+                placeholder={'每行输入一个商品，例如：\n748392010293\nhttps://item.taobao.com/item.htm?id=748392010293'}
+              />
+              <small>支持淘宝、天猫和淘宝短链接，最多 100 个；1688 货源链接不能用于刷单表。</small>
+            </label>
+            <div className="order-sheet-parse-summary" role="status">
+              <strong>{manualInput.items.length} 个有效商品</strong>
+              {manualInput.duplicateCount > 0 && <span>{manualInput.duplicateCount} 个重复项已合并</span>}
+              {manualInput.invalidCount > 0 && <span className="is-invalid">{manualInput.invalidCount} 个内容无法识别</span>}
+              {manualInput.truncatedCount > 0 && <span className="is-invalid">超出上限 {manualInput.truncatedCount} 个</span>}
+            </div>
+            {manualInput.items.length > 0 && (
+              <div className="order-sheet-manual-list">
+                {manualInput.items.map((item, index) => {
+                  const key = item.itemId || item.sourceKey;
+                  return (
+                    <article className="order-sheet-manual-item" key={key}>
+                      <div className="order-sheet-manual-item-head">
+                        <strong>{item.itemId ? `商品 ${item.itemId}` : `短链接 ${index + 1}`}</strong>
+                        <a href={item.productUrl} target="_blank" rel="noreferrer">打开商品</a>
+                      </div>
+                      <div className="start-configuration-grid">
+                        <label className="node-field start-configuration-wide">
+                          <span>商品标题 <small>可留空自动获取</small></span>
+                          <input type="text" value={item.title || ''} onChange={(event) => updateManualItem(item, 'title', event.target.value)} />
+                        </label>
+                        <label className="node-field">
+                          <span>做单金额</span>
+                          <input type="number" min="0" step="0.01" value={item.orderAmount ?? ''} onChange={(event) => updateManualItem(item, 'orderAmount', event.target.value === '' ? null : Number(event.target.value))} placeholder="自动留空" />
+                        </label>
+                        <label className="node-field">
+                          <span>店铺名</span>
+                          <input type="text" value={item.storeName || ''} onChange={(event) => updateManualItem(item, 'storeName', event.target.value)} placeholder="可留空自动获取" />
+                        </label>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        )}
+
+        {usesRank && <section className="sheet-config-section order-sheet-rank-section">
+          <h3>生意参谋排行条件</h3>
         <div className="start-configuration-grid">
           <label className="node-field start-configuration-wide">
             <span>日期范围</span>
@@ -122,6 +224,7 @@ export function StartConfigurationPanel({ mode, modeHint, node, onDone, onUpdate
           </label>
         </div>
         {customDate && <div className="start-configuration-hint">自定义日期最少 1 天、最多 31 天，以生意参谋当前可选日期为准。</div>}
+        </section>}
         </fieldset>
         <div className="start-configuration-actions">
           <button type="button" className="node-primary-button" onClick={onDone}>{readOnly ? '关闭' : '完成配置'}</button>
