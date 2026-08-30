@@ -73,7 +73,7 @@ const NODE_PANEL_COPY = {
   },
   'order-sheet-products': {
     title: '商品资料操作台',
-    description: '核对指定商品的标题、店铺和下单金额，资料齐全后继续生成 Excel。'
+    description: '核对指定商品的标题、购买规格、店铺和下单金额，资料齐全后继续生成 Excel。'
   },
   'order-sheet-groups': {
     title: '确认商品与编组',
@@ -237,6 +237,7 @@ export const NodeOperationPanel = ({
           currentRunId={currentRunId}
           sourceNodeId={selectedNode?.id}
           onDistributionJobChange={onDistributionJobChange}
+          workflowRunStatus={selectedNode?.data?.workflowRunStatus}
         />
       )}
       {kind === 'review-drafts' && (

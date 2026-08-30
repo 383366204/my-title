@@ -14,6 +14,7 @@ const {
   flowExport,
   flowManualStart,
   flowEnrichManualProducts,
+  flowVerifyManualProducts,
   flowKeywordStart,
   flowKeyword
 } = require('../index');
@@ -39,7 +40,7 @@ const {
 
 const DEFAULT_STEPS = ['mine', 'keywordReview', 'verify', 'select', 'generate', 'export'];
 const KEYWORD_STEPS = ['start', 'verify', 'select', 'generate', 'export'];
-const MANUAL_STEPS = ['start', 'select', 'generate', 'export'];
+const MANUAL_STEPS = ['start', 'select', 'verify', 'generate', 'export'];
 const ORDER_SHEET_STEPS = ['collectRank', 'confirmProducts', 'generateSheet'];
 const REVIEW_SHEET_STEPS = ['importSheet', 'generateReviews', 'generateSheet'];
 const STOP_STATUSES = new Set([
@@ -148,11 +149,12 @@ function createDefaultStepFns({ dataDir, runId, params, mode = 'daily' }) {
     ? normalizeExactKeywords(Array.isArray(params.keywords) && params.keywords.length > 0 ? params.keywords : params.keyword)
     : [];
   const keywordCount = Math.max(1, exactKeywords.length);
+  const manualProductCount = Math.max(1, Array.isArray(params.items) ? params.items.length : 0);
   const mineLimit = params.mine || params.limit || 50;
   const verifyLimit = keywordMode ? keywordCount : (params.verify || 20);
   const selectLimit = keywordMode ? keywordCount : (params.select || params.generate || 10);
-  const generateLimit = keywordMode ? keywordCount : (params.generate || 10);
-  const exportLimit = params.export || 20;
+  const generateLimit = manualMode ? manualProductCount : (keywordMode ? keywordCount : (params.generate || 10));
+  const exportLimit = manualMode ? Math.max(manualProductCount, Number(params.export || 0)) : (params.export || 20);
   const recordSeedFeedback = mode === 'daily'
     ? params.recordSeedFeedback !== false
     : params.recordSeedFeedback === true;
@@ -190,6 +192,9 @@ function createDefaultStepFns({ dataDir, runId, params, mode = 'daily' }) {
     },
     verify: async ({ reportProgress }) => {
       reportProgress({ current: 0, total: verifyLimit, message: '开始验真' });
+      if (manualMode) {
+        return flowVerifyManualProducts({ ...params, dataDir, runId, limit: verifyLimit, onProgress: reportProgress });
+      }
       return flowVerify({ ...params, dataDir, runId, limit: verifyLimit, recordSeedFeedback, onProgress: reportProgress });
     },
     keywordReview: async ({ reportProgress }) => {

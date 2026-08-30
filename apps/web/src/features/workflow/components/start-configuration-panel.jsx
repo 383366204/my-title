@@ -82,6 +82,11 @@ export function StartConfigurationPanel({ mode, modeHint, node, onDone, onUpdate
     const usesManual = inputMode !== 'rank';
     const customDate = data.dateMode === 'custom';
     const manualInput = parseOrderSheetManualItems(data.manualItemsText || '', data.manualItems || []);
+    const duplicatePreview = manualInput.duplicateItems.slice(0, 5);
+    const duplicateSummary = duplicatePreview
+      .map((item) => `${item.label}（出现 ${item.occurrenceCount} 次）`)
+      .join('、');
+    const hiddenDuplicateCount = Math.max(0, manualInput.duplicateItems.length - duplicatePreview.length);
     const updateManualText = (value) => {
       const parsed = parseOrderSheetManualItems(value, data.manualItems || []);
       onUpdateField(node.id, 'manualItemsText', value);
@@ -146,7 +151,11 @@ export function StartConfigurationPanel({ mode, modeHint, node, onDone, onUpdate
             </label>
             <div className="order-sheet-parse-summary" role="status">
               <strong>{manualInput.items.length} 个有效商品</strong>
-              {manualInput.duplicateCount > 0 && <span>{manualInput.duplicateCount} 个重复项已合并</span>}
+              {manualInput.duplicateCount > 0 && (
+                <span className="is-duplicate" title={manualInput.duplicateItems.map((item) => `${item.label}（出现 ${item.occurrenceCount} 次）`).join('、')}>
+                  重复商品 ID：{duplicateSummary}{hiddenDuplicateCount > 0 ? `，另有 ${hiddenDuplicateCount} 个` : ''}，已自动合并
+                </span>
+              )}
               {manualInput.invalidCount > 0 && <span className="is-invalid">{manualInput.invalidCount} 个内容无法识别</span>}
               {manualInput.truncatedCount > 0 && <span className="is-invalid">超出上限 {manualInput.truncatedCount} 个</span>}
             </div>

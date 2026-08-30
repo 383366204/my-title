@@ -183,7 +183,7 @@ function _connectToTab(port, urlFilter) {
       res.on('data', function(chunk) { body += chunk; });
       res.on('end', function() {
         var tabs = JSON.parse(body).filter(function(t) {
-          return !t.url.includes('g.alicdn.com');
+          return t.type === 'page' && !t.url.includes('g.alicdn.com');
         });
         var tab = urlFilter
           ? tabs.find(function(t) { return t.url.includes(urlFilter); }) || tabs[0]
@@ -193,6 +193,14 @@ function _connectToTab(port, urlFilter) {
       });
     }).on('error', reject);
   });
+}
+
+function _searchUrlMatchesKeyword(currentUrl, keyword) {
+  try {
+    return new URL(currentUrl).searchParams.get('keyWord') === String(keyword);
+  } catch (e) {
+    return false;
+  }
 }
 
 function _createCdpClient(wsUrl) {
@@ -572,7 +580,7 @@ async function _rawExtractSycmData(keyword, options) {
   if (!keyword) throw new Error('keyword is required');
 
   onProgress('[CDP] Connecting to Chrome on port ' + port + '...');
-  var tab = await _connectToTab(port);
+  var tab = await _connectToTab(port, 'sycm.taobao.com');
   var cdp = await _createCdpClient(tab.webSocketDebuggerUrl);
   await cdp.sendCommand('Page.enable', {});
 
@@ -586,15 +594,31 @@ async function _rawExtractSycmData(keyword, options) {
       + '&dateRange=' + encodeURIComponent(dateRangeStr)
       + '&searchAnalysisRadio=' + pfCompare;
     onProgress('[1/6] Navigating to: ' + keyword + ' (period: ' + pfPeriod + ', compare: ' + pfCompare + ')');
-    await cdp.runAction("window.location.href='" + targetUrl.replace(/'/g, "\\'") + "'", 5000);
+    await cdp.sendCommand('Page.navigate', { url: targetUrl }, 10000);
     cdp.close();
     onProgress('[1/6] Waiting for page load...');
     await new Promise(function(r) { setTimeout(r, 10000); });
 
-    tab = await _connectToTab(port);
+    tab = await _connectToTab(port, 'sycm.taobao.com');
     cdp = await _createCdpClient(tab.webSocketDebuggerUrl);
     await cdp.sendCommand('Page.enable', {});
     var currentUrl = await cdp.evaluate("window.location.href", 5000);
+    if (!_searchUrlMatchesKeyword(currentUrl, keyword)) {
+      onProgress('[WARN] 生意参谋仍停留在旧关键词，正在强制重新导航...');
+      await cdp.sendCommand('Page.navigate', { url: targetUrl }, 10000);
+      cdp.close();
+      await new Promise(function(r) { setTimeout(r, 10000); });
+      tab = await _connectToTab(port, 'search_analysis');
+      cdp = await _createCdpClient(tab.webSocketDebuggerUrl);
+      await cdp.sendCommand('Page.enable', {});
+      currentUrl = await cdp.evaluate("window.location.href", 5000);
+      if (!_searchUrlMatchesKeyword(currentUrl, keyword)) {
+        var navigationError = new Error('生意参谋未切换到当前关键词“' + keyword + '”，请重试验真');
+        navigationError.code = 'SYCM_NAVIGATION_STALE';
+        navigationError.status = 'transient_failure';
+        throw navigationError;
+      }
+    }
     await _throwIfManualBlocker(cdp, options, onProgress, 'after_initial_navigation');
 
     if (currentUrl.includes('login.taobao.com') ||

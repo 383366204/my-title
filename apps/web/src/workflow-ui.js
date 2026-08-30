@@ -212,7 +212,7 @@ export function getWorkflowNodeAction(nodeId, state) {
       return { label: '无需配置', action: 'inspect', tone: 'default' };
     }
     const label = stateDetails.manualInput === true
-      ? '录入词和货源'
+      ? '录入1688链接'
       : Object.hasOwn(stateDetails, 'keywordsText') || Array.isArray(stateDetails.keywords)
         ? '输入关键词'
         : '配置输入';
@@ -359,7 +359,7 @@ export function getWorkflowBlockerActions(nodeId, state = {}) {
   const productDetailsBlocked = nodeId === 'collectRank' && (
     blocker === 'order_sheet_product_details_required' || platformStatus === 'product_details_required'
   );
-  const sycmChromeBlocked = ['verify', 'collectRank'].includes(nodeId) && (
+  const chromeBlocked = ['verify', 'collectRank'].includes(nodeId) && (
     blocker.includes('browser_cdp_unavailable') ||
     blocker.includes('cdp_unavailable') ||
     platformStatus.includes('cdp_unavailable') ||
@@ -368,8 +368,12 @@ export function getWorkflowBlockerActions(nodeId, state = {}) {
     actionHint.includes('chrome cdp') ||
     /no chrome tab found|chrome[^\n]*(?:tab|debug)|cdp|devtools/.test(chromeFailureText)
   );
+  const productDetailChromeBlocked = nodeId === 'collectRank' && (
+    blocker.includes('order_sheet_browser_cdp_unavailable') ||
+    String(state.platform || '').toLowerCase() === 'taobao'
+  );
 
-  if (recommended && recommended.action && (!sycmChromeBlocked || recommended.action === 'start-sycm-chrome')) {
+  if (recommended && recommended.action && (!chromeBlocked || recommended.action === 'start-sycm-chrome')) {
     const recommendedAction = {
       'confirm-keyword-review': 'keyword-review',
       'resume-after-manual': 'resume',
@@ -382,20 +386,24 @@ export function getWorkflowBlockerActions(nodeId, state = {}) {
     });
   }
 
-  if (sycmChromeBlocked) {
+  if (chromeBlocked) {
     if (!actions.some((action) => action.action === 'start-sycm-chrome')) {
       actions.push({
         action: 'start-sycm-chrome',
         label: '启动 Chrome',
-        description: '打开带调试端口的 Chrome，登录生意参谋后可重新检测或重跑验真。'
+        description: productDetailChromeBlocked
+          ? '打开带调试端口的 Chrome，登录淘宝后重新读取商品资料。'
+          : '打开带调试端口的 Chrome，登录生意参谋后可重新检测或重跑验真。'
       });
     }
     actions.push({
       action: 'retry-node',
-      label: nodeId === 'collectRank' ? '重试采集' : '重跑验真',
-      description: nodeId === 'collectRank'
-        ? 'Chrome 就绪并完成登录后，重新采集商品排行第一页。'
-        : 'Chrome 就绪并完成登录后，从生意参谋校验节点重新执行。'
+      label: productDetailChromeBlocked ? '重试获取商品资料' : nodeId === 'collectRank' ? '重试采集' : '重跑验真',
+      description: productDetailChromeBlocked
+        ? 'Chrome 就绪并登录淘宝后，重新读取全部指定商品的标题、价格和规格。'
+        : nodeId === 'collectRank'
+          ? 'Chrome 就绪并完成登录后，重新采集商品排行第一页。'
+          : 'Chrome 就绪并完成登录后，从生意参谋校验节点重新执行。'
     });
   } else if (nodeId === 'verify' && (blocker === 'verified_empty' || blocker === 'no_generation_eligible_keywords')) {
     actions.push({
@@ -661,7 +669,7 @@ export function getWorkflowResultSummaryView(nodeId, state = {}) {
     select: '已选货源会按商品信息和机会分展示，完整内容保存在 selected-products.jsonl。',
     generate: '每条标题记录会关联已选货源；完整内容保存在 generated-products.jsonl。',
     collectRank: '排行商品与指定商品会统一展示；自动读取失败的指定商品可在当前节点补充后继续。',
-    confirmProducts: '只有确认后的任务组会进入刷单表；备选池中的商品不会输出。',
+    confirmProducts: '只有确认后的任务组会进入刷单表；未指定 SKU 时自动采用可售最低价规格。',
     generateSheet: sheetType === 'review'
       ? 'Excel 按1拖多评价格式写入刷单日期、店铺和商品标题，并附带生意参谋原始指标。'
       : 'Excel 按动销一拖多格式写入标题、主图、下单金额、做单要求和店铺，并附带生意参谋原始指标。',
@@ -858,7 +866,7 @@ export function getWorkflowTemplateView(template = {}) {
   const mode = String(template.mode || template.workflow?.mode || '').toLowerCase();
   const id = String(template.id || '').toLowerCase();
   const isKeyword = mode === 'keyword' || id === 'exact-keyword-v1';
-  const isManual = mode === 'manual' || id === 'manual-selection-v1';
+  const isManual = mode === 'manual' || ['manual-selection-v1', 'manual-selection-v2'].includes(id);
   const isOrderSheet = mode === 'order-sheet' || id === 'sycm-order-sheet-v1';
   const defaults = isOrderSheet
     ? {
@@ -869,10 +877,10 @@ export function getWorkflowTemplateView(template = {}) {
       }
     : isManual
     ? {
-        entryLabel: '入口：手动关键词',
-        scenarioLabel: '适合：精确控制词和商品',
-        flowSummary: '流程：人工选词 → 人工选品 → AI生成标题 → URL$$标题$$类目',
-        modeHint: '先输入关键词并筛选，再勾选 1688 货源或手动添加商品。'
+        entryLabel: '入口：1688链接（关键词可选）',
+        scenarioLabel: '适合：已经确定货源',
+        flowSummary: '流程：获取商品 → 提取并验真关键词 → MiniMax生成标题 → 铺货复核',
+        modeHint: '支持1688商品链接和手机分享口令；手动填写的关键词会被优先验证。'
       }
     : isKeyword
     ? {
@@ -1120,11 +1128,12 @@ function parseOrderSheetManualItem(value) {
  * Backend validation repeats the same trust boundary before starting a run.
  * @param {string} input Multiline product input.
  * @param {Array<object>} [overrides=[]] User-entered product details.
- * @returns {{items:Array<object>, totalCount:number, duplicateCount:number, invalidCount:number, truncatedCount:number}}
+ * @returns {{items:Array<object>, totalCount:number, duplicateCount:number, duplicateItems:Array<{key:string,itemId:string,label:string,occurrenceCount:number}>, invalidCount:number, truncatedCount:number}}
  */
 export function parseOrderSheetManualItems(input, overrides = []) {
   const tokens = String(input || '').split(/[\r\n,，;；、]+/).map((item) => item.trim()).filter(Boolean);
   const byKey = new Map();
+  const duplicateByKey = new Map();
   let duplicateCount = 0;
   let invalidCount = 0;
   let truncatedCount = 0;
@@ -1137,6 +1146,14 @@ export function parseOrderSheetManualItems(input, overrides = []) {
     const key = parsed.itemId || parsed.sourceKey;
     if (byKey.has(key)) {
       duplicateCount += 1;
+      const duplicate = duplicateByKey.get(key) || {
+        key,
+        itemId: parsed.itemId || '',
+        label: parsed.itemId || token,
+        occurrenceCount: 1
+      };
+      duplicate.occurrenceCount += 1;
+      duplicateByKey.set(key, duplicate);
       continue;
     }
     if (byKey.size >= 100) {
@@ -1165,7 +1182,14 @@ export function parseOrderSheetManualItems(input, overrides = []) {
       ...(Number(override.orderAmount) > 0 ? { orderAmount: Number(override.orderAmount) } : {})
     });
   }
-  return { items: [...byKey.values()], totalCount: tokens.length, duplicateCount, invalidCount, truncatedCount };
+  return {
+    items: [...byKey.values()],
+    totalCount: tokens.length,
+    duplicateCount,
+    duplicateItems: [...duplicateByKey.values()],
+    invalidCount,
+    truncatedCount
+  };
 }
 
 /**
@@ -1238,15 +1262,15 @@ export function getWorkflowLaunchBlocker(mode, nodes = []) {
   }
   if (mode === 'manual') {
     const items = Array.isArray(params.items) ? params.items : [];
-    if (items.length > 0 && items.every((item) => String(item?.keyword || params.defaultKeyword || '').trim() && /1688\.com/i.test(String(item?.url || '')))) return null;
-    const message = '请先在开始节点录入关键词和有效的 1688 商品链接';
+    if (items.length > 0 && items.every((item) => /1688\.com/i.test(String(item?.url || '')))) return null;
+    const message = '请先在开始节点录入有效的 1688 商品链接';
     return {
       status: 'blocked',
       error: message,
       logs: [{
         timestamp: new Date().toISOString(),
         level: 'error',
-        message: `[keywords_required] ${message}`
+        message: `[manual_products_required] ${message}`
       }]
     };
   }

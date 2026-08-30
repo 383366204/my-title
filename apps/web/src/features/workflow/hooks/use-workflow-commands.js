@@ -75,7 +75,9 @@ export function useWorkflowCommands(options = {}) {
           : action === 'pause'
             ? '正在提交暂停请求…'
             : action === 'start-sycm-chrome'
-              ? '正在启动 Chrome 并打开生意参谋…'
+              ? operationNodeId === 'collectRank'
+                ? '正在启动 Chrome 并打开商品页面…'
+                : '正在启动 Chrome 并打开生意参谋…'
               : '';
 
     if (operationNodeId && pendingMessage) {

@@ -28,12 +28,17 @@ async function flowGenerate(options = {}) {
   const verified = options.manualMode
     ? readJsonl(run.files.reviewedCandidates).filter(row => row.reviewStatus === 'approved' || row.status === 'keyword_approved')
     : readJsonl(run.files.verifiedKeywords);
-  const selectedProducts = readJsonl(run.files.selectedProducts)
+  const allSelectedProducts = readJsonl(run.files.selectedProducts)
     .filter(row => row.status === 'selected' && row.product);
+  const selectedProducts = options.manualMode
+    ? allSelectedProducts.filter(row => String(row.keyword || '').trim())
+    : allSelectedProducts;
   const requireSelectedProducts = options.allowLegacyProductFallback !== true;
   let eligible = [];
   if (selectedProducts.length > 0) {
-    eligible = Array.from(new Map(selectedProducts.map(row => [row.keyword, row])).values());
+    eligible = options.manualMode
+      ? selectedProducts
+      : Array.from(new Map(selectedProducts.map(row => [row.keyword, row])).values());
   } else if (!requireSelectedProducts) {
     eligible = options.includeReviewKeywords
       ? verified
@@ -52,10 +57,13 @@ async function flowGenerate(options = {}) {
   fs.writeFileSync(run.files.generatedProducts, '', 'utf8');
 
   if (requireSelectedProducts && selectedProducts.length === 0) {
+    const missingManualKeywords = options.manualMode && allSelectedProducts.length > 0;
     const blockedRow = {
       status: 'generate_blocked',
-      code: 'selected_products_required',
-      error: '没有通过货源选品的商品，标题生成已停止',
+      code: missingManualKeywords ? 'manual_keywords_required' : 'selected_products_required',
+      error: missingManualKeywords
+        ? '商品尚未绑定可用关键词，标题生成已停止'
+        : '没有通过货源选品的商品，标题生成已停止',
       generatedAt: new Date().toISOString()
     };
     appendJsonl(run.files.generatedProducts, blockedRow);
@@ -63,13 +71,14 @@ async function flowGenerate(options = {}) {
     run.counts.titleGenerationInputs = 0;
     run.counts.generatedProducts = 0;
     run.counts.titleGenerationFailed = 1;
+    if (missingManualKeywords) {
+      run.counts.titleGenerationSkippedMissingKeyword = allSelectedProducts.length;
+    }
     setRunStageMetrics(run, 'generate', {
       input: 0,
       passed: 0,
       rejected: 1
-    }, {
-      selected_products_required: 1
-    });
+    }, { [blockedRow.code]: missingManualKeywords ? allSelectedProducts.length : 1 });
     writeRun(runDir, run);
     const nextCommand = buildFlowCommand('select', run.runId, { limit: options.select || options.generate || 10 });
     return flowResponse({
@@ -86,7 +95,9 @@ async function flowGenerate(options = {}) {
 
   for (const item of selected) {
     try {
-      const productRowsForKeyword = selectedProducts.filter(row => row.keyword === item.keyword);
+      const productRowsForKeyword = options.manualMode
+        ? [item]
+        : selectedProducts.filter(row => row.keyword === item.keyword);
       const externalProducts = productRowsForKeyword.map(row => row.product);
       const result = await generator(item.keyword, {
         maxLength: Number(options.length || 60),
@@ -132,6 +143,12 @@ async function flowGenerate(options = {}) {
           recommendedCategory: options.manualMode
             ? (selectedProduct.recommendedCategory || item.recommendedCategory || '')
             : (item.recommendedCategory || selectedProduct.recommendedCategory || ''),
+          categorySource: selectedProduct.categorySource || item.categorySource || '',
+          categoryConfidence: selectedProduct.categoryConfidence || item.categoryConfidence || '',
+          sycmRecommendedCategory: selectedProduct.sycmRecommendedCategory || item.sycmRecommendedCategory || '',
+          keywordSource: selectedProduct.keywordSource || item.keywordSource || '',
+          keywordStatus: selectedProduct.keywordStatus || item.keywordStatus || '',
+          keywordConfidence: selectedProduct.keywordConfidence || item.keywordConfidence || '',
           verifyMode: item.verifyMode || selectedProduct.verifyMode || '',
           confidence: item.confidence || selectedProduct.confidence || '',
           usage: item.usage || selectedProduct.usage || '',
@@ -161,6 +178,8 @@ async function flowGenerate(options = {}) {
       generatedRows.push({
         status: 'generate_failed',
         keyword: item.keyword,
+        offerId: item.offerId || '',
+        url: item.url || '',
         error: error && error.message ? error.message : String(error),
         code: error && error.code ? error.code : '',
         source: error && error.source ? error.source : '',
@@ -193,6 +212,9 @@ async function flowGenerate(options = {}) {
   run.status = generatedRows.some(row => row.status === 'generated') ? 'generated' : 'generate_failed';
   run.counts.generatedProducts = generatedRows.filter(row => row.status === 'generated').length;
   run.counts.titleGenerationInputs = selectedProducts.length;
+  if (options.manualMode) {
+    run.counts.titleGenerationSkippedMissingKeyword = allSelectedProducts.length - selectedProducts.length;
+  }
   run.counts.titleGenerationFailed = generatedRows.filter(row => row.status !== 'generated').length;
   if (options.recordSeedFeedback === true && run.counts.generatedProducts > 0) {
     const generatedByRoot = new Map();
@@ -217,7 +239,12 @@ async function flowGenerate(options = {}) {
     input: selectedProducts.length,
     passed: run.counts.generatedProducts,
     rejected: run.counts.titleGenerationFailed
-  }, generationFailures);
+  }, {
+    ...generationFailures,
+    ...(options.manualMode && allSelectedProducts.length > selectedProducts.length
+      ? { manual_keyword_missing: allSelectedProducts.length - selectedProducts.length }
+      : {})
+  });
   writeRun(runDir, run);
   return flowResponse({
     ok: true,

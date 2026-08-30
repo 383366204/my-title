@@ -1,6 +1,7 @@
 'use strict';
 
 const axios = require('axios');
+const WebSocket = require('ws');
 
 const ALLOWED_DOMAINS = [
   'item.taobao.com',
@@ -30,6 +31,33 @@ function isAllowedEndpoint({ protocol = '', hostname = '', port = '' } = {}) {
       ? ['', '80']
       : [];
   return isAllowedDomain(hostname) && allowedPorts.includes(normalizedPort);
+}
+
+function normalizeSkuOptions(options) {
+  if (!Array.isArray(options)) return [];
+  const seen = new Set();
+  return options.map((option) => {
+    const skuId = String(option?.skuId || option?.id || '').trim();
+    const name = String(option?.name || option?.label || '').trim();
+    const price = Number(option?.price);
+    const originalPrice = Number(option?.originalPrice);
+    const quantity = Number(option?.quantity);
+    return {
+      skuId,
+      name,
+      price: Number.isFinite(price) && price > 0 ? Math.round(price * 100) / 100 : null,
+      originalPrice: Number.isFinite(originalPrice) && originalPrice > 0 ? Math.round(originalPrice * 100) / 100 : null,
+      quantity: Number.isFinite(quantity) ? quantity : null,
+      available: option?.available !== false && (!Number.isFinite(quantity) || quantity > 0),
+      propPath: String(option?.propPath || '').trim(),
+      imageUrl: String(option?.imageUrl || option?.image || '').trim()
+    };
+  }).filter((option) => {
+    const key = option.skuId || `${option.name}:${option.price}`;
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return option.available && option.price != null;
+  });
 }
 
 /**
@@ -64,6 +92,13 @@ function parseManualItem(input) {
 
   const orderAmount = parseAmount(raw.orderAmount);
   const paymentAmount = parseAmount(raw.paymentAmount);
+  const selectedSkuId = String(raw.selectedSkuId || raw.skuId || '').trim();
+  const selectedSkuName = String(raw.selectedSkuName || raw.skuName || '').trim();
+  const selectedSkuPrice = parseAmount(raw.selectedSkuPrice != null ? raw.selectedSkuPrice : raw.skuPrice);
+  const lowestSkuId = String(raw.lowestSkuId || '').trim();
+  const lowestSkuName = String(raw.lowestSkuName || '').trim();
+  const lowestSkuPrice = parseAmount(raw.lowestSkuPrice);
+  const skuOptions = normalizeSkuOptions(raw.skuOptions);
 
   let itemId = '';
   let productUrl = '';
@@ -126,6 +161,18 @@ function parseManualItem(input) {
     storeName,
     orderAmount,
     paymentAmount,
+    ...(selectedSkuId ? { selectedSkuId } : {}),
+    ...(selectedSkuName ? { selectedSkuName } : {}),
+    ...(selectedSkuPrice != null ? { selectedSkuPrice } : {}),
+    ...(lowestSkuId ? { lowestSkuId } : {}),
+    ...(lowestSkuName ? { lowestSkuName } : {}),
+    ...(lowestSkuPrice != null ? { lowestSkuPrice } : {}),
+    ...(skuOptions.length > 0 ? { skuOptions } : {}),
+    ...(
+      raw.skuSelectionMode || selectedSkuId || selectedSkuName
+        ? { skuSelectionMode: raw.skuSelectionMode === 'manual' ? 'manual' : 'lowest' }
+        : {}
+    ),
     sourceType: 'manual',
     enrichmentStatus: raw.enrichmentStatus || 'normalized'
   };
@@ -170,7 +217,15 @@ function parseManualItems(manualItems, manualItemsText) {
         ...(parsed.imageUrl ? { imageUrl: parsed.imageUrl } : {}),
         ...(parsed.storeName ? { storeName: parsed.storeName } : {}),
         ...(parsed.orderAmount != null ? { orderAmount: parsed.orderAmount } : {}),
-        ...(parsed.paymentAmount != null ? { paymentAmount: parsed.paymentAmount } : {})
+        ...(parsed.paymentAmount != null ? { paymentAmount: parsed.paymentAmount } : {}),
+        ...(parsed.selectedSkuId ? { selectedSkuId: parsed.selectedSkuId } : {}),
+        ...(parsed.selectedSkuName ? { selectedSkuName: parsed.selectedSkuName } : {}),
+        ...(parsed.selectedSkuPrice != null ? { selectedSkuPrice: parsed.selectedSkuPrice } : {}),
+        ...(parsed.lowestSkuId ? { lowestSkuId: parsed.lowestSkuId } : {}),
+        ...(parsed.lowestSkuName ? { lowestSkuName: parsed.lowestSkuName } : {}),
+        ...(parsed.lowestSkuPrice != null ? { lowestSkuPrice: parsed.lowestSkuPrice } : {}),
+        ...(parsed.skuOptions?.length > 0 ? { skuOptions: parsed.skuOptions } : {}),
+        ...(parsed.skuSelectionMode ? { skuSelectionMode: parsed.skuSelectionMode } : {})
       });
       continue;
     }
@@ -234,6 +289,266 @@ function wait(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function createCdpClient(wsUrl) {
+  const ws = new WebSocket(wsUrl);
+  const pending = new Map();
+  let nextId = 1;
+  const ready = new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('连接淘宝商品页超时')), 8000);
+    ws.once('open', () => {
+      clearTimeout(timer);
+      resolve();
+    });
+    ws.once('error', error => {
+      clearTimeout(timer);
+      reject(error);
+    });
+  });
+
+  ws.on('message', raw => {
+    let message;
+    try {
+      message = JSON.parse(raw.toString());
+    } catch (_error) {
+      return;
+    }
+    if (!message.id || !pending.has(message.id)) return;
+    const request = pending.get(message.id);
+    pending.delete(message.id);
+    clearTimeout(request.timer);
+    if (message.error) request.reject(new Error(message.error.message || '淘宝商品页操作失败'));
+    else request.resolve(message.result || {});
+  });
+  ws.on('close', () => {
+    for (const request of pending.values()) {
+      clearTimeout(request.timer);
+      request.reject(new Error('淘宝商品页连接已关闭'));
+    }
+    pending.clear();
+  });
+
+  async function send(method, params = {}, timeout = 20000) {
+    await ready;
+    return new Promise((resolve, reject) => {
+      const id = nextId++;
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        reject(new Error(`淘宝商品页操作超时: ${method}`));
+      }, timeout);
+      pending.set(id, { resolve, reject, timer });
+      ws.send(JSON.stringify({ id, method, params }));
+    });
+  }
+
+  async function evaluate(expression, timeout) {
+    const response = await send('Runtime.evaluate', {
+      expression,
+      returnByValue: true,
+      awaitPromise: true
+    }, timeout);
+    if (response.exceptionDetails) {
+      const detail = response.exceptionDetails.exception?.description || response.exceptionDetails.text;
+      throw new Error(detail || '读取淘宝商品页失败');
+    }
+    return response.result ? response.result.value : undefined;
+  }
+
+  return {
+    ready,
+    send,
+    evaluate,
+    close() {
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) ws.close();
+    }
+  };
+}
+
+function cleanBrowserTitle(value) {
+  return decodeHtml(value)
+    .replace(/\s*[-_–—]\s*(淘宝网|天猫(?:国际)?(?:官方网站)?|淘！我喜欢)\s*$/i, '')
+    .trim();
+}
+
+function browserSnapshotExpression() {
+  return `(() => {
+    const content = (selector, attr = 'content') => document.querySelector(selector)?.getAttribute(attr) || '';
+    const text = selector => String(document.querySelector(selector)?.textContent || '').trim();
+    const bodyText = String(document.body?.innerText || '').replace(/\\s+/g, ' ').slice(0, 4000);
+    const titleCandidates = [
+      content('meta[property="og:title"]'),
+      document.title,
+      text('[class*="ItemTitle"]'),
+      text('[class*="itemTitle"]'),
+      text('h1')
+    ].filter(Boolean);
+    const imageCandidates = [
+      content('meta[property="og:image"]'),
+      document.querySelector('[class*="MainPic"] img,[class*="mainPic"] img')?.currentSrc,
+      document.querySelector('[class*="MainPic"] img,[class*="mainPic"] img')?.src
+    ].filter(Boolean);
+    const scriptText = [...document.scripts].map(script => script.textContent || '').join('\\n');
+    const jsonValue = keys => {
+      for (const key of keys) {
+        const match = scriptText.match(new RegExp('"' + key + '"\\\\s*:\\s*"((?:\\\\\\\\.|[^"])*)"', 'i'));
+        if (match?.[1]) return match[1].replace(/\\\\\\//g, '/');
+      }
+      return '';
+    };
+    const seen = new WeakSet();
+    const findSkuData = (value, depth = 0) => {
+      if (!value || typeof value !== 'object' || depth > 10 || seen.has(value)) return null;
+      seen.add(value);
+      if (value.skuBase?.skus && value.skuCore?.sku2info) return value;
+      for (const child of Object.values(value)) {
+        const found = findSkuData(child, depth + 1);
+        if (found) return found;
+      }
+      return null;
+    };
+    const skuData = findSkuData(window.__ICE_APP_CONTEXT__);
+    const skuNames = new Map();
+    const skuImages = new Map();
+    for (const prop of skuData?.skuBase?.props || []) {
+      for (const value of prop.values || []) {
+        const path = String(prop.pid || '') + ':' + String(value.vid || '');
+        skuNames.set(path, (prop.name ? prop.name + '：' : '') + String(value.name || ''));
+        if (value.image) skuImages.set(path, value.image);
+      }
+    }
+    const priceValue = value => {
+      const amount = Number(String(value?.priceText || value?.priceMoney || '').replace(/[^\\d.]/g, ''));
+      if (!Number.isFinite(amount) || amount <= 0) return null;
+      return value?.priceText ? amount : amount / 100;
+    };
+    const skuOptions = (skuData?.skuBase?.skus || []).map(sku => {
+      const info = skuData?.skuCore?.sku2info?.[sku.skuId] || {};
+      const paths = String(sku.propPath || '').split(';').filter(Boolean);
+      const names = paths.map(path => skuNames.get(path)).filter(Boolean);
+      return {
+        skuId: String(sku.skuId || ''),
+        name: names.join(' / '),
+        price: priceValue(info.subPrice) || priceValue(info.price),
+        originalPrice: priceValue(info.price),
+        quantity: Number.isFinite(Number(info.quantity)) ? Number(info.quantity) : null,
+        available: info.quantityText !== '无货' && (!Number.isFinite(Number(info.quantity)) || Number(info.quantity) > 0),
+        propPath: String(sku.propPath || ''),
+        imageUrl: paths.map(path => skuImages.get(path)).find(Boolean) || ''
+      };
+    });
+    const defaultSkuInfo = skuData?.skuCore?.sku2info?.['0'] || {};
+    const defaultSkuPrice = priceValue(defaultSkuInfo.subPrice) || priceValue(defaultSkuInfo.price);
+    return {
+      readyState: document.readyState,
+      url: location.href,
+      bodyText,
+      title: titleCandidates[0] || jsonValue(['title', 'itemTitle']),
+      imageUrl: imageCandidates[0] || jsonValue(['picUrl', 'mainImage']),
+      storeName: jsonValue(['shopName', 'sellerNick', 'sellerName']),
+      priceText: content('meta[property="product:price:amount"]') || jsonValue(['priceText', 'price']),
+      defaultSkuPrice,
+      skuOptions
+    };
+  })()`;
+}
+
+function parseBrowserSnapshot(snapshot = {}, fallbackItem = {}) {
+  const bodyText = String(snapshot.bodyText || '');
+  const pageUrl = String(snapshot.url || '');
+  if (/login\.taobao\.com|passport\.taobao\.com/.test(pageUrl) || /扫码登录|密码登录|短信登录/.test(bodyText)) {
+    throw new Error('淘宝登录态不可用，请在 Chrome 登录淘宝后重试');
+  }
+  if (/punish|captcha/.test(pageUrl) || /安全验证|滑块|验证码|人机验证/.test(bodyText)) {
+    throw new Error('淘宝触发了安全验证，请在 Chrome 完成验证后重试');
+  }
+  const parsedUrl = parseManualItem(pageUrl);
+  const skuOptions = normalizeSkuOptions(snapshot.skuOptions);
+  const requestedSkuId = String(fallbackItem.selectedSkuId || fallbackItem.skuId || '').trim();
+  const requestedSkuName = String(fallbackItem.selectedSkuName || fallbackItem.skuName || '').trim();
+  const requestedSku = skuOptions.find(option => option.skuId === requestedSkuId)
+    || skuOptions.find(option => requestedSkuName && option.name === requestedSkuName)
+    || null;
+  const lowestSku = skuOptions.reduce((lowest, option) => (
+    !lowest || Number(option.price) < Number(lowest.price) ? option : lowest
+  ), null);
+  const selectedSku = requestedSku || lowestSku;
+  const pagePrice = Number(snapshot.defaultSkuPrice || String(snapshot.priceText || '').replace(/[^\d.]/g, ''));
+  const referencePrice = selectedSku?.price || (Number.isFinite(pagePrice) && pagePrice > 0 ? Math.round(pagePrice * 100) / 100 : null);
+  return {
+    itemId: fallbackItem.itemId || parsedUrl?.itemId || '',
+    title: cleanBrowserTitle(snapshot.title),
+    imageUrl: String(snapshot.imageUrl || '').trim(),
+    storeName: String(snapshot.storeName || '').trim(),
+    referencePrice,
+    skuOptions,
+    selectedSkuId: selectedSku?.skuId || '',
+    selectedSkuName: selectedSku?.name || '',
+    selectedSkuPrice: selectedSku?.price ?? referencePrice,
+    lowestSkuId: lowestSku?.skuId || '',
+    lowestSkuName: lowestSku?.name || '',
+    lowestSkuPrice: lowestSku?.price ?? referencePrice,
+    skuSelectionMode: requestedSku ? 'manual' : 'lowest',
+    finalUrl: pageUrl || fallbackItem.productUrl || '',
+    enrichmentSource: 'chrome'
+  };
+}
+
+/**
+ * Create a reusable Chrome/CDP session for reading Taobao item pages with the user's login state.
+ * @param {object} [options] Browser options.
+ * @param {number} [options.port=9222] Chrome debugging port.
+ * @param {number} [options.browserTimeout=20000] Per-item loading timeout.
+ * @returns {Promise<{readItem: Function, close: Function}>} Reusable item page session.
+ */
+async function createTaobaoChromeSession(options = {}) {
+  const port = Number(options.port || 9222);
+  const timeout = Number(options.browserTimeout || 20000);
+  let response;
+  try {
+    response = await axios.put(
+      `http://127.0.0.1:${port}/json/new?${encodeURIComponent('about:blank')}`,
+      null,
+      { timeout: 5000, proxy: false }
+    );
+  } catch (error) {
+    throw new Error(`Chrome 调试连接不可用（端口 ${port}），请先启动 Chrome 后重试：${error.message}`);
+  }
+  const target = response?.data;
+  if (!target?.webSocketDebuggerUrl) {
+    throw new Error(`Chrome 调试端口 ${port} 没有创建出可用商品页`);
+  }
+  const cdp = createCdpClient(target.webSocketDebuggerUrl);
+  await cdp.ready;
+  await cdp.send('Page.enable').catch(() => {});
+
+  return {
+    async readItem(item) {
+      const targetUrl = String(item?.productUrl || '');
+      const parsed = new URL(targetUrl);
+      if (!isAllowedEndpoint(parsed)) throw new Error('商品链接不是安全的淘系地址');
+      await cdp.send('Page.navigate', { url: targetUrl }, timeout);
+      const startedAt = Date.now();
+      let snapshot = null;
+      while (Date.now() - startedAt < timeout) {
+        await wait(350);
+        snapshot = await cdp.evaluate(browserSnapshotExpression(), 8000);
+        const detail = parseBrowserSnapshot(snapshot, item);
+        if (detail.title) return detail;
+        if (snapshot?.readyState === 'complete') {
+          await wait(650);
+          snapshot = await cdp.evaluate(browserSnapshotExpression(), 8000);
+          const completedDetail = parseBrowserSnapshot(snapshot, item);
+          if (completedDetail.title) return completedDetail;
+          break;
+        }
+      }
+      throw new Error(`Chrome 已打开商品 ${item?.itemId || ''}，但页面没有可读取的标题`);
+    },
+    close() {
+      cdp.close();
+    }
+  };
+}
+
 async function fetchTaobaoItemPage(item, options = {}) {
   const request = options.request || axios.get;
   const initialUrl = new URL(item.productUrl);
@@ -254,7 +569,7 @@ async function fetchTaobaoItemPage(item, options = {}) {
   });
   const finalUrl = response?.request?.res?.responseUrl || response?.config?.url || item.productUrl;
   if (!isAllowedEndpoint(new URL(finalUrl))) throw new Error('商品链接返回了非淘系页面');
-  return parseTaobaoItemHtml(response.data, finalUrl);
+  return { ...parseTaobaoItemHtml(response.data, finalUrl), enrichmentSource: 'http' };
 }
 
 /**
@@ -271,47 +586,92 @@ async function enrichManualItems(items = [], _options = {}) {
   }
   const onProgress = typeof options.onProgress === 'function' ? options.onProgress : () => {};
   const enriched = [];
-  for (const [index, item] of items.entries()) {
-    if (item.title && item.imageUrl) {
-      enriched.push({ ...item, enrichmentStatus: 'complete' });
-    } else {
-      try {
-        const detail = await fetchTaobaoItemPage(item, options);
-        const nextItem = {
-          ...item,
-          itemId: item.itemId || detail.itemId || '',
-          title: item.title || detail.title || '',
-          imageUrl: item.imageUrl || detail.imageUrl || '',
-          storeName: item.storeName || detail.storeName || '',
-          referencePrice: detail.referencePrice,
-          resolvedUrl: detail.finalUrl || item.productUrl,
-          enrichmentStatus: (item.title || detail.title) && (item.itemId || detail.itemId) ? 'complete' : 'partial',
-          enrichmentError: !(item.title || detail.title)
-            ? '未读取到商品标题'
-            : !(item.itemId || detail.itemId)
-              ? '短链接未解析出商品 ID'
-              : ''
-        };
-        if (nextItem.itemId) delete nextItem.sourceKey;
-        enriched.push(nextItem);
-      } catch (error) {
-        enriched.push({
-          ...item,
-          enrichmentStatus: item.title ? 'partial' : 'failed',
-          enrichmentError: error.message || '商品资料读取失败'
-        });
+  const pageFetcher = typeof options.fetchTaobaoItemPage === 'function' ? options.fetchTaobaoItemPage : fetchTaobaoItemPage;
+  const sessionFactory = typeof options.createTaobaoChromeSession === 'function'
+    ? options.createTaobaoChromeSession
+    : createTaobaoChromeSession;
+  let chromeSession = null;
+  let chromeSessionError = null;
+  try {
+    for (const [index, item] of items.entries()) {
+      if (item.title && item.imageUrl) {
+        enriched.push({ ...item, enrichmentStatus: 'complete' });
+      } else {
+        try {
+          let detail = null;
+          let httpError = null;
+          try {
+            detail = await pageFetcher(item, options);
+          } catch (error) {
+            httpError = error;
+          }
+          if (!detail?.title && options.useChromeFallback !== false) {
+            onProgress({ current: index, total: items.length, message: `正在 Chrome 打开第 ${index + 1}/${items.length} 个商品` });
+            if (!chromeSession && !chromeSessionError) {
+              try {
+                chromeSession = await sessionFactory(options);
+              } catch (error) {
+                chromeSessionError = error;
+              }
+            }
+            if (chromeSession) {
+              detail = await chromeSession.readItem(item);
+            } else if (chromeSessionError) {
+              throw chromeSessionError;
+            }
+          }
+          if (!detail) throw httpError || new Error('商品资料读取失败');
+          const nextItem = {
+            ...item,
+            itemId: item.itemId || detail.itemId || '',
+            title: item.title || detail.title || '',
+            imageUrl: item.imageUrl || detail.imageUrl || '',
+            storeName: item.storeName || detail.storeName || '',
+            referencePrice: detail.referencePrice,
+            orderAmount: item.orderAmount != null
+              ? item.orderAmount
+              : (detail.selectedSkuPrice ?? detail.referencePrice ?? null),
+            skuOptions: detail.skuOptions || item.skuOptions || [],
+            selectedSkuId: detail.selectedSkuId || item.selectedSkuId || '',
+            selectedSkuName: detail.selectedSkuName || item.selectedSkuName || '',
+            selectedSkuPrice: detail.selectedSkuPrice ?? item.selectedSkuPrice ?? null,
+            lowestSkuId: detail.lowestSkuId || item.lowestSkuId || '',
+            lowestSkuName: detail.lowestSkuName || item.lowestSkuName || '',
+            lowestSkuPrice: detail.lowestSkuPrice ?? item.lowestSkuPrice ?? detail.referencePrice ?? null,
+            skuSelectionMode: detail.skuSelectionMode || item.skuSelectionMode || 'lowest',
+            resolvedUrl: detail.finalUrl || item.productUrl,
+            enrichmentSource: detail.enrichmentSource || '',
+            enrichmentStatus: (item.title || detail.title) && (item.itemId || detail.itemId) ? 'complete' : 'partial',
+            enrichmentError: !(item.title || detail.title)
+              ? '未读取到商品标题'
+              : !(item.itemId || detail.itemId)
+                ? '短链接未解析出商品 ID'
+                : ''
+          };
+          if (nextItem.itemId) delete nextItem.sourceKey;
+          enriched.push(nextItem);
+        } catch (error) {
+          enriched.push({
+            ...item,
+            enrichmentStatus: item.title ? 'partial' : 'failed',
+            enrichmentError: error.message || '商品资料读取失败'
+          });
+        }
+      }
+      onProgress({ current: index + 1, total: items.length, message: `已处理第 ${index + 1}/${items.length} 个指定商品` });
+      if (index < items.length - 1 && options.skipEnrichmentDelay !== true) {
+        await wait(Math.max(300, Number(options.enrichmentIntervalMs || 900)));
       }
     }
-    onProgress({ current: index + 1, total: items.length, message: `已处理第 ${index + 1}/${items.length} 个指定商品` });
-    if (index < items.length - 1 && options.skipEnrichmentDelay !== true) {
-      await wait(Math.max(300, Number(options.enrichmentIntervalMs || 900)));
-    }
+  } finally {
+    if (chromeSession) chromeSession.close();
   }
   return enriched;
 }
 
 module.exports = {
   fetchTaobaoItemPage,
+  createTaobaoChromeSession,
   isAllowedEndpoint,
   isAllowedDomain,
   parseTaobaoItemHtml,

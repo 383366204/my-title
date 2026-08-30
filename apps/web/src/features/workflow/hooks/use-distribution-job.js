@@ -10,7 +10,7 @@ import {
 
 const FINISHED_STATUSES = new Set(['completed', 'completed_with_issues', 'failed', 'cancelled']);
 
-export function useDistributionJob({ initialJobId = '', onJobChange } = {}) {
+export function useDistributionJob({ initialJobId = '', notifyCompletedOnRestore = false, onJobChange } = {}) {
   const [job, setJobState] = useState(null);
   const [error, setError] = useState('');
   const [chromeStarting, setChromeStarting] = useState(false);
@@ -27,8 +27,10 @@ export function useDistributionJob({ initialJobId = '', onJobChange } = {}) {
     if (!initialJobId) return () => { cancelled = true; };
     getDistributionRun(initialJobId)
       .then((persistedJob) => {
-        // 历史任务只恢复面板状态，不应伪装成一次新的完成事件并重置当前选中节点。
-        if (!cancelled) setJobState(persistedJob);
+        if (cancelled) return;
+        // 已完成任务需要通知画布同步；否则用户在铺货中关闭弹窗后，重新打开仍会停在复核节点。
+        if (notifyCompletedOnRestore && persistedJob?.status === 'completed') setJob(persistedJob);
+        else setJobState(persistedJob);
       })
       .catch((loadError) => {
         if (!cancelled && !/未找到铺货任务|404/.test(String(loadError?.message || ''))) {
@@ -36,7 +38,7 @@ export function useDistributionJob({ initialJobId = '', onJobChange } = {}) {
         }
     });
     return () => { cancelled = true; };
-  }, [initialJobId]);
+  }, [initialJobId, notifyCompletedOnRestore, setJob]);
 
   useEffect(() => {
     if (!job?.jobId || FINISHED_STATUSES.has(job.status)) return undefined;

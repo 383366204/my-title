@@ -1,5 +1,7 @@
 'use strict';
 
+const DEFAULT_ORDER_GROUP_SIZE = 4;
+
 /**
  * @typedef {object} OrderProduct
  * @property {string} [itemId] 商品 ID
@@ -10,6 +12,11 @@
  * @property {string} [storeName] 店铺名称
  * @property {number|null} [orderAmount] 下单金额（实付参考价）
  * @property {number|null} [paymentAmount] 支付金额
+ * @property {Array<object>} [skuOptions] 可售 SKU 列表
+ * @property {string} [selectedSkuId] 已选 SKU ID
+ * @property {string} [selectedSkuName] 已选规格名称
+ * @property {number|null} [selectedSkuPrice] 已选 SKU 价格
+ * @property {'lowest'|'manual'} [skuSelectionMode] SKU 选择方式
  * @property {number|null} [visitorCount] 访客数
  * @property {number|null} [paidItemCount] 支付件数
  * @property {number|null} [cartItemCount] 加购件数
@@ -83,6 +90,7 @@ function normalizeOrderProduct(product = {}, defaultRole = 'main') {
   const visitorCount = Number.isFinite(Number(product.visitorCount)) ? Number(product.visitorCount) : null;
   const paidItemCount = Number.isFinite(Number(product.paidItemCount)) ? Number(product.paidItemCount) : null;
   const cartItemCount = Number.isFinite(Number(product.cartItemCount)) ? Number(product.cartItemCount) : null;
+  const skuOptions = Array.isArray(product.skuOptions) ? product.skuOptions.map(option => ({ ...option })) : [];
 
   return {
     ...product,
@@ -97,6 +105,14 @@ function normalizeOrderProduct(product = {}, defaultRole = 'main') {
     visitorCount,
     paidItemCount,
     cartItemCount,
+    skuOptions,
+    selectedSkuId: String(product.selectedSkuId || '').trim(),
+    selectedSkuName: String(product.selectedSkuName || '').trim(),
+    selectedSkuPrice: parseAmount(product.selectedSkuPrice),
+    lowestSkuId: String(product.lowestSkuId || '').trim(),
+    lowestSkuName: String(product.lowestSkuName || '').trim(),
+    lowestSkuPrice: parseAmount(product.lowestSkuPrice != null ? product.lowestSkuPrice : product.referencePrice),
+    skuSelectionMode: product.skuSelectionMode === 'manual' ? 'manual' : 'lowest',
     sourceType,
     role,
     enrichmentStatus: product.enrichmentStatus || (title ? 'complete' : 'normalized'),
@@ -108,16 +124,16 @@ function normalizeOrderProduct(product = {}, defaultRole = 'main') {
 }
 
 /**
- * 将商品列表自动按 1 拖 N（1 主品 + N 副品）规则进行分组。
- * 尾组不足 N 个副品时，自动归入该组（尾组不足容差）。
+ * 将商品列表自动按 1 拖 N（每组 N 件商品）规则进行分组。
+ * 每组第一件标记为主商品，其余标记为搭配商品；尾组不足 N 件时保留为尾组。
  * 
  * 注意区分：
- * - dragCount (1拖N): 业务上的商品编组，1 主品拖 N 副品（组大小为 1 + dragCount）。
+ * - dragCount (1拖N): 业务上的商品编组，每组正好 N 件（尾组除外）。
  * - rowSpan: Excel 渲染排版参数，决定每个商品在表格中占用的行高合并数（默认 3）。
  * 
  * @param {Array<object>} products 商品列表
  * @param {object} [options] 分组选项
- * @param {number} [options.dragCount=0] 每个主品拖带的副品数（N）。0 表示单品组（1拖0），2 表示 1拖2（组大小 3）。
+ * @param {number} [options.dragCount=4] 每个任务组的商品数（N）。最小为 1，默认 4。
  * @param {string} [options.groupPrefix='组 '] 组名前缀
  * @returns {OrderGroup[]} 分组后的 OrderGroup 数组
  */
@@ -126,8 +142,9 @@ function autoGroupOrderProducts(products = [], options = {}) {
   if (list.length === 0) return [];
 
   const rawDragCount = Number.parseInt(options.dragCount, 10);
-  const dragCount = Number.isFinite(rawDragCount) && rawDragCount > 0 ? rawDragCount : 0;
-  const groupSize = 1 + dragCount;
+  const groupSize = Number.isFinite(rawDragCount) && rawDragCount >= 1
+    ? rawDragCount
+    : DEFAULT_ORDER_GROUP_SIZE;
   const groupPrefix = options.groupPrefix || '组 ';
   const groups = [];
 
@@ -162,13 +179,13 @@ function autoGroupOrderProducts(products = [], options = {}) {
 }
 
 /**
- * 将扁平的历史商品 rows 转为单品组（1拖0）。
+ * 将扁平的历史商品 rows 转为单品组（1拖1）。
  * @param {Array<object>} rows 历史商品列表
  * @param {object} [options] 选项
  * @returns {OrderGroup[]} 单品组数组
  */
 function rowsToOrderGroups(rows = [], options = {}) {
-  return autoGroupOrderProducts(rows, { ...options, dragCount: 0 });
+  return autoGroupOrderProducts(rows, { ...options, dragCount: 1 });
 }
 
 /**
@@ -182,12 +199,14 @@ function rowsToOrderGroups(rows = [], options = {}) {
  * @param {Array<object>} groups 待校验的组列表
  * @param {object} [options] 校验选项
  * @param {boolean} [options.requireNonEmpty=true] 是否要求至少包含 1 个组
+ * @param {number} [options.groupSize] 1 拖 N 的 N；设置后，中间组必须为 N 件，尾组最多 N 件
  * @returns {{ valid: boolean, errors: string[], groupCount: number, productCount: number }} 校验结果
  */
 function validateOrderGroups(groups = [], options = {}) {
   const list = Array.isArray(groups) ? groups : [];
   const errors = [];
   const requireNonEmpty = options.requireNonEmpty !== false;
+  const expectedGroupSize = Number.parseInt(options.groupSize, 10);
 
   if (requireNonEmpty && list.length === 0) {
     errors.push('商品分组不能为空，至少需要 1 个商品组');
@@ -219,6 +238,14 @@ function validateOrderGroups(groups = [], options = {}) {
       { ...mainProduct, role: 'main' },
       ...subProducts.map(sub => ({ ...sub, role: 'sub' }))
     ];
+
+    if (Number.isFinite(expectedGroupSize) && expectedGroupSize >= 1) {
+      if (allGroupProducts.length > expectedGroupSize) {
+        errors.push(`${groupLabel} 有 ${allGroupProducts.length} 件商品，超过 1拖${expectedGroupSize} 的组容量`);
+      } else if (gIdx < list.length - 1 && allGroupProducts.length !== expectedGroupSize) {
+        errors.push(`${groupLabel} 需要保持 ${expectedGroupSize} 件商品，只有最后一组可以不足`);
+      }
+    }
 
     // 组内重复检查（组内 Set 独立跟踪，不同组之间相互独立以支持跨组复用）
     const intraGroupSeen = new Set();
@@ -275,7 +302,7 @@ function assertValidOrderGroups(groups, options = {}) {
  * 规范化商品组列表（支持已经是 groups 数组或旧 flat rows 数组的输入）。
  * @param {Array<object>} input 组列表或商品列表
  * @param {object} [options] 选项
- * @param {number} [options.dragCount=0] 如果输入为扁平 rows，指定 1 拖 N 编组数
+ * @param {number} [options.dragCount=4] 如果输入为扁平 rows，指定每组 N 件商品
  * @returns {OrderGroup[]} 规范化后的 OrderGroup 数组
  */
 function normalizeOrderGroups(input = [], options = {}) {
@@ -338,6 +365,7 @@ function flattenOrderGroups(groups = []) {
   const rows = [];
 
   normalized.forEach((group, gIdx) => {
+    const groupProductCount = 1 + (group.subProducts || []).length;
     const main = {
       ...group.mainProduct,
       storeName: group.mainProduct.storeName || group.storeName || '',
@@ -348,7 +376,8 @@ function flattenOrderGroups(groups = []) {
       groupId: group.id,
       groupName: group.name || `组 ${gIdx + 1}`,
       groupIndex: gIdx + 1,
-      itemIndexInGroup: 1
+      itemIndexInGroup: 1,
+      groupProductCount
     };
     rows.push(main);
 
@@ -363,7 +392,8 @@ function flattenOrderGroups(groups = []) {
         groupId: group.id,
         groupName: group.name || `组 ${gIdx + 1}`,
         groupIndex: gIdx + 1,
-        itemIndexInGroup: sIdx + 2
+        itemIndexInGroup: sIdx + 2,
+        groupProductCount
       };
       rows.push(subItem);
     });
@@ -373,6 +403,7 @@ function flattenOrderGroups(groups = []) {
 }
 
 module.exports = {
+  DEFAULT_ORDER_GROUP_SIZE,
   getProductKey,
   normalizeOrderProduct,
   autoGroupOrderProducts,

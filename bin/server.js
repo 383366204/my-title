@@ -21,7 +21,7 @@ const {
 } = require('../skills/keyword-mining');
 
 const { generateTitlePipeline } = require('../skills/title-gen');
-const { searchAll } = require('../skills/alibaba1688');
+const { searchAll, resolve1688ShareText } = require('../skills/alibaba1688');
 const {
   autoLaunchChrome,
   isChromeDevToolsAvailable,
@@ -114,6 +114,16 @@ const WORKBENCH_OUTPUT_LIMIT_BYTES = 200 * 1024;
 let activeWorkbenchProcess = null;
 const activeDistributionJobs = new Map();
 const DISTRIBUTION_JOB_DIR = path.join(process.cwd(), 'data', 'pipeline', 'distribution-runs');
+
+async function resolveManualShareParams(mode, raw = {}) {
+  if (mode !== 'manual' || !Array.isArray(raw.items)) return raw;
+  const items = await Promise.all(raw.items.slice(0, 100).map(async (item) => {
+    const source = String(item?.url || item?.productUrl || '').trim();
+    const resolved = await resolve1688ShareText(source);
+    return resolved ? { ...item, url: resolved.url, offerId: resolved.offerId } : item;
+  }));
+  return { ...raw, items };
+}
 
 function distributionJobFile(jobId) {
   if (!/^[a-zA-Z0-9_-]+$/.test(String(jobId || ''))) throw new Error('无效的铺货运行 ID。');
@@ -492,7 +502,7 @@ app.get('/api/pipeline/runs/:runId', (req, res) => {
   }
 });
 
-app.post('/api/pipeline/start', (req, res) => {
+app.post('/api/pipeline/start', async (req, res) => {
   if (activeWorkbenchProcess) {
     return res.status(409).json({
       ok: false,
@@ -503,7 +513,8 @@ app.post('/api/pipeline/start', (req, res) => {
 
   try {
     const launch = resolveProductionWorkflowLaunch(req.body || {});
-    const params = sanitizeWorkflowParams(launch.mode, launch.params);
+    const resolvedParams = await resolveManualShareParams(launch.mode, launch.params);
+    const params = sanitizeWorkflowParams(launch.mode, resolvedParams);
     const runId = createRunId();
     const definition = resolveProductionWorkflowDefinition(req.body || {}, launch);
     writeWorkflowDefinition({ runId, definition });
@@ -1620,8 +1631,22 @@ app.post('/api/workflows/validate', (req, res) => {
   }
 });
 
+// 2.6 POST /api/1688/resolve-share - 将手机分享口令或短链转换成标准商品链接
+app.post('/api/1688/resolve-share', async (req, res) => {
+  try {
+    const input = String(req.body?.input || '').trim();
+    if (!input) return res.status(400).json({ ok: false, error: '分享内容为空。' });
+    if (input.length > 8192) return res.status(400).json({ ok: false, error: '单条分享内容过长。' });
+    const result = await resolve1688ShareText(input);
+    if (!result) return res.status(422).json({ ok: false, error: '没有从分享内容中识别到有效的 1688 商品。' });
+    return res.json({ ok: true, data: result });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: `解析 1688 分享内容失败：${err.message}` });
+  }
+});
+
 // 3. POST /api/workflows/run - 启动一个新工作流
-app.post('/api/workflows/run', (req, res) => {
+app.post('/api/workflows/run', async (req, res) => {
   if (activeWorkbenchProcess) {
     return res.status(409).json({
       ok: false,
@@ -1632,7 +1657,8 @@ app.post('/api/workflows/run', (req, res) => {
 
   try {
     const launch = resolveProductionWorkflowLaunch(req.body || {});
-    const params = sanitizeWorkflowParams(launch.mode, launch.params);
+    const resolvedParams = await resolveManualShareParams(launch.mode, launch.params);
+    const params = sanitizeWorkflowParams(launch.mode, resolvedParams);
     const runId = createRunId();
     const definition = resolveProductionWorkflowDefinition(req.body || {}, launch);
     writeWorkflowDefinition({ runId, definition });
@@ -1850,15 +1876,26 @@ app.post('/api/workflows/runs/:runId/retry-node', async (req, res) => {
       const manualOrderSheetCollection = nodeId === 'collectRank'
         && runtime.mode === 'order-sheet'
         && runtime.params?.inputMode === 'manual';
-      if ((nodeId === 'verify' || nodeId === 'collectRank') && !manualOrderSheetCollection) {
+      if (nodeId === 'verify' || nodeId === 'collectRank') {
         const port = parsePositiveNumber(runtime.params?.port || process.env.SYCM_DEBUG_PORT || 9222, 9222);
-        const recovery = await recoverSycmAccessAfterChrome(port);
-        if (!recovery.chromeReady) {
-          return res.status(409).json({
-            ok: false,
-            code: 'SYCM_CHROME_REQUIRED',
-            error: `Chrome 调试连接仍不可用（端口 ${port}）。请先点击节点上的“启动 Chrome”，完成登录后再重试当前节点。`
-          });
+        if (manualOrderSheetCollection) {
+          const chromeReady = await getSycmChromeAvailabilityChecker()(port);
+          if (!chromeReady) {
+            return res.status(409).json({
+              ok: false,
+              code: 'CHROME_REQUIRED',
+              error: `Chrome 调试连接仍不可用（端口 ${port}）。请先点击节点上的“启动 Chrome”，登录淘宝后再重试获取商品资料。`
+            });
+          }
+        } else {
+          const recovery = await recoverSycmAccessAfterChrome(port);
+          if (!recovery.chromeReady) {
+            return res.status(409).json({
+              ok: false,
+              code: 'SYCM_CHROME_REQUIRED',
+              error: `Chrome 调试连接仍不可用（端口 ${port}）。请先点击节点上的“启动 Chrome”，完成登录后再重试当前节点。`
+            });
+          }
         }
       }
       if (activeWorkbenchProcess) {
@@ -1953,7 +1990,20 @@ app.post('/api/workflows/runs/:runId/pause', (req, res) => {
 app.post('/api/workflows/sycm/chrome/start', async (req, res) => {
   const port = parsePositiveNumber(req.body?.port || process.env.SYCM_DEBUG_PORT || 9222, 9222);
   const chromeProfileDir = req.body?.chromeProfileDir || process.env.SYCM_CHROME_PROFILE_DIR;
-  const sycmUrl = req.body?.url
+  const workflowRuntime = req.body?.runId && isValidWorkflowRunIdParam(req.body.runId)
+    ? readRuntimeState({ runId: req.body.runId })
+    : null;
+  const manualOrderSheetCollection = req.body?.nodeId === 'collectRank'
+    && workflowRuntime?.mode === 'order-sheet'
+    && workflowRuntime.params?.inputMode === 'manual';
+  const firstManualItemId = manualOrderSheetCollection
+    ? String(workflowRuntime.params?.manualItems?.[0]?.itemId || '').trim()
+    : '';
+  const manualProductUrl = /^\d+$/.test(firstManualItemId)
+    ? `https://item.taobao.com/item.htm?id=${firstManualItemId}`
+    : 'https://item.taobao.com/';
+  const targetUrl = req.body?.url
+    || (manualOrderSheetCollection ? manualProductUrl : '')
     || (req.body?.nodeId === 'collectRank' ? 'https://sycm.taobao.com/cc/item_rank' : '')
     || process.env.SYCM_START_URL
     || SYCM_SELECTORS.SEARCH_URL;
@@ -1965,33 +2015,39 @@ app.post('/api/workflows/sycm/chrome/start', async (req, res) => {
         status: 'chrome_launch_failed',
         port,
         message: launchResult?.message || 'Chrome 启动失败',
-        userMessage: 'Chrome 启动失败。请手动启动带远程调试端口的 Chrome，然后重跑验真。'
+        userMessage: manualOrderSheetCollection
+          ? 'Chrome 启动失败。请手动启动带远程调试端口的 Chrome，登录淘宝后重试获取商品资料。'
+          : 'Chrome 启动失败。请手动启动带远程调试端口的 Chrome，然后重跑验真。'
       });
     }
-    await recoverSycmAccessAfterChrome(port, { assumeReady: true });
+    if (!manualOrderSheetCollection) await recoverSycmAccessAfterChrome(port, { assumeReady: true });
     let openResult = null;
     try {
-      openResult = await getSycmChromePageOpener()(port, sycmUrl);
+      openResult = await getSycmChromePageOpener()(port, targetUrl);
     } catch (openErr) {
       return res.json({
         ok: true,
         status: 'ready',
         port,
-        url: sycmUrl,
+        url: targetUrl,
         message: launchResult.message || 'Chrome 已启动并就绪',
         openStatus: 'open_page_failed',
         openMessage: openErr.message,
-        userMessage: `Chrome 已启动，但没有自动打开生意参谋页面。请在该 Chrome 中手动打开：${sycmUrl}`
+        userMessage: manualOrderSheetCollection
+          ? `Chrome 已启动，但没有自动打开淘宝商品页。请在该 Chrome 中手动打开：${targetUrl}`
+          : `Chrome 已启动，但没有自动打开生意参谋页面。请在该 Chrome 中手动打开：${targetUrl}`
       });
     }
     return res.json({
       ok: true,
       status: 'ready',
       port,
-      url: sycmUrl,
+      url: targetUrl,
       openStatus: openResult?.success === false ? 'open_page_failed' : 'opened',
       message: launchResult.message || 'Chrome 已启动并就绪',
-      userMessage: 'Chrome 已启动并就绪，已打开生意参谋页面。请登录或完成验证后重跑验真。'
+      userMessage: manualOrderSheetCollection
+        ? 'Chrome 已启动并打开待读取的淘宝商品。请确认淘宝已登录，然后点击“重试获取商品资料”。'
+        : 'Chrome 已启动并就绪，已打开生意参谋页面。请登录或完成验证后重跑验真。'
     });
   } catch (err) {
     return res.status(500).json({

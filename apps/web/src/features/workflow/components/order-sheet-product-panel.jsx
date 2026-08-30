@@ -2,6 +2,7 @@ import { ExternalLink, Save } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
 import { artifactItems } from '../workflow-data.js';
+import { AUTO_LOWEST_SKU, applySkuSelection, availableSkuOptions, skuOptionLabel, skuSelectionValue } from '../order-sheet-sku.js';
 import { ArtifactPanel } from './artifact-panel.jsx';
 
 export function OrderSheetProductPanel({ artifactState, canConfirm, confirming, onConfirm }) {
@@ -35,7 +36,15 @@ export function OrderSheetProductPanel({ artifactState, canConfirm, confirming, 
       productUrl: row.productUrl || '',
       title: row.title.trim(),
       storeName: row.storeName.trim(),
-      orderAmount: row.orderAmount === '' ? null : Number(row.orderAmount)
+      orderAmount: row.orderAmount === '' ? null : Number(row.orderAmount),
+      skuOptions: row.skuOptions || [],
+      selectedSkuId: row.selectedSkuId || '',
+      selectedSkuName: row.selectedSkuName || '',
+      selectedSkuPrice: row.selectedSkuPrice ?? null,
+      lowestSkuId: row.lowestSkuId || '',
+      lowestSkuName: row.lowestSkuName || '',
+      lowestSkuPrice: row.lowestSkuPrice ?? null,
+      skuSelectionMode: row.skuSelectionMode || 'lowest'
     })));
     if (!ok) setMessage('保存失败，请查看页面下方日志后重试。');
   };
@@ -65,6 +74,26 @@ export function OrderSheetProductPanel({ artifactState, canConfirm, confirming, 
             <label>
               <span>商品标题 <b>必填</b></span>
               <input value={row.title} placeholder="请输入淘宝商品标题" onChange={event => updateRow(index, 'title', event.target.value)} />
+            </label>
+            <label className="order-sheet-sku-field">
+              <span>购买规格</span>
+              {availableSkuOptions(row).length > 0 ? (
+                <select value={skuSelectionValue(row)} onChange={(event) => {
+                  const patch = applySkuSelection(row, event.target.value);
+                  setRows(current => current.map((item, rowIndex) => rowIndex === index ? { ...item, ...patch } : item));
+                  setMessage('');
+                }}>
+                  <option value={AUTO_LOWEST_SKU}>自动选择最低价 · ¥{Number(row.lowestSkuPrice ?? availableSkuOptions(row)[0]?.price).toFixed(2)}</option>
+                  {availableSkuOptions(row).map(option => <option key={option.skuId} value={option.skuId}>{skuOptionLabel(option)}</option>)}
+                </select>
+              ) : (
+                <input value={row.selectedSkuName || ''} placeholder="手动填写规格" onChange={event => {
+                  setRows(current => current.map((item, rowIndex) => rowIndex === index
+                    ? { ...item, selectedSkuName: event.target.value, skuSelectionMode: 'manual' }
+                    : item));
+                  setMessage('');
+                }} />
+              )}
             </label>
             <div className="order-sheet-product-fields">
               <label>

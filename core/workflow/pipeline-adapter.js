@@ -15,7 +15,7 @@ const {
 const { getLLMProviderInfo } = require('../llm');
 const { normalizeExactKeywords } = require('../exact-keywords');
 const { parseManualItems } = require('../../skills/order-sheet/src/manual-items');
-const { autoGroupOrderProducts } = require('../../skills/order-sheet/src/order-groups');
+const { DEFAULT_ORDER_GROUP_SIZE, autoGroupOrderProducts } = require('../../skills/order-sheet/src/order-groups');
 
 const WORKFLOW_NODE_IDS = {
   start: 'start',
@@ -132,11 +132,12 @@ function sanitizeManualWorkflowItems(raw = {}) {
       throw new Error(`第 ${index + 1} 个 1688 商品链接与前面的商品重复`);
     }
     const keyword = String(item?.keyword || defaultKeyword).trim();
-    if (!keyword) throw new Error(`第 ${index + 1} 个商品缺少关键词`);
     seenOfferIds.add(normalizedUrl.offerId);
     items.push({
       clientId: String(item?.clientId || `manual-${normalizedUrl.offerId}`).trim(),
       keyword,
+      userKeyword: keyword,
+      keywordSource: keyword ? 'manual' : 'auto_extract',
       url: normalizedUrl.url,
       offerId: normalizedUrl.offerId,
       title: String(item?.title || item?.sourceTitle || '').trim(),
@@ -268,7 +269,7 @@ function workflowNodes(mode = 'daily') {
     return withSteps(positionNodes([
       { id: WORKFLOW_NODE_IDS.start, type: 'production-start', data: { label: '开始', description: '选择商品排行或输入指定商品', orderSheetConfig: true, inputMode: 'rank', manualItemsText: '', manualItems: [], port: 9222, dateMode: 'latest_day', startDate: '', endDate: '', pages: 1, sortMetric: 'itmUv' } },
       { id: WORKFLOW_NODE_IDS.collectRank, type: 'pipeline-collect-rank', data: { label: '获取商品资料', description: '采集排行或补全指定商品的标题、主图和店铺' } },
-      { id: WORKFLOW_NODE_IDS.confirmProducts, type: 'pipeline-confirm-products', data: { label: '确认商品与编组', description: '核对商品资料、编辑下单金额、配置 1 拖 N 编组' } },
+      { id: WORKFLOW_NODE_IDS.confirmProducts, type: 'pipeline-confirm-products', data: { label: '确认商品与编组', description: '选择购买规格、核对金额并配置 1 拖 N 编组' } },
       {
         id: WORKFLOW_NODE_IDS.generateSheet,
         type: 'pipeline-generate-sheet',
@@ -308,9 +309,10 @@ function workflowNodes(mode = 'daily') {
   }
   if (mode === 'manual') {
     return withSteps(positionNodes([
-      { id: WORKFLOW_NODE_IDS.start, type: 'production-start', data: { label: '录入词和货源', description: '输入关键词和 1688 商品链接', manualInput: true, defaultKeyword: '', items: [], length: 60, export: 20 } },
-      { id: WORKFLOW_NODE_IDS.select, type: 'pipeline-select', data: { label: '获取商品资料', description: '读取商品标题、主图、类目和价格', manualDirectInput: true } },
-      { id: WORKFLOW_NODE_IDS.generate, type: 'pipeline-generate', data: { label: 'AI生成标题', description: '根据关键词和商品信息生成标题' } },
+      { id: WORKFLOW_NODE_IDS.start, type: 'production-start', data: { label: '录入1688链接', description: '粘贴商品链接或手机分享口令，关键词可选', manualInput: true, defaultKeyword: '', items: [], length: 60, export: 20 } },
+      { id: WORKFLOW_NODE_IDS.select, type: 'pipeline-select', data: { label: '获取商品与候选词', description: '读取标题、主图、类目并提取短词根', manualDirectInput: true } },
+      { id: WORKFLOW_NODE_IDS.verify, type: 'pipeline-verify', data: { label: '生意参谋验真', description: '验证候选词并为每件商品选定最优词' } },
+      { id: WORKFLOW_NODE_IDS.generate, type: 'pipeline-generate', data: { label: 'MiniMax生成标题', description: '基于选定词、原商品和类目生成标题' } },
       { id: WORKFLOW_NODE_IDS.export, type: 'pipeline-export', data: { label: '铺货复核与执行', description: '确认标题和类目后自动铺货' } },
       { id: WORKFLOW_NODE_IDS.end, type: 'production-end', data: { label: '完成', description: '铺货结果确认后完成流程' } }
     ], { startX: 150 }));
@@ -363,7 +365,8 @@ function workflowEdges(mode = 'daily') {
     : mode === 'manual'
       ? [
         [WORKFLOW_NODE_IDS.start, WORKFLOW_NODE_IDS.select],
-        [WORKFLOW_NODE_IDS.select, WORKFLOW_NODE_IDS.generate],
+        [WORKFLOW_NODE_IDS.select, WORKFLOW_NODE_IDS.verify],
+        [WORKFLOW_NODE_IDS.verify, WORKFLOW_NODE_IDS.generate],
         [WORKFLOW_NODE_IDS.generate, WORKFLOW_NODE_IDS.export],
         [WORKFLOW_NODE_IDS.export, WORKFLOW_NODE_IDS.end]
       ]
@@ -420,11 +423,11 @@ function listProductionWorkflowTemplates() {
       flowSummary: '流程：批量输入关键词 → 跳过挖词 → 生意参谋校验 → 货源选品 → 标题生成 → 导出复核',
       modeHint: '每行输入一个关键词，系统会逐词验真、选品和生成标题。'
     }),
-    template('manual-selection-v1', '人工选词人工选品流水线', 'manual', '输入关键词和 1688 货源，生成标题后确认铺货', {
-      entryLabel: '入口：关键词 + 1688链接',
-      scenarioLabel: '适合：已经确定词和货源',
-      flowSummary: '流程：录入词和货源 → 获取商品资料 → AI生成标题 → 铺货复核 → 自动铺货',
-      modeHint: '一次输入关键词和 1688 链接，系统准备好标题与类目后只需复核一次。'
+    template('manual-selection-v2', '1688链接智能铺货流水线', 'manual', '输入1688链接，自动查词、生成标题并准备铺货', {
+      entryLabel: '入口：1688链接（关键词可选）',
+      scenarioLabel: '适合：已经确定货源',
+      flowSummary: '流程：录入链接 → 获取商品与候选词 → 生意参谋验真 → MiniMax生成标题 → 铺货复核',
+      modeHint: '支持1688商品链接和手机分享口令；填写关键词时会优先验证人工词。'
     }),
     template('sycm-order-sheet-v1', '制作刷单表格流水线', 'order-sheet', '从商品排行或指定商品生成 Excel', {
       entryLabel: '入口：商品排行或指定商品',
@@ -462,6 +465,28 @@ function legacyManualWorkflowTemplate() {
     id: 'manual-selection-v1',
     mode: 'manual',
     nodes,
+    edges: pairs.map(([source, target]) => ({ id: `${source}-${target}`, source, target, type: 'straight' }))
+  };
+}
+
+function directInputManualWorkflowTemplate() {
+  const nodes = positionNodes([
+    { id: WORKFLOW_NODE_IDS.start, type: 'production-start', data: { label: '录入词和货源', description: '输入关键词和 1688 商品链接', manualInput: true } },
+    { id: WORKFLOW_NODE_IDS.select, type: 'pipeline-select', data: { label: '获取商品资料', description: '读取商品标题、主图、类目和价格', manualDirectInput: true } },
+    { id: WORKFLOW_NODE_IDS.generate, type: 'pipeline-generate', data: { label: 'AI生成标题', description: '根据关键词和商品信息生成标题' } },
+    { id: WORKFLOW_NODE_IDS.export, type: 'pipeline-export', data: { label: '铺货复核与执行', description: '确认标题和类目后自动铺货' } },
+    { id: WORKFLOW_NODE_IDS.end, type: 'production-end', data: { label: '完成', description: '铺货结果确认后完成流程' } }
+  ], { startX: 150 });
+  const pairs = [
+    [WORKFLOW_NODE_IDS.start, WORKFLOW_NODE_IDS.select],
+    [WORKFLOW_NODE_IDS.select, WORKFLOW_NODE_IDS.generate],
+    [WORKFLOW_NODE_IDS.generate, WORKFLOW_NODE_IDS.export],
+    [WORKFLOW_NODE_IDS.export, WORKFLOW_NODE_IDS.end]
+  ];
+  return {
+    id: 'manual-selection-v1',
+    mode: 'manual',
+    nodes: withSteps(nodes),
     edges: pairs.map(([source, target]) => ({ id: `${source}-${target}`, source, target, type: 'straight' }))
   };
 }
@@ -533,6 +558,12 @@ function sanitizeWorkflowParams(mode, raw = {}) {
     return {
       defaultKeyword: manualInput.defaultKeyword,
       items: manualInput.items,
+      verify: clampInt(raw.verify, Math.max(1, manualInput.items.length * 3), 1, 200),
+      port: clampInt(raw.port, 9222, 1, 65535),
+      pages: clampInt(raw.pages, 1, 1, 5),
+      minBlueRows: clampInt(raw.minBlueRows, 1, 0, 50),
+      fallbackHot: sanitizeBool(raw.fallbackHot, true),
+      autoAllowReviewKeywords: sanitizeBool(raw.autoAllowReviewKeywords, true),
       export: clampInt(raw.export, 20, 1, 100),
       length: clampInt(raw.length, 60, 30, 80)
     };
@@ -580,6 +611,7 @@ function sanitizeWorkflowParams(mode, raw = {}) {
       missingAmountPolicy,
       cartQuantity: clampInt(raw.cartQuantity, 1, 1, 20),
       rowSpan: clampInt(raw.rowSpan, 3, 1, 5),
+      dragCount: clampInt(raw.dragCount, DEFAULT_ORDER_GROUP_SIZE, 1, 20),
       workRequirement: String(raw.workRequirement || '').trim().slice(0, 200),
       orderNote: String(raw.orderNote || '').trim().slice(0, 100),
       reviewGroupSize,
@@ -907,6 +939,8 @@ function outputForNode(id, summary) {
   if (id === WORKFLOW_NODE_IDS.verify) {
     return {
       verified: Number(counts.sycmVerified || 0),
+      assignedProducts: Number(counts.sycmVerifiedProducts || counts.sycmVerified || 0) + Number(counts.manualKeywordFallback || 0),
+      manualReview: Number(counts.manualKeywordFallback || 0),
       rejected: Number(counts.sycmRejected || 0),
       generationEligible: Number(counts.sycmGenerationEligible || 0),
       opportunityReview: Number(counts.sycmOpportunityReview || 0),
@@ -1006,6 +1040,12 @@ function firstSycmFailure(summary) {
   return rows.find(row => row && row.ok === false && (row.manualAction || row.error || row.status)) || null;
 }
 
+function firstOrderSheetProductFailure(summary) {
+  const file = summary.files?.productRank;
+  const rows = readJsonlPreview(file, 100);
+  return rows.find(row => row && row.enrichmentStatus === 'failed' && row.enrichmentError) || null;
+}
+
 function sycmFailureIntervention(row) {
   if (!row) return null;
   const status = String(row.status || row.manualAction?.status || 'transient_failure');
@@ -1051,6 +1091,23 @@ function summaryInterventionForNode(summary, nodeId) {
   if (nodeId === WORKFLOW_NODE_IDS.collectRank && status === 'manual_action_required') {
     const manualAction = summary.runtime?.manualAction || summary.manualAction || null;
     if (manualAction?.status === 'product_details_required' || summary.blockers?.includes('order_sheet_product_details_required')) {
+      const detailFailure = firstOrderSheetProductFailure(summary);
+      const detailError = String(detailFailure?.enrichmentError || '').trim();
+      const chromeUnavailable = /ECONNREFUSED|127\.0\.0\.1:9222|no chrome tab found|chrome[^\n]*(?:tab|debug)|cdp|devtools/i.test(detailError);
+      if (chromeUnavailable) {
+        return {
+          blocker: 'order_sheet_browser_cdp_unavailable',
+          actionHint: `淘宝商品资料读取需要连接 Chrome 9222 调试端口。请启动 Chrome，确认淘宝已登录后重试获取商品资料。原始错误：${detailError}`,
+          platform: 'taobao',
+          platformStatus: 'browser_cdp_unavailable',
+          manualAction,
+          nextRecommendedAction: {
+            action: 'start-sycm-chrome',
+            label: '启动 Chrome',
+            description: '启动带调试端口的 Chrome，并打开第一个待读取的淘宝商品。'
+          }
+        };
+      }
       return {
         blocker: 'order_sheet_product_details_required',
         actionHint: manualAction?.userMessage || '部分指定商品没有读取到标题，请补充商品资料后继续生成表格。',
@@ -1230,6 +1287,26 @@ function summaryInterventionForNode(summary, nodeId) {
     };
   }
   if (nodeId === WORKFLOW_NODE_IDS.select && status === 'select_failed') {
+    const manualMode = summary.runtime?.mode === 'manual' || summary.options?.mode === 'manual';
+    const detailFailure = manualMode
+      ? (summary.previews?.selectedProducts || []).find(row => row?.status === 'enrich_failed')
+      : null;
+    if (manualMode && detailFailure) {
+      const reason = String(detailFailure.enrichError || '').trim();
+      return {
+        blocker: 'product_detail_fetch_failed',
+        actionHint: reason
+          ? `1688 商品资料获取失败：${reason}。当前尚未进入生意参谋验真。`
+          : '1688 商品资料获取失败，当前尚未进入生意参谋验真。',
+        platform: '1688',
+        platformStatus: detailFailure.enrichErrorCode || 'detail_fetch_failed',
+        nextRecommendedAction: {
+          action: 'retry-node',
+          label: '重试获取商品资料',
+          description: '重新读取 1688 商品标题、类目和价格，再继续提取候选词。'
+        }
+      };
+    }
     return {
       blocker: 'no_selected_products',
       actionHint: '货源选品没有选出可用商品。请检查 1688 搜索配置、放宽选品数量，或回到生意参谋节点更换候选词。',
@@ -1333,6 +1410,55 @@ function statusPlanForSummary(summary) {
       states[WORKFLOW_NODE_IDS.generateReviews] = 'running';
     } else {
       states[WORKFLOW_NODE_IDS.importSheet] = 'running';
+    }
+    return states;
+  }
+  if (mode === 'manual' && Number(summary.options?.workflowVersion || 1) >= 3) {
+    states[WORKFLOW_NODE_IDS.start] = 'completed';
+    if (status === 'workflow_complete') {
+      for (const nodeId of [WORKFLOW_NODE_IDS.select, WORKFLOW_NODE_IDS.verify, WORKFLOW_NODE_IDS.generate, WORKFLOW_NODE_IDS.export, WORKFLOW_NODE_IDS.end]) {
+        states[nodeId] = 'completed';
+      }
+    } else if (['manual_action_required', 'verified_partial_manual_required', 'verified_empty', 'verified_no_generation_eligible'].includes(status)) {
+      states[WORKFLOW_NODE_IDS.select] = 'completed';
+      states[WORKFLOW_NODE_IDS.verify] = 'blocked';
+    } else if (status === 'select_failed') {
+      states[WORKFLOW_NODE_IDS.select] = 'failed';
+    } else if (status === 'products_selected') {
+      states[WORKFLOW_NODE_IDS.select] = 'completed';
+      states[WORKFLOW_NODE_IDS.verify] = 'running';
+    } else if (status === 'verified') {
+      states[WORKFLOW_NODE_IDS.select] = 'completed';
+      states[WORKFLOW_NODE_IDS.verify] = 'completed';
+      states[WORKFLOW_NODE_IDS.generate] = 'running';
+    } else if (status === 'generate_failed') {
+      states[WORKFLOW_NODE_IDS.select] = 'completed';
+      states[WORKFLOW_NODE_IDS.verify] = 'completed';
+      states[WORKFLOW_NODE_IDS.generate] = 'failed';
+    } else if (status === 'generated') {
+      states[WORKFLOW_NODE_IDS.select] = 'completed';
+      states[WORKFLOW_NODE_IDS.verify] = 'completed';
+      states[WORKFLOW_NODE_IDS.generate] = 'completed';
+      states[WORKFLOW_NODE_IDS.export] = 'running';
+    } else if (status === 'needs_review') {
+      states[WORKFLOW_NODE_IDS.select] = 'completed';
+      states[WORKFLOW_NODE_IDS.verify] = 'completed';
+      states[WORKFLOW_NODE_IDS.generate] = 'completed';
+      states[WORKFLOW_NODE_IDS.export] = 'needs_review';
+    } else if (['ready_to_distribute', 'awaiting_user_confirmation'].includes(status)) {
+      states[WORKFLOW_NODE_IDS.select] = 'completed';
+      states[WORKFLOW_NODE_IDS.verify] = 'completed';
+      states[WORKFLOW_NODE_IDS.generate] = 'completed';
+      states[WORKFLOW_NODE_IDS.export] = 'waiting_confirmation';
+    } else if (status === 'export_empty') {
+      states[WORKFLOW_NODE_IDS.select] = 'completed';
+      states[WORKFLOW_NODE_IDS.verify] = 'completed';
+      states[WORKFLOW_NODE_IDS.generate] = 'completed';
+      states[WORKFLOW_NODE_IDS.export] = 'failed';
+    } else if (status === 'manual_products_received') {
+      states[WORKFLOW_NODE_IDS.select] = 'running';
+    } else {
+      states[WORKFLOW_NODE_IDS.select] = 'running';
     }
     return states;
   }
@@ -1522,13 +1648,17 @@ function buildNodeStates(summary) {
 function templateForSummary(summary) {
   const options = summary.options || {};
   const mode = summary.runtime?.mode || summary.options?.mode || (options.keyword || summary.exactKeyword ? 'keyword' : 'daily');
-  if (mode === 'manual' && Number(options.workflowVersion || 1) < 2) {
+  const manualVersion = Number(options.workflowVersion || 1);
+  if (mode === 'manual' && manualVersion < 2) {
     return { id: 'manual-selection-v1', mode: 'manual', workflow: legacyManualWorkflowTemplate() };
+  }
+  if (mode === 'manual' && manualVersion === 2) {
+    return { id: 'manual-selection-v1', mode: 'manual', workflow: directInputManualWorkflowTemplate() };
   }
   const id = mode === 'keyword'
     ? 'exact-keyword-v1'
     : mode === 'manual'
-      ? 'manual-selection-v1'
+      ? 'manual-selection-v2'
       : mode === 'order-sheet'
         ? 'sycm-order-sheet-v1'
         : mode === 'review-sheet'
@@ -1669,7 +1799,9 @@ function readWorkflowNodeArtifact(runIdOrOptions, nodeId, options = {}) {
       const rankFile = summary.files?.productRank;
       if (rankFile && fs.existsSync(rankFile)) {
         const rankRows = readJsonlPreview(rankFile, normalized.limit || 100);
-        const dragCount = Number.isFinite(Number(summary.options?.dragCount)) ? Number(summary.options.dragCount) : 0;
+        const dragCount = Number.isFinite(Number(summary.options?.dragCount))
+          ? Math.max(1, Number(summary.options.dragCount))
+          : DEFAULT_ORDER_GROUP_SIZE;
         const groups = autoGroupOrderProducts(rankRows, { dragCount });
         return {
           runId: summary.runId,

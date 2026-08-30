@@ -231,6 +231,8 @@ function normalizeSheetType(value) {
 function orderAmount(row, mode) {
   const explicitAmount = Number(row.orderAmount);
   if (Number.isFinite(explicitAmount) && explicitAmount > 0) return Math.round(explicitAmount * 100) / 100;
+  const skuAmount = Number(row.selectedSkuPrice ?? row.lowestSkuPrice ?? row.referencePrice);
+  if (Number.isFinite(skuAmount) && skuAmount > 0) return Math.round(skuAmount * 100) / 100;
   if (mode === 'blank') return null;
   if (mode === 'payment') {
     const value = Number(row.paymentAmount);
@@ -293,14 +295,16 @@ async function createOrderSheet(workbook, rows, meta, options = {}) {
   sheet.autoFilter = { from: 'A1', to: 'G1' };
 
   let imageCount = 0;
+  let nextStartRow = 2;
   for (const [index, row] of rows.entries()) {
-    const startRow = 2 + index * rowSpan;
-    const endRow = startRow + rowSpan - 1;
-    styleBlock(sheet, startRow, endRow);
     const isGrouped = Boolean(row.groupId);
-    const roleLabel = row.role === 'main' ? '主商品' : row.role === 'sub' ? '搭配商品' : '';
+    const itemRowSpan = isGrouped ? 1 : rowSpan;
+    const startRow = nextStartRow;
+    const endRow = startRow + itemRowSpan - 1;
+    styleBlock(sheet, startRow, endRow);
+    if (isGrouped) sheet.getRow(startRow).height = Math.max(32, rowSpan * 24);
     const titleCell = sheet.getCell(startRow, 1);
-    const displayTitle = roleLabel ? `【${roleLabel}】${String(row.title || '')}` : String(row.title || '');
+    const displayTitle = String(row.title || '');
     titleCell.value = row.productUrl
       ? { text: displayTitle, hyperlink: String(row.productUrl) }
       : displayTitle;
@@ -308,8 +312,11 @@ async function createOrderSheet(workbook, rows, meta, options = {}) {
     titleCell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
     const amountCell = sheet.getCell(startRow, 3);
     const amount = orderAmount(row, amountMode);
-    amountCell.value = amount == null && missingAmountPolicy === 'mark' ? '待填写' : amount;
-    if (amount != null) amountCell.numFmt = '0.00';
+    const selectedSkuName = String(row.selectedSkuName || '').trim();
+    amountCell.value = amount == null && missingAmountPolicy === 'mark'
+      ? '待填写'
+      : (amount != null && selectedSkuName ? `${Number(amount)}（${selectedSkuName}）` : amount);
+    if (amount != null && !selectedSkuName) amountCell.numFmt = '0.00';
     if (amount == null && missingAmountPolicy === 'mark') {
       amountCell.font = { name: '宋体', size: 11, bold: true, color: { argb: 'FFB45309' } };
       amountCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF3C7' } };
@@ -323,15 +330,15 @@ async function createOrderSheet(workbook, rows, meta, options = {}) {
     requirementCell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
     sheet.getCell(startRow, 6).value = String(row.storeName || meta.storeName || '');
     sheet.getCell(startRow, 6).alignment = { vertical: 'middle', horizontal: 'center' };
-    sheet.getCell(startRow, 7).value = String(row.orderNote || orderNote);
+    sheet.getCell(startRow, 7).value = String(row.orderNote || orderNote).trim();
     const nextRow = rows[index + 1];
-    if (isGrouped && (!nextRow || nextRow.groupId !== row.groupId)) {
-      for (let column = 1; column <= ORDER_HEADERS.length; column += 1) {
-        sheet.getCell(endRow, column).border = {
-          ...sheet.getCell(endRow, column).border,
-          bottom: { style: 'medium', color: { argb: 'FF64748B' } }
-        };
+    const hasNextGroup = isGrouped && nextRow && nextRow.groupId !== row.groupId;
+    nextStartRow = endRow + 1;
+    if (hasNextGroup) {
+      for (let spacerIndex = 0; spacerIndex < 2; spacerIndex += 1) {
+        sheet.getRow(nextStartRow + spacerIndex).height = 15;
       }
+      nextStartRow += 2;
     }
     if (includeImages && await addProductImage(workbook, sheet, row, startRow, imageLoader)) imageCount += 1;
     onProgress({ current: index + 1, total: rows.length, message: `正在写入第 ${index + 1}/${rows.length} 个商品` });
@@ -354,6 +361,7 @@ async function createOrderSheet(workbook, rows, meta, options = {}) {
  * @param {'blank'|'mark'|'skip'} [options.missingAmountPolicy] 金额缺失处理方式。
  * @param {number} [options.cartQuantity] 默认加购件数。
  * @param {number} [options.rowSpan] 每个商品占用行数。
+ * @param {number} [options.dragCount] 1 拖 N 的每组商品数。
  * @param {string} [options.orderNote] 默认下单备注。
  * @param {number} [options.reviewGroupSize] 评价表每组商品数。
  * @param {boolean} [options.includeSpacerRow] 评价组之间是否保留空行。

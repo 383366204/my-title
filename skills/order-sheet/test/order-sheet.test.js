@@ -77,32 +77,74 @@ describe('order sheet workflow', () => {
     assert.equal(rawSheet.getCell('P3').value, '商品访客数降序');
   });
 
+  it('writes selected SKU and defaults amount to the lowest SKU price', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'order-sheet-sku-'));
+    const outputFile = path.join(tempDir, 'result.xlsx');
+    await generateOrderSheet({
+      rows: [{
+        itemId: 'sku-item',
+        title: '多规格商品',
+        productUrl: 'https://item.taobao.com/item.htm?id=1001',
+        selectedSkuName: '颜色：蓝色 / 尺码：M',
+        selectedSkuPrice: 19.9,
+        lowestSkuPrice: 19.9,
+        orderAmount: null
+      }],
+      outputFile,
+      includeImages: false,
+      includeRawData: false,
+      orderNote: '浏览后下单'
+    });
+
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(outputFile);
+    const sheet = workbook.getWorksheet('动销一拖多');
+    assert.equal(sheet.getCell('C2').value, '19.9（颜色：蓝色 / 尺码：M）');
+    assert.equal(sheet.getCell('G2').value, '浏览后下单');
+  });
+
   it('renders confirmed groups in user order while keeping raw rank rows unchanged', async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'grouped-order-sheet-'));
     const outputFile = path.join(tempDir, 'result.xlsx');
     const rows = [
       { rank: 1, itemId: '2001', title: '原始排行一', productUrl: 'https://item.taobao.com/item.htm?id=2001', visitorCount: 80, orderAmount: 20 },
-      { rank: 2, itemId: '2002', title: '原始排行二', productUrl: 'https://item.taobao.com/item.htm?id=2002', visitorCount: 60, orderAmount: 30 }
+      { rank: 2, itemId: '2002', title: '原始排行二', productUrl: 'https://item.taobao.com/item.htm?id=2002', visitorCount: 60, orderAmount: 30 },
+      { rank: 3, itemId: '2003', title: '原始排行三', productUrl: 'https://item.taobao.com/item.htm?id=2003', visitorCount: 40, orderAmount: 40 }
     ];
-    const groups = [{
-      id: 'group-1',
-      workRequirement: '先浏览主商品再加购搭配商品',
-      mainProduct: { ...rows[1], title: '确认后的主商品' },
-      subProducts: [{ ...rows[0], title: '确认后的搭配商品' }]
-    }];
+    const groups = [
+      {
+        id: 'group-1',
+        workRequirement: '先浏览主商品再加购搭配商品',
+        mainProduct: { ...rows[1], title: '确认后的主商品' },
+        subProducts: [{ ...rows[0], title: '确认后的搭配商品' }]
+      },
+      {
+        id: 'group-2',
+        mainProduct: { ...rows[2], title: '下一组商品' },
+        subProducts: []
+      }
+    ];
 
-    await generateOrderSheet({ rows, groups, outputFile, rowSpan: 1, includeImages: false });
+    await generateOrderSheet({ rows, groups, outputFile, rowSpan: 3, dragCount: 2, includeImages: false });
 
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.readFile(outputFile);
     const orderSheet = workbook.getWorksheet('动销一拖多');
     const rawSheet = workbook.getWorksheet('商品排行原始数据');
-    assert.equal(orderSheet.getCell('A2').text, '【主商品】确认后的主商品');
-    assert.equal(orderSheet.getCell('A3').text, '【搭配商品】确认后的搭配商品');
+    assert.equal(orderSheet.getCell('A2').text, '确认后的主商品');
+    assert.equal(orderSheet.getCell('A3').text, '确认后的搭配商品');
     assert.equal(orderSheet.getCell('E2').value, '先浏览主商品再加购搭配商品');
-    assert.equal(orderSheet.getCell('G3').border.bottom.style, 'medium');
+    assert.equal(orderSheet.getCell('G2').value, '');
+    assert.equal(orderSheet.getCell('A4').value, null);
+    assert.equal(orderSheet.getCell('A5').value, null);
+    assert.equal(orderSheet.getCell('A6').text, '下一组商品');
+    assert.equal(orderSheet.getRow(2).height, 72);
+    assert.equal(orderSheet.getRow(3).height, 72);
+    assert.equal(orderSheet.getRow(4).height, 15);
+    assert.equal(orderSheet.getRow(5).height, 15);
     assert.equal(rawSheet.getCell('D2').value, '原始排行一');
     assert.equal(rawSheet.getCell('D3').value, '原始排行二');
+    assert.equal(rawSheet.getCell('D4').value, '原始排行三');
   });
 
   it('writes the 1拖多评价 layout when review is selected', async () => {

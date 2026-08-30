@@ -59,11 +59,36 @@ test('order-sheet item input parses direct IDs, links, short links, duplicates, 
   assert.equal(parsed.totalCount, 5);
   assert.equal(parsed.items.length, 3);
   assert.equal(parsed.duplicateCount, 1);
+  assert.deepEqual(parsed.duplicateItems, [{
+    key: '748392010293',
+    itemId: '748392010293',
+    label: '748392010293',
+    occurrenceCount: 2
+  }]);
   assert.equal(parsed.invalidCount, 1);
   assert.equal(parsed.items[0].title, '人工标题');
   assert.equal(parsed.items[0].orderAmount, 88);
   assert.equal(parsed.items[2].itemId, '');
   assert.match(parsed.items[2].sourceKey, /^url:https:\/\/m\.tb\.cn/);
+});
+
+test('order-sheet item input reports every duplicate ID and occurrence count', () => {
+  const parsed = parseOrderSheetManualItems([
+    '908694159958',
+    '1051983444354',
+    '908694159958',
+    '908694159958',
+    '1051983444354'
+  ].join('\n'));
+
+  assert.equal(parsed.duplicateCount, 3);
+  assert.deepEqual(parsed.duplicateItems.map((item) => ({
+    itemId: item.itemId,
+    occurrenceCount: item.occurrenceCount
+  })), [
+    { itemId: '908694159958', occurrenceCount: 3 },
+    { itemId: '1051983444354', occurrenceCount: 2 }
+  ]);
 });
 
 test('order-sheet item input accepts Taobao share subdomains and rejects nonstandard ports', () => {
@@ -358,7 +383,7 @@ test('getWorkflowNodePanelKind maps production nodes to embedded panels', () => 
 
 test('start nodes expose their input configuration directly on the canvas', () => {
   assert.deepEqual(getWorkflowNodeAction('start', { status: 'idle', manualInput: true }), {
-    label: '录入词和货源', action: 'manual-input', tone: 'warn'
+    label: '录入1688链接', action: 'manual-input', tone: 'warn'
   });
   assert.deepEqual(getWorkflowNodeAction('start', { status: 'idle', keywordsText: '' }), {
     label: '输入关键词', action: 'manual-input', tone: 'warn'
@@ -482,7 +507,7 @@ test('labelWorkflowNodeStatus localizes idle and paused statuses', () => {
 
 test('getWorkflowNodeAction maps review and terminal states to node actions', () => {
   assert.deepEqual(getWorkflowNodeAction('start', { status: 'idle', manualInput: true }), {
-    label: '录入词和货源',
+    label: '录入1688链接',
     action: 'manual-input',
     tone: 'warn'
   });
@@ -716,6 +741,25 @@ test('getWorkflowBlockerActions opens product detail completion without a mislea
     nextRecommendedAction: { action: 'complete-order-sheet-products', label: '补充商品资料' }
   });
   assert.deepEqual(actions.map(action => action.action), ['complete-order-sheet-products']);
+});
+
+test('getWorkflowBlockerActions offers product Chrome recovery for manual order-sheet enrichment', () => {
+  const actions = getWorkflowBlockerActions('collectRank', {
+    status: 'blocked',
+    blocker: 'order_sheet_browser_cdp_unavailable',
+    platform: 'taobao',
+    platformStatus: 'browser_cdp_unavailable',
+    actionHint: '淘宝商品资料读取需要连接 Chrome 9222 调试端口。',
+    nextRecommendedAction: {
+      action: 'start-sycm-chrome',
+      label: '启动 Chrome',
+      description: '启动带调试端口的 Chrome，并打开第一个待读取的淘宝商品。'
+    }
+  });
+
+  assert.deepEqual(actions.map(action => action.action), ['start-sycm-chrome', 'retry-node']);
+  assert.equal(actions[1].label, '重试获取商品资料');
+  assert.match(actions[1].description, /标题、价格和规格/);
 });
 
 test('getMiningRecoveryHint explains how to recover a verified-empty run', () => {
@@ -1509,7 +1553,7 @@ test('getWorkflowLaunchBlocker requires products only for manual order-sheet inp
   assert.equal(ready, null);
 });
 
-test('getWorkflowLaunchBlocker requires keyword-bound 1688 items for manual mode', () => {
+test('getWorkflowLaunchBlocker accepts link-only items for manual mode', () => {
   const missing = getWorkflowLaunchBlocker('manual', [
     { id: 'start', type: 'production-start', data: { defaultKeyword: '法式连衣裙', items: [] } }
   ]);
@@ -1518,7 +1562,7 @@ test('getWorkflowLaunchBlocker requires keyword-bound 1688 items for manual mode
       id: 'start',
       type: 'production-start',
       data: {
-        defaultKeyword: '法式连衣裙',
+        defaultKeyword: '',
         items: [{ keyword: '', url: 'https://detail.1688.com/offer/123456.html' }]
       }
     }

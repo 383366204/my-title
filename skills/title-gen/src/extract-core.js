@@ -18,7 +18,7 @@ async function extractCoreAndModifiers(input) {
   try {
     return await client.extractCoreAndModifiers(input);
   } catch (error) {
-    console.warn(`⚠️  GLM API 调用失败，使用降级提取: ${error.message}`);
+    console.warn(`关键词模型提取失败，使用本地规则降级: ${error.message}`);
     return fallbackExtract(input);
   }
 }

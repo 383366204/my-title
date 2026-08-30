@@ -24,6 +24,7 @@ import { useDistributionExportData } from './distribution/use-distribution-expor
  * @param {string} [props.currentRunId] Active run ID.
  * @param {string} [props.sourceNodeId='export'] Source node ID.
  * @param {Function} [props.onDistributionJobChange] Job state change listener.
+ * @param {string} [props.workflowRunStatus] Current workflow runtime status.
  * @param {boolean} [props.directPreview=false] Whether rendering as direct preview.
  * @param {Function} [props.onManualComplete] Callback invoked only after manual distribution completes successfully.
  * @returns {import('react').JSX.Element} React component element.
@@ -34,6 +35,7 @@ export const DistributionExportPanel = ({
   currentRunId,
   sourceNodeId = 'export',
   onDistributionJobChange,
+  workflowRunStatus = '',
   directPreview = false,
   onManualComplete
 }) => {
@@ -75,6 +77,7 @@ export const DistributionExportPanel = ({
     startChrome: startDistributionChromeJob
   } = useDistributionJob({
     initialJobId: currentRunId ? `${currentRunId}-distribution` : '',
+    notifyCompletedOnRestore: String(workflowRunStatus).toLowerCase() !== 'completed',
     onJobChange: onDistributionJobChange
   });
 

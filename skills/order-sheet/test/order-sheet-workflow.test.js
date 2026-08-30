@@ -77,9 +77,10 @@ describe('order-sheet workflow and confirmation runtime', () => {
 
     const draft = getOrderSheetDraft({ dataDir, runId });
     assert.equal(draft.count, 3);
-    assert.equal(draft.groupCount, 1);
+    assert.equal(draft.groupCount, 2);
     assert.equal(draft.groups[0].mainProduct.itemId, '6001001');
-    assert.equal(draft.groups[0].subProducts.length, 2);
+    assert.equal(draft.groups[0].subProducts.length, 1);
+    assert.equal(draft.groups[1].mainProduct.itemId, '6001003');
   });
 
   it('allows saving draft and confirms groups before resuming generation', async () => {
@@ -116,6 +117,7 @@ describe('order-sheet workflow and confirmation runtime', () => {
     const draftBefore = getOrderSheetDraft({ dataDir, runId });
     assert.equal(draftBefore.count, 2);
     assert.equal(draftBefore.missingCount, 0);
+    assert.equal(draftBefore.dragCount, 4);
 
     // Step 3: Save draft with adjusted groups (e.g. 1 group with 1 main + 1 sub)
     const customGroups = [
@@ -132,13 +134,13 @@ describe('order-sheet workflow and confirmation runtime', () => {
       dataDir,
       runId,
       groups: customGroups,
-      dragCount: 1,
+      dragCount: 2,
       unassignedItems: [],
       expectedRevision: draftBefore.revision
     });
     assert.equal(saved.groupCount, 1);
     assert.equal(saved.groups[0].groupName, '定制商品组 1');
-    assert.equal(saved.dragCount, 1);
+    assert.equal(saved.dragCount, 2);
     assert.equal(saved.revision, draftBefore.revision + 1);
     assert.throws(() => saveOrderSheetDraft({
       dataDir,

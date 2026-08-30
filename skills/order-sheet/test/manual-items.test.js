@@ -116,6 +116,85 @@ describe('manual items parser', () => {
     assert.deepEqual(enriched, [{ itemId: '1001', title: '测试', enrichmentStatus: 'complete' }]);
   });
 
+  it('falls back to one reusable Chrome session when direct pages have no title', async () => {
+    const opened = [];
+    let sessionCount = 0;
+    let closed = false;
+    const items = ['1001', '1002'].map(itemId => ({
+      itemId,
+      title: '',
+      imageUrl: '',
+      productUrl: `https://item.taobao.com/item.htm?id=${itemId}`
+    }));
+
+    const enriched = await enrichManualItems(items, {
+      skipEnrichmentDelay: true,
+      fetchTaobaoItemPage: async item => ({
+        itemId: item.itemId,
+        title: '',
+        imageUrl: '',
+        finalUrl: item.productUrl,
+        enrichmentSource: 'http'
+      }),
+      createTaobaoChromeSession: async () => {
+        sessionCount += 1;
+        return {
+          async readItem(item) {
+            opened.push(item.itemId);
+            return {
+              itemId: item.itemId,
+              title: `浏览器标题 ${item.itemId}`,
+              imageUrl: `https://img.test/${item.itemId}.jpg`,
+              finalUrl: item.productUrl,
+              enrichmentSource: 'chrome'
+            };
+          },
+          close() {
+            closed = true;
+          }
+        };
+      }
+    });
+
+    assert.equal(sessionCount, 1);
+    assert.deepEqual(opened, ['1001', '1002']);
+    assert.deepEqual(enriched.map(item => item.title), ['浏览器标题 1001', '浏览器标题 1002']);
+    assert.deepEqual(enriched.map(item => item.enrichmentSource), ['chrome', 'chrome']);
+    assert.equal(closed, true);
+  });
+
+  it('uses the lowest SKU price as order amount when no SKU is specified', async () => {
+    const [enriched] = await enrichManualItems([{
+      itemId: '1001',
+      title: '',
+      imageUrl: '',
+      productUrl: 'https://item.taobao.com/item.htm?id=1001'
+    }], {
+      fetchTaobaoItemPage: async item => ({
+        itemId: item.itemId,
+        title: '多规格测试商品',
+        imageUrl: '',
+        finalUrl: item.productUrl,
+        selectedSkuId: 'sku-low',
+        selectedSkuName: '蓝色 / M',
+        selectedSkuPrice: 19.9,
+        lowestSkuId: 'sku-low',
+        lowestSkuName: '蓝色 / M',
+        lowestSkuPrice: 19.9,
+        skuSelectionMode: 'lowest',
+        skuOptions: [
+          { skuId: 'sku-high', name: '黑色 / XL', price: 39, available: true },
+          { skuId: 'sku-low', name: '蓝色 / M', price: 19.9, available: true }
+        ],
+        enrichmentSource: 'chrome'
+      })
+    });
+
+    assert.equal(enriched.orderAmount, 19.9);
+    assert.equal(enriched.selectedSkuId, 'sku-low');
+    assert.equal(enriched.skuSelectionMode, 'lowest');
+  });
+
   it('extracts product metadata without treating page price as paid metrics', async () => {
     const html = `
       <meta property="og:title" content="测试淘宝商品">

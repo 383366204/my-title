@@ -12,6 +12,7 @@ const {
   flowReviewProducts,
   flowManualStart,
   flowEnrichManualProducts,
+  flowVerifyManualProducts,
   flowVerify,
   flowGenerate,
   flowExport,
@@ -89,6 +90,7 @@ describe('pipeline-flow', () => {
           }
         };
       },
+      keywordExtractor: async () => ({ coreWord: '连衣裙', modifiers: [{ word: '法式', rigidity: 'optional' }] }),
       onProgress: (value) => progress.push(value)
     });
 
@@ -97,7 +99,7 @@ describe('pipeline-flow', () => {
     assert.strictEqual(enriched.failed.length, 1);
     assert.strictEqual(enriched.selected[0].recommendedCategory, '女装 > 连衣裙');
     assert.strictEqual(enriched.failed[0].enrichError, '商品已下架');
-    assert.strictEqual(getRun({ dataDir, runId }).run.options.workflowVersion, 2);
+    assert.strictEqual(getRun({ dataDir, runId }).run.options.workflowVersion, 3);
     assert.ok(progress.some((value) => value.current === 2 && value.total === 2));
 
     const retriedOfferIds = [];
@@ -107,7 +109,8 @@ describe('pipeline-flow', () => {
       detailFetcher: async (offerId) => {
         retriedOfferIds.push(offerId);
         return { model: { bizData: { title: '碎花连衣裙夏季新款女装', categoryName: '女装 > 连衣裙' } } };
-      }
+      },
+      keywordExtractor: async () => ({ coreWord: '连衣裙', modifiers: [{ word: '碎花', rigidity: 'optional' }] })
     });
     assert.deepStrictEqual(retriedOfferIds, ['789012']);
     assert.strictEqual(retried.selected.length, 2);
@@ -135,7 +138,8 @@ describe('pipeline-flow', () => {
             categoryName: offerId === '111111' ? '办公用品 > 收纳盒' : '厨房用品 > 收纳架'
           }
         }
-      })
+      }),
+      keywordExtractor: async () => ({ coreWord: '桌面收纳', modifiers: [] })
     });
 
     const generated = await flowGenerate({
@@ -155,6 +159,76 @@ describe('pipeline-flow', () => {
       '办公用品 > 收纳盒',
       '厨房用品 > 收纳架'
     ]);
+  });
+
+  test('manual workflow extracts keywords from link-only products and shares duplicate SYCM queries', async () => {
+    const dataDir = tempDataDir();
+    const runId = 'manual_link_only_keywords';
+    flowManualStart({
+      dataDir,
+      runId,
+      items: [
+        { url: 'https://detail.1688.com/offer/311111.html' },
+        { url: 'https://detail.1688.com/offer/322222.html' }
+      ]
+    });
+    const enriched = await flowEnrichManualProducts({
+      dataDir,
+      runId,
+      detailFetcher: async offerId => ({
+        model: { bizData: { title: `${offerId}桌面分类收纳盒家用`, categoryName: '家居用品 > 收纳盒' } }
+      }),
+      keywordExtractor: async () => ({ coreWord: '收纳盒', modifiers: [] })
+    });
+
+    assert.equal(enriched.candidates.length, 1);
+    assert.equal(enriched.candidates[0].productBindings.length, 2);
+    let sycmCalls = 0;
+    const verified = await flowVerifyManualProducts({
+      dataDir,
+      runId,
+      fallbackHot: false,
+      sycmExtractor: async keyword => {
+        sycmCalls += 1;
+        return {
+          keyword,
+          data: [{ keyword, demandSupplyRatio: 3, searchPopularity: 200, clickRate: 45, conversionRate: 2 }]
+        };
+      }
+    });
+
+    assert.equal(sycmCalls, 1);
+    assert.equal(verified.verified.length, 2);
+    assert.deepEqual(verified.verified.map(row => row.offerId), ['311111', '322222']);
+    assert.ok(readJsonl(getRun({ dataDir, runId }).run.files.selectedProducts).every(row => row.keyword === '收纳盒'));
+  });
+
+  test('manual workflow keeps low-score keywords as review-only drafts', async () => {
+    const dataDir = tempDataDir();
+    const runId = 'manual_keyword_review_fallback';
+    flowManualStart({
+      dataDir,
+      runId,
+      items: [{ url: 'https://detail.1688.com/offer/333333.html' }]
+    });
+    await flowEnrichManualProducts({
+      dataDir,
+      runId,
+      detailFetcher: async () => ({ model: { bizData: { title: '磁吸防摔手机壳', categoryName: '3C数码 > 手机壳' } } }),
+      keywordExtractor: async () => ({ coreWord: '手机壳', modifiers: [] })
+    });
+    const verified = await flowVerifyManualProducts({
+      dataDir,
+      runId,
+      fallbackHot: false,
+      sycmExtractor: async keyword => ({ keyword, data: [] })
+    });
+
+    assert.equal(verified.status, 'verified');
+    assert.equal(verified.verified.length, 1);
+    assert.equal(verified.verified[0].keywordStatus, 'review_required');
+    assert.equal(verified.verified[0].keywordOpportunity.decision, 'review');
+    assert.equal(getRun({ dataDir, runId }).run.counts.manualKeywordFallback, 1);
   });
 
   test('scoreSycmRows accepts usable blue-ocean data', () => {

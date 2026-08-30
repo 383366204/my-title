@@ -380,6 +380,60 @@ function parse1688Url(url) {
 }
 
 /**
+ * 从普通链接、分享文本或 1688 App 协议中提取商品 ID。
+ * @param {string} value - 用户粘贴的链接、分享口令或短链响应文本
+ * @returns {object|null} 标准商品链接信息
+ */
+function parse1688ShareText(value) {
+  const source = String(value || '').trim();
+  if (!source || source.length > 64 * 1024) return null;
+  const variants = [source];
+  let decoded = source;
+  for (let index = 0; index < 3; index += 1) {
+    try {
+      const next = decodeURIComponent(decoded);
+      if (next === decoded) break;
+      variants.push(next);
+      decoded = next;
+    } catch (_error) {
+      break;
+    }
+  }
+
+  for (const text of variants) {
+    const urlMatches = text.match(/https?:\/\/[^\s<>"'，。；]+/gi) || [];
+    for (const candidate of urlMatches) {
+      const parsed = parse1688Url(candidate.replace(/[)\]}]+$/g, ''));
+      if (parsed?.offerId) {
+        return { offerId: parsed.offerId, url: `https://detail.1688.com/offer/${parsed.offerId}.html` };
+      }
+    }
+    const pathMatch = text.match(/(?:\/offer\/|offerId=|offer_id=)(\d{5,})/i);
+    if (pathMatch?.[1]) {
+      return { offerId: pathMatch[1], url: `https://detail.1688.com/offer/${pathMatch[1]}.html` };
+    }
+  }
+  return null;
+}
+
+/**
+ * 提取分享文本中的 1688 HTTP 链接候选项。
+ * @param {string} value - 用户分享文本
+ * @returns {string[]} 去重后的 1688 链接
+ */
+function extract1688ShareUrls(value) {
+  const matches = String(value || '').match(/https?:\/\/[^\s<>"'，。；]+/gi) || [];
+  return [...new Set(matches.map(item => item.replace(/[)\]}]+$/g, '')).filter(item => {
+    try {
+      const hostname = new URL(item).hostname.toLowerCase();
+      return hostname === '1688.com' || hostname.endsWith('.1688.com');
+    } catch (_error) {
+      return false;
+    }
+  }))];
+}
+
+/**
  * Resolve 1688 short URL by following HTTP redirects
  * @param {string} url - Short URL to resolve
  * @param {number} [maxRedirects=5] - Max redirect hops
@@ -391,10 +445,12 @@ async function resolve1688ShortUrl(url, maxRedirects = 5) {
 
   try {
     while (redirects < maxRedirects) {
-      const response = await axios.head(currentUrl, {
+      const response = await axios.get(currentUrl, {
         maxRedirects: 0,
-        validateStatus: (status) => status < 400,
+        validateStatus: (status) => status >= 200 && status < 400,
         timeout: 5000,
+        responseType: 'text',
+        maxContentLength: 64 * 1024,
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         }
@@ -402,11 +458,10 @@ async function resolve1688ShortUrl(url, maxRedirects = 5) {
 
       const location = response.headers.location;
       if (!location) {
-        // No more redirects, check if current URL is parseable
-        if (parse1688Url(currentUrl)) {
-          return currentUrl;
-        }
-        return null;
+        const bodyResult = parse1688ShareText(response.data);
+        if (bodyResult) return bodyResult.url;
+        const currentResult = parse1688ShareText(currentUrl);
+        return currentResult?.url || null;
       }
 
       // Resolve relative URL if needed
@@ -432,7 +487,30 @@ async function resolve1688ShortUrl(url, maxRedirects = 5) {
   }
 }
 
+/**
+ * 将手机分享口令、1688 短链或商品链接解析为标准详情链接。
+ * @param {string} value - 用户粘贴的分享内容
+ * @param {object} [options] 解析选项
+ * @param {Function} [options.shortUrlResolver] 测试或定制用短链解析器
+ * @returns {Promise<object|null>} 标准商品链接信息
+ */
+async function resolve1688ShareText(value, options = {}) {
+  const direct = parse1688ShareText(value);
+  if (direct) return direct;
+  const resolver = options.shortUrlResolver || resolve1688ShortUrl;
+  const candidates = extract1688ShareUrls(value);
+  for (const candidate of candidates) {
+    const resolved = await resolver(candidate);
+    const parsed = parse1688ShareText(resolved);
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
 module.exports = Alibaba1688Client;
 module.exports.parse1688Url = parse1688Url;
+module.exports.parse1688ShareText = parse1688ShareText;
+module.exports.extract1688ShareUrls = extract1688ShareUrls;
 module.exports.resolve1688ShortUrl = resolve1688ShortUrl;
+module.exports.resolve1688ShareText = resolve1688ShareText;
 module.exports.RateLimitError = RateLimitError;

@@ -6,6 +6,7 @@ const { flowDaily, flowKeyword, flowKeywordStart } = require('./src/flow-orchest
 const { appendRunCandidates, flowMine } = require('./src/keyword-mining-flow');
 const { flowReviewCandidates } = require('./src/keyword-review-flow');
 const { flowVerify } = require('./src/keyword-verification-flow');
+const { flowVerifyManualProducts } = require('./src/manual-keyword-flow');
 const {
   flowEnrichManualProducts,
   flowManualStart,
@@ -45,6 +46,7 @@ module.exports = {
   flowMine,
   flowReviewCandidates,
   flowVerify,
+  flowVerifyManualProducts,
   flowSelectProducts,
   flowGenerate,
   flowExport,

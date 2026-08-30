@@ -89,7 +89,9 @@ function findDetailValue(root, keys) {
  */
 function normalizeManualOfferDetail(raw, input = {}) {
   const root = parsePossibleJson(raw?.model?.bizData ?? raw?.model?.data ?? raw?.data ?? raw);
-  const text = typeof root === 'string' ? root : '';
+  const text = typeof root === 'string'
+    ? root
+    : findDetailValue(root, ['all_info', 'allInfo', 'content', 'markdown', 'text']);
   const fromText = (patterns) => {
     for (const pattern of patterns) {
       const match = text.match(pattern);
@@ -98,13 +100,23 @@ function normalizeManualOfferDetail(raw, input = {}) {
     return '';
   };
   const title = findDetailValue(root, ['title', 'subject', 'offerTitle', 'productTitle', 'name'])
-    || fromText([/(?:商品标题|标题)[:：]\s*([^\n]+)/i]);
+    || fromText([
+      /(?:^|\n)#{1,6}\s*(?:商品标题|标题)\s*\n+([^\n#|]+)/i,
+      /(?:商品标题|标题)[:：]\s*([^\n]+)/i
+    ]);
   const category = findDetailValue(root, ['categoryName', 'leafCategoryName', 'category', 'catName', 'categoryListName'])
-    || fromText([/(?:商品类目|类目)[:：]\s*([^\n]+)/i]);
+    || fromText([
+      /\|(?:叶子类目|三级类目)\|\s*([^|\n]+)\s*\|/i,
+      /(?:^|\n)#{1,6}\s*(?:商品类目|类目)\s*\n+([^\n#|]+)/i,
+      /(?:商品类目|类目)[:：]\s*([^\n]+)/i
+    ]);
   const imageUrl = findDetailValue(root, ['imageUrl', 'mainImage', 'mainPic', 'picUrl', 'image'])
     || fromText([/(https?:\/\/[^\s"']+\.(?:jpg|jpeg|png|webp))/i]);
   const price = findDetailValue(root, ['price', 'offerPrice', 'salePrice', 'priceRange'])
-    || fromText([/(?:价格|单价)[:：]\s*([^\n]+)/i]);
+    || fromText([
+      /(?:^|\n)#{1,6}\s*(?:商品价格|价格|单价)\s*\n+([^\n#|]+)/i,
+      /(?:商品价格|价格|单价)[:：]\s*([^\n]+)/i
+    ]);
   return {
     offerId: input.offerId || '',
     title: title || String(input.title || '').trim(),

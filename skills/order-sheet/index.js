@@ -6,6 +6,7 @@ const { collectProductRankPage } = require('../sycm-research/src/product-rank');
 const { generateOrderSheet } = require('./src/generate-order-sheet');
 const { parseManualItems, enrichManualItems } = require('./src/manual-items');
 const {
+  DEFAULT_ORDER_GROUP_SIZE,
   getProductKey,
   normalizeOrderProduct,
   autoGroupOrderProducts,
@@ -70,6 +71,15 @@ function mergeOrderSheetProducts(rankRows = [], manualRows = []) {
       if (manualRow.imageUrl) existing.imageUrl = manualRow.imageUrl;
       if (manualRow.orderAmount != null) existing.orderAmount = manualRow.orderAmount;
       existing.manualEnrichmentStatus = manualRow.enrichmentStatus || 'normalized';
+      existing.manualEnrichmentSource = manualRow.enrichmentSource || '';
+      existing.skuOptions = manualRow.skuOptions || [];
+      existing.selectedSkuId = manualRow.selectedSkuId || '';
+      existing.selectedSkuName = manualRow.selectedSkuName || '';
+      existing.selectedSkuPrice = manualRow.selectedSkuPrice ?? null;
+      existing.lowestSkuId = manualRow.lowestSkuId || '';
+      existing.lowestSkuName = manualRow.lowestSkuName || '';
+      existing.lowestSkuPrice = manualRow.lowestSkuPrice ?? manualRow.referencePrice ?? null;
+      existing.skuSelectionMode = manualRow.skuSelectionMode || 'lowest';
     } else {
       result.push({
         rank: null,
@@ -90,6 +100,15 @@ function mergeOrderSheetProducts(rankRows = [], manualRows = []) {
         storeName: manualRow.storeName || '',
         sourceType: 'manual',
         enrichmentStatus: manualRow.enrichmentStatus || 'normalized',
+        enrichmentSource: manualRow.enrichmentSource || '',
+        skuOptions: manualRow.skuOptions || [],
+        selectedSkuId: manualRow.selectedSkuId || '',
+        selectedSkuName: manualRow.selectedSkuName || '',
+        selectedSkuPrice: manualRow.selectedSkuPrice ?? null,
+        lowestSkuId: manualRow.lowestSkuId || '',
+        lowestSkuName: manualRow.lowestSkuName || '',
+        lowestSkuPrice: manualRow.lowestSkuPrice ?? manualRow.referencePrice ?? null,
+        skuSelectionMode: manualRow.skuSelectionMode || 'lowest',
         enrichmentError: manualRow.enrichmentError || ''
       });
     }
@@ -123,6 +142,14 @@ function updateOrderSheetManualProducts(options = {}) {
       ...(update.imageUrl ? { imageUrl: update.imageUrl } : {}),
       storeName: update.storeName,
       orderAmount: update.orderAmount,
+      skuOptions: update.skuOptions?.length > 0 ? update.skuOptions : (row.skuOptions || []),
+      selectedSkuId: update.selectedSkuId || row.selectedSkuId || '',
+      selectedSkuName: update.selectedSkuName || row.selectedSkuName || '',
+      selectedSkuPrice: update.selectedSkuPrice ?? row.selectedSkuPrice ?? null,
+      lowestSkuId: update.lowestSkuId || row.lowestSkuId || '',
+      lowestSkuName: update.lowestSkuName || row.lowestSkuName || '',
+      lowestSkuPrice: update.lowestSkuPrice ?? row.lowestSkuPrice ?? row.referencePrice ?? null,
+      skuSelectionMode: update.skuSelectionMode || row.skuSelectionMode || 'lowest',
       enrichmentStatus: update.title || row.title ? 'complete' : row.enrichmentStatus,
       enrichmentError: update.title || row.title ? '' : row.enrichmentError
     };
@@ -141,6 +168,14 @@ function updateOrderSheetManualProducts(options = {}) {
       imageUrl: row.imageUrl || '',
       storeName: row.storeName || '',
       orderAmount: row.orderAmount != null ? row.orderAmount : null,
+      skuOptions: row.skuOptions || [],
+      selectedSkuId: row.selectedSkuId || '',
+      selectedSkuName: row.selectedSkuName || '',
+      selectedSkuPrice: row.selectedSkuPrice ?? null,
+      lowestSkuId: row.lowestSkuId || '',
+      lowestSkuName: row.lowestSkuName || '',
+      lowestSkuPrice: row.lowestSkuPrice ?? row.referencePrice ?? null,
+      skuSelectionMode: row.skuSelectionMode || 'lowest',
       sourceType: 'manual',
       enrichmentStatus: row.enrichmentStatus || 'normalized'
     }));
@@ -176,31 +211,39 @@ function ensureOrderSheetFiles(run, runDir) {
 
 function readOrderGroupDocument(file) {
   if (!file || !fs.existsSync(file)) {
-    return { version: 1, revision: 0, dragCount: 0, groups: [], unassignedItems: [] };
+    return { version: 2, revision: 0, dragCount: DEFAULT_ORDER_GROUP_SIZE, groups: [], unassignedItems: [] };
   }
   try {
     const value = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const version = Number(value.version) || 1;
+    const groups = Array.isArray(value.groups) ? normalizeOrderGroups(value.groups) : [];
+    const legacyGroupSize = groups.length > 0
+      ? Math.max(...groups.map(group => 1 + (group.subProducts || []).length))
+      : DEFAULT_ORDER_GROUP_SIZE;
+    const storedGroupSize = Number.parseInt(value.dragCount, 10);
     return {
       ...value,
-      version: Number(value.version) || 1,
+      version,
       revision: Number(value.revision) || 0,
-      dragCount: Math.max(0, Number.parseInt(value.dragCount, 10) || 0),
-      groups: Array.isArray(value.groups) ? normalizeOrderGroups(value.groups) : [],
+      dragCount: version >= 2 && Number.isFinite(storedGroupSize) && storedGroupSize >= 1
+        ? storedGroupSize
+        : legacyGroupSize,
+      groups,
       unassignedItems: Array.isArray(value.unassignedItems)
         ? value.unassignedItems.map(item => normalizeOrderProduct(item))
         : []
     };
   } catch (_) {
-    return { version: 1, revision: 0, dragCount: 0, groups: [], unassignedItems: [] };
+    return { version: 2, revision: 0, dragCount: DEFAULT_ORDER_GROUP_SIZE, groups: [], unassignedItems: [] };
   }
 }
 
 function writeOrderGroupDocument(file, document = {}) {
   const payload = {
-    version: 1,
+    version: 2,
     revision: Math.max(1, Number(document.revision) || 1),
     runId: document.runId,
-    dragCount: Math.max(0, Number.parseInt(document.dragCount, 10) || 0),
+    dragCount: Math.max(1, Number.parseInt(document.dragCount, 10) || DEFAULT_ORDER_GROUP_SIZE),
     groups: normalizeOrderGroups(document.groups || []),
     unassignedItems: Array.isArray(document.unassignedItems)
       ? document.unassignedItems.map(item => normalizeOrderProduct(item))
@@ -419,7 +462,7 @@ async function prepareOrderSheetDraft(options = {}) {
   if (!groups) {
     const dragCount = Number.isFinite(Number(options.dragCount))
       ? Number(options.dragCount)
-      : (Number.isFinite(Number(context.run.options?.dragCount)) ? Number(context.run.options.dragCount) : 0);
+      : (Number.isFinite(Number(context.run.options?.dragCount)) ? Number(context.run.options.dragCount) : DEFAULT_ORDER_GROUP_SIZE);
     groups = normalizeOrderGroups(rows, { dragCount });
     draft = writeOrderGroupDocument(files.productGroups, {
       runId: context.runId,
@@ -466,9 +509,12 @@ function getOrderSheetDraft(options = {}) {
 
   const document = readOrderGroupDocument(files.productGroups);
   let groups = document.groups;
+  let dragCount = document.dragCount;
 
   if (groups.length === 0 && rows.length > 0) {
-    const dragCount = Number.isFinite(Number(context.run.options?.dragCount)) ? Number(context.run.options.dragCount) : 0;
+    dragCount = Number.isFinite(Number(context.run.options?.dragCount))
+      ? Math.max(1, Number(context.run.options.dragCount))
+      : DEFAULT_ORDER_GROUP_SIZE;
     groups = normalizeOrderGroups(rows, { dragCount });
   }
 
@@ -481,7 +527,7 @@ function getOrderSheetDraft(options = {}) {
     groupCount: groups.length,
     missingCount,
     revision: document.revision,
-    dragCount: document.dragCount,
+    dragCount,
     groups,
     unassignedItems: document.unassignedItems,
     items: rows,
@@ -585,15 +631,19 @@ function confirmOrderSheetProducts(options = {}) {
     ? options.groups
     : (currentDraft.groups.length > 0 ? currentDraft.groups : rows);
   const groups = normalizeOrderGroups(rawGroups);
+  const dragCount = Math.max(1, Number.parseInt(
+    options.dragCount == null ? currentDraft.dragCount : options.dragCount,
+    10
+  ) || DEFAULT_ORDER_GROUP_SIZE);
 
   // 校验分组
-  assertValidOrderGroups(groups);
+  assertValidOrderGroups(groups, { groupSize: dragCount });
 
   const flattened = flattenOrderGroups(groups);
   const savedDraft = writeOrderGroupDocument(files.productGroups, {
     runId: context.runId,
     revision: currentDraft.revision + 1,
-    dragCount: options.dragCount == null ? currentDraft.dragCount : options.dragCount,
+    dragCount,
     groups,
     unassignedItems: Array.isArray(options.unassignedItems)
       ? options.unassignedItems
@@ -673,6 +723,7 @@ async function buildOrderSheet(options = {}) {
     missingAmountPolicy: generationOptions.missingAmountPolicy,
     cartQuantity: generationOptions.cartQuantity,
     rowSpan: generationOptions.rowSpan,
+    dragCount: groupDocument.dragCount,
     workRequirement: generationOptions.workRequirement,
     orderNote: generationOptions.orderNote,
     reviewGroupSize: generationOptions.reviewGroupSize,
@@ -695,6 +746,7 @@ async function buildOrderSheet(options = {}) {
     missingAmountPolicy: generationOptions.missingAmountPolicy || 'blank',
     cartQuantity: Number(generationOptions.cartQuantity || 1),
     rowSpan: Number(generationOptions.rowSpan || 3),
+    dragCount: groupDocument.dragCount,
     workRequirement: generationOptions.workRequirement || '',
     orderNote: generationOptions.orderNote || '',
     reviewGroupSize: Number(generationOptions.reviewGroupSize || 4),
@@ -715,6 +767,7 @@ async function buildOrderSheet(options = {}) {
 }
 
 module.exports = {
+  DEFAULT_ORDER_GROUP_SIZE,
   buildOrderSheet,
   collectOrderSheetProducts,
   confirmOrderSheetProducts,

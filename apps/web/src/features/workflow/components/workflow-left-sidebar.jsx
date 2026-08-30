@@ -55,7 +55,7 @@ export function WorkflowLeftSidebar({
                 const template = templates.find((item) => item.id === event.target.value);
                 if (template) onLoadTemplate(template);
               }}
-              className="w-full p-2.5 rounded border border-slate-700 bg-slate-800 text-sm text-slate-100 font-medium focus:border-blue-500 focus:outline-none"
+              className="workflow-template-select w-full p-2.5 rounded border border-slate-700 bg-slate-800 text-sm text-slate-100 font-medium focus:border-blue-500 focus:outline-none"
             >
               {templates.map((template) => (
                 <option key={template.id} value={template.id}>{template.name}</option>

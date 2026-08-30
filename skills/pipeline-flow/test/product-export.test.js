@@ -39,6 +39,23 @@ test('normalizes nested 1688 detail payloads and common product fields', () => {
   assert.equal(productCategory({ stats: { categoryName: '收纳盒' } }), '收纳盒');
 });
 
+test('normalizes offer_detail all_info markdown keyed by offer id', () => {
+  const detail = normalizeManualOfferDetail({
+    success: true,
+    model: {
+      bizData: {
+        993531162503: {
+          all_info: '# 商品ID\n993531162503\n\n# 商品标题\n双层叠戴十字架海星项链女\n\n# 商品价格\n1.48元\n\n# 商品类目\n|类目级别|类目名称|\n|--|--|\n|一级类目|服饰配件、饰品|\n|二级类目|项饰|\n|三级类目|项链|'
+        }
+      }
+    }
+  }, { offerId: '993531162503' });
+
+  assert.equal(detail.title, '双层叠戴十字架海星项链女');
+  assert.equal(detail.category, '项链');
+  assert.equal(detail.price, '1.48元');
+});
+
 test('assesses matching and conflicting product categories', () => {
   const matched = categoryAssessment({
     recommendedCategory: '家居用品 > 收纳整理',

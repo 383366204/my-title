@@ -60,16 +60,16 @@ describe('workflow pipeline adapter', () => {
 
     const templates = listProductionWorkflowTemplates();
 
-    assert.deepEqual(templates.map(template => template.id), ['daily-selection-v1', 'exact-keyword-v1', 'manual-selection-v1', 'sycm-order-sheet-v1', 'uploaded-review-sheet-v1']);
-    assert.deepEqual(templates.map(template => template.entryLabel), ['入口：动态灵感', '入口：手动关键词', '入口：关键词 + 1688链接', '入口：商品排行或指定商品', '入口：已执行的刷单表']);
+    assert.deepEqual(templates.map(template => template.id), ['daily-selection-v1', 'exact-keyword-v1', 'manual-selection-v2', 'sycm-order-sheet-v1', 'uploaded-review-sheet-v1']);
+    assert.deepEqual(templates.map(template => template.entryLabel), ['入口：动态灵感', '入口：手动关键词', '入口：1688链接（关键词可选）', '入口：商品排行或指定商品', '入口：已执行的刷单表']);
     assert.match(templates[0].scenarioLabel, /每天自动发现/);
     assert.match(templates[1].scenarioLabel, /明确目标词/);
     assert.match(templates[0].flowSummary, /灵感选词/);
     assert.match(templates[1].flowSummary, /跳过挖词/);
     assert.match(templates[0].modeHint, /不要求预先维护种子池/);
     assert.match(templates[1].modeHint, /逐词验真/);
-    assert.match(templates[2].flowSummary, /录入词和货源/);
-    assert.match(templates[2].flowSummary, /自动铺货/);
+    assert.match(templates[2].flowSummary, /录入链接/);
+    assert.match(templates[2].flowSummary, /生意参谋验真/);
     assert.match(templates[3].flowSummary, /获取商品资料/);
     assert.match(templates[3].flowSummary, /确认商品与编组/);
     const orderSheetStart = templates[3].workflow.nodes.find(node => node.id === WORKFLOW_NODE_IDS.start);
@@ -160,13 +160,15 @@ describe('workflow pipeline adapter', () => {
     assert.deepEqual(templates[2].workflow.nodes.map(node => node.id), [
       WORKFLOW_NODE_IDS.start,
       WORKFLOW_NODE_IDS.select,
+      WORKFLOW_NODE_IDS.verify,
       WORKFLOW_NODE_IDS.generate,
       WORKFLOW_NODE_IDS.export,
       WORKFLOW_NODE_IDS.end
     ]);
     assert.deepEqual(templates[2].workflow.edges.map(edge => `${edge.source}->${edge.target}`), [
       'start->select',
-      'select->generate',
+      'select->verify',
+      'verify->generate',
       'generate->export',
       'export->end'
     ]);
@@ -231,6 +233,7 @@ describe('workflow pipeline adapter', () => {
           ? [
               WORKFLOW_NODE_IDS.start,
               WORKFLOW_NODE_IDS.select,
+              WORKFLOW_NODE_IDS.verify,
               WORKFLOW_NODE_IDS.generate,
               WORKFLOW_NODE_IDS.export,
               WORKFLOW_NODE_IDS.end
@@ -461,9 +464,15 @@ describe('workflow pipeline adapter', () => {
     }), {
       defaultKeyword: '法式连衣裙',
       items: [
-        { clientId: 'manual-123456', keyword: '法式连衣裙', url: 'https://detail.1688.com/offer/123456.html', offerId: '123456', title: '', category: '' },
-        { clientId: 'manual-789012', keyword: '碎花连衣裙', url: 'https://detail.1688.com/offer/789012.html', offerId: '789012', title: '', category: '' }
+        { clientId: 'manual-123456', keyword: '法式连衣裙', userKeyword: '法式连衣裙', keywordSource: 'manual', url: 'https://detail.1688.com/offer/123456.html', offerId: '123456', title: '', category: '' },
+        { clientId: 'manual-789012', keyword: '碎花连衣裙', userKeyword: '碎花连衣裙', keywordSource: 'manual', url: 'https://detail.1688.com/offer/789012.html', offerId: '789012', title: '', category: '' }
       ],
+      verify: 6,
+      port: 9222,
+      pages: 1,
+      minBlueRows: 1,
+      fallbackHot: true,
+      autoAllowReviewKeywords: true,
       export: 100,
       length: 30
     });
@@ -474,6 +483,12 @@ describe('workflow pipeline adapter', () => {
         { url: 'https://detail.1688.com/offer/123456.html?spm=duplicate' }
       ]
     }), /商品重复/);
+    const linkOnly = sanitizeWorkflowParams('manual', {
+      items: [{ url: 'https://detail.1688.com/offer/456789.html' }]
+    });
+    assert.equal(linkOnly.items[0].keyword, '');
+    assert.equal(linkOnly.items[0].keywordSource, 'auto_extract');
+    assert.equal(linkOnly.verify, 3);
     assert.throws(() => sanitizeWorkflowParams('manual', { items: [] }), /1688 商品链接/);
     assert.deepEqual(sanitizeWorkflowParams('order-sheet', {
       port: 9223,
@@ -506,6 +521,7 @@ describe('workflow pipeline adapter', () => {
       missingAmountPolicy: 'blank',
       cartQuantity: 1,
       rowSpan: 3,
+      dragCount: 4,
       workRequirement: '',
       orderNote: '',
       reviewGroupSize: 4,
@@ -546,7 +562,12 @@ describe('workflow pipeline adapter', () => {
       dateMode: 'latest_day',
       startDate: '',
       endDate: '',
-      orderDate: new Date().toISOString().slice(0, 10),
+      orderDate: new Intl.DateTimeFormat('en-CA', {
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      }).format(new Date()),
       storeName: '',
       sheetType: 'order',
       pages: 1,
@@ -559,6 +580,7 @@ describe('workflow pipeline adapter', () => {
       missingAmountPolicy: 'blank',
       cartQuantity: 1,
       rowSpan: 3,
+      dragCount: 4,
       workRequirement: '',
       orderNote: '',
       reviewGroupSize: 4,
@@ -1068,6 +1090,72 @@ describe('workflow pipeline adapter', () => {
     assert.match(run.nodeStates.generate.actionHint, /标题生成超时\(120s\)/);
     assert.doesNotMatch(run.nodeStates.generate.actionHint, /检查 GLM 配置/);
     assert.equal(run.nodeStates.generate.nextRecommendedAction.action, 'retry-node');
+  });
+
+  it('shows manual 1688 detail failures on the product node before SYCM verification', () => {
+    const run = pipelineSummaryToWorkflowRun({
+      runId: 'manual_detail_failed',
+      status: 'select_failed',
+      stage: 'selected',
+      options: { mode: 'manual', workflowVersion: 3 },
+      counts: { selectedProducts: 0, productEnrichFailed: 1 },
+      files: {},
+      previews: {
+        selectedProducts: [{
+          status: 'enrich_failed',
+          offerId: '993531162503',
+          enrichError: '1688 返回结果中没有商品标题'
+        }]
+      }
+    });
+
+    assert.equal(run.nodeStates.select.blocker, 'product_detail_fetch_failed');
+    assert.match(run.nodeStates.select.actionHint, /尚未进入生意参谋验真/);
+    assert.equal(run.nodeStates.select.platform, '1688');
+    assert.equal(run.nodeStates.select.nextRecommendedAction.label, '重试获取商品资料');
+    assert.equal(run.nodeStates.verify.status, 'idle');
+  });
+
+  it('offers Chrome recovery when manual order-sheet product enrichment cannot reach CDP', () => {
+    const dataDir = tempPipelineDir();
+    const productRankFile = path.join(dataDir, 'runs', 'order_sheet_cdp_failed', 'sycm-product-rank.jsonl');
+    writeText(productRankFile, JSON.stringify({
+      itemId: '1042421302304',
+      enrichmentStatus: 'failed',
+      enrichmentError: 'Chrome 调试连接不可用（端口 9222）：connect ECONNREFUSED 127.0.0.1:9222'
+    }) + '\n');
+
+    const run = pipelineSummaryToWorkflowRun({
+      runId: 'order_sheet_cdp_failed',
+      status: 'manual_action_required',
+      options: { mode: 'order-sheet', inputMode: 'manual' },
+      files: { productRank: productRankFile },
+      runtime: {
+        status: 'blocked',
+        activeStep: WORKFLOW_NODE_IDS.collectRank,
+        mode: 'order-sheet',
+        params: { inputMode: 'manual', port: 9222 },
+        progress: {
+          collectRank: { status: 'completed', current: 1, total: 1, percent: 100, message: '商品资料读取完成' }
+        },
+        manualAction: {
+          platform: 'taobao',
+          status: 'product_details_required',
+          userMessage: '1 个指定商品没有读取到标题。'
+        }
+      }
+    });
+
+    assert.equal(run.nodeStates.collectRank.status, 'blocked');
+    assert.equal(run.nodeStates.collectRank.blocker, 'order_sheet_browser_cdp_unavailable');
+    assert.equal(run.nodeStates.collectRank.platform, 'taobao');
+    assert.equal(run.nodeStates.collectRank.platformStatus, 'browser_cdp_unavailable');
+    assert.match(run.nodeStates.collectRank.actionHint, /9222/);
+    assert.deepEqual(run.nodeStates.collectRank.nextRecommendedAction, {
+      action: 'start-sycm-chrome',
+      label: '启动 Chrome',
+      description: '启动带调试端口的 Chrome，并打开第一个待读取的淘宝商品。'
+    });
   });
 
   it('lists, gets, and reads workflow node artifacts from pipeline runs', () => {

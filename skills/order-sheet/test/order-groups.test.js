@@ -51,38 +51,37 @@ describe('order-groups module', () => {
       { itemId: 'p7', title: '商品 7', orderAmount: 200 }
     ];
 
-    // 1-drag-2 means 1 main + 2 sub = groupSize of 3.
-    // 7 products: Group 1 (3 items), Group 2 (3 items), Group 3 (1 item - tail group).
+    // 1拖2 means exactly 2 products per group.
+    // 7 products: three complete groups of 2 and one tail group of 1.
     const groups = autoGroupOrderProducts(products, { dragCount: 2, groupPrefix: '商品组 ' });
-    assert.equal(groups.length, 3);
+    assert.equal(groups.length, 4);
 
     // Group 1
     assert.equal(groups[0].groupName, '商品组 1');
     assert.equal(groups[0].mainProduct.itemId, 'p1');
     assert.equal(groups[0].mainProduct.role, 'main');
-    assert.equal(groups[0].subProducts.length, 2);
+    assert.equal(groups[0].subProducts.length, 1);
     assert.equal(groups[0].subProducts[0].itemId, 'p2');
     assert.equal(groups[0].subProducts[0].role, 'sub');
-    assert.equal(groups[0].subProducts[1].itemId, 'p3');
-    assert.equal(groups[0].subProducts[1].role, 'sub');
-    assert.equal(groups[0].totalCount, 3);
+    assert.equal(groups[0].totalCount, 2);
 
     // Group 2
     assert.equal(groups[1].groupName, '商品组 2');
-    assert.equal(groups[1].mainProduct.itemId, 'p4');
-    assert.equal(groups[1].subProducts.length, 2);
-    assert.equal(groups[1].subProducts[0].itemId, 'p5');
-    assert.equal(groups[1].subProducts[1].role, 'sub');
-    assert.equal(groups[1].subProducts[1].itemId, 'p6');
+    assert.equal(groups[1].mainProduct.itemId, 'p3');
+    assert.equal(groups[1].subProducts.length, 1);
+    assert.equal(groups[1].subProducts[0].itemId, 'p4');
 
-    // Group 3 (Tail group: 1 main + 0 sub)
-    assert.equal(groups[2].groupName, '商品组 3');
-    assert.equal(groups[2].mainProduct.itemId, 'p7');
-    assert.equal(groups[2].subProducts.length, 0);
-    assert.equal(groups[2].totalCount, 1);
+    assert.equal(groups[2].mainProduct.itemId, 'p5');
+    assert.equal(groups[2].subProducts[0].itemId, 'p6');
+
+    // Group 4 is the tail group.
+    assert.equal(groups[3].groupName, '商品组 4');
+    assert.equal(groups[3].mainProduct.itemId, 'p7');
+    assert.equal(groups[3].subProducts.length, 0);
+    assert.equal(groups[3].totalCount, 1);
   });
 
-  it('rowsToOrderGroups converts legacy flat rows to 1-drag-0 single-product groups', () => {
+  it('rowsToOrderGroups converts legacy flat rows to 1-drag-1 single-product groups', () => {
     const rows = [
       { itemId: 'r1', title: 'Row 1', orderAmount: 88 },
       { itemId: 'r2', title: 'Row 2', orderAmount: 99 }
@@ -140,6 +139,22 @@ describe('order-groups module', () => {
     assert.equal(result.errors.length, 0);
   });
 
+  it('validateOrderGroups enforces N products per complete group and allows a short tail group', () => {
+    const valid = autoGroupOrderProducts([
+      { itemId: '1', title: '商品 1' },
+      { itemId: '2', title: '商品 2' },
+      { itemId: '3', title: '商品 3' },
+      { itemId: '4', title: '商品 4' },
+      { itemId: '5', title: '商品 5' }
+    ], { dragCount: 2 });
+    assert.equal(validateOrderGroups(valid, { groupSize: 2 }).valid, true);
+
+    const invalid = [valid[2], valid[0], valid[1]];
+    const result = validateOrderGroups(invalid, { groupSize: 2 });
+    assert.equal(result.valid, false);
+    assert.match(result.errors[0], /只有最后一组可以不足/);
+  });
+
   it('validateOrderGroups rejects groups with empty product titles', () => {
     const emptyTitleGroup = [
       {
@@ -182,6 +197,7 @@ describe('order-groups module', () => {
     assert.equal(flattened[0].role, 'main');
     assert.equal(flattened[0].groupIndex, 1);
     assert.equal(flattened[0].itemIndexInGroup, 1);
+    assert.equal(flattened[0].groupProductCount, 3);
 
     assert.equal(flattened[1].itemId, 's1');
     assert.equal(flattened[1].role, 'sub');
@@ -200,7 +216,7 @@ describe('order-groups module', () => {
 
   it('clarifies decoupling of rowSpan (Excel formatting) and dragCount (1-drag-N grouping)', () => {
     // rowSpan is an Excel row merge height / spacing parameter (e.g. 3 rows height per item on sheet).
-    // dragCount is business grouping: 1 main + dragCount subs per order group.
+    // dragCount is business grouping: exactly N products per order group.
     const rowSpan = 3; // Excel layout param
     const dragCount = 2; // Business 1-drag-2 param
 
@@ -211,8 +227,9 @@ describe('order-groups module', () => {
     ];
 
     const groups = autoGroupOrderProducts(items, { dragCount });
-    assert.equal(groups.length, 1);
-    assert.equal(groups[0].subProducts.length, 2);
+    assert.equal(groups.length, 2);
+    assert.equal(groups[0].subProducts.length, 1);
+    assert.equal(groups[1].mainProduct.itemId, '103');
     // rowSpan is independent of group count / size
     assert.equal(rowSpan, 3);
   });

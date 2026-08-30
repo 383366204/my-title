@@ -149,7 +149,8 @@ describe('pipeline runtime runner', () => {
         items: [{ keyword: '法式连衣裙', url: 'https://detail.1688.com/offer/123456.html' }],
         detailFetcher: async () => ({
           model: { bizData: { title: '法式碎花收腰连衣裙夏季女装', categoryName: '女装 > 连衣裙' } }
-        })
+        }),
+        keywordExtractor: async () => ({ coreWord: '连衣裙', modifiers: [] })
       }
     });
 
@@ -159,6 +160,40 @@ describe('pipeline runtime runner', () => {
     assert.equal(runtime.progress.start.status, 'completed');
     assert.equal(runtime.progress.select.status, 'completed');
     assert.equal(runtime.progress.keywordReview, undefined);
+  });
+
+  it('runs the link-only manual workflow through verification, title generation, and export', async () => {
+    const dataDir = tempDataDir();
+    const runId = 'manual_runtime_v3';
+    const result = await runPipelineRuntime({
+      dataDir,
+      runId,
+      mode: 'manual',
+      params: {
+        items: [{ url: 'https://detail.1688.com/offer/654321.html' }],
+        fallbackHot: false,
+        detailFetcher: async () => ({
+          model: { bizData: { title: '桌面分类收纳盒家用办公室整理', categoryName: '家居用品 > 收纳盒' } }
+        }),
+        keywordExtractor: async () => ({ coreWord: '收纳盒', modifiers: [] }),
+        sycmExtractor: async keyword => ({
+          keyword,
+          data: [{ keyword, demandSupplyRatio: 3, searchPopularity: 200, clickRate: 45, conversionRate: 2 }]
+        }),
+        generator: async (keyword, options) => ({
+          products: options.products.map(product => ({
+            ...product,
+            '铺货标题': `${keyword}桌面分类整理盒家用办公室文具化妆品杂物多功能大容量收纳神器`
+          }))
+        })
+      }
+    });
+
+    const runtime = readRuntimeState({ dataDir, runId });
+    assert.equal(result.status, 'ready_to_distribute');
+    assert.deepEqual(runtime.steps, ['start', 'select', 'verify', 'generate', 'export']);
+    assert.ok(runtime.steps.every(step => runtime.progress[step].status === 'completed'));
+    assert.match(fs.readFileSync(path.join(dataDir, 'runs', runId, 'distribution-batch.txt'), 'utf8'), /\$\$家居用品 > 收纳盒/);
   });
 
   it('runs steps in order and writes progress events', async () => {

@@ -202,6 +202,18 @@ code, pre {
   line-height: 1.35;
 }
 
+.workflow-template-select {
+  background-color: #172033;
+  border-color: #3b4a62;
+  color: #f8fafc;
+  color-scheme: dark;
+}
+
+.workflow-template-select option {
+  background-color: #172033;
+  color: #f8fafc;
+}
+
 .monitor-status-pill {
   display: inline-flex;
   align-items: center;
@@ -1554,6 +1566,27 @@ code, pre {
   gap: 6px;
 }
 
+.manual-product-choice {
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: start;
+  cursor: pointer;
+}
+
+.manual-product-choice > input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  padding: 0;
+  justify-self: start;
+  accent-color: #3b82f6;
+}
+
+.manual-product-choice > div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
 .node-product-row .node-product-actions {
   margin-top: 2px;
 }
@@ -2388,6 +2421,12 @@ code, pre {
   color: #fca5a5;
 }
 
+.order-sheet-parse-summary .is-duplicate {
+  min-width: 0;
+  color: #fbbf24;
+  overflow-wrap: anywhere;
+}
+
 .order-sheet-manual-list {
   display: grid;
   gap: 8px;
@@ -2528,7 +2567,8 @@ code, pre {
   font-weight: 500;
 }
 
-.order-sheet-product-list input {
+.order-sheet-product-list input,
+.order-sheet-product-list select {
   width: 100%;
   min-width: 0;
 }
@@ -4985,9 +5025,14 @@ textarea:focus {
 }
 
 .manual-input-table {
+  min-height: 0;
+  max-height: min(360px, 42vh);
   border: 1px solid #26344d;
   border-radius: 6px;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .manual-input-row {
@@ -5005,10 +5050,31 @@ textarea:focus {
 }
 
 .manual-input-row.is-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   color: #94a3b8;
   background: #111d31;
   font-size: 11px;
   font-weight: 700;
+}
+
+.manual-input-table::-webkit-scrollbar {
+  width: 10px;
+}
+
+.manual-input-table::-webkit-scrollbar-track {
+  background: #0a1324;
+}
+
+.manual-input-table::-webkit-scrollbar-thumb {
+  border: 2px solid #0a1324;
+  border-radius: 5px;
+  background: #3a4b68;
+}
+
+.manual-input-table::-webkit-scrollbar-thumb:hover {
+  background: #526887;
 }
 
 .manual-input-row input {
@@ -5208,6 +5274,14 @@ textarea:focus {
   background: #111a2c;
 }
 
+.order-sheet-task-group.is-tail {
+  border-color: #52647f;
+}
+
+.order-sheet-task-group.is-incomplete {
+  border-color: #9a641f;
+}
+
 .order-sheet-task-group-head {
   display: flex;
   align-items: center;
@@ -5228,6 +5302,15 @@ textarea:focus {
 .order-sheet-unassigned-pool > div span {
   color: #8fa1ba;
   font-size: 11px;
+}
+
+.order-sheet-task-group-head .order-sheet-group-size {
+  padding: 2px 6px;
+  border: 1px solid #4a668c;
+  border-radius: 4px;
+  background: #1b304d;
+  color: #c9ddf7;
+  font-weight: 600;
 }
 
 .order-sheet-task-group-head button,
@@ -5314,7 +5397,8 @@ textarea:focus {
   font-size: 10px;
 }
 
-.order-group-product-fields input {
+.order-group-product-fields input,
+.order-group-product-fields select {
   width: 100%;
   min-width: 0;
   height: 32px;
@@ -5325,9 +5409,14 @@ textarea:focus {
   padding: 0 9px;
 }
 
-.order-group-product-fields input:focus {
+.order-group-product-fields input:focus,
+.order-group-product-fields select:focus {
   border-color: #4e86cf;
   outline: none;
+}
+
+.order-group-product-fields .order-sheet-sku-field {
+  grid-column: 1 / -1;
 }
 
 .order-group-product-actions {

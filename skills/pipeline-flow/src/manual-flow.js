@@ -15,6 +15,10 @@ const {
   createManualDetailFetcher,
   normalizeManualOfferDetail
 } = require('./product-normalizer');
+const {
+  buildManualCandidateRows,
+  extractManualProductKeywords
+} = require('./manual-keyword-flow');
 
 /**
  * Create a run from manually entered keywords and 1688 URLs.
@@ -23,7 +27,7 @@ const {
  */
 function flowManualStart(options = {}) {
   const inputItems = Array.isArray(options.items) ? options.items : [];
-  if (inputItems.length === 0) throw new Error('至少输入一个关键词和 1688 商品链接');
+  if (inputItems.length === 0) throw new Error('至少输入一个 1688 商品链接');
   const normalizedItems = inputItems.map((item, index) => {
     const inputUrl = String(item?.url || '');
     let inputHostname = '';
@@ -36,10 +40,11 @@ function flowManualStart(options = {}) {
     const parsed = validHostname ? parse1688Url(inputUrl) : null;
     const keyword = String(item?.keyword || options.defaultKeyword || '').trim();
     if (!parsed) throw new Error(`第 ${index + 1} 个 1688 商品链接无效`);
-    if (!keyword) throw new Error(`第 ${index + 1} 个商品缺少关键词`);
     return {
       clientId: String(item?.clientId || `manual-${parsed.offerId}`),
       keyword,
+      userKeyword: keyword,
+      keywordSource: keyword ? 'manual' : 'auto_extract',
       selectedKeyword: keyword,
       offerId: parsed.offerId,
       url: `https://detail.1688.com/offer/${parsed.offerId}.html`,
@@ -47,10 +52,10 @@ function flowManualStart(options = {}) {
       category: String(item?.category || '').trim()
     };
   });
-  const keywords = [...new Set(normalizedItems.map(item => item.keyword))];
+  const keywords = [...new Set(normalizedItems.map(item => item.keyword).filter(Boolean))];
   const { runDir, run } = initRun({
     ...options,
-    options: { ...(options.options || {}), mode: 'manual', workflowVersion: 2 }
+    options: { ...(options.options || {}), mode: 'manual', workflowVersion: 3 }
   });
   const candidates = keywords.map(keyword => ({
     keyword,
@@ -106,7 +111,7 @@ function flowManualStart(options = {}) {
     runDir,
     blockers: [],
     nextActionCode: 'fetch_product_details',
-    userMessage: `已录入 ${normalizedItems.length} 个商品，开始获取商品资料。`
+    userMessage: `已录入 ${normalizedItems.length} 个商品，开始获取商品资料并提取候选词。`
   });
 }
 
@@ -157,14 +162,27 @@ async function flowEnrichManualProducts(options = {}) {
         '商品原价': detail.price,
         '类目': detail.category
       };
+      const keywordResult = await extractManualProductKeywords({
+        ...row,
+        title: detail.title,
+        sourceTitle: detail.title,
+        recommendedCategory: detail.category,
+        product
+      }, options);
       enriched.push({
         ...row,
         status: 'selected',
         title: detail.title,
         sourceTitle: detail.title,
         recommendedCategory: detail.category,
+        categorySource: detail.category ? '1688' : '',
+        categoryConfidence: detail.category ? 'medium' : 'unknown',
         imageUrl: detail.imageUrl,
         price: detail.price,
+        coreWord: keywordResult.coreWord,
+        candidateKeywords: keywordResult.candidates,
+        keywordExtractStatus: keywordResult.candidates.length > 0 ? 'completed' : 'failed',
+        keywordExtractError: keywordResult.extractError,
         product,
         manualSelectionStatus: 'approved',
         enrichStatus: 'completed',
@@ -191,7 +209,14 @@ async function flowEnrichManualProducts(options = {}) {
   appendJsonl(run.files.selectedProducts, enriched);
   const selected = enriched.filter(row => row.status === 'selected');
   const failed = enriched.filter(row => row.status === 'enrich_failed');
+  const candidates = buildManualCandidateRows(selected);
+  fs.writeFileSync(run.files.candidates, '', 'utf8');
+  appendJsonl(run.files.candidates, candidates);
+  fs.writeFileSync(run.files.reviewedCandidates, '', 'utf8');
+  appendJsonl(run.files.reviewedCandidates, candidates);
   run.status = selected.length > 0 ? 'products_selected' : 'select_failed';
+  run.counts.candidates = candidates.length;
+  run.counts.keywordReviewApproved = candidates.length;
   run.counts.selectedProducts = selected.length;
   run.counts.productEnrichFailed = failed.length;
   setRunStageMetrics(run, 'select', {
@@ -210,6 +235,7 @@ async function flowEnrichManualProducts(options = {}) {
     runId: run.runId,
     status: run.status,
     selected,
+    candidates,
     failed,
     runDir,
     blockers: selected.length > 0 ? [] : ['product_detail_fetch_failed'],

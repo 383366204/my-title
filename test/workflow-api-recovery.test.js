@@ -440,6 +440,51 @@ test('workflow recovery APIs - pause, resume, and retry', async (t) => {
       }
     });
 
+    await t.test('POST /api/workflows/sycm/chrome/start opens the first manual Taobao product', async () => {
+      const runId = 'api_manual_product_chrome';
+      const runDir = path.join(process.cwd(), 'data', 'pipeline', 'runs', runId);
+      const originalLauncher = app.locals.sycmChromeLauncher;
+      const originalPageOpener = app.locals.sycmChromePageOpener;
+      const opened = [];
+      fs.mkdirSync(runDir, { recursive: true });
+      fs.writeFileSync(path.join(runDir, 'runtime.json'), JSON.stringify({
+        status: 'blocked',
+        activeStep: 'collectRank',
+        mode: 'order-sheet',
+        params: {
+          inputMode: 'manual',
+          port: 9222,
+          manualItems: [{ itemId: '1042421302304' }]
+        }
+      }));
+      app.locals.sycmChromeLauncher = async () => ({ success: true, message: 'Chrome 已启动并就绪' });
+      app.locals.sycmChromePageOpener = async (chromePort, url) => {
+        opened.push({ port: chromePort, url });
+        return { success: true, url };
+      };
+
+      try {
+        const res = await fetch(`http://127.0.0.1:${port}/api/workflows/sycm/chrome/start`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ runId, nodeId: 'collectRank' })
+        });
+        const payload = await res.json();
+
+        assert.strictEqual(res.status, 200);
+        assert.strictEqual(payload.ok, true);
+        assert.match(payload.userMessage, /淘宝商品/);
+        assert.deepStrictEqual(opened, [{
+          port: 9222,
+          url: 'https://item.taobao.com/item.htm?id=1042421302304'
+        }]);
+      } finally {
+        app.locals.sycmChromeLauncher = originalLauncher;
+        app.locals.sycmChromePageOpener = originalPageOpener;
+        fs.rmSync(runDir, { recursive: true, force: true });
+      }
+    });
+
     await t.test('POST /api/distribution/runs/:jobId/recheck completes the workflow after log confirmation', async () => {
       const runId = 'api_distribution_recheck_run';
       const jobId = `${runId}-distribution`;

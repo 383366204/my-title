@@ -15,6 +15,7 @@ export const validateWorkflow = (input) => requestPayload('/api/workflows/valida
   allowApiError: true
 });
 export const startWorkflow = (input) => requestJson('/api/workflows/run', { method: 'POST', body: input });
+export const resolve1688Share = (input) => requestJson('/api/1688/resolve-share', { method: 'POST', body: { input } });
 export const cancelWorkflow = (runId) => requestJson(`${workflowRunPath(runId)}/cancel`, { method: 'POST' });
 export const resumeWorkflow = (runId) => requestJson(`${workflowRunPath(runId)}/resume`, { method: 'POST' });
 export const pauseWorkflow = (runId) => requestJson(`${workflowRunPath(runId)}/pause`, { method: 'POST' });

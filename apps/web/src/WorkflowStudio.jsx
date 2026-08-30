@@ -392,8 +392,12 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
 
       setCurrentRunId(runId);
       setRunStatus(run.status);
-      setActiveTemplateId(defaultWorkflow.id || run.workflow?.id || null);
-      setActiveTemplateMode(run.workflow?.mode || run.mode || activeTemplateMode);
+      const historyMode = run.workflow?.mode || run.mode || activeTemplateMode;
+      const historyWorkflowId = defaultWorkflow.id || run.workflow?.id || '';
+      const historyTemplate = templates.find((template) => template.id === historyWorkflowId)
+        || templates.find((template) => template.mode === historyMode);
+      setActiveTemplateId(historyTemplate?.id || historyWorkflowId || null);
+      setActiveTemplateMode(historyMode);
       setSelectedNodeId(getWorkflowRunActiveNodeId(run));
 
       if (ACTIVE_RUN_STATUSES.has(String(run.status || '').toLowerCase())) {
@@ -447,6 +451,7 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
     if (job?.status === 'completed' && workflowRunId && !completedDistributionJobsRef.current.has(job.jobId)) {
       completedDistributionJobsRef.current.add(job.jobId);
       const manualMode = job.mode === 'manual';
+      closeOverlay();
       setLogs((previous) => [...previous, {
         timestamp: new Date().toISOString(),
         level: 'info',
@@ -454,9 +459,12 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
           ? '人工铺货已确认完成，流水线正在进入完成节点。'
           : '自动铺货已确认完成，流水线正在进入完成节点。'
       }]);
-      Promise.resolve().then(() => loadHistoryRunRef.current?.(workflowRunId, { preserveLogs: true }));
+      Promise.resolve().then(async () => {
+        await loadHistoryRunRef.current?.(workflowRunId, { preserveLogs: true });
+        await fetchHistoryRuns();
+      });
     }
-  }, [currentRunId, setLogs, setNodes]);
+  }, [closeOverlay, currentRunId, fetchHistoryRuns, setLogs, setNodes]);
 
   const handleNodeAction = async (action, nodeId) => {
     const targetNodeId = nodeId || selectedNodeId;
@@ -751,7 +759,7 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
           setLogs((previous) => [...previous, {
             timestamp: new Date().toISOString(),
             level: 'info',
-            message: `已准备 ${items.length} 个商品，启动流水线后将直接获取商品资料。`
+            message: `已准备 ${items.length} 个商品，启动后将获取商品资料、提取候选词并进行验真。`
           }]);
         }}
         onUpdateNodeData={updateNodeData}

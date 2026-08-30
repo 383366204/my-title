@@ -145,6 +145,7 @@ function businessRowMeta(row = {}, nodeId = '') {
     }
     if (row.enrichStatus === 'failed' || row.status === 'enrich_failed') parts.push('获取失败');
     if (row.enrichStatus === 'completed') parts.push('资料已获取');
+    if (row.keywordExtractStatus === 'completed') parts.push('候选词已提取');
     const novelty = row.productDiversity?.noveltyStatus;
     if (novelty === 'new_offer') parts.push('新货源');
     if (novelty === 'recent_generated_offer') parts.push('近期生成过');
@@ -178,8 +179,12 @@ function businessMetrics(row = {}, nodeId = '') {
   }
   if (nodeId === 'select' || nodeId === 'generate' || nodeId === 'export') {
     const keyword = selectedKeyword(row);
+    const candidateKeywords = Array.isArray(row.candidateKeywords)
+      ? row.candidateKeywords.map(item => item?.keyword || item).filter(Boolean).join('、')
+      : '';
     return [
       keyword ? compactMetric('选词', keyword) : '',
+      nodeId === 'select' && candidateKeywords ? compactMetric('候选词', candidateKeywords) : '',
       compactMetric('价格', metricValue(row, ['price', '商品原价', 'minPrice', 'product.商品原价', 'product.price'])),
       compactMetric('销量', metricValue(row, ['sales', 'sales30days', '30天销量', 'monthlySales', 'product.30天销量', 'product.sales'])),
       compactMetric('好评率', metricValue(row, ['positiveRate', '好评率', 'product.好评率'])),
@@ -196,6 +201,9 @@ function businessMetrics(row = {}, nodeId = '') {
 function businessDescription(row = {}, nodeId = '') {
   if (nodeId === 'select' && row.enrichError) {
     return `获取失败：${row.enrichError}`;
+  }
+  if (nodeId === 'select' && row.keywordExtractError && row.keywordExtractStatus === 'failed') {
+    return `候选词提取失败：${row.keywordExtractError}`;
   }
   if (nodeId === 'select' && row.productOpportunity) {
     const opportunity = row.productOpportunity || {};
@@ -454,6 +462,7 @@ export function getWorkflowArtifactView(artifact, nodeId = '') {
             meta: [item.itemId ? `商品ID ${item.itemId}` : '短链接商品', item.storeName || '', '用户指定'].filter(Boolean).join(' · '),
             metrics: [
               item.orderAmount != null ? `下单金额 ${Number(item.orderAmount).toFixed(2)}` : '下单金额待填写',
+              item.selectedSkuName ? `${item.skuSelectionMode === 'manual' ? '指定规格' : '最低价规格'} ${item.selectedSkuName}` : '',
               item.referencePrice != null ? `页面参考价 ${Number(item.referencePrice).toFixed(2)}` : ''
             ].filter(Boolean),
             description: item.enrichmentError ? `自动读取失败：${item.enrichmentError}` : '指定商品资料已保存',

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Check, ChevronDown, ChevronUp, ExternalLink, Plus, RefreshCw, Save, Trash2 } from 'lucide-react';
 
 import { getOrderSheetDraft, saveOrderSheetDraft } from '../../../api/workflow-api.js';
+import { AUTO_LOWEST_SKU, applySkuSelection, availableSkuOptions, skuOptionLabel, skuSelectionValue } from '../order-sheet-sku.js';
 
 const itemKey = (item, fallback = '') => String(item?.itemId || item?.sourceKey || item?.productUrl || fallback).trim();
 
@@ -15,7 +16,7 @@ const makeGroup = (items, index) => ({
 });
 
 const autoGroup = (items, dragCount) => {
-  const size = Math.max(1, Number(dragCount) + 1);
+  const size = Math.max(1, Number(dragCount) || 4);
   const result = [];
   for (let index = 0; index < items.length; index += size) {
     result.push(makeGroup(items.slice(index, index + size), result.length));
@@ -49,7 +50,8 @@ const detachItem = (groups, groupIndex, itemIndex) => {
   return { groups: next, item };
 };
 
-function ProductEditor({ item, itemIndex, groupIndex, groupCount, onChange, onMoveGroup, onMoveToPool, onReorder, onSetMain }) {
+function ProductEditor({ item, itemIndex, availableTargets, onChange, onMoveGroup, onMoveToPool, onReorder, onSetMain }) {
+  const skuOptions = availableSkuOptions(item);
   return (
     <div className={`order-group-product-row ${itemIndex === 0 ? 'is-main' : ''}`}>
       <div className="order-group-product-role">
@@ -70,18 +72,29 @@ function ProductEditor({ item, itemIndex, groupIndex, groupCount, onChange, onMo
           <span>店铺名</span>
           <input value={item.storeName || ''} onChange={(event) => onChange({ storeName: event.target.value })} />
         </label>
+        <label className="order-sheet-sku-field">
+          <span>购买规格</span>
+          {skuOptions.length > 0 ? (
+            <select value={skuSelectionValue(item)} onChange={(event) => onChange(applySkuSelection(item, event.target.value))}>
+              <option value={AUTO_LOWEST_SKU}>自动选择最低价 · ¥{Number(item.lowestSkuPrice ?? skuOptions[0]?.price).toFixed(2)}</option>
+              {skuOptions.map(option => <option key={option.skuId} value={option.skuId}>{skuOptionLabel(option)}</option>)}
+            </select>
+          ) : (
+            <input value={item.selectedSkuName || ''} placeholder="手动填写规格" onChange={(event) => onChange({ selectedSkuName: event.target.value, skuSelectionMode: 'manual' })} />
+          )}
+        </label>
       </div>
       <div className="order-group-product-actions">
         <button type="button" title="上移" disabled={itemIndex === 0} onClick={() => onReorder(-1)}><ChevronUp size={14} /></button>
         <button type="button" title="下移" onClick={() => onReorder(1)}><ChevronDown size={14} /></button>
         {itemIndex > 0 && <button type="button" onClick={onSetMain}>设为主商品</button>}
-        {groupCount > 1 && (
+        {availableTargets.length > 0 && (
           <select aria-label="移动到其他任务组" defaultValue="" onChange={(event) => {
             if (event.target.value !== '') onMoveGroup(Number(event.target.value));
             event.target.value = '';
           }}>
             <option value="">移到其他组</option>
-            {Array.from({ length: groupCount }, (_, index) => index).filter((index) => index !== groupIndex).map((index) => (
+            {availableTargets.map((index) => (
               <option key={index} value={index}>第 {index + 1} 组</option>
             ))}
           </select>
@@ -97,7 +110,7 @@ export function OrderSheetGroupPanel({ currentRunId, confirming = false, onConfi
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [revision, setRevision] = useState(0);
-  const [dragCount, setDragCount] = useState(0);
+  const [dragCount, setDragCount] = useState(4);
   const [groups, setGroups] = useState([]);
   const [unassignedItems, setUnassignedItems] = useState([]);
 
@@ -109,7 +122,7 @@ export function OrderSheetGroupPanel({ currentRunId, confirming = false, onConfi
       .then((draft) => {
         if (cancelled) return;
         setRevision(Number(draft.revision) || 0);
-        setDragCount(Math.max(0, Number(draft.dragCount) || 0));
+        setDragCount(Math.max(1, Number(draft.dragCount) || 4));
         setGroups(Array.isArray(draft.groups) ? draft.groups : []);
         const assigned = new Set((draft.groups || []).flatMap(groupItems).map((item) => itemKey(item)).filter(Boolean));
         const inferredPool = (draft.items || []).filter((item) => !assigned.has(itemKey(item)));
@@ -126,7 +139,12 @@ export function OrderSheetGroupPanel({ currentRunId, confirming = false, onConfi
     if (groups.length === 0) errors.push('至少需要保留一个任务组');
     groups.forEach((group, groupIndex) => {
       const seen = new Set();
-      groupItems(group).forEach((item, itemIndex) => {
+      const items = groupItems(group);
+      if (items.length > dragCount) errors.push(`第 ${groupIndex + 1} 组超过 1拖${dragCount} 的 ${dragCount} 件容量`);
+      if (groupIndex < groups.length - 1 && items.length !== dragCount) {
+        errors.push(`第 ${groupIndex + 1} 组需要保持 ${dragCount} 件，只有最后一组可以不足`);
+      }
+      items.forEach((item, itemIndex) => {
         const key = itemKey(item);
         if (!key) errors.push(`第 ${groupIndex + 1} 组第 ${itemIndex + 1} 个商品缺少链接或商品 ID`);
         if (!String(item.title || '').trim()) errors.push(`第 ${groupIndex + 1} 组第 ${itemIndex + 1} 个商品缺少标题`);
@@ -135,7 +153,7 @@ export function OrderSheetGroupPanel({ currentRunId, confirming = false, onConfi
       });
     });
     return errors;
-  }, [groups]);
+  }, [dragCount, groups]);
 
   const payload = () => ({ revision, dragCount, groups, unassignedItems });
 
@@ -160,11 +178,17 @@ export function OrderSheetGroupPanel({ currentRunId, confirming = false, onConfi
     if (!confirmed) setMessage('确认失败，请根据提示检查商品资料和组合。');
   };
 
-  const regroup = () => {
+  const regroup = (nextDragCount = dragCount) => {
     const items = uniqueItems([...groups.flatMap(groupItems), ...unassignedItems]);
-    setGroups(autoGroup(items, dragCount));
+    setGroups(autoGroup(items, nextDragCount));
     setUnassignedItems([]);
-    setMessage(`已按 1拖${dragCount} 重新编组，每组最多 ${dragCount + 1} 件商品。`);
+    const tailCount = items.length % nextDragCount;
+    setMessage(`已按 1拖${nextDragCount} 自动编组，每组 ${nextDragCount} 件商品${tailCount ? `，最后一组 ${tailCount} 件` : ''}。`);
+  };
+
+  const changeDragCount = (nextDragCount) => {
+    setDragCount(nextDragCount);
+    regroup(nextDragCount);
   };
 
   const updateItem = (groupIndex, itemIndex, patch) => {
@@ -197,6 +221,7 @@ export function OrderSheetGroupPanel({ currentRunId, confirming = false, onConfi
 
   const moveAcrossGroups = (sourceGroup, itemIndex, targetGroup) => {
     setGroups((current) => {
+      if (groupItems(current[targetGroup] || {}).length >= dragCount) return current;
       const detached = detachItem(current, sourceGroup, itemIndex);
       const adjustedTarget = sourceGroup < targetGroup && detached.groups.length < current.length ? targetGroup - 1 : targetGroup;
       return detached.groups.map((group, index) => index === adjustedTarget
@@ -219,6 +244,7 @@ export function OrderSheetGroupPanel({ currentRunId, confirming = false, onConfi
     if (targetGroup === 'new' || groups.length === 0) {
       setGroups((current) => [...current, makeGroup([item], current.length)]);
     } else {
+      if (groupItems(groups[Number(targetGroup)] || {}).length >= dragCount) return;
       setGroups((current) => current.map((group, index) => index === Number(targetGroup)
         ? rebuildGroup(group, [...groupItems(group), item])
         : group));
@@ -238,11 +264,13 @@ export function OrderSheetGroupPanel({ currentRunId, confirming = false, onConfi
         </div>
         <label>
           <span>组合方式</span>
-          <select value={dragCount} onChange={(event) => setDragCount(Number(event.target.value))}>
-            {[0, 1, 2, 3, 4].map((count) => <option key={count} value={count}>1拖{count}（每组 {count + 1} 件）</option>)}
+          <select value={dragCount} onChange={(event) => changeDragCount(Number(event.target.value))}>
+            {Array.from({ length: 10 }, (_, index) => index + 1).map((count) => (
+              <option key={count} value={count}>1拖{count}（每组 {count} 件）</option>
+            ))}
           </select>
         </label>
-        <button type="button" className="node-secondary-button" onClick={regroup}><RefreshCw size={13} /> 按当前顺序重新编组</button>
+        <button type="button" className="node-secondary-button" onClick={() => regroup()}><RefreshCw size={13} /> 按当前顺序重新编组</button>
       </div>
 
       {validationErrors.length > 0 && (
@@ -255,9 +283,16 @@ export function OrderSheetGroupPanel({ currentRunId, confirming = false, onConfi
       <div className="order-sheet-group-workspace">
         <div className="order-sheet-group-list">
           {groups.map((group, groupIndex) => (
-            <section className="order-sheet-task-group" key={group.id || groupIndex}>
+            <section className={`order-sheet-task-group ${groupItems(group).length < dragCount ? (groupIndex === groups.length - 1 ? 'is-tail' : 'is-incomplete') : ''}`} key={group.id || groupIndex}>
               <div className="order-sheet-task-group-head">
-                <div><strong>第 {groupIndex + 1} 组</strong><span>{groupItems(group).length} 件商品</span></div>
+                <div>
+                  <strong>第 {groupIndex + 1} 组</strong>
+                  <span className="order-sheet-group-size">1拖{dragCount}</span>
+                  <span>
+                    {groupItems(group).length}/{dragCount} 件
+                    {groupItems(group).length < dragCount ? (groupIndex === groups.length - 1 ? ' · 尾组' : ' · 未满') : ''}
+                  </span>
+                </div>
                 <button type="button" title="解散该组" onClick={() => {
                   setUnassignedItems((pool) => uniqueItems([...pool, ...groupItems(group)]));
                   setGroups((current) => current.filter((_, index) => index !== groupIndex));
@@ -268,8 +303,10 @@ export function OrderSheetGroupPanel({ currentRunId, confirming = false, onConfi
                   key={`${itemKey(item, itemIndex)}-${itemIndex}`}
                   item={item}
                   itemIndex={itemIndex}
-                  groupIndex={groupIndex}
-                  groupCount={groups.length}
+                  availableTargets={groups
+                    .map((target, index) => ({ index, count: groupItems(target).length }))
+                    .filter((target) => target.index !== groupIndex && target.count < dragCount)
+                    .map((target) => target.index)}
                   onChange={(patch) => updateItem(groupIndex, itemIndex, patch)}
                   onMoveGroup={(targetGroup) => moveAcrossGroups(groupIndex, itemIndex, targetGroup)}
                   onMoveToPool={() => moveToPool(groupIndex, itemIndex)}
@@ -293,7 +330,9 @@ export function OrderSheetGroupPanel({ currentRunId, confirming = false, onConfi
                 if (event.target.value !== '') addPoolItem(index, event.target.value);
               }}>
                 <option value="">选择加入位置</option>
-                {groups.map((_, groupIndex) => <option key={groupIndex} value={groupIndex}>加入第 {groupIndex + 1} 组</option>)}
+                {groups.map((group, groupIndex) => ({ group, groupIndex }))
+                  .filter(({ group }) => groupItems(group).length < dragCount)
+                  .map(({ groupIndex }) => <option key={groupIndex} value={groupIndex}>加入第 {groupIndex + 1} 组</option>)}
                 <option value="new">新建任务组</option>
               </select>
             </div>

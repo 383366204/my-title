@@ -138,6 +138,7 @@ export function WorkflowOverlayManager({
         currentRunId={currentRunId}
         sourceNodeId={node?.id}
         onDistributionJobChange={updateDistributionNodeJob}
+        workflowRunStatus={node?.data?.workflowRunStatus}
         directPreview
         onManualComplete={onClose}
       />
