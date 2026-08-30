@@ -21,10 +21,15 @@ export async function requestPayload(url, options = {}) {
   const payload = await response.json().catch(() => ({}));
 
   if (!response.ok || (payload.ok === false && !allowApiError)) {
-    throw new ApiError(payload.error || `请求失败: ${response.status}`, {
-      status: response.status,
-      payload
-    });
+    // 部分接口只返回 userMessage / message（例如 Chrome 启动失败），
+    // 不兜底就会退化成无信息量的「请求失败: 500」。
+    throw new ApiError(
+      payload.error || payload.userMessage || payload.message || `请求失败: ${response.status}`,
+      {
+        status: response.status,
+        payload
+      }
+    );
   }
   return payload;
 }

@@ -5,14 +5,12 @@
 
 const http = require('http');
 const path = require('path');
-const { exec, execSync } = require('child_process');
-const util = require('util');
+const { execSync, spawn } = require('child_process');
 const {
   buildChromeLaunchPlan,
   findChromeExecutable,
   getChromeProfileDir
 } = require('../../../core/platform');
-const execAsync = util.promisify(exec);
 
 // 错误提示常量
 const ERRORS = {
@@ -231,10 +229,16 @@ async function autoLaunchChrome(port, options = {}) {
 
   const userDataDir = options.userDataDir || getDedicatedProfileDir();
   const osKind = process.platform === 'darwin' ? 'macos' : process.platform === 'win32' ? 'windows' : 'linux';
-  const cmd = launchPlanToShellCommand(buildChromeLaunchPlan({ osKind, port, userDataDir, profileName: 'sycm' }));
+  const plan = buildChromeLaunchPlan({ osKind, port, userDataDir, profileName: 'sycm' });
 
+  // Chrome 是常驻 GUI 进程，用 exec 等它退出必然在 timeout 时误判为启动失败
+  // （macOS 走 open 会立即退出，所以只有 Windows/Linux 复现）。
+  // 改为分离启动：只有拉不起来才算错误，是否就绪交给下面的端口轮询判定。
+  let spawnError = null;
   try {
-    await execAsync(cmd, { timeout: 10000 });
+    const child = spawn(plan.command, plan.args, { detached: true, stdio: 'ignore' });
+    child.on('error', (err) => { spawnError = err; });
+    child.unref();
   } catch (err) {
     return { success: false, message: '启动 Chrome 失败: ' + (err.message || err) };
   }
@@ -245,9 +249,15 @@ async function autoLaunchChrome(port, options = {}) {
     if (await isChromeDevToolsAvailable(port)) {
       return { success: true, message: 'Chrome 已启动并就绪' };
     }
+    if (spawnError) break;
   }
 
-  return { success: false, message: 'Chrome 启动超时（等待 ' + (waitTimeout / 1000) + '秒），请检查 Chrome 是否已安装' };
+  return {
+    success: false,
+    message: spawnError
+      ? '启动 Chrome 失败: ' + (spawnError.message || spawnError)
+      : 'Chrome 启动超时（等待 ' + (waitTimeout / 1000) + '秒），请检查 Chrome 是否已安装'
+  };
 }
 
 module.exports = {
