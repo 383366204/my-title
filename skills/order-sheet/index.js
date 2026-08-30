@@ -76,6 +76,7 @@ function mergeOrderSheetProducts(rankRows = [], manualRows = []) {
       existing.selectedSkuId = manualRow.selectedSkuId || '';
       existing.selectedSkuName = manualRow.selectedSkuName || '';
       existing.selectedSkuPrice = manualRow.selectedSkuPrice ?? null;
+      existing.selectedSkuImageUrl = manualRow.selectedSkuImageUrl || '';
       existing.lowestSkuId = manualRow.lowestSkuId || '';
       existing.lowestSkuName = manualRow.lowestSkuName || '';
       existing.lowestSkuPrice = manualRow.lowestSkuPrice ?? manualRow.referencePrice ?? null;
@@ -105,6 +106,7 @@ function mergeOrderSheetProducts(rankRows = [], manualRows = []) {
         selectedSkuId: manualRow.selectedSkuId || '',
         selectedSkuName: manualRow.selectedSkuName || '',
         selectedSkuPrice: manualRow.selectedSkuPrice ?? null,
+        selectedSkuImageUrl: manualRow.selectedSkuImageUrl || '',
         lowestSkuId: manualRow.lowestSkuId || '',
         lowestSkuName: manualRow.lowestSkuName || '',
         lowestSkuPrice: manualRow.lowestSkuPrice ?? manualRow.referencePrice ?? null,
@@ -146,6 +148,7 @@ function updateOrderSheetManualProducts(options = {}) {
       selectedSkuId: update.selectedSkuId || row.selectedSkuId || '',
       selectedSkuName: update.selectedSkuName || row.selectedSkuName || '',
       selectedSkuPrice: update.selectedSkuPrice ?? row.selectedSkuPrice ?? null,
+      selectedSkuImageUrl: update.selectedSkuImageUrl || row.selectedSkuImageUrl || '',
       lowestSkuId: update.lowestSkuId || row.lowestSkuId || '',
       lowestSkuName: update.lowestSkuName || row.lowestSkuName || '',
       lowestSkuPrice: update.lowestSkuPrice ?? row.lowestSkuPrice ?? row.referencePrice ?? null,
@@ -172,6 +175,7 @@ function updateOrderSheetManualProducts(options = {}) {
       selectedSkuId: row.selectedSkuId || '',
       selectedSkuName: row.selectedSkuName || '',
       selectedSkuPrice: row.selectedSkuPrice ?? null,
+      selectedSkuImageUrl: row.selectedSkuImageUrl || '',
       lowestSkuId: row.lowestSkuId || '',
       lowestSkuName: row.lowestSkuName || '',
       lowestSkuPrice: row.lowestSkuPrice ?? row.referencePrice ?? null,

@@ -95,6 +95,7 @@ function parseManualItem(input) {
   const selectedSkuId = String(raw.selectedSkuId || raw.skuId || '').trim();
   const selectedSkuName = String(raw.selectedSkuName || raw.skuName || '').trim();
   const selectedSkuPrice = parseAmount(raw.selectedSkuPrice != null ? raw.selectedSkuPrice : raw.skuPrice);
+  const selectedSkuImageUrl = String(raw.selectedSkuImageUrl || '').trim();
   const lowestSkuId = String(raw.lowestSkuId || '').trim();
   const lowestSkuName = String(raw.lowestSkuName || '').trim();
   const lowestSkuPrice = parseAmount(raw.lowestSkuPrice);
@@ -164,6 +165,7 @@ function parseManualItem(input) {
     ...(selectedSkuId ? { selectedSkuId } : {}),
     ...(selectedSkuName ? { selectedSkuName } : {}),
     ...(selectedSkuPrice != null ? { selectedSkuPrice } : {}),
+    ...(selectedSkuImageUrl ? { selectedSkuImageUrl } : {}),
     ...(lowestSkuId ? { lowestSkuId } : {}),
     ...(lowestSkuName ? { lowestSkuName } : {}),
     ...(lowestSkuPrice != null ? { lowestSkuPrice } : {}),

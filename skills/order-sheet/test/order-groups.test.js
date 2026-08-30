@@ -35,6 +35,15 @@ describe('order-groups module', () => {
     assert.equal(normalizedMain.role, 'main');
     assert.equal(normalizedMain.orderAmount, 199.9);
     assert.equal(normalizedMain.storeName, '某某旗舰店');
+    assert.equal(normalizedMain.selectedSkuImageUrl, '');
+
+    // 规格图与商品主图是两个独立字段，选择规格不得改写主图。
+    const withSkuImage = normalizeOrderProduct({
+      ...item,
+      selectedSkuImageUrl: 'https://img.alicdn.com/sku-red.jpg'
+    }, 'main');
+    assert.equal(withSkuImage.selectedSkuImageUrl, 'https://img.alicdn.com/sku-red.jpg');
+    assert.equal(withSkuImage.imageUrl, 'https://img.alicdn.com/test.jpg');
 
     const normalizedSub = normalizeOrderProduct(item, 'sub');
     assert.equal(normalizedSub.role, 'sub');

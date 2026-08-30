@@ -16,6 +16,7 @@ const DEFAULT_ORDER_GROUP_SIZE = 4;
  * @property {string} [selectedSkuId] 已选 SKU ID
  * @property {string} [selectedSkuName] 已选规格名称
  * @property {number|null} [selectedSkuPrice] 已选 SKU 价格
+ * @property {string} [selectedSkuImageUrl] 已选 SKU 规格图（不覆盖商品主图 imageUrl）
  * @property {'lowest'|'manual'} [skuSelectionMode] SKU 选择方式
  * @property {number|null} [visitorCount] 访客数
  * @property {number|null} [paidItemCount] 支付件数
@@ -109,6 +110,7 @@ function normalizeOrderProduct(product = {}, defaultRole = 'main') {
     selectedSkuId: String(product.selectedSkuId || '').trim(),
     selectedSkuName: String(product.selectedSkuName || '').trim(),
     selectedSkuPrice: parseAmount(product.selectedSkuPrice),
+    selectedSkuImageUrl: String(product.selectedSkuImageUrl || '').trim(),
     lowestSkuId: String(product.lowestSkuId || '').trim(),
     lowestSkuName: String(product.lowestSkuName || '').trim(),
     lowestSkuPrice: parseAmount(product.lowestSkuPrice != null ? product.lowestSkuPrice : product.referencePrice),

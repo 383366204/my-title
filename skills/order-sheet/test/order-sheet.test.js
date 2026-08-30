@@ -77,6 +77,38 @@ describe('order sheet workflow', () => {
     assert.equal(rawSheet.getCell('P3').value, '商品访客数降序');
   });
 
+  it('embeds the product main image even when a SKU image is selected', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'order-sheet-main-image-'));
+    const outputFile = path.join(tempDir, 'main-image.xlsx');
+    const requested = [];
+    const rows = [
+      {
+        rank: 1,
+        itemId: '2001',
+        title: '主图商品',
+        productUrl: 'https://item.taobao.com/item.htm?id=2001',
+        imageUrl: 'https://img.alicdn.com/main.jpg',
+        selectedSkuImageUrl: 'https://img.alicdn.com/sku-red.jpg',
+        selectedSkuName: '颜色：酒红',
+        orderAmount: 25,
+        visitorCount: 30
+      }
+    ];
+
+    const result = await generateOrderSheet({
+      rows,
+      meta: { storeName: '测试店铺', statDate: '2026-08-10', orderDate: '2026-08-12', period: '日' },
+      outputFile,
+      imageLoader: async (imageUrl) => {
+        requested.push(imageUrl);
+        return null;
+      }
+    });
+
+    assert.deepEqual(requested, ['https://img.alicdn.com/main.jpg']);
+    assert.equal(result.imageCount, 0);
+  });
+
   it('writes selected SKU and defaults amount to the lowest SKU price', async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'order-sheet-sku-'));
     const outputFile = path.join(tempDir, 'result.xlsx');

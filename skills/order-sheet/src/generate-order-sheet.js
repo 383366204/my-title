@@ -242,6 +242,7 @@ function orderAmount(row, mode) {
 }
 
 async function addProductImage(workbook, sheet, row, startRow, imageLoader) {
+  // 只嵌商品主图：规格图记录在 selectedSkuImageUrl，不参与制表。
   const image = await imageLoader(row.imageUrl);
   if (!image) {
     if (row.imageUrl) {

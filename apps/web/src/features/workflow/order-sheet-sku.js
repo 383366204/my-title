@@ -14,7 +14,8 @@ export function skuSelectionValue(item = {}) {
     : AUTO_LOWEST_SKU;
 }
 
-/** Build the item patch produced by an automatic or manual SKU choice. */
+/** Build the item patch produced by an automatic or manual SKU choice.
+ * 商品主图 imageUrl 不受规格选择影响，规格图单独记录在 selectedSkuImageUrl。 */
 export function applySkuSelection(item = {}, value = AUTO_LOWEST_SKU) {
   const options = availableSkuOptions(item);
   const lowest = options[0] || null;
@@ -31,7 +32,8 @@ export function applySkuSelection(item = {}, value = AUTO_LOWEST_SKU) {
     lowestSkuPrice: Number(lowest?.price || selected.price),
     skuSelectionMode: value === AUTO_LOWEST_SKU ? 'lowest' : 'manual',
     orderAmount: Number(selected.price),
-    ...(selected.imageUrl ? { imageUrl: selected.imageUrl } : {})
+    // 规格图只作为所选规格的凭证保留，制表嵌图始终用商品主图。
+    selectedSkuImageUrl: String(selected.imageUrl || '')
   };
 }
 
