@@ -14,7 +14,14 @@ const {
   parseNumber,
   validateCustomDateRange
 } = require('../../sycm-research/src/product-rank');
-const { averagePayment, generateOrderSheet } = require('../src/generate-order-sheet');
+const {
+  averagePayment,
+  fetchImage,
+  generateOrderSheet,
+  imageUrlCandidates,
+  normalizeImageUrl,
+  sniffImageFormat
+} = require('../src/generate-order-sheet');
 
 describe('order sheet workflow', () => {
   it('normalizes SYCM numbers and verifies visitor descending order', () => {
@@ -395,5 +402,118 @@ describe('order sheet workflow', () => {
     const [clearedRow] = readJsonl(getRun({ dataDir: tempDir, runId }).run.files.productRank);
     assert.equal(clearedRow.orderAmount, null);
     assert.equal(clearedRow.storeName, '');
+  });
+
+  it('sniffs the real image format from bytes instead of trusting the URL suffix', () => {
+    assert.equal(sniffImageFormat(Buffer.from('ffd8ffe000104a464946', 'hex')), 'jpeg');
+    assert.equal(sniffImageFormat(Buffer.from('89504e470d0a1a0a0000000d', 'hex')), 'png');
+    assert.equal(sniffImageFormat(Buffer.from('474946383961000000000000', 'hex')), 'gif');
+    assert.equal(sniffImageFormat(Buffer.from('52494646523f300057454250', 'hex')), 'webp');
+    assert.equal(sniffImageFormat(Buffer.from('<html>error</html>', 'utf8')), '');
+    assert.equal(sniffImageFormat(Buffer.alloc(4)), '');
+  });
+
+  it('normalizes alicdn webp transform suffixes back to embeddable sources', () => {
+    assert.equal(
+      normalizeImageUrl('https://img.alicdn.com/i2/394/O1CN01abc_!!394.jpg_.webp'),
+      'https://img.alicdn.com/i2/394/O1CN01abc_!!394.jpg'
+    );
+    assert.equal(
+      normalizeImageUrl('https://img.alicdn.com/i2/394/O1CN01abc_!!394.jpg_400x400q90.jpg_.webp'),
+      'https://img.alicdn.com/i2/394/O1CN01abc_!!394.jpg_400x400q90.jpg'
+    );
+    assert.equal(normalizeImageUrl('https://cdn.example.com/a.webp'), 'https://cdn.example.com/a.jpg');
+    assert.equal(normalizeImageUrl('https://cdn.example.com/a.jpg'), 'https://cdn.example.com/a.jpg');
+    assert.equal(normalizeImageUrl(''), '');
+
+    assert.deepEqual(
+      imageUrlCandidates('https://img.alicdn.com/i2/394/O1CN01abc_!!394.jpg_.webp'),
+      [
+        'https://img.alicdn.com/i2/394/O1CN01abc_!!394.jpg_200x200q90.jpg',
+        'https://img.alicdn.com/i2/394/O1CN01abc_!!394.jpg',
+        'https://img.alicdn.com/i2/394/O1CN01abc_!!394.jpg_.webp'
+      ]
+    );
+    // 非淘系 CDN 不追加缩放后缀，避免无谓的 404
+    assert.deepEqual(imageUrlCandidates('https://cdn.example.com/p.webp'), [
+      'https://cdn.example.com/p.jpg',
+      'https://cdn.example.com/p.webp'
+    ]);
+  });
+
+  it('never embeds a webp payload even when the CDN answers with one', async () => {
+    const webp = Buffer.from('52494646523f30005745425056503820', 'hex');
+    const jpeg = Buffer.from('ffd8ffe000104a46494600010100', 'hex');
+
+    // 最坏情况：CDN 完全无视协商，任何地址都回 WebP —— 必须返回 null 走超链接降级
+    const attempted = [];
+    const alwaysWebp = async (url) => {
+      attempted.push(url);
+      return { data: webp, headers: { 'content-type': 'image/webp' } };
+    };
+    assert.equal(await fetchImage('https://img.alicdn.com/x/O1CN01.jpg_.webp', { request: alwaysWebp }), null);
+    assert.equal(attempted.length, 3);
+
+    // 真实 CDN 行为：缩放后缀给真 JPEG，首个候选即命中，不必再请求大图
+    const hits = [];
+    const realistic = async (url) => {
+      hits.push(url);
+      const isJpeg = url.endsWith('_200x200q90.jpg');
+      return {
+        data: isJpeg ? jpeg : webp,
+        headers: { 'content-type': isJpeg ? 'image/jpeg' : 'image/webp' }
+      };
+    };
+    const result = await fetchImage('https://img.alicdn.com/x/O1CN01.jpg_.webp', { request: realistic });
+    assert.deepEqual(hits, ['https://img.alicdn.com/x/O1CN01.jpg_200x200q90.jpg']);
+    assert.equal(result.extension, 'jpeg');
+    assert.equal(Buffer.compare(result.buffer, jpeg), 0);
+  });
+
+  it('writes media files named after the format the loader reported', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'order-sheet-media-name-'));
+    const outputFile = path.join(tempDir, 'media.xlsx');
+    await generateOrderSheet({
+      rows: [{ rank: 1, itemId: '3001', title: 'PNG 商品', imageUrl: 'https://img.alicdn.com/x.png', visitorCount: 5 }],
+      meta: { storeName: '测试店铺', statDate: '2026-08-31', orderDate: '2026-08-31', period: '日' },
+      outputFile,
+      includeRawData: false,
+      imageLoader: async () => ({ buffer: Buffer.from('89504e470d0a1a0a0000000d', 'hex'), extension: 'png' })
+    });
+    const packed = fs.readFileSync(outputFile).toString('latin1');
+    assert.ok(packed.includes('xl/media/image1.png'), '媒体文件名应跟随真实格式，不能硬写 .jpeg');
+    assert.equal(packed.includes('image1.jpeg'), false);
+  });
+
+  it('writes picture anchors that mobile renderers can actually draw', async () => {
+    const JSZip = require('jszip');
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'order-sheet-anchor-'));
+    const outputFile = path.join(tempDir, 'anchor.xlsx');
+    const jpeg = Buffer.from('ffd8ffe000104a46494600010100000100010000', 'hex');
+    const rows = [
+      { rank: 1, itemId: '4001', title: '锚点商品一', productUrl: 'https://item.taobao.com/item.htm?id=4001', imageUrl: 'https://img.alicdn.com/a.jpg', visitorCount: 30 },
+      { rank: 2, itemId: '4002', title: '锚点商品二', productUrl: 'https://item.taobao.com/item.htm?id=4002', imageUrl: 'https://img.alicdn.com/b.jpg', visitorCount: 20 }
+    ];
+
+    const result = await generateOrderSheet({
+      rows,
+      meta: { storeName: '测试店铺', statDate: '2026-08-31', orderDate: '2026-08-31', period: '日' },
+      outputFile,
+      imageLoader: async () => ({ buffer: jpeg, extension: 'jpeg' })
+    });
+    assert.equal(result.imageCount, 2);
+
+    const zip = await JSZip.loadAsync(fs.readFileSync(outputFile));
+    const xml = await zip.file('xl/drawings/drawing1.xml').async('string');
+    assert.equal((xml.match(/<xdr:twoCellAnchor/g) || []).length, 2, '应改用 twoCellAnchor 两角点锚定');
+    assert.equal(xml.includes('<xdr:oneCellAnchor'), false);
+    assert.equal(xml.includes('cstate='), false, '纯内嵌图片不应带 cstate 标记');
+
+    const boxes = [...xml.matchAll(/<a:off x="(\d+)" y="(\d+)"\/><a:ext cx="(\d+)" cy="(\d+)"\/>/g)];
+    assert.equal(boxes.length, 2, '每个锚点都应回填真实 xfrm');
+    for (const [, offX, offY, cx, cy] of boxes) {
+      assert.ok(Number(cx) > 0 && Number(cy) > 0, 'xfrm 尺寸不能为 0');
+      assert.ok(Number(offY) > 0, 'xfrm 偏移需要换算成绝对 EMU');
+    }
   });
 });
