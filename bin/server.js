@@ -100,7 +100,9 @@ const {
 } = require('../core/platform-access-guard');
 
 const app = express();
-app.use(express.json());
+// 刷单表草稿会带完整商品 + SKU 数据（单个商品可有数百个规格），默认 100kb 会把保存请求直接拒成 413
+const JSON_BODY_LIMIT = process.env.UI_JSON_BODY_LIMIT || '25mb';
+app.use(express.json({ limit: JSON_BODY_LIMIT }));
 
 const reactWebPath = path.join(__dirname, '../apps/web/dist');
 
@@ -2231,6 +2233,19 @@ app.get('*', (req, res, next) => {
   const indexPath = path.join(reactWebPath, 'index.html');
   if (!fs.existsSync(indexPath)) return next();
   res.sendFile(indexPath);
+});
+
+// 请求体超限时返回结构化 JSON，避免前端只拿到 HTML 报错页
+app.use((err, req, res, next) => {
+  if (err && (err.type === 'entity.too.large' || err.status === 413 || err.statusCode === 413)) {
+    return res.status(413).json({
+      ok: false,
+      code: 'PAYLOAD_TOO_LARGE',
+      error: `请求体超过上限（${JSON_BODY_LIMIT}），请减少商品或规格数量后重试`,
+      userMessage: `本次提交内容过大（上限 ${JSON_BODY_LIMIT}），服务器已拒绝，请精简后重试。`
+    });
+  }
+  return next(err);
 });
 
 // Boot Server (Explicitly bind to localhost 127.0.0.1 for local boundaries security P2)
