@@ -10,7 +10,10 @@ const {
   parseTaobaoItemHtml,
   parseManualItem,
   parseManualItems,
-  enrichManualItems
+  enrichManualItems,
+  createTaobaoChromeSession,
+  isPlaceholderTitle,
+  pickTitle
 } = require('../src/manual-items');
 
 describe('manual items parser', () => {
@@ -221,5 +224,98 @@ describe('manual items parser', () => {
     );
     assert.equal(fetched.itemId, '8899');
     assert.equal(fetched.referencePrice, 39.9);
+  });
+
+  it('treats SPA placeholder titles as missing instead of success', () => {
+    assert.equal(isPlaceholderTitle('商品详情'), true);
+    assert.equal(isPlaceholderTitle('商品详情 - 淘宝网'), true);
+    assert.equal(isPlaceholderTitle('加载中'), true);
+    assert.equal(isPlaceholderTitle('淘宝网'), true);
+    assert.equal(isPlaceholderTitle(''), true);
+    assert.equal(isPlaceholderTitle('气球狗长项链装饰贝壳长款简约韩系女百搭通勤小众高级感金属配饰'), false);
+    assert.equal(pickTitle(['商品详情', '商品详情 - 淘宝网', '气球狗长项链装饰贝壳长款']), '气球狗长项链装饰贝壳长款');
+    assert.equal(pickTitle(['商品详情', '']), '');
+  });
+
+  it('does not fall back to a placeholder <title> when og:title is missing', () => {
+    const html = '<html><head><title>商品详情 - 淘宝网</title></head><body></body></html>';
+    const parsed = parseTaobaoItemHtml(html, 'https://item.taobao.com/item.htm?id=1051983444354');
+    assert.equal(parsed.title, '');
+    assert.equal(parsed.itemId, '1051983444354');
+  });
+
+  it('keeps polling past the placeholder title until the SPA renders the real one', async () => {
+    const frames = [
+      {
+        readyState: 'loading',
+        url: 'https://item.taobao.com/item.htm?id=1051983444354',
+        title: '商品详情',
+        titleCandidates: ['商品详情'],
+        skuOptions: []
+      },
+      {
+        readyState: 'interactive',
+        url: 'https://item.taobao.com/item.htm?id=1051983444354',
+        title: '气球狗长项链装饰贝壳长款简约韩系女',
+        titleCandidates: ['气球狗长项链装饰贝壳长款简约韩系女'],
+        skuOptions: []
+      }
+    ];
+    let evaluates = 0;
+    const session = await createTaobaoChromeSession({
+      browserTimeout: 6000,
+      openBlankTarget: async () => ({ webSocketDebuggerUrl: 'ws://fake-cdp' }),
+      createCdpClient: () => ({
+        ready: Promise.resolve(),
+        send: async () => ({}),
+        async evaluate() {
+          evaluates += 1;
+          return frames[Math.min(evaluates - 1, frames.length - 1)];
+        },
+        close: () => {}
+      })
+    });
+
+    const detail = await session.readItem({
+      itemId: '1051983444354',
+      productUrl: 'https://item.taobao.com/item.htm?id=1051983444354'
+    });
+
+    assert.equal(evaluates, 2, '占位标题不应让轮询提前结束');
+    assert.equal(detail.title, '气球狗长项链装饰贝壳长款简约韩系女');
+  });
+
+  it('reports failed enrichment when only a placeholder title is ever rendered', async () => {
+    const [enriched] = await enrichManualItems([{
+      itemId: '1067574637657',
+      title: '',
+      imageUrl: '',
+      productUrl: 'https://item.taobao.com/item.htm?id=1067574637657'
+    }], {
+      skipEnrichmentDelay: true,
+      fetchTaobaoItemPage: async item => ({
+        itemId: item.itemId,
+        title: '',
+        imageUrl: '',
+        finalUrl: item.productUrl,
+        enrichmentSource: 'http'
+      }),
+      createTaobaoChromeSession: async () => ({
+        async readItem(item) {
+          return {
+            itemId: item.itemId,
+            title: '商品详情',
+            imageUrl: 'https://img.test/x.jpg',
+            finalUrl: item.productUrl,
+            enrichmentSource: 'chrome'
+          };
+        },
+        close() {}
+      })
+    });
+
+    assert.equal(enriched.title, '');
+    assert.equal(enriched.enrichmentStatus, 'partial');
+    assert.match(enriched.enrichmentError, /未渲染出商品标题/);
   });
 });

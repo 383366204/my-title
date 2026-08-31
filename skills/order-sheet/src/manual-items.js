@@ -270,7 +270,11 @@ function jsonStringValue(html, keys) {
 function parseTaobaoItemHtml(html, finalUrl = '') {
   const source = String(html || '');
   const titleTag = decodeHtml(source.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '').replace(/[-_–—]\s*(淘宝网|天猫.*)$/i, '').trim();
-  const title = metaContent(source, 'og:title') || jsonStringValue(source, ['title', 'itemTitle']) || titleTag;
+  const title = pickTitle([
+    metaContent(source, 'og:title'),
+    jsonStringValue(source, ['itemTitle', 'title']),
+    titleTag
+  ]);
   const imageUrl = metaContent(source, 'og:image') || jsonStringValue(source, ['picUrl', 'image', 'mainImage']);
   const storeName = jsonStringValue(source, ['shopName', 'sellerNick', 'sellerName']);
   const referencePriceText = metaContent(source, 'product:price:amount') || jsonStringValue(source, ['priceText', 'price']);
@@ -371,18 +375,45 @@ function cleanBrowserTitle(value) {
     .trim();
 }
 
+// 淘宝商品页是 SPA，首屏 document.title 字面上就是「商品详情」，等渲染完成后才换成真实商品标题。
+const PLACEHOLDER_TITLE_PATTERN = /^\s*(商品详情|商品详情页|产品详情|详情|加载中[^ ]*|页面不存在|登录[^ ]*|淘宝网?|天猫(商城|国际)?)\s*(?:[-–—_]\s*(?:淘宝网?|天猫\S*))?\s*$/i;
+
+/**
+ * 判断抓取结果是否只是页面未渲染完成时的占位标题。
+ * @param {string} value 候选标题
+ * @returns {boolean} true 表示这不是有效的商品标题
+ */
+function isPlaceholderTitle(value) {
+  const text = cleanBrowserTitle(value);
+  if (!text) return true;
+  return PLACEHOLDER_TITLE_PATTERN.test(text);
+}
+
+/**
+ * 按可信度顺序挑选第一个有效的商品标题。
+ * @param {Array<string>} candidates 标题候选，可信度从高到低
+ * @returns {string} 有效标题，全部无效时返回空串
+ */
+function pickTitle(candidates) {
+  const list = Array.isArray(candidates) ? candidates : [candidates];
+  for (const candidate of list) {
+    const text = cleanBrowserTitle(candidate);
+    if (text && !isPlaceholderTitle(text)) return text;
+  }
+  return '';
+}
+
 function browserSnapshotExpression() {
   return `(() => {
     const content = (selector, attr = 'content') => document.querySelector(selector)?.getAttribute(attr) || '';
     const text = selector => String(document.querySelector(selector)?.textContent || '').trim();
     const bodyText = String(document.body?.innerText || '').replace(/\\s+/g, ' ').slice(0, 4000);
-    const titleCandidates = [
+    const domTitles = [
       content('meta[property="og:title"]'),
-      document.title,
       text('[class*="ItemTitle"]'),
       text('[class*="itemTitle"]'),
       text('h1')
-    ].filter(Boolean);
+    ];
     const imageCandidates = [
       content('meta[property="og:image"]'),
       document.querySelector('[class*="MainPic"] img,[class*="mainPic"] img')?.currentSrc,
@@ -408,6 +439,32 @@ function browserSnapshotExpression() {
       return null;
     };
     const skuData = findSkuData(window.__ICE_APP_CONTEXT__);
+    // 标题要等 React 渲染才写进 DOM，但 ICE 全局里通常已经带着它，优先从页面数据取。
+    const iceTitles = [];
+    const titleSeen = new WeakSet();
+    const collectIceTitles = (value, depth) => {
+      if (!value || typeof value !== 'object' || depth > 10 || iceTitles.length >= 6 || titleSeen.has(value)) return;
+      titleSeen.add(value);
+      for (const entry of Object.entries(value)) {
+        const key = entry[0];
+        const child = entry[1];
+        if ((key === 'itemTitle' || key === 'title') && typeof child === 'string') {
+          const clean = child.trim();
+          if (clean.length > 6 && !/^https?:/i.test(clean)) iceTitles.push(clean);
+        } else if (child && typeof child === 'object') {
+          collectIceTitles(child, depth + 1);
+        }
+      }
+    };
+    collectIceTitles(window.__ICE_APP_CONTEXT__, 0);
+    // document.title 排最后：它在首屏几乎必然是占位内容，交给 Node 侧的 pickTitle 过滤
+    const titleCandidates = [
+      ...domTitles,
+      ...iceTitles,
+      jsonValue(['itemTitle']),
+      jsonValue(['title']),
+      document.title
+    ].filter(Boolean);
     const skuNames = new Map();
     const skuImages = new Map();
     for (const prop of skuData?.skuBase?.props || []) {
@@ -443,7 +500,8 @@ function browserSnapshotExpression() {
       readyState: document.readyState,
       url: location.href,
       bodyText,
-      title: titleCandidates[0] || jsonValue(['title', 'itemTitle']),
+      title: titleCandidates[0] || '',
+      titleCandidates,
       imageUrl: imageCandidates[0] || jsonValue(['picUrl', 'mainImage']),
       storeName: jsonValue(['shopName', 'sellerNick', 'sellerName']),
       priceText: content('meta[property="product:price:amount"]') || jsonValue(['priceText', 'price']),
@@ -477,7 +535,9 @@ function parseBrowserSnapshot(snapshot = {}, fallbackItem = {}) {
   const referencePrice = selectedSku?.price || (Number.isFinite(pagePrice) && pagePrice > 0 ? Math.round(pagePrice * 100) / 100 : null);
   return {
     itemId: fallbackItem.itemId || parsedUrl?.itemId || '',
-    title: cleanBrowserTitle(snapshot.title),
+    title: pickTitle(Array.isArray(snapshot.titleCandidates) && snapshot.titleCandidates.length > 0
+      ? snapshot.titleCandidates
+      : [snapshot.title]),
     imageUrl: String(snapshot.imageUrl || '').trim(),
     storeName: String(snapshot.storeName || '').trim(),
     referencePrice,
@@ -499,26 +559,37 @@ function parseBrowserSnapshot(snapshot = {}, fallbackItem = {}) {
  * @param {object} [options] Browser options.
  * @param {number} [options.port=9222] Chrome debugging port.
  * @param {number} [options.browserTimeout=20000] Per-item loading timeout.
+ * @param {number} [options.postCompleteGraceMs=6000] 页面 ready 后继续等待真实标题渲染的时间。
+ * @param {Function} [options.openBlankTarget] 注入的空白标签页创建函数，便于测试。
+ * @param {Function} [options.createCdpClient] 注入的 CDP 客户端工厂，便于测试。
  * @returns {Promise<{readItem: Function, close: Function}>} Reusable item page session.
  */
 async function createTaobaoChromeSession(options = {}) {
   const port = Number(options.port || 9222);
   const timeout = Number(options.browserTimeout || 20000);
-  let response;
-  try {
-    response = await axios.put(
-      `http://127.0.0.1:${port}/json/new?${encodeURIComponent('about:blank')}`,
-      null,
-      { timeout: 5000, proxy: false }
-    );
-  } catch (error) {
-    throw new Error(`Chrome 调试连接不可用（端口 ${port}），请先启动 Chrome 后重试：${error.message}`);
-  }
-  const target = response?.data;
+  // 页面 readyState 变 complete 只表示静态 HTML 加载完，SPA 还要再渲染才会写入真实标题。
+  const postCompleteGrace = Number(options.postCompleteGraceMs || 6000);
+  const openBlankTarget = typeof options.openBlankTarget === 'function'
+    ? options.openBlankTarget
+    : async () => {
+        try {
+          const response = await axios.put(
+            `http://127.0.0.1:${port}/json/new?${encodeURIComponent('about:blank')}`,
+            null,
+            { timeout: 5000, proxy: false }
+          );
+          return response?.data;
+        } catch (error) {
+          throw new Error(`Chrome 调试连接不可用（端口 ${port}），请先启动 Chrome 后重试：${error.message}`);
+        }
+      };
+  const cdpFactory = typeof options.createCdpClient === 'function' ? options.createCdpClient : createCdpClient;
+
+  const target = await openBlankTarget();
   if (!target?.webSocketDebuggerUrl) {
     throw new Error(`Chrome 调试端口 ${port} 没有创建出可用商品页`);
   }
-  const cdp = createCdpClient(target.webSocketDebuggerUrl);
+  const cdp = cdpFactory(target.webSocketDebuggerUrl);
   await cdp.ready;
   await cdp.send('Page.enable').catch(() => {});
 
@@ -529,21 +600,20 @@ async function createTaobaoChromeSession(options = {}) {
       if (!isAllowedEndpoint(parsed)) throw new Error('商品链接不是安全的淘系地址');
       await cdp.send('Page.navigate', { url: targetUrl }, timeout);
       const startedAt = Date.now();
-      let snapshot = null;
-      while (Date.now() - startedAt < timeout) {
+      const deadline = startedAt + timeout;
+      let completedAt = null;
+      while (Date.now() < deadline) {
         await wait(350);
-        snapshot = await cdp.evaluate(browserSnapshotExpression(), 8000);
+        const snapshot = await cdp.evaluate(browserSnapshotExpression(), 8000);
+        // parseBrowserSnapshot 已过滤占位标题：拿不到真标题就继续轮询，不能提前收工
         const detail = parseBrowserSnapshot(snapshot, item);
         if (detail.title) return detail;
         if (snapshot?.readyState === 'complete') {
-          await wait(650);
-          snapshot = await cdp.evaluate(browserSnapshotExpression(), 8000);
-          const completedDetail = parseBrowserSnapshot(snapshot, item);
-          if (completedDetail.title) return completedDetail;
-          break;
+          completedAt = completedAt || Date.now();
+          if (Date.now() - completedAt >= postCompleteGrace) break;
         }
       }
-      throw new Error(`Chrome 已打开商品 ${item?.itemId || ''}，但页面没有可读取的标题`);
+      throw new Error(`Chrome 已打开商品 ${item?.itemId || ''}，但页面未渲染出商品标题，请手动补充`);
     },
     close() {
       cdp.close();
@@ -622,34 +692,37 @@ async function enrichManualItems(items = [], _options = {}) {
               throw chromeSessionError;
             }
           }
-          if (!detail) throw httpError || new Error('商品资料读取失败');
-          const nextItem = {
-            ...item,
-            itemId: item.itemId || detail.itemId || '',
-            title: item.title || detail.title || '',
-            imageUrl: item.imageUrl || detail.imageUrl || '',
-            storeName: item.storeName || detail.storeName || '',
-            referencePrice: detail.referencePrice,
-            orderAmount: item.orderAmount != null
-              ? item.orderAmount
-              : (detail.selectedSkuPrice ?? detail.referencePrice ?? null),
-            skuOptions: detail.skuOptions || item.skuOptions || [],
-            selectedSkuId: detail.selectedSkuId || item.selectedSkuId || '',
-            selectedSkuName: detail.selectedSkuName || item.selectedSkuName || '',
-            selectedSkuPrice: detail.selectedSkuPrice ?? item.selectedSkuPrice ?? null,
-            lowestSkuId: detail.lowestSkuId || item.lowestSkuId || '',
-            lowestSkuName: detail.lowestSkuName || item.lowestSkuName || '',
-            lowestSkuPrice: detail.lowestSkuPrice ?? item.lowestSkuPrice ?? detail.referencePrice ?? null,
-            skuSelectionMode: detail.skuSelectionMode || item.skuSelectionMode || 'lowest',
-            resolvedUrl: detail.finalUrl || item.productUrl,
-            enrichmentSource: detail.enrichmentSource || '',
-            enrichmentStatus: (item.title || detail.title) && (item.itemId || detail.itemId) ? 'complete' : 'partial',
-            enrichmentError: !(item.title || detail.title)
-              ? '未读取到商品标题'
-              : !(item.itemId || detail.itemId)
-                ? '短链接未解析出商品 ID'
-                : ''
-          };
+        if (!detail) throw httpError || new Error('商品资料读取失败');
+        // 只拿到占位标题时按"未抓到"处理，交给上游拦成人工补录，不能静默出错表
+        const fetchedTitle = isPlaceholderTitle(detail.title) ? '' : String(detail.title || '').trim();
+        const finalTitle = item.title || fetchedTitle;
+        const nextItem = {
+          ...item,
+          itemId: item.itemId || detail.itemId || '',
+          title: finalTitle,
+          imageUrl: item.imageUrl || detail.imageUrl || '',
+          storeName: item.storeName || detail.storeName || '',
+          referencePrice: detail.referencePrice,
+          orderAmount: item.orderAmount != null
+            ? item.orderAmount
+            : (detail.selectedSkuPrice ?? detail.referencePrice ?? null),
+          skuOptions: detail.skuOptions || item.skuOptions || [],
+          selectedSkuId: detail.selectedSkuId || item.selectedSkuId || '',
+          selectedSkuName: detail.selectedSkuName || item.selectedSkuName || '',
+          selectedSkuPrice: detail.selectedSkuPrice ?? item.selectedSkuPrice ?? null,
+          lowestSkuId: detail.lowestSkuId || item.lowestSkuId || '',
+          lowestSkuName: detail.lowestSkuName || item.lowestSkuName || '',
+          lowestSkuPrice: detail.lowestSkuPrice ?? item.lowestSkuPrice ?? detail.referencePrice ?? null,
+          skuSelectionMode: detail.skuSelectionMode || item.skuSelectionMode || 'lowest',
+          resolvedUrl: detail.finalUrl || item.productUrl,
+          enrichmentSource: detail.enrichmentSource || '',
+          enrichmentStatus: finalTitle && (item.itemId || detail.itemId) ? 'complete' : 'partial',
+          enrichmentError: !finalTitle
+            ? (detail.title ? '页面未渲染出商品标题，请手动补充' : '未读取到商品标题')
+            : !(item.itemId || detail.itemId)
+              ? '短链接未解析出商品 ID'
+              : ''
+        };
           if (nextItem.itemId) delete nextItem.sourceKey;
           enriched.push(nextItem);
         } catch (error) {
@@ -679,5 +752,7 @@ module.exports = {
   parseTaobaoItemHtml,
   parseManualItem,
   parseManualItems,
-  enrichManualItems
+  enrichManualItems,
+  isPlaceholderTitle,
+  pickTitle
 };
