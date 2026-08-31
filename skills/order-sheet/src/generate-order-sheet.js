@@ -490,9 +490,9 @@ async function createOrderSheet(workbook, rows, meta, options = {}) {
     if (isGrouped) sheet.getRow(startRow).height = Math.max(32, rowSpan * 24);
     const titleCell = sheet.getCell(startRow, 1);
     const displayTitle = String(row.title || '');
-    titleCell.value = row.productUrl
-      ? { text: displayTitle, hyperlink: String(row.productUrl) }
-      : displayTitle;
+    // 标题列只写纯文本：超链接会变成蓝色下划线，手机和微信预览里尤其影响阅读。
+    // 商品链接仍保留在「商品排行原始数据」页的链接列，需要时去那里取。
+    titleCell.value = displayTitle;
     titleCell.font = { name: '宋体', size: 11, bold: row.role === 'main', color: { argb: 'FF000000' } };
     titleCell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
     const amountCell = sheet.getCell(startRow, 3);
