@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Check, ChevronDown, ChevronUp, ExternalLink, Plus, RefreshCw, Save, Trash2 } from 'lucide-react';
 
 import { getOrderSheetDraft, saveOrderSheetDraft } from '../../../api/workflow-api.js';
+import { toDraftPayload } from '../order-sheet-draft.js';
 import { AUTO_LOWEST_SKU, applySkuSelection, availableSkuOptions, skuOptionLabel, skuSelectionValue } from '../order-sheet-sku.js';
 
 const itemKey = (item, fallback = '') => String(item?.itemId || item?.sourceKey || item?.productUrl || fallback).trim();
@@ -155,7 +156,8 @@ export function OrderSheetGroupPanel({ currentRunId, confirming = false, onConfi
     return errors;
   }, [dragCount, groups]);
 
-  const payload = () => ({ revision, dragCount, groups, unassignedItems });
+  // 只回传可编辑字段：整包 skuOptions 会让负载超过 Express 的 100KB body 上限（413）
+  const payload = () => toDraftPayload({ revision, dragCount, groups, unassignedItems });
 
   const saveDraft = async () => {
     setSaving(true);

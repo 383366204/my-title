@@ -74,6 +74,8 @@ describe('order sheet workflow', () => {
     assert.equal(orderSheet.getCell('A1').font.name, '宋体');
     assert.equal(orderSheet.getCell('A1').font.size, 12);
     assert.equal(orderSheet.getCell('A2').text, '测试商品一');
+    assert.equal(typeof orderSheet.getCell('A2').value, 'string', '标题列应为纯文本');
+    assert.ok(!orderSheet.getCell('A2').hyperlink, '标题列不应再带超链接');
     assert.equal(orderSheet.getCell('C2').value, 18.8);
     assert.equal(orderSheet.getCell('F2').value, '商品所属店铺');
     assert.equal(orderSheet.getCell('G2').value, '');
@@ -172,6 +174,8 @@ describe('order sheet workflow', () => {
     const rawSheet = workbook.getWorksheet('商品排行原始数据');
     assert.equal(orderSheet.getCell('A2').text, '确认后的主商品');
     assert.equal(orderSheet.getCell('A3').text, '确认后的搭配商品');
+    assert.ok(!orderSheet.getCell('A2').hyperlink, '编组渲染下标题同样不应带超链接');
+    assert.ok(!orderSheet.getCell('A3').hyperlink, '编组渲染下标题同样不应带超链接');
     assert.equal(orderSheet.getCell('E2').value, '先浏览主商品再加购搭配商品');
     assert.equal(orderSheet.getCell('G2').value, '');
     assert.equal(orderSheet.getCell('A4').value, null);
@@ -515,5 +519,83 @@ describe('order sheet workflow', () => {
       assert.ok(Number(cx) > 0 && Number(cy) > 0, 'xfrm 尺寸不能为 0');
       assert.ok(Number(offY) > 0, 'xfrm 偏移需要换算成绝对 EMU');
     }
+  });
+
+  it('restores static product fields when the client sends a trimmed draft payload', async () => {
+    const { collectOrderSheetProducts, prepareOrderSheetDraft, saveOrderSheetDraft, getOrderSheetDraft } = require('../index');
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'order-sheet-trim-'));
+    const runId = 'test_trimmed_draft';
+
+    await collectOrderSheetProducts({
+      dataDir: tempDir,
+      runId,
+      inputMode: 'manual',
+      autoEnrichManualItems: false,
+      manualItems: [
+        {
+          itemId: '7001',
+          title: '商品甲',
+          orderAmount: 30,
+          storeName: '甲店',
+          imageUrl: 'https://img.alicdn.com/a.jpg',
+          skuOptions: [
+            { skuId: 'a1', name: '规格一', price: 30, quantity: 5, available: true },
+            { skuId: 'a2', name: '规格二', price: 31, quantity: 5, available: true }
+          ]
+        },
+        {
+          itemId: '7002',
+          title: '商品乙',
+          orderAmount: 40,
+          storeName: '乙店',
+          imageUrl: 'https://img.alicdn.com/b.jpg',
+          skuOptions: [{ skuId: 'b1', name: '黑色', price: 40, quantity: 2, available: true }]
+        }
+      ]
+    });
+
+    const prepared = await prepareOrderSheetDraft({ dataDir: tempDir, runId, dragCount: 2 });
+    assert.equal(prepared.groups[0].mainProduct.skuOptions.length, 2);
+
+    // 模拟前端最小负载：只有身份字段和可编辑字段，没有 skuOptions / 主图 / 排行指标
+    const trimmedGroups = prepared.groups.map(group => ({
+      id: group.id,
+      name: group.name,
+      mainProduct: {
+        itemId: group.mainProduct.itemId,
+        role: 'main',
+        title: '改过的甲标题',
+        orderAmount: 66,
+        selectedSkuId: 'a2',
+        selectedSkuName: '规格二',
+        selectedSkuPrice: 31,
+        skuSelectionMode: 'manual'
+      },
+      subProducts: group.subProducts.map(item => ({ itemId: item.itemId, role: 'sub', title: item.title }))
+    }));
+    const trimmedSize = JSON.stringify(trimmedGroups).length;
+
+    saveOrderSheetDraft({
+      dataDir: tempDir,
+      runId,
+      expectedRevision: prepared.revision,
+      dragCount: 2,
+      groups: trimmedGroups,
+      unassignedItems: []
+    });
+
+    const persisted = getOrderSheetDraft({ dataDir: tempDir, runId });
+    const main = persisted.groups[0].mainProduct;
+    // 客户端提交的可编辑字段生效
+    assert.equal(main.title, '改过的甲标题');
+    assert.equal(main.orderAmount, 66);
+    assert.equal(main.selectedSkuId, 'a2');
+    assert.equal(main.skuSelectionMode, 'manual');
+    // 未提交的静态字段由服务端补齐，规格下拉框和主图都不会丢
+    assert.equal(main.skuOptions.length, 2);
+    assert.equal(main.imageUrl, 'https://img.alicdn.com/a.jpg');
+    assert.equal(main.storeName, '甲店');
+    assert.equal(main.productUrl, 'https://item.taobao.com/item.htm?id=7001');
+    assert.ok(JSON.stringify(persisted.groups).length > trimmedSize, '落盘数据应比回传负载更完整');
   });
 });

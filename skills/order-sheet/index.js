@@ -541,6 +541,52 @@ function getOrderSheetDraft(options = {}) {
 }
 
 /**
+ * 建立"商品标识 -> 已存盘完整资料"的索引，用于补齐前端省略的静态字段。
+ * @param {Array<object>} rows sycm-product-rank.jsonl 中的商品行
+ * @param {object} draft 当前已存盘的编组文档
+ * @returns {Map<string, object>} 商品资料索引
+ */
+function buildProductCatalog(rows, draft) {
+  const catalog = new Map();
+  const remember = (product) => {
+    if (!product || typeof product !== 'object') return;
+    const key = getProductKey(product);
+    if (key && !catalog.has(key)) catalog.set(key, product);
+  };
+  (Array.isArray(rows) ? rows : []).forEach(remember);
+  (draft.groups || []).forEach(group => {
+    remember(group.mainProduct);
+    (group.subProducts || []).forEach(remember);
+  });
+  (draft.unassignedItems || []).forEach(remember);
+  return catalog;
+}
+
+/**
+ * 用已存盘资料补齐单个商品：客户端显式提交的字段优先，未提交的字段以服务端为准。
+ * @param {object} product 客户端回传的最小商品对象
+ * @param {Map<string, object>} catalog buildProductCatalog 的结果
+ * @returns {object} 补齐后的商品对象
+ */
+function restoreProductFields(product, catalog) {
+  if (!product || typeof product !== 'object') return product;
+  const stored = catalog.get(getProductKey(product));
+  return stored ? { ...stored, ...product } : product;
+}
+
+function restoreDraftGroups(groups, catalog) {
+  return groups.map(group => ({
+    ...group,
+    mainProduct: restoreProductFields(group.mainProduct, catalog),
+    subProducts: (group.subProducts || []).map(item => restoreProductFields(item, catalog))
+  }));
+}
+
+function restoreDraftProducts(list, catalog) {
+  return list.map(item => restoreProductFields(item, catalog));
+}
+
+/**
  * 保存刷单表草稿（更新商品资料或商品编组，但不推进至生成表格）。
  * @param {object} [options] 保存选项。
  * @param {string} options.runId 运行 ID。
@@ -563,9 +609,12 @@ function saveOrderSheetDraft(options = {}) {
 
   const currentDraft = readOrderGroupDocument(files.productGroups);
   assertDraftRevision(currentDraft, options.expectedRevision);
+  const rows = readJsonl(files.productRank);
+  // 前端只回传可编辑字段，这里补齐 skuOptions、主图等静态数据，避免 413 又不丢规格
+  const catalog = buildProductCatalog(rows, currentDraft);
   let nextGroups = currentDraft.groups;
   if (Array.isArray(options.groups)) {
-    nextGroups = normalizeOrderGroups(options.groups);
+    nextGroups = normalizeOrderGroups(restoreDraftGroups(options.groups, catalog));
   }
   const savedDraft = writeOrderGroupDocument(files.productGroups, {
     runId: context.runId,
@@ -573,11 +622,10 @@ function saveOrderSheetDraft(options = {}) {
     dragCount: options.dragCount == null ? currentDraft.dragCount : options.dragCount,
     groups: nextGroups,
     unassignedItems: Array.isArray(options.unassignedItems)
-      ? options.unassignedItems
+      ? restoreDraftProducts(options.unassignedItems, catalog)
       : currentDraft.unassignedItems
   });
 
-  const rows = readJsonl(files.productRank);
   const missingCount = rows.filter(row => row.sourceType === 'manual' && !String(row.title || '').trim()).length;
 
   context.run.counts = {
@@ -631,8 +679,10 @@ function confirmOrderSheetProducts(options = {}) {
     throw err;
   }
 
+  // 前端只回传可编辑字段，这里补齐静态数据后再校验
+  const catalog = buildProductCatalog(rows, currentDraft);
   const rawGroups = Array.isArray(options.groups)
-    ? options.groups
+    ? restoreDraftGroups(options.groups, catalog)
     : (currentDraft.groups.length > 0 ? currentDraft.groups : rows);
   const groups = normalizeOrderGroups(rawGroups);
   const dragCount = Math.max(1, Number.parseInt(
@@ -650,7 +700,7 @@ function confirmOrderSheetProducts(options = {}) {
     dragCount,
     groups,
     unassignedItems: Array.isArray(options.unassignedItems)
-      ? options.unassignedItems
+      ? restoreDraftProducts(options.unassignedItems, catalog)
       : currentDraft.unassignedItems,
     confirmedAt: new Date().toISOString()
   });
