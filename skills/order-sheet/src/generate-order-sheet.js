@@ -1,10 +1,10 @@
 'use strict';
 
 const axios = require('axios');
-const fs = require('fs');
 const ExcelJS = require('exceljs');
-const JSZip = require('jszip');
 const { flattenOrderGroups } = require('./order-groups');
+const { EMBEDDABLE_IMAGE_FORMATS, sniffImageFormat } = require('../../../core/image-format');
+const { hardenDrawingAnchors } = require('../../../core/excel-image');
 
 const REVIEW_HEADERS = [
   '刷单日期',
@@ -86,25 +86,8 @@ function parseOrderDate(value) {
 // 之前只按 Content-Type/URL 后缀猜格式、拿不到就兜成 jpeg，结果把 WebP 字节标成 .jpeg 写进 xlsx：
 // 新版 Excel 会嗅探字节所以本机正常，旧版 Excel、WPS、手机 Office 和微信/钉钉预览按 jpeg 解码失败，图片区域空白。
 const IMAGE_ACCEPT = 'image/jpeg, image/png';
-const EMBEDDABLE_FORMATS = ['jpeg', 'png', 'gif'];
 const CDN_RESIZE_HOSTS = /(^|\.)(alicdn|taobaocdn|tbcdn)\.com$/i;
 const CDN_THUMBNAIL_SUFFIX = '_200x200q90.jpg';
-
-/**
- * 按字节魔数判定图片真实格式，不信任 Content-Type 与 URL 后缀。
- * @param {Buffer} buffer 图片字节
- * @returns {'jpeg'|'png'|'gif'|'webp'|''} 真实格式，无法识别时返回空串
- */
-function sniffImageFormat(buffer) {
-  const bytes = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer || []);
-  // 各格式只需读到自己的魔数即可判定，WebP 靠 subarray 越界返回空串自然落空
-  if (bytes.length < 4) return '';
-  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'jpeg';
-  if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return 'png';
-  if (bytes.subarray(0, 3).toString('ascii') === 'GIF') return 'gif';
-  if (bytes.subarray(0, 4).toString('ascii') === 'RIFF' && bytes.subarray(8, 12).toString('ascii') === 'WEBP') return 'webp';
-  return '';
-}
 
 /**
  * 去掉 CDN 强制输出 WebP 的变换后缀，拿回可嵌入的原始格式地址。
@@ -176,7 +159,7 @@ async function fetchImage(imageUrl, options = {}) {
       const buffer = Buffer.from(response.data);
       const format = sniffImageFormat(buffer);
       // 拿到 WebP 或未知格式时绝不写盘：宁可降级成超链接，也不再产出谎报格式的文件
-      if (EMBEDDABLE_FORMATS.includes(format)) return { buffer, extension: format };
+      if (EMBEDDABLE_IMAGE_FORMATS.includes(format)) return { buffer, extension: format };
     } catch (_error) {
       // 换下一个候选地址
     }
@@ -235,7 +218,9 @@ function styleReviewRows(sheet, startRow, endRow) {
  * @returns {{sheet: object, groupCount: number}} Created sheet metadata.
  */
 function createReviewSheet(workbook, rows, meta, options = {}) {
-  const groupSize = [1, 2, 4].includes(Number(options.reviewGroupSize)) ? Number(options.reviewGroupSize) : 4;
+  // 与评价表链路的每组商品数保持一致：可选 1-4，默认 4
+  const rawGroupSize = Number.parseInt(options.reviewGroupSize, 10);
+  const groupSize = Number.isFinite(rawGroupSize) ? Math.min(4, Math.max(1, rawGroupSize)) : 4;
   const includeSpacerRow = options.includeSpacerRow !== false;
   const sheet = workbook.addWorksheet('1拖多评价', {
     views: [{ state: 'frozen', ySplit: 1, showGridLines: false }],
@@ -321,98 +306,6 @@ function orderAmount(row, mode) {
   return averagePayment(row);
 }
 
-function columnWidthToEmu(widthChars) {
-  const chars = Number(widthChars) > 0 ? Number(widthChars) : 8.43;
-  return (Math.round(chars * 7) + 5) * EMU_PER_PIXEL;
-}
-
-function rowHeightToEmu(heightPoints) {
-  const points = Number(heightPoints) > 0 ? Number(heightPoints) : 15;
-  return points * EMU_PER_POINT;
-}
-
-function buildAxisPrefix(sizes) {
-  const prefix = [0];
-  for (let i = 0; i < sizes.length; i += 1) prefix.push(prefix[i] + sizes[i]);
-  return prefix;
-}
-
-function axisOrigin(prefix, sizes, index) {
-  if (index < prefix.length) return prefix[index];
-  const fallback = sizes.length > 0 ? sizes[sizes.length - 1] : prefix[prefix.length - 1];
-  return prefix[prefix.length - 1] + (index - (prefix.length - 1)) * fallback;
-}
-
-function anchorPoint(body, tag) {
-  const block = new RegExp(`<xdr:${tag}>([\\s\\S]*?)</xdr:${tag}>`).exec(body);
-  if (!block) return null;
-  const num = (name) => Number(new RegExp(`<xdr:${name}>(-?\\d+)</xdr:${name}>`).exec(block[1])?.[1] || 0);
-  return { col: num('col'), colOff: num('colOff'), row: num('row'), rowOff: num('rowOff') };
-}
-
-/**
- * 补齐 ExcelJS 写死的图片元数据，让手机 WPS/Excel 等渲染器也能画出图片。
- * ExcelJS 会把 spPr/a:xfrm 写成 off=0,0 / ext=0,0，并给 a:blip 加上 cstate="print"；
- * 桌面版 Excel 会按锚点重算所以看不出问题，只读 xfrm 的渲染器则算出零尺寸图片而什么都不画。
- * @param {string} file 已写出的 xlsx 路径
- * @param {object} layout 工作表布局，用于把单元格坐标换算成绝对 EMU
- * @param {Array<number>} layout.columnWidths 各列宽度（字符）
- * @param {Array<number>} layout.rowHeights 各行高度（磅）
- * @returns {Promise<number>} 修补的锚点数量
- */
-async function hardenDrawingAnchors(file, layout = {}) {
-  const colSizes = (Array.isArray(layout.columnWidths) ? layout.columnWidths : []).map(columnWidthToEmu);
-  const rowSizes = (Array.isArray(layout.rowHeights) ? layout.rowHeights : []).map(rowHeightToEmu);
-  const colPrefix = buildAxisPrefix(colSizes);
-  const rowPrefix = buildAxisPrefix(rowSizes);
-  const zip = await JSZip.loadAsync(fs.readFileSync(file));
-  const drawingNames = Object.keys(zip.files).filter(name => /^xl\/drawings\/drawing\d+\.xml$/.test(name));
-  let patched = 0;
-
-  for (const name of drawingNames) {
-    const xml = await zip.file(name).async('string');
-    const next = xml.replace(
-      /<xdr:(one|two)CellAnchor([^>]*)>([\s\S]*?)<\/xdr:\1CellAnchor>/g,
-      (whole, kind, attrs, body) => {
-        const from = anchorPoint(body, 'from');
-        if (!from) return whole;
-        const x = axisOrigin(colPrefix, colSizes, from.col) + from.colOff;
-        const y = axisOrigin(rowPrefix, rowSizes, from.row) + from.rowOff;
-        let width = null;
-        let height = null;
-        if (kind === 'two') {
-          const to = anchorPoint(body, 'to');
-          if (to) {
-            width = axisOrigin(colPrefix, colSizes, to.col) + to.colOff - x;
-            height = axisOrigin(rowPrefix, rowSizes, to.row) + to.rowOff - y;
-          }
-        } else {
-          const ext = /<xdr:ext cx="(-?\d+)" cy="(-?\d+)"\s*\/>/.exec(body);
-          if (ext) {
-            width = Number(ext[1]);
-            height = Number(ext[2]);
-          }
-        }
-        if (!(width > 0) || !(height > 0)) return whole;
-        patched += 1;
-        const fixed = body.replace(
-          /<a:xfrm><a:off x="[^"]*" y="[^"]*"\s*\/><a:ext cx="[^"]*" cy="[^"]*"\s*\/><\/a:xfrm>/,
-          `<a:xfrm><a:off x="${x}" y="${y}"/><a:ext cx="${width}" cy="${height}"/></a:xfrm>`
-        );
-        // cstate 是给外链图片用的完成状态标记，纯内嵌图片带上它会让部分渲染器以为图片待加载
-        return `<xdr:${kind}CellAnchor${attrs}>${fixed.replace(/\s+cstate="[^"]*"/g, '')}</xdr:${kind}CellAnchor>`;
-      }
-    );
-    if (next !== xml) zip.file(name, next);
-  }
-
-  if (patched > 0) {
-    const buffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
-    fs.writeFileSync(file, buffer);
-  }
-  return patched;
-}
-
 /**
  * 嵌入商品主图。
  * @param {ExcelJS.Workbook} workbook 目标工作簿
@@ -480,6 +373,7 @@ async function createOrderSheet(workbook, rows, meta, options = {}) {
   sheet.autoFilter = { from: 'A1', to: 'G1' };
 
   let imageCount = 0;
+  const imageLabels = [];
   let nextStartRow = 2;
   for (const [index, row] of rows.entries()) {
     const isGrouped = Boolean(row.groupId);
@@ -525,13 +419,18 @@ async function createOrderSheet(workbook, rows, meta, options = {}) {
       }
       nextStartRow += 2;
     }
-    if (includeImages && await addProductImage(workbook, sheet, row, startRow, endRow, imageLoader)) imageCount += 1;
+    if (includeImages && await addProductImage(workbook, sheet, row, startRow, endRow, imageLoader)) {
+      imageCount += 1;
+      // 给图片对象起名，Excel 的"选择窗格"里能认出这张图属于哪个商品
+      imageLabels.push(String(row.title || row.imageUrl || `商品 ${index + 1}`));
+    }
     onProgress({ current: index + 1, total: rows.length, message: `正在写入第 ${index + 1}/${rows.length} 个商品` });
   }
   // 回传布局，供写盘后把图片锚点换算成绝对 EMU 修补
   const layout = {
     columnWidths: sheet.columns.map(column => column.width),
-    rowHeights: Array.from({ length: Math.max(1, sheet.rowCount) }, (_unused, i) => sheet.getRow(i + 1).height)
+    rowHeights: Array.from({ length: Math.max(1, sheet.rowCount) }, (_unused, i) => sheet.getRow(i + 1).height),
+    labels: imageLabels
   };
   return { sheet, imageCount, layout };
 }
