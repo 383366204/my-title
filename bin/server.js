@@ -65,6 +65,11 @@ const {
 } = require('../skills/pipeline-flow/runtime/runner');
 const {
   confirmReviewDrafts,
+  addReviewAttachment,
+  listReviewAttachments,
+  readReviewAttachment,
+  removeReviewAttachment,
+  regroupReviewSourceUpload,
   saveReviewSourceUpload
 } = require('../skills/review-sheet');
 const {
@@ -1420,9 +1425,79 @@ app.post('/api/review-sheets/upload', express.raw({
     const encodedName = String(req.get('x-file-name') || '刷单表.xlsx');
     let fileName = encodedName;
     try { fileName = decodeURIComponent(encodedName); } catch (_) { /* Keep the supplied name. */ }
-    const result = await saveReviewSourceUpload({ buffer: req.body, fileName });
+    const result = await saveReviewSourceUpload({
+      buffer: req.body,
+      fileName,
+      groupSize: req.query.groupSize
+    });
     const { sourceFile: _sourceFile, ...publicResult } = result;
     return res.json({ ok: true, data: publicResult });
+  } catch (err) {
+    return res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+// 改每组商品数后重新分组：直接复用已上传的源文件，不用重新选文件
+app.post('/api/review-sheets/uploads/:uploadId/group-size', async (req, res) => {
+  try {
+    const result = await regroupReviewSourceUpload({
+      uploadId: req.params.uploadId,
+      groupSize: req.body?.groupSize
+    });
+    const { sourceFile: _sourceFile, ...publicResult } = result;
+    return res.json({ ok: true, data: publicResult });
+  } catch (err) {
+    return res.status(400).json({ ok: false, error: err.message });
+  }
+});
+// 评价配图：上传、列表、回图、删除。文件名一律服务端生成，只按清单里的相对路径取文件。
+app.post('/api/workflows/runs/:runId/review-assets', express.raw({
+  type: ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'application/octet-stream'],
+  limit: '8mb'
+}), async (req, res) => {
+  try {
+    const encodedName = String(req.get('x-file-name') || '');
+    let fileName = encodedName;
+    try { fileName = decodeURIComponent(encodedName); } catch (_) { /* Keep the supplied name. */ }
+    const result = await addReviewAttachment({
+      runId: req.params.runId,
+      draftId: String(req.query.draftId || ''),
+      buffer: req.body,
+      fileName
+    });
+    return res.json({ ok: true, data: result });
+  } catch (err) {
+    return res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+app.get('/api/workflows/runs/:runId/review-assets', (req, res) => {
+  try {
+    return res.json({ ok: true, data: listReviewAttachments({ runId: req.params.runId }) });
+  } catch (err) {
+    return res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+app.get('/api/workflows/runs/:runId/review-assets/:attachmentId', (req, res) => {
+  try {
+    const asset = readReviewAttachment({ runId: req.params.runId, attachmentId: req.params.attachmentId });
+    res.setHeader('Content-Type', asset.contentType);
+    res.setHeader('Cache-Control', 'no-store');
+    return fs.createReadStream(asset.absolutePath).pipe(res);
+  } catch (err) {
+    return res.status(404).json({ ok: false, error: err.message });
+  }
+});
+
+app.delete('/api/workflows/runs/:runId/review-assets/:attachmentId', (req, res) => {
+  try {
+    const result = removeReviewAttachment({
+      runId: req.params.runId,
+      draftId: String(req.query.draftId || ''),
+      attachmentId: req.params.attachmentId
+    });
+    return res.json({ ok: true, data: result });
   } catch (err) {
     return res.status(400).json({ ok: false, error: err.message });
   }

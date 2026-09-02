@@ -1,3 +1,5 @@
+import { describeRequiredReviewGroupFields, findMissingReviewGroupFields } from './features/workflow/review-group-fields.js';
+
 export const BUSINESS_FUNNEL = [
   { id: 'candidate', label: '候选词' },
   { id: 'verified', label: '大盘验真' },
@@ -1251,13 +1253,12 @@ export function getWorkflowLaunchBlocker(mode, nodes = []) {
       const message = '请先在上传刷单表节点选择并解析 .xlsx 文件';
       return { status: 'blocked', error: message, logs: [{ timestamp: new Date().toISOString(), level: 'error', message: `[review_source_required] ${message}` }] };
     }
-    const missing = groups.flatMap((group, index) => ['orderDate', 'storeName', 'buyerName', 'buyerPhone', 'orderNumber']
-      .filter((field) => !String(group?.[field] || '').trim())
-      .map((field) => `${index + 1}:${field}`));
-    if (missing.length > 0) {
-      const message = `还有 ${missing.length} 项订单信息未补全，请填写日期、店铺、旺旺、手机号和订单号`;
-      return { status: 'blocked', error: message, logs: [{ timestamp: new Date().toISOString(), level: 'error', message: `[review_order_info_required] ${message}` }] };
-    }
+      // 只校验必填字段：旺旺、手机号、订单号允许留空，事后补录
+      const missing = findMissingReviewGroupFields(groups);
+      if (missing.length > 0) {
+        const message = `还有 ${missing.length} 项订单信息未补全，请填写${describeRequiredReviewGroupFields()}`;
+        return { status: 'blocked', error: message, logs: [{ timestamp: new Date().toISOString(), level: 'error', message: `[review_order_info_required] ${message}` }] };
+      }
     return null;
   }
   if (mode === 'manual') {

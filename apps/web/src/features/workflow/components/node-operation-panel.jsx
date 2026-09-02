@@ -241,7 +241,12 @@ export const NodeOperationPanel = ({
         />
       )}
       {kind === 'review-drafts' && (
-        <ReviewDraftPanel artifactState={artifactState} onConfirm={onConfirmReviews} confirming={confirmingReviews} />
+          <ReviewDraftPanel
+            artifactState={artifactState}
+            onConfirm={onConfirmReviews}
+            confirming={confirmingReviews}
+            currentRunId={currentRunId}
+          />
       )}
       {kind === 'order-sheet-products' && (
         <OrderSheetProductPanel

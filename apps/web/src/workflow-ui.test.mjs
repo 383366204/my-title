@@ -178,10 +178,20 @@ test('uploaded review sheet workflow requires complete local order groups', () =
   assert.equal(getSheetConfigSummary({ sheetType: 'review', reviewSourceUpload: true }), '评价表 · 按上传订单组');
 
   assert.match(getWorkflowLaunchBlocker('review-sheet', [{ id: 'start', data: {} }]).error, /选择并解析/);
-  assert.match(getWorkflowLaunchBlocker('review-sheet', [{ id: 'start', data: {
+  // 只填必填项即可启动：旺旺、手机号、订单号允许留空
+  assert.equal(getWorkflowLaunchBlocker('review-sheet', [{ id: 'start', data: {
     uploadId: 'upload-1',
     groups: [{ id: 'group-1', orderDate: '2026-08-13', storeName: '竹里人' }]
-  } }]).error, /订单信息未补全/);
+  } }]), null);
+
+  // 缺店铺名仍然拦下，且报错不再把选填字段算进去
+  const incomplete = getWorkflowLaunchBlocker('review-sheet', [{ id: 'start', data: {
+    uploadId: 'upload-1',
+    groups: [{ id: 'group-1', orderDate: '2026-08-13' }, { id: 'group-2', orderDate: '2026-08-14' }]
+  } }]);
+  assert.match(incomplete.error, /还有 2 项订单信息未补全/);
+  assert.match(incomplete.error, /店铺名/);
+  assert.doesNotMatch(incomplete.error, /旺旺|手机号|订单号/);
 
   const nodes = [
     { id: 'start', data: {
