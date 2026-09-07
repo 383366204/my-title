@@ -11,6 +11,9 @@ export function summarizeWorkflowArtifact(artifact) {
     const items = Array.isArray(artifact.items) ? artifact.items : artifact.rows;
     return `${Array.isArray(items) ? items.length : 0} 条数据`;
   }
+  if (type === 'competitor-products') {
+    return `${(artifact.hotRows || []).length} 个爆款 · ${(artifact.newRows || []).length} 个新品`;
+  }
   if (type === 'xlsx') return `${Number(artifact.count || 0)} 条商品`;
   const text = typeof artifact.text === 'string' ? artifact.text : '';
   if (!text.trim()) return '暂无产物';
@@ -381,6 +384,81 @@ export function getWorkflowArtifactView(artifact, nodeId = '') {
   }
   const type = String(artifact.type || '').toLowerCase();
   const items = Array.isArray(artifact.items) ? artifact.items : artifact.rows;
+  if (effectiveNodeId === 'resolveShops' && Array.isArray(items)) {
+    return {
+      kind: 'business-list',
+      title: '已识别同行店铺',
+      emptyText: '暂无已识别店铺',
+      rows: items.map((shop) => ({
+        title: shop.shopName || '未命名店铺',
+        meta: [shop.followerText || '', `${(shop.categories || []).length} 个商品分类`].filter(Boolean).join(' · '),
+        metrics: (shop.signals || []).slice(0, 4),
+        description: (shop.categories || []).slice(0, 12).join('、'),
+        sourceUrl: shop.shopUrl || '',
+        raw: shop
+      })),
+      text: ''
+    };
+  }
+  if (effectiveNodeId === 'collectCompetitors' && type === 'competitor-products') {
+    const hotRows = Array.isArray(artifact.hotRows) ? artifact.hotRows : [];
+    const newRows = Array.isArray(artifact.newRows) ? artifact.newRows : [];
+    return {
+      kind: 'business-list',
+      title: `爆款 ${hotRows.length} 个 · 新品 ${newRows.length} 个`,
+      emptyText: '暂无同行商品',
+      rows: [...hotRows.map(item => ({ ...item, listLabel: '销量榜' })), ...newRows.map(item => ({ ...item, listLabel: '新品榜' }))].map(item => ({
+        title: item.title || '未命名商品',
+        meta: `${item.shopName || ''} · ${item.listLabel}第 ${item.rank || '-'} 位`,
+        metrics: [item.paymentText || '付款表现未获取', ...(item.labels || []).slice(0, 3)],
+        description: item.enrichmentError
+          ? `商品链接补全失败：${item.enrichmentError}；${item.listLabel === '新品榜' ? '新品表示店铺页面排序，不代表精确上架日期。' : '付款人数为页面区间或下限，不等同于30天销量。'}`
+          : item.productUrl
+            ? (item.listLabel === '新品榜' ? '已补全商品链接；新品表示店铺页面排序，不代表精确上架日期。' : '已补全商品链接；付款人数为页面区间或下限，不等同于30天销量。')
+            : `该商品未纳入链接补全范围，可在启动配置中提高“每榜补全商品链接”；${item.listLabel === '新品榜' ? '新品表示店铺页面排序，不代表精确上架日期。' : '付款人数为页面区间或下限，不等同于30天销量。'}`,
+        sourceUrl: item.productUrl || '',
+        raw: item
+      })),
+      text: ''
+    };
+  }
+  if (effectiveNodeId === 'enrichCompetitors' && Array.isArray(items)) {
+    return {
+      kind: 'business-list',
+      title: '商品链接补全结果',
+      emptyText: '暂无商品链接补全结果',
+      rows: items.map(item => ({
+        title: item.title || '未命名商品',
+        meta: [item.shopName || '', item.itemId ? `商品ID ${item.itemId}` : '链接补全失败'].filter(Boolean).join(' · '),
+        metrics: [item.paymentText || '', item.sortType === 'new' ? '新品样本' : '爆款样本'].filter(Boolean),
+        description: item.enrichmentError ? `补全失败：${item.enrichmentError}` : '已取得标准商品链接',
+        sourceUrl: item.productUrl || '',
+        raw: item
+      })),
+      text: ''
+    };
+  }
+  if (effectiveNodeId === 'analyzeCompetitors' && type === 'json') {
+    const keywords = Array.isArray(artifact.opportunityKeywords) ? artifact.opportunityKeywords : [];
+    const shops = Array.isArray(artifact.shopSummaries) ? artifact.shopSummaries : [];
+    const history = artifact.historyComparison || {};
+    const historyLabel = history.status === 'compared'
+      ? `较上次新增爆款样本 ${(history.newlyObservedHot || []).length} 个、新品样本 ${(history.newlyObservedNew || []).length} 个`
+      : history.status === 'no_baseline' ? '首次快照' : '未启用历史对比';
+    return {
+      kind: 'business-list',
+      title: `同行对比分析 · ${shops.length} 家店铺 · ${historyLabel}`,
+      emptyText: '暂无分析结果',
+      rows: keywords.map(item => ({
+        title: item.keyword,
+        meta: `覆盖 ${item.productCount} 个商品`,
+        metrics: ['待生意参谋验真'],
+        description: '来自同行标题频次统计，不直接代表市场机会。',
+        raw: item
+      })),
+      text: ''
+    };
+  }
   if (effectiveNodeId === 'mine' && Array.isArray(items)) {
     return {
       kind: 'candidate-list',
@@ -505,6 +583,9 @@ export function getWorkflowArtifactView(artifact, nodeId = '') {
       rows: [],
       text: ''
     };
+  }
+  if (effectiveNodeId === 'competitorReport' && type === 'xlsx') {
+    return { kind: 'file', title: '同行分析报告', emptyText: '报告尚未生成', rows: [], text: '' };
   }
   if (effectiveNodeId === 'export' && Array.isArray(items)) {
     return {

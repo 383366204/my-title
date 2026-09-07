@@ -14,6 +14,7 @@ const {
 } = require('../../skills/pipeline-flow/runtime/store');
 const { getLLMProviderInfo } = require('../llm');
 const { normalizeExactKeywords } = require('../exact-keywords');
+const { normalizeRootKeywords } = require('../root-keywords');
 const { parseManualItems } = require('../../skills/order-sheet/src/manual-items');
 const { DEFAULT_ORDER_GROUP_SIZE, autoGroupOrderProducts } = require('../../skills/order-sheet/src/order-groups');
 
@@ -31,6 +32,11 @@ const WORKFLOW_NODE_IDS = {
   importSheet: 'importSheet',
   generateReviews: 'generateReviews',
   generateSheet: 'generateSheet',
+  resolveShops: 'resolveShops',
+  collectCompetitors: 'collectCompetitors',
+  enrichCompetitors: 'enrichCompetitors',
+  analyzeCompetitors: 'analyzeCompetitors',
+  competitorReport: 'competitorReport',
   end: 'end'
 };
 
@@ -49,7 +55,12 @@ const ARTIFACT_BY_NODE = {
   [WORKFLOW_NODE_IDS.confirmProducts]: { fileKey: 'productGroups', type: 'json' },
   [WORKFLOW_NODE_IDS.importSheet]: { fileKey: 'reviewGroups', type: 'json' },
   [WORKFLOW_NODE_IDS.generateReviews]: { fileKey: 'reviewDrafts', type: 'jsonl' },
-  [WORKFLOW_NODE_IDS.generateSheet]: { fileKey: 'orderSheet', type: 'xlsx' }
+  [WORKFLOW_NODE_IDS.generateSheet]: { fileKey: 'orderSheet', type: 'xlsx' },
+  [WORKFLOW_NODE_IDS.resolveShops]: { fileKey: 'competitorShops', type: 'jsonl' },
+  [WORKFLOW_NODE_IDS.collectCompetitors]: { fileKey: 'competitorHotProducts', type: 'competitor-products' },
+  [WORKFLOW_NODE_IDS.enrichCompetitors]: { fileKey: 'competitorProductDetails', type: 'jsonl' },
+  [WORKFLOW_NODE_IDS.analyzeCompetitors]: { fileKey: 'competitorAnalysis', type: 'json' },
+  [WORKFLOW_NODE_IDS.competitorReport]: { fileKey: 'competitorReport', type: 'xlsx' }
 };
 
 function clampInt(value, fallback, min, max) {
@@ -234,7 +245,27 @@ function workflowNodes(mode = 'daily') {
       position: { x: startX + index * stepX, y }
     }))
   );
-  const startData = mode === 'keyword'
+  const startData = mode === 'root-keyword'
+    ? {
+        label: '录入词根',
+        description: '批量输入词根并配置安全查询节奏',
+        rootsText: '',
+        roots: [],
+        sycmMode: 'hot',
+        period: '7d',
+        compareType: 'cycle',
+        sycmRiskProfile: 'standard',
+        sycmMinIntervalMs: 45000,
+        sycmMaxIntervalMs: 90000,
+        sycmBatchSize: 10,
+        sycmMinBatchCooldownMs: 300000,
+        sycmMaxBatchCooldownMs: 600000,
+        sycmMaxRetries: 2,
+        length: 60,
+        productsPerKeyword: 12,
+        port: 9222
+      }
+    : mode === 'keyword'
     ? {
         label: '开始',
         description: '批量输入精确关键词并启动',
@@ -265,6 +296,32 @@ function workflowNodes(mode = 'daily') {
         length: 60,
         pages: 1
       };
+  if (mode === 'competitor-analysis') {
+    return withSteps(positionNodes([
+      {
+        id: WORKFLOW_NODE_IDS.start,
+        type: 'production-start',
+        data: {
+          label: '录入同行',
+          description: '粘贴多个淘宝分享文案、商品或店铺链接',
+          competitorConfig: true,
+          competitorText: '',
+          maxShops: 5,
+          hotLimit: 20,
+          newLimit: 20,
+          detailLimit: 20,
+          waitMs: 1200,
+          compareHistory: true
+        }
+      },
+      { id: WORKFLOW_NODE_IDS.resolveShops, type: 'pipeline-resolve-shops', data: { label: '识别同行店铺', description: '解析分享短链、商品所属店铺并按店铺去重' } },
+      { id: WORKFLOW_NODE_IDS.collectCompetitors, type: 'pipeline-collect-competitors', data: { label: '采集爆款与新品', description: '依次读取店铺销量排序和新品排序' } },
+      { id: WORKFLOW_NODE_IDS.enrichCompetitors, type: 'pipeline-enrich-competitors', data: { label: '补全商品链接', description: '逐个打开榜单商品，补充可点击链接和商品ID' } },
+      { id: WORKFLOW_NODE_IDS.analyzeCompetitors, type: 'pipeline-analyze-competitors', data: { label: '同行对比分析', description: '分析商品结构、高频词和新品起量信号' } },
+      { id: WORKFLOW_NODE_IDS.competitorReport, type: 'pipeline-competitor-report', data: { label: '生成分析报告', description: '生成可查看、可下载的同行分析报告' } },
+      { id: WORKFLOW_NODE_IDS.end, type: 'production-end', data: { label: '完成', description: '查看报告或将机会词加入选品流水线', competitorDownload: true } }
+    ], { startX: 90, stepX: 275 }));
+  }
   if (mode === 'order-sheet') {
     return withSteps(positionNodes([
       { id: WORKFLOW_NODE_IDS.start, type: 'production-start', data: { label: '开始', description: '选择商品排行或输入指定商品', orderSheetConfig: true, inputMode: 'rank', manualItemsText: '', manualItems: [], port: 9222, dateMode: 'latest_day', startDate: '', endDate: '', pages: 1, sortMetric: 'itmUv' } },
@@ -327,6 +384,18 @@ function workflowNodes(mode = 'daily') {
       { id: WORKFLOW_NODE_IDS.end, type: 'production-end', data: { label: '完成', description: '查看结果和批次记录' } }
     ], { startX: 190 }));
   }
+  if (mode === 'root-keyword') {
+    return withSteps(positionNodes([
+      { id: WORKFLOW_NODE_IDS.start, type: 'production-start', data: startData },
+      { id: WORKFLOW_NODE_IDS.mine, type: 'pipeline-mine', data: { label: '生意参谋拓词', description: '按安全节奏逐个查询词根并持续保存结果', discoveryMode: 'user_roots' } },
+      { id: WORKFLOW_NODE_IDS.keywordReview, type: 'pipeline-keyword-review', data: { label: '人工筛词', description: '按词根、市场数据和机会分筛选候选词' } },
+      { id: WORKFLOW_NODE_IDS.verify, type: 'pipeline-verify', data: { label: '关键词机会确认', description: '复用新鲜数据，只补查缺失或过期指标' } },
+      { id: WORKFLOW_NODE_IDS.select, type: 'pipeline-select', data: { label: '货源选品', description: '为确认后的关键词搜索并勾选1688货源' } },
+      { id: WORKFLOW_NODE_IDS.generate, type: 'pipeline-generate', data: { label: '标题生成', description: '基于关键词和已选货源生成铺货标题' } },
+      { id: WORKFLOW_NODE_IDS.export, type: 'pipeline-export', data: { label: '铺货复核', description: '确认标题、类目和待铺货商品' } },
+      { id: WORKFLOW_NODE_IDS.end, type: 'production-end', data: { label: '完成', description: '查看结果和批次记录' } }
+    ], { startX: 60, stepX: 260 }));
+  }
   return withSteps(positionNodes([
     { id: WORKFLOW_NODE_IDS.start, type: 'production-start', data: startData },
     { id: WORKFLOW_NODE_IDS.mine, type: 'pipeline-mine', data: { label: '灵感选词', description: '收集灵感、生成商品词根并查询关联词', discoveryMode: 'inspiration' } },
@@ -340,7 +409,16 @@ function workflowNodes(mode = 'daily') {
 }
 
 function workflowEdges(mode = 'daily') {
-  const pairs = mode === 'order-sheet'
+  const pairs = mode === 'competitor-analysis'
+    ? [
+        [WORKFLOW_NODE_IDS.start, WORKFLOW_NODE_IDS.resolveShops],
+        [WORKFLOW_NODE_IDS.resolveShops, WORKFLOW_NODE_IDS.collectCompetitors],
+        [WORKFLOW_NODE_IDS.collectCompetitors, WORKFLOW_NODE_IDS.enrichCompetitors],
+        [WORKFLOW_NODE_IDS.enrichCompetitors, WORKFLOW_NODE_IDS.analyzeCompetitors],
+        [WORKFLOW_NODE_IDS.analyzeCompetitors, WORKFLOW_NODE_IDS.competitorReport],
+        [WORKFLOW_NODE_IDS.competitorReport, WORKFLOW_NODE_IDS.end]
+      ]
+    : mode === 'order-sheet'
     ? [
         [WORKFLOW_NODE_IDS.start, WORKFLOW_NODE_IDS.collectRank],
         [WORKFLOW_NODE_IDS.collectRank, WORKFLOW_NODE_IDS.confirmProducts],
@@ -423,6 +501,12 @@ function listProductionWorkflowTemplates() {
       flowSummary: '流程：批量输入关键词 → 跳过挖词 → 生意参谋校验 → 货源选品 → 标题生成 → 导出复核',
       modeHint: '每行输入一个关键词，系统会逐词验真、选品和生成标题。'
     }),
+    template('root-keyword-selection-v1', '词根拓词选品流水线', 'root-keyword', '输入词根，通过生意参谋拓词后进入选品和铺货', {
+      entryLabel: '入口：手动词根',
+      scenarioLabel: '适合：从短词根持续拓展选品机会',
+      flowSummary: '流程：录入词根 → 分时拓词 → 人工筛词 → 机会确认 → 货源选品 → 标题生成 → 铺货复核',
+      modeHint: '词根和候选词不设业务数量上限；系统按安全间隔串行查询，并可暂停后继续。'
+    }),
     template('manual-selection-v2', '1688链接智能铺货流水线', 'manual', '输入1688链接，自动查词、生成标题并准备铺货', {
       entryLabel: '入口：1688链接（关键词可选）',
       scenarioLabel: '适合：已经确定货源',
@@ -440,6 +524,12 @@ function listProductionWorkflowTemplates() {
       scenarioLabel: '适合：刷单完成后整理评价任务',
       flowSummary: '流程：上传刷单表 → 解析订单组 → 生成并复核评价 → 导出评价表',
       modeHint: '上传实际使用过的 .xlsx 刷单表；订单号、手机号和旺旺只保存在本机。'
+    }),
+    template('competitor-analysis-v1', '同行分析流水线', 'competitor-analysis', '进入同行店铺分析销量榜、新品榜和机会方向', {
+      entryLabel: '入口：同行分享链接',
+      scenarioLabel: '适合：跟踪同行爆款和上新方向',
+      flowSummary: '流程：录入同行 → 识别店铺 → 采集爆款与新品 → 补全商品链接 → 对比分析 → 导出报告',
+      modeHint: '支持完整淘宝分享文案、短链接、商品链接和店铺链接；采集期间会使用当前淘宝客户端登录状态。'
     })
   ];
 }
@@ -553,6 +643,51 @@ function sanitizeWorkflowParams(mode, raw = {}) {
       fallbackHot: sanitizeBool(raw.fallbackHot, true)
     };
   }
+  if (mode === 'root-keyword') {
+    const normalizedRoots = normalizeRootKeywords(
+      Array.isArray(raw.roots) && raw.roots.length > 0 ? raw.roots : raw.rootsText
+    );
+    if (normalizedRoots.roots.length === 0) throw new Error('词根不能为空');
+    const riskProfile = ['conservative', 'standard', 'custom'].includes(String(raw.sycmRiskProfile || ''))
+      ? String(raw.sycmRiskProfile)
+      : 'standard';
+    const presets = riskProfile === 'conservative'
+      ? { minInterval: 90000, maxInterval: 180000, batchSize: 8, minCooldown: 600000, maxCooldown: 1200000 }
+      : { minInterval: 45000, maxInterval: 90000, batchSize: 10, minCooldown: 300000, maxCooldown: 600000 };
+    const minInterval = riskProfile === 'custom'
+      ? clampInt(raw.sycmMinIntervalMs, 45000, 15000, 600000)
+      : presets.minInterval;
+    const minCooldown = riskProfile === 'custom'
+      ? clampInt(raw.sycmMinBatchCooldownMs, 300000, 60000, 3600000)
+      : presets.minCooldown;
+    return {
+      roots: normalizedRoots.roots,
+      rootsText: normalizedRoots.roots.join('\n'),
+      duplicateRoots: normalizedRoots.duplicates,
+      sycmMode: String(raw.sycmMode || 'hot') === 'blue' ? 'blue' : 'hot',
+      period: ['7d', '30d', 'day', 'week', 'month'].includes(String(raw.period || '')) ? String(raw.period) : '7d',
+      compareType: String(raw.compareType || '') === 'yearSync' ? 'yearSync' : 'cycle',
+      sycmRiskProfile: riskProfile,
+      sycmMinIntervalMs: minInterval,
+      sycmMaxIntervalMs: riskProfile === 'custom'
+        ? clampInt(raw.sycmMaxIntervalMs, 90000, minInterval, 900000)
+        : presets.maxInterval,
+      sycmBatchSize: riskProfile === 'custom'
+        ? clampInt(raw.sycmBatchSize, 10, 1, 100)
+        : presets.batchSize,
+      sycmMinBatchCooldownMs: minCooldown,
+      sycmMaxBatchCooldownMs: riskProfile === 'custom'
+        ? clampInt(raw.sycmMaxBatchCooldownMs, 600000, minCooldown, 7200000)
+        : presets.maxCooldown,
+      sycmMaxRetries: clampInt(raw.sycmMaxRetries, 2, 0, 5),
+      sycmMaxPages: 9999,
+      productsPerKeyword: clampInt(raw.productsPerKeyword, 12, 1, 50),
+      length: clampInt(raw.length, 60, 30, 80),
+      port: clampInt(raw.port, 9222, 1, 65535),
+      reuseInspirationSycmData: true,
+      sycmEvidenceMaxAgeHours: 24
+    };
+  }
   if (mode === 'manual') {
     const manualInput = sanitizeManualWorkflowItems(raw);
     return {
@@ -638,6 +773,23 @@ function sanitizeWorkflowParams(mode, raw = {}) {
       fileName: String(raw.fileName || '').trim().slice(0, 80),
       includeSpacerRow: sanitizeBool(raw.includeSpacerRow, true),
       sheetType: 'review'
+    };
+  }
+  if (mode === 'competitor-analysis') {
+    const competitorText = String(raw.competitorText || '').trim();
+    const competitorInputs = Array.isArray(raw.competitorInputs)
+      ? raw.competitorInputs.map(value => String(value || '').trim()).filter(Boolean).slice(0, 20)
+      : [];
+    if (!competitorText && competitorInputs.length === 0) throw new Error('请至少输入一条淘宝或天猫同行链接');
+    return {
+      competitorText,
+      competitorInputs,
+      maxShops: clampInt(raw.maxShops, 5, 1, 10),
+      hotLimit: clampInt(raw.hotLimit, 20, 5, 50),
+      newLimit: clampInt(raw.newLimit, 20, 5, 50),
+      detailLimit: clampInt(raw.detailLimit, 20, 0, 50),
+      waitMs: clampInt(raw.waitMs, 1200, 500, 10000),
+      compareHistory: sanitizeBool(raw.compareHistory, true)
     };
   }
   throw new Error(`未知 workflow mode: ${mode}`);
@@ -726,9 +878,10 @@ function findProductionTemplateForWorkflow(workflow) {
 /**
  * 校验真实 pipeline workflow 图，不依赖旧实验节点 registry。
  * @param {object} workflow workflow graph。
+ * @param {{templateId?:string,mode?:string}|string} [options] 明确选择的模板或模式。
  * @returns {{ok:boolean, errors:Array<object>, production:boolean, templateId:string}}
  */
-function validateProductionWorkflow(workflow) {
+function validateProductionWorkflow(workflow, options = {}) {
   const graph = normalizeWorkflowGraph(workflow);
   if (!graph) {
     return {
@@ -736,6 +889,40 @@ function validateProductionWorkflow(workflow) {
       errors: [{ code: 'invalid_workflow', message: '工作流定义无效' }],
       production: true,
       templateId: ''
+    };
+  }
+
+  const templates = listProductionWorkflowTemplates();
+  const requestedTemplateId = typeof options === 'string'
+    ? options
+    : String(options?.templateId || '').trim();
+  const requestedMode = typeof options === 'object'
+    ? String(options?.mode || '').trim()
+    : '';
+  const requestedTemplate = requestedTemplateId
+    ? templates.find(item => item.id === requestedTemplateId)
+    : requestedMode
+      ? templates.find(item => item.mode === requestedMode)
+      : null;
+
+  if (requestedTemplateId && !requestedTemplate) {
+    return {
+      ok: false,
+      errors: [{ code: 'unknown_production_template', message: `未知 workflow template: ${requestedTemplateId}` }],
+      production: true,
+      templateId: ''
+    };
+  }
+
+  if (requestedTemplate) {
+    if (workflowSignature(graph) === workflowSignature(requestedTemplate.workflow)) {
+      return { ok: true, errors: [], production: true, templateId: requestedTemplate.id };
+    }
+    return {
+      ok: false,
+      errors: [{ code: 'production_template_mismatch', message: '工作流定义与所选模板不一致' }],
+      production: true,
+      templateId: requestedTemplate.id
     };
   }
 
@@ -767,6 +954,12 @@ function extractWorkflowKeywords(workflow) {
   );
 }
 
+function extractWorkflowRoots(workflow) {
+  const nodes = Array.isArray(workflow?.nodes) ? workflow.nodes : [];
+  const start = nodes.find(node => node?.id === WORKFLOW_NODE_IDS.start) || nodes[0];
+  return normalizeRootKeywords(start?.data?.rootsText ?? start?.data?.roots ?? '').roots;
+}
+
 /**
  * 从新旧 UI 请求体解析真实 pipeline 启动参数。
  * @param {object} body 请求体。
@@ -789,7 +982,7 @@ function resolveProductionWorkflowLaunch(body = {}) {
     ...(body.params || {}),
     ...(body.options || {})
   };
-  for (const key of ['keyword', 'keywords', 'mine', 'discoveryMode', 'source', 'rootMode', 'rootLimit', 'rootCooldownDays', 'familyCooldownDays', 'inspirationSycmPages', 'inspirationUseLLM', 'maxObservingSeeds', 'maxObservingPoolSize', 'maxNewSeeds', 'autoReplenishSeeds', 'recordSeedFeedback', 'verify', 'select', 'generate', 'export', 'productsPerKeyword', 'length', 'port', 'pages', 'minBlueRows', 'fallbackHot', 'autoApproveKeywords', 'autoExpandVerify', 'verifyReserve', 'autoAllowReviewKeywords', 'reviewKeywordLimit', 'workRequirement', 'dateMode', 'startDate', 'endDate', 'orderDate', 'storeName', 'sheetType', 'sortMetric', 'productLimit', 'fileName', 'includeRawData', 'includeImages', 'amountMode', 'missingAmountPolicy', 'cartQuantity', 'rowSpan', 'orderNote', 'reviewGroupSize', 'includeSpacerRow', 'uploadId', 'uploadName', 'groups', 'reviewTone', 'reviewLength', 'useAI', 'inputMode', 'manualItems', 'manualItemsText']) {
+  for (const key of ['keyword', 'keywords', 'roots', 'rootsText', 'sycmMode', 'period', 'compareType', 'sycmRiskProfile', 'sycmMinIntervalMs', 'sycmMaxIntervalMs', 'sycmBatchSize', 'sycmMinBatchCooldownMs', 'sycmMaxBatchCooldownMs', 'sycmMaxRetries', 'mine', 'discoveryMode', 'source', 'rootMode', 'rootLimit', 'rootCooldownDays', 'familyCooldownDays', 'inspirationSycmPages', 'inspirationUseLLM', 'maxObservingSeeds', 'maxObservingPoolSize', 'maxNewSeeds', 'autoReplenishSeeds', 'recordSeedFeedback', 'verify', 'select', 'generate', 'export', 'productsPerKeyword', 'length', 'port', 'pages', 'minBlueRows', 'fallbackHot', 'autoApproveKeywords', 'autoExpandVerify', 'verifyReserve', 'autoAllowReviewKeywords', 'reviewKeywordLimit', 'workRequirement', 'dateMode', 'startDate', 'endDate', 'orderDate', 'storeName', 'sheetType', 'sortMetric', 'productLimit', 'fileName', 'includeRawData', 'includeImages', 'amountMode', 'missingAmountPolicy', 'cartQuantity', 'rowSpan', 'orderNote', 'reviewGroupSize', 'includeSpacerRow', 'uploadId', 'uploadName', 'groups', 'reviewTone', 'reviewLength', 'useAI', 'inputMode', 'manualItems', 'manualItemsText', 'competitorText', 'competitorInputs', 'maxShops', 'hotLimit', 'newLimit', 'detailLimit', 'waitMs', 'compareHistory']) {
     if (Object.prototype.hasOwnProperty.call(body, key)) params[key] = body[key];
   }
 
@@ -797,6 +990,10 @@ function resolveProductionWorkflowLaunch(body = {}) {
     const keywords = extractWorkflowKeywords(workflow);
     if (keywords.length > 0) params.keyword = keywords[0];
     if (keywords.length > 1) params.keywords = keywords;
+  }
+  if (!params.roots && !params.rootsText) {
+    const roots = extractWorkflowRoots(workflow);
+    if (roots.length > 0) params.roots = roots;
   }
 
   let mode = body.mode || workflow?.mode || template?.mode || '';
@@ -824,13 +1021,13 @@ function resolveProductionWorkflowDefinition(body = {}, launch = resolveProducti
   let template = null;
 
   if (submitted) {
-    const validation = validateProductionWorkflow(submitted);
+    const requestedTemplateId = body.templateId || body.template_id;
+    const validation = validateProductionWorkflow(submitted, {
+      templateId: requestedTemplateId,
+      mode: requestedTemplateId ? '' : launch.mode
+    });
     if (!validation.ok) throw new Error(validation.errors[0]?.message || '工作流定义无效');
     template = templates.find(item => item.id === validation.templateId) || null;
-    const requestedTemplateId = body.templateId || body.template_id;
-    if (requestedTemplateId && requestedTemplateId !== validation.templateId) {
-      throw new Error('工作流定义与所选模板不一致');
-    }
   } else {
     const requestedTemplateId = body.templateId || body.template_id;
     template = templates.find(item => item.id === requestedTemplateId)
@@ -1027,6 +1224,42 @@ function outputForNode(id, summary) {
       file: summary.files?.orderSheet || ''
     };
   }
+  if (id === WORKFLOW_NODE_IDS.resolveShops) {
+    return {
+      count: Number(counts.competitorShops || 0),
+      failed: Number(counts.competitorResolveFailed || 0),
+      file: summary.files?.competitorShops || ''
+    };
+  }
+  if (id === WORKFLOW_NODE_IDS.collectCompetitors) {
+    return {
+      count: Number(counts.competitorHotProducts || 0) + Number(counts.competitorNewProducts || 0),
+      hotCount: Number(counts.competitorHotProducts || 0),
+      newCount: Number(counts.competitorNewProducts || 0),
+      failed: Number(counts.competitorCollectFailed || 0),
+      file: summary.files?.competitorHotProducts || '',
+      newFile: summary.files?.competitorNewProducts || ''
+    };
+  }
+  if (id === WORKFLOW_NODE_IDS.enrichCompetitors) {
+    return {
+      count: Number(counts.competitorProductDetails || 0),
+      failed: Number(counts.competitorProductLinkFailed || 0),
+      file: summary.files?.competitorProductDetails || ''
+    };
+  }
+  if (id === WORKFLOW_NODE_IDS.analyzeCompetitors) {
+    return {
+      count: Number(counts.competitorOpportunityKeywords || 0),
+      file: summary.files?.competitorAnalysis || ''
+    };
+  }
+  if (id === WORKFLOW_NODE_IDS.competitorReport) {
+    return {
+      count: Number(counts.competitorReportRows || 0),
+      file: summary.files?.competitorReport || ''
+    };
+  }
   if (id === WORKFLOW_NODE_IDS.review) {
     return { reviewFile: summary.reviewFile || summary.files?.distributionReview || '', mustReview: !!summary.mustReview };
   }
@@ -1088,6 +1321,47 @@ function sycmFailureIntervention(row) {
 
 function summaryInterventionForNode(summary, nodeId) {
   const status = summary.status || 'unknown';
+  const mode = summary.runtime?.mode || summary.options?.mode || '';
+  if (mode === 'competitor-analysis') {
+    if (status !== 'manual_action_required') return null;
+    const activeNode = summary.runtime?.activeStep || WORKFLOW_NODE_IDS.resolveShops;
+    if (nodeId !== activeNode) return null;
+    const manualAction = summary.manualAction || summary.runtime?.manualAction || null;
+    const platformErrorText = (manualAction?.errors || [])
+      .map(item => `${item?.code || ''} ${item?.message || ''}`)
+      .join('\n');
+    const platformStatus = /内测期间仅开放部分用户|ACCESS_RESTRICTED/i.test(platformErrorText)
+      ? 'TAOBAO_NATIVE_ACCESS_RESTRICTED'
+      : /执行层未就绪|NOT_READY/i.test(platformErrorText)
+        ? 'TAOBAO_NATIVE_NOT_READY'
+        : String(manualAction?.status || 'manual_action_required');
+    const accessRestricted = platformStatus === 'TAOBAO_NATIVE_ACCESS_RESTRICTED';
+    const toolNotReady = platformStatus === 'TAOBAO_NATIVE_NOT_READY';
+    const requiresPlatformAction = /LOGIN|SECURITY|TIMEOUT|UNAVAILABLE|ACCESS_RESTRICTED|NOT_READY|TOOL_ERROR|NATIVE_FAILED/i.test(platformStatus);
+    const platformActionHint = accessRestricted
+      ? '淘宝桌面版当前返回“内测期间仅开放部分用户”。请先完全退出并重新启动客户端；如果重启后仍持续出现，再检查客户端版本或账号开放状态。'
+      : toolNotReady
+        ? '淘宝桌面版自动化执行层未就绪。请完全退出并重新打开客户端，等待首页加载完成后重试。'
+        : manualAction?.userMessage;
+    return {
+      blocker: summary.blockers?.[0] || 'taobao_native_manual_action_required',
+      actionHint: platformActionHint || (requiresPlatformAction
+        ? '请打开淘宝客户端并完成登录或安全验证后重试。'
+        : '店铺榜单页面没有完整加载，请重新采集当前节点。'),
+      platform: 'taobao-native',
+      platformStatus,
+      manualAction,
+      nextRecommendedAction: {
+        action: requiresPlatformAction ? 'start-taobao-native' : 'retry-node',
+        label: accessRestricted ? '打开淘宝客户端' : requiresPlatformAction ? '打开淘宝客户端' : '重新采集失败榜单',
+        description: accessRestricted
+          ? '打开淘宝桌面版；若仍异常，请完全退出客户端后重新启动。'
+          : requiresPlatformAction
+            ? '打开淘宝首页，完成登录或验证后重试当前节点。'
+          : '保留成功样本，只重新采集失败的店铺榜单。'
+      }
+    };
+  }
   if (nodeId === WORKFLOW_NODE_IDS.collectRank && status === 'manual_action_required') {
     const manualAction = summary.runtime?.manualAction || summary.manualAction || null;
     if (manualAction?.status === 'product_details_required' || summary.blockers?.includes('order_sheet_product_details_required')) {
@@ -1165,16 +1439,11 @@ function summaryInterventionForNode(summary, nodeId) {
               : '请在 Chrome 中处理生意参谋登录、滑块或权限问题后重试。'
           }
         : null,
-      nextRecommendedAction: chromeUnavailable
+      nextRecommendedAction: chromeUnavailable || platformBlocked
         ? {
             action: 'start-sycm-chrome',
             label: '启动 Chrome',
-            description: '启动带远程调试端口的 Chrome，登录生意参谋后重试灵感选词。'
-          }
-        : platformBlocked ? {
-            action: 'resume-after-manual',
-            label: '我已处理，重试选词',
-            description: '完成生意参谋人工处理后重新运行当前节点。'
+            description: '启动带远程调试端口的 Chrome，完成生意参谋登录或验证后重试当前拓词节点。'
           }
         : {
             action: 'retry-node',
@@ -1367,6 +1636,28 @@ function statusPlanForSummary(summary) {
     return memo;
   }, {});
   const mode = summary.runtime?.mode || summary.options?.mode || '';
+  if (mode === 'competitor-analysis') {
+    states[WORKFLOW_NODE_IDS.start] = 'completed';
+    const steps = [
+      WORKFLOW_NODE_IDS.resolveShops,
+      WORKFLOW_NODE_IDS.collectCompetitors,
+      WORKFLOW_NODE_IDS.enrichCompetitors,
+      WORKFLOW_NODE_IDS.analyzeCompetitors,
+      WORKFLOW_NODE_IDS.competitorReport
+    ];
+    const activeStep = summary.runtime?.activeStep;
+    for (const step of steps) {
+      const progressStatus = nodeStatusFromRuntimeProgress(summary.runtime?.progress?.[step]);
+      if (progressStatus) states[step] = progressStatus;
+    }
+    if (summary.status === 'workflow_complete') {
+      for (const step of steps) states[step] = 'completed';
+      states[WORKFLOW_NODE_IDS.end] = 'completed';
+    } else if (activeStep && states[activeStep] === 'idle') {
+      states[activeStep] = summary.runtime?.status === 'failed' ? 'failed' : summary.runtime?.status === 'blocked' ? 'blocked' : 'running';
+    }
+    return states;
+  }
   if (mode === 'order-sheet') {
     states[WORKFLOW_NODE_IDS.start] = 'completed';
     if (status === 'workflow_complete') {
@@ -1642,6 +1933,19 @@ function buildNodeStates(summary) {
       outputSummary: runtime.outputSummary || states[activeStep].outputSummary || null
     };
   }
+  if (summary.options?.mode === 'competitor-analysis') {
+    const collectionState = states[WORKFLOW_NODE_IDS.collectCompetitors];
+    if (collectionState?.status === 'blocked' && [
+      'TAOBAO_NATIVE_ACCESS_RESTRICTED',
+      'TAOBAO_NATIVE_NOT_READY'
+    ].includes(collectionState.platformStatus) && collectionState.actionHint) {
+      collectionState.progress = normalizeNodeProgress({
+        ...(collectionState.progress || {}),
+        status: 'blocked',
+        message: collectionState.actionHint
+      });
+    }
+  }
   return states;
 }
 
@@ -1657,12 +1961,16 @@ function templateForSummary(summary) {
   }
   const id = mode === 'keyword'
     ? 'exact-keyword-v1'
+    : mode === 'root-keyword'
+      ? 'root-keyword-selection-v1'
     : mode === 'manual'
       ? 'manual-selection-v2'
       : mode === 'order-sheet'
         ? 'sycm-order-sheet-v1'
-        : mode === 'review-sheet'
+      : mode === 'review-sheet'
           ? 'uploaded-review-sheet-v1'
+          : mode === 'competitor-analysis'
+            ? 'competitor-analysis-v1'
         : 'daily-selection-v1';
   return listProductionWorkflowTemplates().find(item => item.id === id);
 }
@@ -1762,7 +2070,7 @@ function getWorkflowRun(runIdOrOptions, options = {}) {
  * @param {string} nodeId workflow 节点 ID。
  * @param {object} options 读取参数。
  * @param {string} [options.dataDir] pipeline 数据目录。
- * @param {number} [options.limit] JSONL 最大行数。
+ * @param {number|'all'} [options.limit] JSONL 最大行数，`all` 表示读取全部。
  * @param {number} [options.maxChars] 文本最大字符数。
  * @returns {object|null} artifact 内容。
  */
@@ -1771,6 +2079,23 @@ function normalizeArtifactOptions(runIdOrOptions, nodeId, maybeOptions = {}) {
     return { ...runIdOrOptions };
   }
   return { ...maybeOptions, runId: runIdOrOptions, nodeId };
+}
+
+function readArtifactJsonl(file, limit) {
+  if (limit !== 'all') return readJsonlPreview(file, limit || 50);
+  if (!file || !fs.existsSync(file)) return [];
+  return fs.readFileSync(file, 'utf8')
+    .replace(/^\uFEFF/, '')
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean)
+    .flatMap(line => {
+      try {
+        return [JSON.parse(line)];
+      } catch (_error) {
+        return [];
+      }
+    });
 }
 
 function readWorkflowNodeArtifact(runIdOrOptions, nodeId, options = {}) {
@@ -1824,16 +2149,16 @@ function readWorkflowNodeArtifact(runIdOrOptions, nodeId, options = {}) {
         nodeId: normalized.nodeId,
         file,
         type: 'jsonl',
-        rows: readJsonlPreview(file, normalized.limit || 50),
-        inspirationRows: readJsonlPreview(summary.files?.inspirations, normalized.limit || 50),
-        rootRows: readJsonlPreview(summary.files?.rootCandidates, normalized.limit || 100),
+        rows: readArtifactJsonl(file, normalized.limit),
+        inspirationRows: readArtifactJsonl(summary.files?.inspirations, normalized.limit),
+        rootRows: readArtifactJsonl(summary.files?.rootCandidates, normalized.limit),
         discovery: summary.discovery || null
       };
     }
     if (normalized.nodeId === WORKFLOW_NODE_IDS.keywordReview) {
       if (summary.options?.mode === 'manual') {
         const selectedFile = summary.files?.selectedProducts;
-        const selectedRows = readJsonlPreview(selectedFile, normalized.limit || 50);
+        const selectedRows = readArtifactJsonl(selectedFile, normalized.limit);
         if (selectedRows.length > 0) {
           return {
             runId: summary.runId,
@@ -1844,7 +2169,7 @@ function readWorkflowNodeArtifact(runIdOrOptions, nodeId, options = {}) {
           };
         }
       }
-      const reviewedRows = readJsonlPreview(file, normalized.limit || 50);
+      const reviewedRows = readArtifactJsonl(file, normalized.limit);
       if (reviewedRows.length > 0) {
         return {
           runId: summary.runId,
@@ -1854,7 +2179,7 @@ function readWorkflowNodeArtifact(runIdOrOptions, nodeId, options = {}) {
           rows: reviewedRows
         };
       }
-      const candidateRows = readJsonlPreview(summary.files?.candidates, normalized.limit || 50);
+      const candidateRows = readArtifactJsonl(summary.files?.candidates, normalized.limit);
       return {
         runId: summary.runId,
         nodeId: normalized.nodeId,
@@ -1917,6 +2242,16 @@ function readWorkflowNodeArtifact(runIdOrOptions, nodeId, options = {}) {
       rows: readJsonlPreview(file, normalized.limit || 50)
     };
   }
+  if (artifact.type === 'competitor-products') {
+    return {
+      runId: summary.runId,
+      nodeId: normalized.nodeId,
+      file,
+      type: 'competitor-products',
+      hotRows: readJsonlPreview(summary.files?.competitorHotProducts, normalized.limit || 50),
+      newRows: readJsonlPreview(summary.files?.competitorNewProducts, normalized.limit || 50)
+    };
+  }
   if (artifact.type === 'xlsx') {
     if (!fs.existsSync(file)) return null;
     return {
@@ -1925,7 +2260,9 @@ function readWorkflowNodeArtifact(runIdOrOptions, nodeId, options = {}) {
       file,
       filename: path.basename(file),
       type: 'xlsx',
-      count: Number(summary.counts?.orderSheetRows || 0),
+      count: normalized.nodeId === WORKFLOW_NODE_IDS.competitorReport
+        ? Number(summary.counts?.competitorReportRows || 0)
+        : Number(summary.counts?.orderSheetRows || 0),
       downloadUrl: `/api/workflows/runs/${encodeURIComponent(summary.runId)}/artifacts/${encodeURIComponent(normalized.nodeId)}/raw`
     };
   }

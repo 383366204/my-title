@@ -165,7 +165,7 @@ export function WorkflowOverlayManager({
       label={label}
       description={defaultDescription}
       onClose={onClose}
-      wide={[WORKFLOW_OVERLAYS.DISTRIBUTION, WORKFLOW_OVERLAYS.NODE_WORKBENCH, WORKFLOW_OVERLAYS.PRODUCT_SELECT, WORKFLOW_OVERLAYS.SHEET_CONFIG].includes(activeOverlay.type)}
+      wide={[WORKFLOW_OVERLAYS.DISTRIBUTION, WORKFLOW_OVERLAYS.NODE_WORKBENCH, WORKFLOW_OVERLAYS.PRODUCT_SELECT, WORKFLOW_OVERLAYS.SHEET_CONFIG, WORKFLOW_OVERLAYS.START_CONFIG].includes(activeOverlay.type)}
     >
       {content}
     </WorkflowOverlayShell>

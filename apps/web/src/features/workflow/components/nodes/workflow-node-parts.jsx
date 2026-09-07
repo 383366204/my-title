@@ -64,7 +64,10 @@ export const WorkflowNodeActionChip = ({ view, onAction }) => (
   </span>
 );
 
-const ARTIFACT_NODE_IDS = new Set(['mine', 'keywordReview', 'verify', 'select', 'generate', 'collectRank', 'generateSheet']);
+const ARTIFACT_NODE_IDS = new Set([
+  'mine', 'keywordReview', 'verify', 'select', 'generate', 'collectRank', 'generateSheet',
+  'resolveShops', 'collectCompetitors', 'enrichCompetitors', 'analyzeCompetitors', 'competitorReport'
+]);
 
 /**
  * Component to render button for viewing node artifact.

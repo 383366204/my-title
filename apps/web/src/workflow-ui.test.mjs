@@ -13,7 +13,9 @@ import {
   getPipelineMonitorNodeStatus,
   getPipelineSummaryVisualState,
   normalizeWorkflowProgressEvent,
+  parseCompetitorShareInputs,
   parseExactKeywords,
+  parseRootKeywords,
   parseOrderSheetManualItems,
   getStartNodeParams,
   getWorkflowLaunchParams,
@@ -39,7 +41,9 @@ import {
   getWorkflowNodeSuccessLabel,
   getWorkflowNodeResultLocation,
   getWorkflowResultSummaryView,
+  getCompetitorConfigSummary,
   getOrderSheetConfigSummary,
+  getRootKeywordConfigSummary,
   getSheetConfigSummary
 } from './workflow-ui.js';
 
@@ -134,6 +138,29 @@ test('exact keyword input blocks empty and oversized batches', () => {
   assert.match(getWorkflowLaunchBlocker('keyword', [{ id: 'start', data: { keywordsText: '' } }]).error, /不能为空/);
   const keywordsText = Array.from({ length: 21 }, (_, index) => `关键词${index + 1}`).join('\n');
   assert.match(getWorkflowLaunchBlocker('keyword', [{ id: 'start', data: { keywordsText } }]).error, /最多输入 20 个/);
+});
+
+test('root keyword input preserves large batches and exposes the safe-query summary', () => {
+  const rootsText = [
+    ...Array.from({ length: 120 }, (_, index) => `词根${index + 1}`),
+    '词根1',
+    ' 词根2 '
+  ].join('\n');
+  const roots = parseRootKeywords(rootsText);
+  const nodes = [{
+    id: 'start',
+    data: {
+      rootsText,
+      sycmRiskProfile: 'conservative',
+      sycmBatchSize: 8
+    }
+  }];
+
+  assert.equal(roots.length, 120);
+  assert.equal(getWorkflowLaunchBlocker('root-keyword', nodes), null);
+  assert.match(getRootKeywordConfigSummary(nodes[0].data), /120 个词根/);
+  assert.match(getRootKeywordConfigSummary(nodes[0].data), /保守节奏/);
+  assert.match(getWorkflowLaunchBlocker('root-keyword', [{ id: 'start', data: { rootsText: '' } }]).error, /至少一个词根/);
 });
 
 test('order sheet start config validates custom date ranges', () => {
@@ -523,6 +550,11 @@ test('getWorkflowNodeAction maps review and terminal states to node actions', ()
   });
   assert.deepEqual(getWorkflowNodeAction('select', { status: 'completed', manualDirectInput: true, output: { failed: 1 } }), {
     label: '重试失败项',
+    action: 'retry-node',
+    tone: 'warn'
+  });
+  assert.deepEqual(getWorkflowNodeAction('enrichCompetitors', { status: 'completed', output: { count: 15, failed: 5 } }), {
+    label: '重试失败链接',
     action: 'retry-node',
     tone: 'warn'
   });
@@ -1090,6 +1122,17 @@ test('getUnifiedWorkflowHistoryItem normalizes pipeline and workflow runs for on
     stage: 'submitted',
     workflow: { id: 'sycm-order-sheet-v1', mode: 'order-sheet' }
   }).subtitle, '表格已生成');
+
+  assert.equal(getUnifiedWorkflowHistoryItem({
+    runId: '2026-09-06-010340',
+    status: 'blocked',
+    stage: 'verified',
+    workflow: { id: 'competitor-analysis-v1', mode: 'competitor-analysis' },
+    nodeStates: {
+      resolveShops: { status: 'completed' },
+      collectCompetitors: { status: 'blocked' }
+    }
+  }).subtitle, '采集爆款与新品');
 });
 
 test('summarizeWorkflowArtifact describes jsonl, markdown, text, and empty artifacts', () => {
@@ -1581,4 +1624,44 @@ test('getWorkflowLaunchBlocker accepts link-only items for manual mode', () => {
   assert.equal(missing.status, 'blocked');
   assert.match(missing.error, /1688 商品链接/);
   assert.equal(ready, null);
+});
+
+test('competitor input parses shared copy, deduplicates links, and blocks empty launches', () => {
+  const parsed = parseCompetitorShareInputs(`【淘宝】分享 https://m.tb.cn/h.example
+https://m.tb.cn/h.example
+https://shop369638840.taobao.com/
+https://shop369638840.taobao.com:444/
+https://example.com/not-taobao`);
+  assert.deepEqual(parsed.links, ['https://m.tb.cn/h.example', 'https://shop369638840.taobao.com/']);
+  assert.equal(parsed.duplicateCount, 1);
+  assert.equal(parsed.invalidCount, 2);
+
+  const missing = getWorkflowLaunchBlocker('competitor-analysis', [
+    { id: 'start', type: 'production-start', data: { competitorText: '没有链接' } }
+  ]);
+  const ready = getWorkflowLaunchBlocker('competitor-analysis', [
+    { id: 'start', type: 'production-start', data: { competitorText: 'https://m.tb.cn/h.example' } }
+  ]);
+  assert.match(missing.error, /同行分享链接/);
+  assert.equal(ready, null);
+});
+
+test('competitor workflow exposes actionable summaries and readable artifacts', () => {
+  assert.match(getCompetitorConfigSummary({ competitorText: 'https://m.tb.cn/h.example', hotLimit: 20, newLimit: 15 }), /1 条同行链接/);
+  assert.deepEqual(buildWorkflowOperationRequest('run-1', 'start-taobao-native', 'resolveShops'), {
+    endpoint: '/api/workflows/taobao-native/start',
+    body: { runId: 'run-1', nodeId: 'resolveShops' }
+  });
+  assert.equal(summarizeWorkflowArtifact({ type: 'competitor-products', hotRows: [{}, {}], newRows: [{}] }), '2 个爆款 · 1 个新品');
+  const view = getWorkflowArtifactView({
+    type: 'competitor-products',
+    hotRows: [{ shopName: '测试店铺', title: '爆款商品', rank: 1, paymentText: '300+人付款', productUrl: 'https://item.taobao.com/item.htm?id=123' }],
+    newRows: [{ shopName: '测试店铺', title: '新品商品', rank: 1, paymentText: '10人付款' }]
+  }, 'collectCompetitors');
+  assert.equal(view.kind, 'business-list');
+  assert.equal(view.rows[0].sourceUrl, 'https://item.taobao.com/item.htm?id=123');
+  assert.match(view.rows[1].description, /提高“每榜补全商品链接”/);
+  assert.equal(view.rows.length, 2);
+  assert.match(view.rows[0].meta, /销量榜/);
+  assert.match(view.rows[1].description, /不代表精确上架日期/);
 });

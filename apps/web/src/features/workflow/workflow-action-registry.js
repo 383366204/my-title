@@ -39,6 +39,7 @@ export const WORKFLOW_ACTION_ROUTES = Object.freeze({
   'mine-more': command,
   'retry-node': command,
   'start-sycm-chrome': command,
+  'start-taobao-native': command,
   'pause-distribution': command
 });
 

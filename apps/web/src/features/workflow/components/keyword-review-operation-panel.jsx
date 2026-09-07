@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Check, CheckCircle2, Plus, RefreshCw, X } from 'lucide-react';
 
 import { artifactItems, candidateKeyword } from '../workflow-data.js';
@@ -16,6 +16,7 @@ export const KeywordReviewOperationPanel = ({
   const [query, setQuery] = useState('');
   const [manualKeywordDraft, setManualKeywordDraft] = useState('');
   const [manualKeywords, setManualKeywords] = useState([]);
+  const [visibleLimit, setVisibleLimit] = useState(50);
   const candidateRows = useMemo(() => [...candidates, ...manualKeywords.map((keyword) => ({
     keyword,
     source: 'manual',
@@ -45,6 +46,7 @@ export const KeywordReviewOperationPanel = ({
     if (filter === 'rejected') return item.reviewDecision === 'rejected';
     return true;
   }), [candidateRows, filter, query]);
+  useEffect(() => setVisibleLimit(50), [filter, query]);
   const setAllDecisions = (decision) => {
     setDecisions(Object.fromEntries(candidateRows.map((item) => [item.key, decision])));
   };
@@ -102,7 +104,7 @@ export const KeywordReviewOperationPanel = ({
           </div>
         )}
         <div className="node-candidate-list">
-          {visibleRows.slice(0, 20).map((item) => (
+          {visibleRows.slice(0, visibleLimit).map((item) => (
             <div className={`node-candidate-row keyword-review-row ${item.reviewDecision === 'rejected' ? 'is-rejected' : 'is-approved'}`} key={item.key}>
               <div>
                 <strong>{item.keyword || '未命名候选词'}</strong>
@@ -141,6 +143,11 @@ export const KeywordReviewOperationPanel = ({
           ))}
           {candidates.length === 0 && manualKeywords.length === 0 && <div className="artifact-empty">暂无候选词，可以先手动输入关键词。</div>}
         </div>
+        {visibleRows.length > visibleLimit && (
+          <button type="button" className="node-secondary-button keyword-review-load-more" onClick={() => setVisibleLimit((current) => current + 50)}>
+            继续显示（剩余 {visibleRows.length - visibleLimit} 个）
+          </button>
+        )}
         <div className="node-product-actions">
           <button type="button" className="node-primary-button" onClick={() => onConfirmKeywordReview(candidateRows, manualKeywords)} disabled={!canConfirm || candidateRows.length === 0}>
             <CheckCircle2 size={14} /> 确认筛词结果

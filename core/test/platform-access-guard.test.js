@@ -139,6 +139,60 @@ test('platform guard reports cooldown without shortening the wait', async () => 
   assert.ok(updates[0].remainingMs > 0);
 });
 
+test('platform guard applies a longer cooldown at a configured batch boundary', async () => {
+  const dataDir = tempDataDir();
+  for (let index = 0; index < 2; index += 1) {
+    await runWithPlatformGuard('sycm', {
+      dataDir,
+      cache: false,
+      minCooldownMs: 0,
+      maxCooldownMs: 0
+    }, async () => ({ ok: true }));
+  }
+
+  const started = Date.now();
+  await runWithPlatformGuard('sycm', {
+    dataDir,
+    cache: false,
+    minCooldownMs: 0,
+    maxCooldownMs: 0,
+    batchSize: 2,
+    minBatchCooldownMs: 35,
+    maxBatchCooldownMs: 35
+  }, async () => ({ ok: true }));
+
+  assert.ok(Date.now() - started >= 30);
+});
+
+test('platform guard can pause before a cooled-down request reaches the platform', async () => {
+  const dataDir = tempDataDir();
+  await runWithPlatformGuard('sycm', {
+    dataDir,
+    cache: false,
+    minCooldownMs: 0,
+    maxCooldownMs: 0
+  }, async () => ({ ok: true }));
+
+  let calls = 0;
+  await assert.rejects(
+    () => runWithPlatformGuard('sycm', {
+      dataDir,
+      cache: false,
+      minCooldownMs: 10_000,
+      maxCooldownMs: 10_000,
+      shouldStop: () => 'pause'
+    }, async () => {
+      calls += 1;
+      return { ok: true };
+    }),
+    (err) => err instanceof PlatformAccessError
+      && err.code === 'PLATFORM_ACCESS_INTERRUPTED'
+      && err.status === 'pause'
+  );
+  assert.equal(calls, 0);
+  assert.equal(getPlatformAccessStatus('sycm', { dataDir }).available, true);
+});
+
 test('platform blocker report protects 1688 without using browser-specific code', () => {
   const dataDir = tempDataDir();
   reportPlatformBlocker('1688', {

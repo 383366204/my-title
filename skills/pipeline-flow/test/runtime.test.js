@@ -137,6 +137,31 @@ describe('pipeline runtime store', () => {
   });
 });
 describe('pipeline runtime runner', () => {
+  it('runs competitor analysis steps in canvas order', async () => {
+    const dataDir = tempDataDir();
+    const calls = [];
+    const stepNames = ['resolveShops', 'collectCompetitors', 'enrichCompetitors', 'analyzeCompetitors', 'competitorReport'];
+    const stepFns = Object.fromEntries(stepNames.map((step, index) => [step, async ({ reportProgress }) => {
+      calls.push(step);
+      reportProgress({ current: 1, total: 1, message: `${step} 完成` });
+      return { status: index === stepNames.length - 1 ? 'workflow_complete' : `competitor_step_${index}` };
+    }]));
+
+    const result = await runPipelineRuntime({
+      dataDir,
+      runId: 'competitor_runtime',
+      mode: 'competitor-analysis',
+      params: { competitorText: 'https://m.tb.cn/h.example' },
+      stepFns
+    });
+
+    const runtime = readRuntimeState({ dataDir, runId: 'competitor_runtime' });
+    assert.deepEqual(calls, stepNames);
+    assert.deepEqual(runtime.steps, stepNames);
+    assert.ok(stepNames.every(step => runtime.progress[step].status === 'completed'));
+    assert.equal(result.status, 'workflow_complete');
+  });
+
   it('runs manual direct-input mode from start to product enrichment without keyword review', async () => {
     const dataDir = tempDataDir();
     const runId = 'manual_runtime_v2';
@@ -160,6 +185,32 @@ describe('pipeline runtime runner', () => {
     assert.equal(runtime.progress.start.status, 'completed');
     assert.equal(runtime.progress.select.status, 'completed');
     assert.equal(runtime.progress.keywordReview, undefined);
+  });
+
+  it('keeps a manually blocked runtime step visibly blocked', async () => {
+    const dataDir = tempDataDir();
+    const runId = 'competitor_blocked_progress';
+    await runPipelineRuntime({
+      dataDir,
+      runId,
+      mode: 'competitor-analysis',
+      steps: ['collectCompetitors'],
+      stepFns: {
+        collectCompetitors: async ({ reportProgress }) => {
+          reportProgress({ current: 3, total: 4, message: '已保留成功样本' });
+          return {
+            status: 'manual_action_required',
+            manualAction: { userMessage: '请重新采集失败榜单' }
+          };
+        }
+      }
+    });
+
+    const runtime = readRuntimeState({ dataDir, runId });
+    assert.equal(runtime.status, 'blocked');
+    assert.equal(runtime.progress.collectCompetitors.status, 'blocked');
+    assert.equal(runtime.progress.collectCompetitors.percent, 75);
+    assert.equal(runtime.progress.collectCompetitors.message, '请重新采集失败榜单');
   });
 
   it('runs the link-only manual workflow through verification, title generation, and export', async () => {
@@ -296,6 +347,37 @@ describe('pipeline runtime runner', () => {
     assert.equal(runtime.progress.select.status, 'completed');
     assert.equal(runtime.progress.generate.status, 'completed');
     assert.equal(runtime.progress.export.status, 'completed');
+  });
+
+  it('runs root expansion before manual keyword review and preserves the full downstream graph', async () => {
+    const dataDir = tempDataDir();
+    const calls = [];
+    const result = await runPipelineRuntime({
+      dataDir,
+      runId: 'root_keyword_runtime',
+      mode: 'root-keyword',
+      params: { roots: ['杯垫', '收纳'] },
+      stepFns: {
+        mine: async ({ reportProgress }) => {
+          calls.push('mine');
+          reportProgress({ current: 2, total: 2, message: '拓词完成' });
+          return { status: 'mined' };
+        },
+        keywordReview: async ({ reportProgress }) => {
+          calls.push('keywordReview');
+          reportProgress({ current: 0, total: 12, message: '等待人工筛词' });
+          return { status: 'awaiting_keyword_review' };
+        }
+      }
+    });
+
+    const runtime = readRuntimeState({ dataDir, runId: 'root_keyword_runtime' });
+    assert.deepEqual(calls, ['mine', 'keywordReview']);
+    assert.equal(result.runtimeStatus, 'blocked');
+    assert.deepEqual(runtime.steps, ['mine', 'keywordReview', 'verify', 'select', 'generate', 'export']);
+    assert.equal(runtime.progress.mine.status, 'completed');
+    assert.equal(runtime.progress.keywordReview.status, 'completed');
+    assert.equal(runtime.progress.verify.status, 'idle');
   });
 
   it('prepares every exact keyword before verification', async () => {

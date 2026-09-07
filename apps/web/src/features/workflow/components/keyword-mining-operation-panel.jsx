@@ -32,6 +32,7 @@ import { SeedPoolWorkbench } from './keyword-mining/seed-pool-workbench.jsx';
 export const KeywordMiningOperationPanel = ({
   artifactState,
   dynamicMode = false,
+  rootExpansionMode = false,
   seedRows,
   seedDraft,
   seedLoading,
@@ -55,7 +56,7 @@ export const KeywordMiningOperationPanel = ({
 }) => {
   return (
     <div className="node-embedded-workbench">
-      {dynamicMode ? (
+      {rootExpansionMode ? null : dynamicMode ? (
         <InspirationDiscoveryView artifactState={artifactState} />
       ) : (
         <SeedPoolWorkbench

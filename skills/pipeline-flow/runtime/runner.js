@@ -3,10 +3,12 @@
 const fs = require('fs');
 const path = require('path');
 const { normalizeExactKeywords } = require('../../../core/exact-keywords');
+const { normalizeRootKeywords } = require('../../../core/root-keywords');
 const {
   DEFAULT_FLOW_DIR,
   createRunId,
   flowMine,
+  flowExpandRootKeywords,
   flowReviewCandidates,
   flowVerify,
   flowSelectProducts,
@@ -29,6 +31,13 @@ const {
   importReviewSource
 } = require('../../review-sheet');
 const {
+  analyzeCompetitors,
+  buildCompetitorAnalysisReport,
+  collectCompetitorProducts,
+  enrichCompetitorProducts,
+  resolveCompetitorShops
+} = require('../../competitor-analysis');
+const {
   assertRuntimeRunId,
   initRuntimeState,
   readRuntimeState,
@@ -40,9 +49,11 @@ const {
 
 const DEFAULT_STEPS = ['mine', 'keywordReview', 'verify', 'select', 'generate', 'export'];
 const KEYWORD_STEPS = ['start', 'verify', 'select', 'generate', 'export'];
+const ROOT_KEYWORD_STEPS = ['mine', 'keywordReview', 'verify', 'select', 'generate', 'export'];
 const MANUAL_STEPS = ['start', 'select', 'verify', 'generate', 'export'];
 const ORDER_SHEET_STEPS = ['collectRank', 'confirmProducts', 'generateSheet'];
 const REVIEW_SHEET_STEPS = ['importSheet', 'generateReviews', 'generateSheet'];
+const COMPETITOR_ANALYSIS_STEPS = ['resolveShops', 'collectCompetitors', 'enrichCompetitors', 'analyzeCompetitors', 'competitorReport'];
 const STOP_STATUSES = new Set([
   'mining_manual_action_required',
   'mining_empty',
@@ -144,6 +155,7 @@ function createReporter({ dataDir, getRunId, step }) {
 
 function createDefaultStepFns({ dataDir, runId, params, mode = 'daily' }) {
   const keywordMode = mode === 'keyword';
+  const rootKeywordMode = mode === 'root-keyword';
   const manualMode = mode === 'manual';
   const exactKeywords = keywordMode
     ? normalizeExactKeywords(Array.isArray(params.keywords) && params.keywords.length > 0 ? params.keywords : params.keyword)
@@ -151,15 +163,17 @@ function createDefaultStepFns({ dataDir, runId, params, mode = 'daily' }) {
   const keywordCount = Math.max(1, exactKeywords.length);
   const manualProductCount = Math.max(1, Array.isArray(params.items) ? params.items.length : 0);
   const mineLimit = params.mine || params.limit || 50;
-  const verifyLimit = keywordMode ? keywordCount : (params.verify || 20);
-  const selectLimit = keywordMode ? keywordCount : (params.select || params.generate || 10);
-  const generateLimit = manualMode ? manualProductCount : (keywordMode ? keywordCount : (params.generate || 10));
-  const exportLimit = manualMode ? Math.max(manualProductCount, Number(params.export || 0)) : (params.export || 20);
+  const unlimited = Number.MAX_SAFE_INTEGER;
+  const verifyLimit = rootKeywordMode ? unlimited : (keywordMode ? keywordCount : (params.verify || 20));
+  const selectLimit = rootKeywordMode ? unlimited : (keywordMode ? keywordCount : (params.select || params.generate || 10));
+  const generateLimit = rootKeywordMode ? unlimited : (manualMode ? manualProductCount : (keywordMode ? keywordCount : (params.generate || 10)));
+  const exportLimit = rootKeywordMode ? unlimited : (manualMode ? Math.max(manualProductCount, Number(params.export || 0)) : (params.export || 20));
   const recordSeedFeedback = mode === 'daily'
     ? params.recordSeedFeedback !== false
     : params.recordSeedFeedback === true;
   const dailyDiscoveryMode = params.discoveryMode || 'inspiration';
   const dailySource = params.source || (dailyDiscoveryMode === 'seed' ? 'sycm_hot' : 'inspiration');
+  const shouldStop = () => readRuntimeControl({ dataDir, runId }).requestedAction;
 
   return {
     start: async ({ reportProgress }) => {
@@ -168,6 +182,17 @@ function createDefaultStepFns({ dataDir, runId, params, mode = 'daily' }) {
       return flowKeywordStart({ ...params, dataDir, runId, keywords: exactKeywords });
     },
     mine: async ({ reportProgress }) => {
+      if (rootKeywordMode) {
+        const rootCount = normalizeRootKeywords(params.roots || params.rootsText).roots.length;
+        reportProgress({ current: 0, total: rootCount, message: '开始按词根拓词' });
+        return flowExpandRootKeywords({
+          ...params,
+          dataDir,
+          runId,
+          onProgress: reportProgress,
+          shouldStop
+        });
+      }
       reportProgress({ current: 0, total: mineLimit, message: '开始挖词' });
       return flowMine({
         ...params,
@@ -261,6 +286,26 @@ function createDefaultStepFns({ dataDir, runId, params, mode = 'daily' }) {
       reportProgress({ current: result.count, total: result.count, message: `已生成 ${result.count} 条评价，等待复核` });
       return result;
     },
+    resolveShops: async ({ reportProgress }) => {
+      reportProgress({ current: 0, total: Math.max(1, Number(params.inputCount || 1)), message: '准备识别同行店铺' });
+      return resolveCompetitorShops({ ...params, dataDir, runId, onProgress: reportProgress });
+    },
+    collectCompetitors: async ({ reportProgress }) => {
+      reportProgress({ current: 0, total: Math.max(2, Number(params.maxShops || 5) * 2), message: '准备采集销量榜和新品榜' });
+      return collectCompetitorProducts({ ...params, dataDir, runId, onProgress: reportProgress, shouldStop });
+    },
+    enrichCompetitors: async ({ reportProgress }) => {
+      reportProgress({ current: 0, total: Math.max(1, Number(params.detailLimit || 20) * 2), message: '准备补全榜单商品链接' });
+      return enrichCompetitorProducts({ ...params, dataDir, runId, onProgress: reportProgress, shouldStop });
+    },
+    analyzeCompetitors: async ({ reportProgress }) => {
+      reportProgress({ current: 0, total: 1, message: '正在分析同行商品结构' });
+      return analyzeCompetitors({ ...params, dataDir, runId, onProgress: reportProgress });
+    },
+    competitorReport: async ({ reportProgress }) => {
+      reportProgress({ current: 0, total: 1, message: '正在生成同行分析报告' });
+      return buildCompetitorAnalysisReport({ ...params, dataDir, runId, onProgress: reportProgress });
+    },
     review: async ({ reportProgress }) => {
       reportProgress({ current: 1, total: 1, message: '等待人工复核' });
       return { status: 'needs_review' };
@@ -322,12 +367,16 @@ async function runPipelineRuntime(options = {}) {
   const steps = options.steps || (
     mode === 'keyword'
       ? KEYWORD_STEPS
+      : mode === 'root-keyword'
+        ? ROOT_KEYWORD_STEPS
       : mode === 'manual'
         ? MANUAL_STEPS
         : mode === 'order-sheet'
           ? ORDER_SHEET_STEPS
-          : mode === 'review-sheet'
-            ? REVIEW_SHEET_STEPS
+        : mode === 'review-sheet'
+          ? REVIEW_SHEET_STEPS
+          : mode === 'competitor-analysis'
+            ? COMPETITOR_ANALYSIS_STEPS
           : DEFAULT_STEPS
   );
   const stepFns = injectedStepFns || createDefaultStepFns({ dataDir, runId, params, mode });
@@ -414,19 +463,27 @@ async function runPipelineRuntime(options = {}) {
       }
 
       const reportedProgress = readRuntimeState({ dataDir, runId })?.progress?.[step] || {};
+      const stepBlocked = lastResult.status === 'manual_action_required'
+        || (BLOCKED_PIPELINE_STATUSES.has(lastResult.status) && lastResult.stepIncomplete === true);
       updateRuntimeState({
         dataDir,
         runId,
         patch: {
           progress: {
-            [step]: completedProgress(reportedProgress.message || '完成', reportedProgress)
+            [step]: stepBlocked
+              ? {
+                  ...normalizeProgress(reportedProgress),
+                  status: 'blocked',
+                  message: lastResult.manualAction?.userMessage || reportedProgress.message || '当前节点需要处理后重试'
+                }
+              : completedProgress(reportedProgress.message || '完成', reportedProgress)
           }
         }
       });
       appendRuntimeEvent({
         dataDir,
         runId,
-        event: { event: 'step_completed', step, status: 'completed' }
+        event: { event: stepBlocked ? 'step_blocked' : 'step_completed', step, status: stepBlocked ? 'blocked' : 'completed' }
       });
 
       const control = readRuntimeControl({ dataDir, runId });
@@ -451,13 +508,17 @@ async function runPipelineRuntime(options = {}) {
 
       if (control.requestedAction === 'pause') {
         clearRuntimeControl({ dataDir, runId });
+        const resumeStep = lastResult.stepIncomplete === true ? step : nextStep;
         updateRuntimeState({
           dataDir,
           runId,
           patch: {
             status: 'paused',
             requestedAction: 'pause',
-            activeStep: nextStep
+            activeStep: resumeStep,
+            progress: lastResult.stepIncomplete === true
+              ? { [step]: { ...reportedProgress, status: 'paused', message: reportedProgress.message || '已暂停，继续后从当前节点恢复' } }
+              : undefined
           }
         });
         appendRuntimeEvent({

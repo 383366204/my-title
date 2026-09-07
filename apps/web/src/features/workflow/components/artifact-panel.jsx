@@ -38,7 +38,9 @@ export function ArtifactPanel({ state }) {
               {item.description && <p>{item.description}</p>}
               {item.sourceUrl && (
                 <a className="artifact-source-link" href={item.sourceUrl} target="_blank" rel="noreferrer">
-                  <ExternalLink size={12} /> {state.nodeId === 'collectRank' ? '打开淘宝商品' : '打开灵感来源'}
+                  <ExternalLink size={12} /> {['resolveShops', 'collectCompetitors', 'enrichCompetitors'].includes(state.nodeId)
+                    ? state.nodeId === 'resolveShops' ? '打开同行店铺' : '打开淘宝商品'
+                    : state.nodeId === 'collectRank' ? '打开淘宝商品' : '打开灵感来源'}
                 </a>
               )}
             </div>

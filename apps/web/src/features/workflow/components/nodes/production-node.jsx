@@ -190,20 +190,21 @@ const WorkflowReviewQuickActions = ({ data }) => {
 const WorkflowCompletionDownload = ({ nodeId, data }) => {
   const status = String(data?.status || data?.state || '').toLowerCase();
   const workflowRunId = data?.workflowRunId || data?.output?.runId;
-  if (nodeId !== 'end' || status !== 'completed' || data?.orderSheetDownload !== true || !workflowRunId) {
+  const artifactNodeId = data?.competitorDownload === true ? 'competitorReport' : 'generateSheet';
+  if (nodeId !== 'end' || status !== 'completed' || (data?.orderSheetDownload !== true && data?.competitorDownload !== true) || !workflowRunId) {
     return null;
   }
-  const downloadUrl = `/api/workflows/runs/${encodeURIComponent(workflowRunId)}/artifacts/generateSheet/raw`;
+  const downloadUrl = `/api/workflows/runs/${encodeURIComponent(workflowRunId)}/artifacts/${artifactNodeId}/raw`;
   return (
     <a
       className="production-node-download-action"
       href={downloadUrl}
       download
-      title="下载本次生成的 Excel 表格"
+      title={data?.competitorDownload === true ? '下载同行分析报告' : '下载本次生成的 Excel 表格'}
       onPointerDown={(event) => event.stopPropagation()}
       onClick={(event) => event.stopPropagation()}
     >
-      <Download size={13} /> 下载 Excel
+      <Download size={13} /> {data?.competitorDownload === true ? '下载分析报告' : '下载 Excel'}
     </a>
   );
 };

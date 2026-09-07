@@ -80,6 +80,27 @@ describe('pipeline run summary', () => {
     assert.deepEqual(summary.blockers, ['sycm_chrome_unavailable']);
   });
 
+  it('does not label competitor collection failures as SYCM blockers', () => {
+    const dataDir = tempPipelineDir();
+    const runId = 'competitor_blocked_run';
+    const runDir = path.join(dataDir, 'runs', runId);
+    writeJson(path.join(runDir, 'run.json'), {
+      runId,
+      status: 'manual_action_required',
+      options: { mode: 'competitor-analysis' },
+      blockers: ['taobao_native_manual_action_required'],
+      manualAction: {
+        platform: 'taobao-native',
+        status: 'TAOBAO_PRODUCT_LIST_EMPTY'
+      },
+      files: {}
+    });
+
+    const summary = summarizePipelineRun({ dataDir, runId });
+    assert.deepEqual(summary.blockers, ['taobao_native_manual_action_required']);
+    assert.equal(summary.blockers.includes('sycm_manual_action_required'), false);
+  });
+
   it('summarizes a needs_review run with previews and review blockers', () => {
     const dataDir = tempPipelineDir();
     const runId = 'review_run';

@@ -16,6 +16,18 @@ const {
   resolveOpportunityDir
 } = require('./flow-context');
 
+function canReuseCandidateSycmEvidence(candidate = {}, options = {}) {
+  if (!candidate.sycmData || typeof candidate.sycmData !== 'object' || Array.isArray(candidate.sycmData)) return false;
+  if (!['inspiration', 'sycm_root_expansion'].includes(String(candidate.source || ''))) return false;
+  // 灵感模式的数据由同一次挖词步骤直接取得，旧记录没有独立证据时间，保持原有复用行为。
+  if (candidate.source === 'inspiration') return true;
+  const evidence = candidate.sycmEvidence || {};
+  if (String(evidence.keyword || '') !== String(candidate.keyword || '')) return false;
+  const collectedAt = Date.parse(evidence.collectedAt || candidate.checkedAt || candidate.date || '');
+  const maxAgeMs = Math.max(1, Number(options.sycmEvidenceMaxAgeHours || 24)) * 60 * 60 * 1000;
+  return Number.isFinite(collectedAt) && Date.now() - collectedAt <= maxAgeMs;
+}
+
 /**
  * Verify candidates against SYCM in a strict serial queue.
  * @param {object} [options] Flow options.
@@ -46,18 +58,17 @@ async function flowVerify(options = {}) {
 
   const verifyCandidate = async (candidate, phase = 'primary') => {
     try {
-      const reuseInspirationMetrics = candidate.source === 'inspiration'
-        && candidate.sycmData
+      const reuseCandidateMetrics = canReuseCandidateSycmEvidence(candidate, options)
         && options.reuseInspirationSycmData !== false;
-      const cachedData = reuseInspirationMetrics
+      const cachedData = reuseCandidateMetrics
         ? [{ keyword: candidate.keyword, ...candidate.sycmData }]
         : [];
-      const sycmAttempt = reuseInspirationMetrics
+      const sycmAttempt = reuseCandidateMetrics
         ? {
             result: { keyword: candidate.keyword, data: cachedData },
             data: cachedData,
             sycmScore: scoreSycmRows(cachedData, { mode: 'blue' }),
-            verifyMode: 'inspiration_cached',
+            verifyMode: candidate.source === 'sycm_root_expansion' ? 'root_expansion_cached' : 'inspiration_cached',
             fallbackUsed: false,
             fallbackReason: '',
             attempts: [{
@@ -272,5 +283,6 @@ async function flowVerify(options = {}) {
 }
 
 module.exports = {
+  canReuseCandidateSycmEvidence,
   flowVerify
 };

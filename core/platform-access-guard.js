@@ -171,6 +171,14 @@ async function withPlatformLock(platform, options, fn) {
       });
       break;
     } catch (err) {
+      const requestedAction = options.shouldStop && options.shouldStop();
+      if (requestedAction) {
+        throw new PlatformAccessError(`${platform} access interrupted by ${requestedAction}`, {
+          platform,
+          status: requestedAction,
+          code: 'PLATFORM_ACCESS_INTERRUPTED'
+        });
+      }
       const owner = readJson(path.join(files.lockDir, 'owner.json'), null);
       const acquiredAt = owner && Date.parse(owner.acquiredAt);
       if (acquiredAt && Date.now() - acquiredAt > options.staleLockMs) {
@@ -186,7 +194,7 @@ async function withPlatformLock(platform, options, fn) {
           code: 'PLATFORM_ACCESS_LOCK_TIMEOUT'
         });
       }
-      await sleep(200);
+      await (options.sleep || sleep)(200);
     }
   }
 
@@ -315,22 +323,44 @@ async function waitForCooldown(platform, options) {
   const last = Date.parse(state.lastAccessAt || 0);
   if (!last) return;
   const cooldownMs = randomBetween(options.minCooldownMs, options.maxCooldownMs, options.random);
-  const readyAt = last + cooldownMs;
+  const batchBoundary = options.batchSize > 0
+    && Number(state.successCount || 0) > 0
+    && Number(state.successCount) % options.batchSize === 0;
+  const batchCooldownMs = batchBoundary
+    ? randomBetween(options.minBatchCooldownMs, options.maxBatchCooldownMs, options.random)
+    : 0;
+  const readyAt = last + Math.max(cooldownMs, batchCooldownMs);
   const waitMs = Math.max(0, readyAt - Date.now());
   let remainingMs = waitMs;
   while (remainingMs > 0) {
-    if (options.onCooldown) {
-      options.onCooldown({ platform: normalizePlatform(platform), waitMs, remainingMs });
+    const requestedAction = options.shouldStop && options.shouldStop();
+    if (requestedAction) {
+      throw new PlatformAccessError(`${platform} access interrupted by ${requestedAction}`, {
+        platform,
+        status: requestedAction,
+        code: 'PLATFORM_ACCESS_INTERRUPTED',
+        cooldownRemainingMs: remainingMs
+      });
     }
-    await sleep(Math.min(5_000, remainingMs));
+    if (options.onCooldown) {
+      options.onCooldown({
+        platform: normalizePlatform(platform),
+        waitMs,
+        remainingMs,
+        cooldownType: batchBoundary ? 'batch' : 'request'
+      });
+    }
+    await (options.sleep || sleep)(Math.min(1_000, remainingMs));
     remainingMs = Math.max(0, readyAt - Date.now());
   }
 }
 
 function recordSuccess(platform, options) {
   const files = statusFiles(platform, options);
+  const current = readJson(files.state, {});
   writeJson(files.state, {
-    lastAccessAt: new Date().toISOString()
+    lastAccessAt: new Date().toISOString(),
+    successCount: Number(current.successCount || 0) + 1
   });
   clearBreaker(platform, options);
 }
@@ -343,9 +373,14 @@ function mergeOptions(platform, options = {}) {
     onCooldown: typeof options.onCooldown === 'function' ? options.onCooldown : null,
     dataDir: resolveDataDir(options),
     random: options.random || Math.random,
+    sleep: typeof options.sleep === 'function' ? options.sleep : sleep,
+    shouldStop: typeof options.shouldStop === 'function' ? options.shouldStop : null,
     cacheTtlMs: options.cacheTtlMs == null ? platformDefaults(platform).cacheTtlMs : options.cacheTtlMs,
     minCooldownMs: options.minCooldownMs == null ? platformDefaults(platform).minCooldownMs : options.minCooldownMs,
     maxCooldownMs: options.maxCooldownMs == null ? platformDefaults(platform).maxCooldownMs : options.maxCooldownMs,
+    batchSize: Math.max(0, Number(options.batchSize || 0)),
+    minBatchCooldownMs: Math.max(0, Number(options.minBatchCooldownMs || 0)),
+    maxBatchCooldownMs: Math.max(0, Number(options.maxBatchCooldownMs || options.minBatchCooldownMs || 0)),
     breakerCooldownMs: options.breakerCooldownMs == null ? platformDefaults(platform).breakerCooldownMs : options.breakerCooldownMs,
     failureThreshold: options.failureThreshold == null ? platformDefaults(platform).failureThreshold : options.failureThreshold,
     lockTimeoutMs: options.lockTimeoutMs == null ? platformDefaults(platform).lockTimeoutMs : options.lockTimeoutMs,
@@ -391,6 +426,7 @@ async function runWithPlatformGuard(platform, options, operation) {
       writeCache(platform, guardOptions.cacheKey, value, guardOptions);
       return value;
     } catch (err) {
+      if (err && err.code === 'PLATFORM_ACCESS_INTERRUPTED') throw err;
       recordFailure(platform, guardOptions, err);
       throw err;
     }

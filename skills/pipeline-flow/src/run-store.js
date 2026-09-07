@@ -113,6 +113,13 @@ function ensureRunFiles(run, runDir) {
   run.files.reviewSource = run.files.reviewSource || path.join(runDir, 'uploaded-order-sheet.xlsx');
   run.files.reviewGroups = run.files.reviewGroups || path.join(runDir, 'review-order-groups.json');
   run.files.reviewDrafts = run.files.reviewDrafts || path.join(runDir, 'review-drafts.jsonl');
+  run.files.competitorInput = run.files.competitorInput || path.join(runDir, 'competitor-input.json');
+  run.files.competitorShops = run.files.competitorShops || path.join(runDir, 'competitor-shops.jsonl');
+  run.files.competitorHotProducts = run.files.competitorHotProducts || path.join(runDir, 'competitor-hot-products.jsonl');
+  run.files.competitorNewProducts = run.files.competitorNewProducts || path.join(runDir, 'competitor-new-products.jsonl');
+  run.files.competitorProductDetails = run.files.competitorProductDetails || path.join(runDir, 'competitor-product-details.jsonl');
+  run.files.competitorAnalysis = run.files.competitorAnalysis || path.join(runDir, 'competitor-analysis.json');
+  run.files.competitorReport = run.files.competitorReport || path.join(runDir, '同行分析报告.xlsx');
 }
 
 /**
@@ -216,7 +223,14 @@ function initRun({ dataDir = DEFAULT_FLOW_DIR, runId, options = {} } = {}) {
       orderSheet: path.join(resolved.runDir, '商品排行刷单表.xlsx'),
       reviewSource: path.join(resolved.runDir, 'uploaded-order-sheet.xlsx'),
       reviewGroups: path.join(resolved.runDir, 'review-order-groups.json'),
-      reviewDrafts: path.join(resolved.runDir, 'review-drafts.jsonl')
+      reviewDrafts: path.join(resolved.runDir, 'review-drafts.jsonl'),
+      competitorInput: path.join(resolved.runDir, 'competitor-input.json'),
+      competitorShops: path.join(resolved.runDir, 'competitor-shops.jsonl'),
+      competitorHotProducts: path.join(resolved.runDir, 'competitor-hot-products.jsonl'),
+      competitorNewProducts: path.join(resolved.runDir, 'competitor-new-products.jsonl'),
+      competitorProductDetails: path.join(resolved.runDir, 'competitor-product-details.jsonl'),
+      competitorAnalysis: path.join(resolved.runDir, 'competitor-analysis.json'),
+      competitorReport: path.join(resolved.runDir, '同行分析报告.xlsx')
     }
   };
   ensureRunQualityState(run, requestedPolicy);

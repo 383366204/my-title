@@ -131,7 +131,9 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
   const [artifactState, setArtifactState, refreshArtifact] = useNodeArtifact({
     runId: currentRunId,
     nodeId: selectedNodeId,
-    limit: selectedNodeId === 'generate' || selectedNodeId === 'collectRank' ? 200 : undefined
+    limit: ['mine', 'keywordReview'].includes(selectedNodeId)
+      ? 'all'
+      : selectedNodeId === 'generate' || selectedNodeId === 'collectRank' ? 200 : undefined
   });
   const {
     seedRows,

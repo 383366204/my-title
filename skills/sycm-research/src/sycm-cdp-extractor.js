@@ -960,7 +960,12 @@ async function extractSycmData(keyword, options) {
     cacheTtlMs: options.guardCacheTtlMs,
     minCooldownMs: options.guardMinCooldownMs,
     maxCooldownMs: options.guardMaxCooldownMs,
+    batchSize: options.guardBatchSize,
+    minBatchCooldownMs: options.guardMinBatchCooldownMs,
+    maxBatchCooldownMs: options.guardMaxBatchCooldownMs,
     breakerCooldownMs: options.guardBreakerCooldownMs,
+    random: options.random,
+    shouldStop: options.shouldStop,
     onCooldown: function(state) {
       if (typeof options.onProgress !== 'function') return;
       var seconds = Math.max(1, Math.ceil(Number(state.remainingMs || 0) / 1000));

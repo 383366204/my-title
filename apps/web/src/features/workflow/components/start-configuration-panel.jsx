@@ -1,4 +1,4 @@
-import { parseExactKeywords, parseOrderSheetManualItems } from '../../../workflow-ui.js';
+import { parseCompetitorShareInputs, parseExactKeywords, parseOrderSheetManualItems, parseRootKeywords } from '../../../workflow-ui.js';
 
 const DAILY_START_FIELDS = [
   { key: 'mine', label: '候选词上限', min: 1, max: 200 },
@@ -41,6 +41,57 @@ export function StartConfigurationPanel({ mode, modeHint, node, onDone, onUpdate
   if (!node) return <div className="artifact-empty">启动节点不存在。</div>;
   const data = node.data || {};
 
+  if (mode === 'competitor-analysis') {
+    const parsed = parseCompetitorShareInputs(data.competitorText || '');
+    return (
+      <div className="start-configuration-panel competitor-start-panel">
+        <p className="start-configuration-hint">{modeHint}</p>
+        <fieldset className="sheet-config-fields" disabled={readOnly}>
+          <section className="sheet-config-section">
+            <h3>同行链接</h3>
+            <label className="node-field">
+              <span>淘宝分享文案、商品链接或店铺链接</span>
+              <textarea
+                className="node-field-textarea"
+                rows="10"
+                value={data.competitorText || ''}
+                onChange={(event) => onUpdateField(node.id, 'competitorText', event.target.value)}
+                placeholder={'可以直接粘贴完整分享文案，每行一条，例如：\n【淘宝】09₴... https://m.tb.cn/h.xxxxx\nhttps://shop123456.taobao.com/'}
+              />
+              <small>最多分析 10 家店铺；同一家店的多个商品或分享链接会在解析后自动合并。</small>
+            </label>
+            <div className="order-sheet-parse-summary" role="status">
+              <strong>{parsed.links.length} 条有效链接</strong>
+              {parsed.duplicateCount > 0 && <span className="is-duplicate">{parsed.duplicateCount} 条重复链接已合并</span>}
+              {parsed.invalidCount > 0 && <span className="is-invalid">{parsed.invalidCount} 条非淘宝链接已忽略</span>}
+              {parsed.truncatedCount > 0 && <span className="is-invalid">超出上限 {parsed.truncatedCount} 条</span>}
+            </div>
+          </section>
+          <section className="sheet-config-section">
+            <h3>采集范围</h3>
+            <div className="start-configuration-grid">
+              <label className="node-field"><span>最多店铺</span><input type="number" min="1" max="10" value={data.maxShops ?? 5} onChange={(event) => onUpdateField(node.id, 'maxShops', Number.parseInt(event.target.value, 10) || 1)} /></label>
+              <label className="node-field"><span>每店爆款</span><input type="number" min="5" max="50" value={data.hotLimit ?? 20} onChange={(event) => onUpdateField(node.id, 'hotLimit', Number.parseInt(event.target.value, 10) || 5)} /></label>
+              <label className="node-field"><span>每店新品</span><input type="number" min="5" max="50" value={data.newLimit ?? 20} onChange={(event) => onUpdateField(node.id, 'newLimit', Number.parseInt(event.target.value, 10) || 5)} /></label>
+              <label className="node-field">
+                <span>每榜补全商品链接</span>
+                <input type="number" min="0" max="50" value={data.detailLimit ?? 20} onChange={(event) => onUpdateField(node.id, 'detailLimit', Math.max(0, Number.parseInt(event.target.value, 10) || 0))} />
+                <small>默认与每店榜单数量一致；逐个打开商品获取真实链接，数量越大耗时越长。</small>
+              </label>
+            </div>
+            <label className="sheet-config-toggle">
+              <input type="checkbox" checked={data.compareHistory !== false} onChange={(event) => onUpdateField(node.id, 'compareHistory', event.target.checked)} />
+              <span>保留本次快照，用于后续历史对比</span>
+            </label>
+          </section>
+        </fieldset>
+        <div className="start-configuration-actions">
+          <button type="button" className="node-primary-button" onClick={onDone}>{readOnly ? '关闭' : '完成配置'}</button>
+        </div>
+      </div>
+    );
+  }
+
   if (mode === 'keyword') {
     const keywordText = data.keywordsText
       ?? (Array.isArray(data.keywords) ? data.keywords.join('\n') : data.keyword || '');
@@ -71,6 +122,104 @@ export function StartConfigurationPanel({ mode, modeHint, node, onDone, onUpdate
         </label>
         <div className="start-configuration-actions">
           <button type="button" className="node-primary-button" onClick={onDone}>完成配置</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (mode === 'root-keyword') {
+    const rootsText = data.rootsText ?? (Array.isArray(data.roots) ? data.roots.join('\n') : '');
+    const roots = parseRootKeywords(rootsText);
+    const rawRootCount = String(rootsText || '').split(/[\r\n,，;；、]+/).map((item) => item.trim()).filter(Boolean).length;
+    const duplicateCount = Math.max(0, rawRootCount - roots.length);
+    const riskProfile = data.sycmRiskProfile || 'standard';
+    const updateSeconds = (field, value, fallback) => {
+      onUpdateField(node.id, field, Math.max(0, Number.parseInt(value, 10) || fallback) * 1000);
+    };
+    const updateMinutes = (field, value, fallback) => {
+      onUpdateField(node.id, field, Math.max(0, Number.parseInt(value, 10) || fallback) * 60000);
+    };
+    return (
+      <div className="start-configuration-panel root-keyword-start-panel">
+        <p className="start-configuration-hint">{modeHint}</p>
+        <fieldset className="sheet-config-fields" disabled={readOnly}>
+          <section className="sheet-config-section">
+            <h3>词根来源</h3>
+            <label className="node-field">
+              <span>词根 <b>{roots.length} 个</b></span>
+              <textarea
+                className="node-field-textarea"
+                rows="10"
+                value={rootsText}
+                onChange={(event) => onUpdateField(node.id, 'rootsText', event.target.value)}
+                placeholder={'每行输入一个词根，例如：\n杯垫\n收纳\n项链\n露营'}
+              />
+              <small>支持换行、逗号或分号分隔，不限制数量；重复词根会自动合并。</small>
+            </label>
+            <div className="order-sheet-parse-summary" role="status">
+              <strong>{roots.length} 个有效词根</strong>
+              {duplicateCount > 0 && <span className="is-duplicate">{duplicateCount} 个重复词根会自动合并</span>}
+            </div>
+          </section>
+
+          <section className="sheet-config-section">
+            <h3>生意参谋查询</h3>
+            <div className="start-configuration-grid">
+              <label className="node-field">
+                <span>拓词方式</span>
+                <select value={data.sycmMode || 'hot'} onChange={(event) => onUpdateField(node.id, 'sycmMode', event.target.value)}>
+                  <option value="hot">热搜关联词</option>
+                  <option value="blue">蓝海关联词</option>
+                </select>
+              </label>
+              <label className="node-field">
+                <span>数据周期</span>
+                <select value={data.period || '7d'} onChange={(event) => onUpdateField(node.id, 'period', event.target.value)}>
+                  <option value="7d">最近 7 天</option>
+                  <option value="30d">最近 30 天</option>
+                  <option value="day">日</option>
+                  <option value="week">周</option>
+                  <option value="month">月</option>
+                </select>
+              </label>
+              <label className="node-field">
+                <span>对比方式</span>
+                <select value={data.compareType || 'cycle'} onChange={(event) => onUpdateField(node.id, 'compareType', event.target.value)}>
+                  <option value="cycle">环比</option>
+                  <option value="yearSync">同比</option>
+                </select>
+              </label>
+              <label className="node-field">
+                <span>风控节奏</span>
+                <select value={riskProfile} onChange={(event) => onUpdateField(node.id, 'sycmRiskProfile', event.target.value)}>
+                  <option value="standard">标准：45～90秒/词根</option>
+                  <option value="conservative">保守：90～180秒/词根</option>
+                  <option value="custom">自定义</option>
+                </select>
+              </label>
+            </div>
+            {riskProfile === 'custom' && (
+              <div className="start-configuration-grid root-keyword-timing-grid">
+                <label className="node-field"><span>最短间隔（秒）</span><input type="number" min="15" max="600" value={Math.round((data.sycmMinIntervalMs ?? 45000) / 1000)} onChange={(event) => updateSeconds('sycmMinIntervalMs', event.target.value, 45)} /></label>
+                <label className="node-field"><span>最长间隔（秒）</span><input type="number" min="15" max="900" value={Math.round((data.sycmMaxIntervalMs ?? 90000) / 1000)} onChange={(event) => updateSeconds('sycmMaxIntervalMs', event.target.value, 90)} /></label>
+                <label className="node-field"><span>每批词根数</span><input type="number" min="1" max="100" value={data.sycmBatchSize ?? 10} onChange={(event) => onUpdateField(node.id, 'sycmBatchSize', Math.max(1, Number.parseInt(event.target.value, 10) || 10))} /></label>
+                <label className="node-field"><span>批次最短休息（分钟）</span><input type="number" min="1" max="60" value={Math.round((data.sycmMinBatchCooldownMs ?? 300000) / 60000)} onChange={(event) => updateMinutes('sycmMinBatchCooldownMs', event.target.value, 5)} /></label>
+                <label className="node-field"><span>批次最长休息（分钟）</span><input type="number" min="1" max="120" value={Math.round((data.sycmMaxBatchCooldownMs ?? 600000) / 60000)} onChange={(event) => updateMinutes('sycmMaxBatchCooldownMs', event.target.value, 10)} /></label>
+              </div>
+            )}
+            <p className="node-workbench-note">查询始终单并发执行。页面关闭、暂停或平台阻塞后，会从未完成词根继续。</p>
+          </section>
+
+          <section className="sheet-config-section">
+            <h3>后续生成</h3>
+            <div className="start-configuration-grid">
+              <label className="node-field"><span>标题长度</span><input type="number" min="30" max="80" value={data.length ?? 60} onChange={(event) => onUpdateField(node.id, 'length', Number.parseInt(event.target.value, 10) || 60)} /></label>
+              <label className="node-field"><span>每词货源参考数</span><input type="number" min="1" max="50" value={data.productsPerKeyword ?? 12} onChange={(event) => onUpdateField(node.id, 'productsPerKeyword', Number.parseInt(event.target.value, 10) || 12)} /></label>
+            </div>
+          </section>
+        </fieldset>
+        <div className="start-configuration-actions">
+          <button type="button" className="node-primary-button" onClick={onDone}>{readOnly ? '关闭' : '完成配置'}</button>
         </div>
       </div>
     );

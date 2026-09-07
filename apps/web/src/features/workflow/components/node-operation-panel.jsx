@@ -79,6 +79,26 @@ const NODE_PANEL_COPY = {
     title: '确认商品与编组',
     description: '确认参与制表的商品，设置 1拖N，并按实际做单顺序排列组合。'
   },
+  'competitor-shops': {
+    title: '同行店铺识别结果',
+    description: '核对分享链接解析出的店铺、粉丝和商品分类。'
+  },
+  'competitor-products': {
+    title: '爆款与新品采集结果',
+    description: '查看各店铺销量排序和新品排序样本及其付款表现。'
+  },
+  'competitor-details': {
+    title: '商品链接补全结果',
+    description: '查看榜单商品的真实商品 ID、链接和补全异常。'
+  },
+  'competitor-analysis': {
+    title: '同行对比分析',
+    description: '查看高频商品词和新品起量信号，机会词仍需进入生意参谋验真。'
+  },
+  'competitor-report': {
+    title: '同行分析报告',
+    description: '下载包含店铺、爆款、新品、机会词和异常记录的 Excel。'
+  },
   completion: {
     title: '流程完成结果',
     description: '导出文件、批次结果和通过率会集中在这里展示。'
@@ -167,6 +187,7 @@ export const NodeOperationPanel = ({
         <KeywordMiningOperationPanel
           artifactState={artifactState}
           dynamicMode={String(selectedNode?.data?.discoveryMode || selectedNode?.data?.output?.discovery?.mode || '').toLowerCase() !== 'seed'}
+          rootExpansionMode={String(selectedNode?.data?.discoveryMode || selectedNode?.data?.output?.discovery?.mode || '').toLowerCase() === 'user_roots'}
           seedRows={seedRows}
           seedDraft={seedDraft}
           seedLoading={seedLoading}

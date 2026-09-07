@@ -63,6 +63,8 @@ const {
 const {
   runPipelineRuntime
 } = require('../skills/pipeline-flow/runtime/runner');
+const { TaobaoNativeClient } = require('../skills/competitor-analysis');
+const { launchTaobaoDesktop } = require('../skills/title-gen/src/taobao-utils');
 const {
   confirmReviewDrafts,
   saveReviewDrafts,
@@ -549,7 +551,7 @@ app.post('/api/pipeline/start', async (req, res) => {
       }
     });
   } catch (err) {
-    const status = /未知 workflow mode|未知 workflow template|工作流定义|工作流必须匹配|关键词不能为空|1688 商品链接|商品缺少关键词|商品重复/.test(err.message) ? 400 : 500;
+    const status = /未知 workflow mode|未知 workflow template|工作流定义|工作流必须匹配|关键词不能为空|词根不能为空|1688 商品链接|同行链接|商品缺少关键词|商品重复/.test(err.message) ? 400 : 500;
     res.status(status).json({ ok: false, error: err.message });
   }
 });
@@ -723,7 +725,9 @@ function isRecoverableChromeBlocker(access = {}) {
 
 async function recoverSycmAccessAfterChrome(port, { assumeReady = false } = {}) {
   const access = getSycmAccessStatus();
-  if (!access.breaker?.open || !isRecoverableChromeBlocker(access)) {
+  const recoverableManualStatus = ['login_required', 'slider_required', 'sycm_feature_required', 'transient_failure', 'transient_failures']
+    .includes(String(access.breaker?.status || ''));
+  if (!access.breaker?.open || (!isRecoverableChromeBlocker(access) && !(assumeReady && recoverableManualStatus))) {
     return { cleared: false, chromeReady: true, access };
   }
   const chromeReady = assumeReady || await getSycmChromeAvailabilityChecker()(port);
@@ -1717,7 +1721,11 @@ app.post('/api/workflows/runs/:runId/order-sheet-products', handleConfirmOrderSh
 // 2.5 POST /api/workflows/validate - 运行前校验工作流图
 app.post('/api/workflows/validate', (req, res) => {
   try {
-    const result = validateProductionWorkflow(req.body && req.body.workflow);
+    const body = req.body || {};
+    const result = validateProductionWorkflow(body.workflow, {
+      templateId: body.templateId || body.template_id,
+      mode: body.mode
+    });
     res.status(result.ok ? 200 : 400).json({ ok: result.ok, data: result });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
@@ -1783,7 +1791,7 @@ app.post('/api/workflows/run', async (req, res) => {
     });
   } catch (err) {
     if (activeWorkbenchProcess && !activeWorkbenchProcess.pid && !activeWorkbenchProcess.promise) activeWorkbenchProcess = null;
-    const status = /未知 workflow mode|未知 workflow template|工作流定义|工作流必须匹配|关键词不能为空|1688 商品链接|商品缺少关键词|商品重复/.test(err.message) ? 400 : 500;
+    const status = /未知 workflow mode|未知 workflow template|工作流定义|工作流必须匹配|关键词不能为空|词根不能为空|1688 商品链接|同行链接|商品缺少关键词|商品重复/.test(err.message) ? 400 : 500;
     res.status(status).json({ ok: false, error: err.message });
   }
 });
@@ -1794,7 +1802,7 @@ app.get('/api/workflows/runs/:runId/artifacts/:nodeId', (req, res) => {
     const artifact = readWorkflowNodeArtifact({
       runId: req.params.runId,
       nodeId: req.params.nodeId,
-      limit: parsePositiveNumber(req.query.limit, 50),
+      limit: req.query.limit === 'all' ? 'all' : parsePositiveNumber(req.query.limit, 50),
       maxChars: parsePositiveNumber(req.query.maxChars, 10000)
     });
     if (!artifact) {
@@ -1963,13 +1971,13 @@ app.post('/api/workflows/runs/:runId/retry-node', async (req, res) => {
     }
     const runtime = readRuntimeState({ runId });
     if (runtime) {
-      if (!['mine', 'keywordReview', 'verify', 'select', 'generate', 'export', 'collectRank', 'generateSheet'].includes(nodeId)) {
+      if (!['mine', 'keywordReview', 'verify', 'select', 'generate', 'export', 'collectRank', 'generateSheet', 'resolveShops', 'collectCompetitors', 'enrichCompetitors', 'analyzeCompetitors', 'competitorReport'].includes(nodeId)) {
         return res.status(400).json({ ok: false, error: '不支持的流程步骤。' });
       }
       const manualOrderSheetCollection = nodeId === 'collectRank'
         && runtime.mode === 'order-sheet'
         && runtime.params?.inputMode === 'manual';
-      if (nodeId === 'verify' || nodeId === 'collectRank') {
+      if (nodeId === 'verify' || nodeId === 'collectRank' || (nodeId === 'mine' && runtime.mode === 'root-keyword')) {
         const port = parsePositiveNumber(runtime.params?.port || process.env.SYCM_DEBUG_PORT || 9222, 9222);
         if (manualOrderSheetCollection) {
           const chromeReady = await getSycmChromeAvailabilityChecker()(port);
@@ -2149,6 +2157,57 @@ app.post('/api/workflows/sycm/chrome/start', async (req, res) => {
       port,
       message: err.message,
       userMessage: 'Chrome 启动失败。请手动启动带远程调试端口的 Chrome，然后重跑验真。'
+    });
+  }
+});
+
+// 8.65 POST /api/workflows/taobao-native/start - 打开淘宝客户端供同行采集恢复。
+app.post('/api/workflows/taobao-native/start', async (_req, res) => {
+  const launched = await launchTaobaoDesktop();
+  if (!launched) {
+    return res.status(500).json({
+      ok: false,
+      status: 'taobao_native_unavailable',
+      userMessage: '淘宝桌面版启动失败，请确认客户端已经安装。'
+    });
+  }
+  try {
+    const result = await new TaobaoNativeClient().navigate('home');
+    return res.json({
+      ok: true,
+      status: 'ready',
+      data: result,
+      userMessage: '淘宝客户端已打开。请完成登录或安全验证后，重试当前同行分析节点。'
+    });
+  } catch (err) {
+    if (err.code === 'TAOBAO_LOGIN_REQUIRED' || err.code === 'TAOBAO_SECURITY_VERIFICATION_REQUIRED') {
+      return res.json({
+        ok: true,
+        status: err.code === 'TAOBAO_LOGIN_REQUIRED' ? 'login_required' : 'verification_required',
+        userMessage: err.code === 'TAOBAO_LOGIN_REQUIRED'
+          ? '淘宝登录页已打开。请完成登录后重试当前同行分析节点。'
+          : '淘宝安全验证页已打开。请完成验证后重试当前同行分析节点。'
+      });
+    }
+    if (err.code === 'TAOBAO_NATIVE_ACCESS_RESTRICTED') {
+      return res.json({
+        ok: true,
+        status: 'access_restricted',
+        userMessage: '淘宝桌面版当前返回“内测期间仅开放部分用户”。请先完全退出并重新启动客户端；如果重启后仍持续出现，再检查客户端版本或账号开放状态。'
+      });
+    }
+    if (err.code === 'TAOBAO_NATIVE_NOT_READY' || err.code === 'TAOBAO_NATIVE_TOOL_ERROR') {
+      return res.json({
+        ok: true,
+        status: 'tool_not_ready',
+        userMessage: `淘宝桌面版已打开，但自动化执行层尚未就绪。请等待首页加载完成后重试；若客户端显示“内测期间仅开放部分用户”，则当前账号暂时无法自动采集。${err.message ? ` 原始提示：${err.message}` : ''}`
+      });
+    }
+    return res.status(500).json({
+      ok: false,
+      status: 'taobao_native_unavailable',
+      error: err.message,
+      userMessage: `淘宝客户端自动化调用失败：${err.message || '未知错误'}`
     });
   }
 });
@@ -2351,7 +2410,8 @@ app.use((err, req, res, next) => {
 
 // Boot Server (Explicitly bind to localhost 127.0.0.1 for local boundaries security P2)
 const defaultPort = parseInt(process.env.UI_PORT, 10) || 3000;
-if (process.env.NODE_ENV !== 'test') {
+const runningUnderNodeTest = Boolean(process.env.NODE_TEST_CONTEXT);
+if (process.env.NODE_ENV !== 'test' && !runningUnderNodeTest) {
   findFreePort(defaultPort).then(port => {
     app.listen(port, '127.0.0.1', () => {
       console.log(`\n======================================================`);

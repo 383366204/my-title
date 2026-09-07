@@ -27,6 +27,10 @@ const STATUS_STAGE = {
   products_confirmed: 'generated',
   review_source_imported: 'selected',
   review_approved: 'generated',
+  competitor_shops_resolved: 'verified',
+  competitor_products_collected: 'selected',
+  competitor_products_enriched: 'generated',
+  competitor_analyzed: 'review',
   generate_failed: 'generated',
   needs_review: 'review',
   ready_to_distribute: 'ready',
@@ -228,7 +232,14 @@ function defaultFiles(runDir, files = {}) {
     orderSheet: safeRunFile(runDir, files.orderSheet, '商品排行刷单表.xlsx'),
     reviewSource: safeRunFile(runDir, files.reviewSource, 'uploaded-order-sheet.xlsx'),
     reviewGroups: safeRunFile(runDir, files.reviewGroups, 'review-order-groups.json'),
-    reviewDrafts: safeRunFile(runDir, files.reviewDrafts, 'review-drafts.jsonl')
+    reviewDrafts: safeRunFile(runDir, files.reviewDrafts, 'review-drafts.jsonl'),
+    competitorInput: safeRunFile(runDir, files.competitorInput, 'competitor-input.json'),
+    competitorShops: safeRunFile(runDir, files.competitorShops, 'competitor-shops.jsonl'),
+    competitorHotProducts: safeRunFile(runDir, files.competitorHotProducts, 'competitor-hot-products.jsonl'),
+    competitorNewProducts: safeRunFile(runDir, files.competitorNewProducts, 'competitor-new-products.jsonl'),
+    competitorProductDetails: safeRunFile(runDir, files.competitorProductDetails, 'competitor-product-details.jsonl'),
+    competitorAnalysis: safeRunFile(runDir, files.competitorAnalysis, 'competitor-analysis.json'),
+    competitorReport: safeRunFile(runDir, files.competitorReport, '同行分析报告.xlsx')
   };
 }
 
@@ -289,9 +300,14 @@ function summarizePipelineRun({ dataDir = DEFAULT_PIPELINE_DIR, runId, previewLi
     blockers.push(run.discovery?.blocker || 'no_inspiration_candidates');
   }
   if (status === 'manual_action_required' || status === 'verified_partial_manual_required') {
-    const orderSheetDetailsRequired = run.options?.mode === 'order-sheet'
+    const mode = run.options?.mode;
+    const orderSheetDetailsRequired = mode === 'order-sheet'
       && blockers.includes('order_sheet_product_details_required');
-    if (!orderSheetDetailsRequired) blockers.push('sycm_manual_action_required');
+    if (mode === 'competitor-analysis') {
+      if (blockers.length === 0) blockers.push('taobao_native_manual_action_required');
+    } else if (!orderSheetDetailsRequired) {
+      blockers.push('sycm_manual_action_required');
+    }
   }
   if (status === 'verified_no_generation_eligible') blockers.push('no_generation_eligible_keywords');
   if (status === 'awaiting_keyword_review') blockers.push('keyword_review_required');
@@ -336,7 +352,10 @@ function summarizePipelineRun({ dataDir = DEFAULT_PIPELINE_DIR, runId, previewLi
       selectedProducts: readJsonlPreview(files.selectedProducts, previewLimit),
       generatedProducts: readJsonlPreview(files.generatedProducts, previewLimit),
       distributionReview: readTextPreview(reviewFile, reviewChars),
-      reviewDrafts: readJsonlPreview(files.reviewDrafts, previewLimit)
+      reviewDrafts: readJsonlPreview(files.reviewDrafts, previewLimit),
+      competitorShops: readJsonlPreview(files.competitorShops, previewLimit),
+      competitorHotProducts: readJsonlPreview(files.competitorHotProducts, previewLimit),
+      competitorNewProducts: readJsonlPreview(files.competitorNewProducts, previewLimit)
     }
   });
 

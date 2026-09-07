@@ -73,6 +73,11 @@ export function getWorkflowNodePanelKind(nodeId) {
   if (normalized === 'generateReviews') return 'review-drafts';
   if (normalized === 'collectRank') return 'order-sheet-products';
   if (normalized === 'confirmProducts') return 'order-sheet-groups';
+  if (normalized === 'resolveShops') return 'competitor-shops';
+  if (normalized === 'collectCompetitors') return 'competitor-products';
+  if (normalized === 'enrichCompetitors') return 'competitor-details';
+  if (normalized === 'analyzeCompetitors') return 'competitor-analysis';
+  if (normalized === 'competitorReport') return 'competitor-report';
   if (normalized === 'export') return 'distribution-export';
   if (normalized === 'review') return 'distribution-export';
   if (normalized === 'end') return 'completion';
@@ -209,12 +214,22 @@ export function getWorkflowNodeAction(nodeId, state) {
       tone: readOnly ? 'default' : 'warn'
     };
   }
+  if (normalizedNodeId === 'start' && stateDetails.competitorConfig === true) {
+    const hasInput = Boolean(String(stateDetails.competitorText || '').trim());
+    return {
+      label: hasInput ? '查看同行设置' : '录入同行',
+      action: 'manual-input',
+      tone: hasInput ? 'success' : 'warn'
+    };
+  }
   if (normalizedNodeId === 'start' && ['idle', 'pending'].includes(normalizedState)) {
     if (stateDetails.autoStart === true) {
       return { label: '无需配置', action: 'inspect', tone: 'default' };
     }
     const label = stateDetails.manualInput === true
       ? '录入1688链接'
+      : Object.hasOwn(stateDetails, 'rootsText') || Array.isArray(stateDetails.roots)
+        ? '输入词根'
       : Object.hasOwn(stateDetails, 'keywordsText') || Array.isArray(stateDetails.keywords)
         ? '输入关键词'
         : '配置输入';
@@ -233,6 +248,9 @@ export function getWorkflowNodeAction(nodeId, state) {
   }
   if (normalizedNodeId === 'select' && stateDetails.manualDirectInput === true && Number(stateDetails.output?.failed || 0) > 0 && normalizedState === 'completed') {
     return { label: '重试失败项', action: 'retry-node', tone: 'warn' };
+  }
+  if (normalizedNodeId === 'enrichcompetitors' && Number(stateDetails.output?.failed || 0) > 0 && normalizedState === 'completed') {
+    return { label: '重试失败链接', action: 'retry-node', tone: 'warn' };
   }
   if (normalizedNodeId === 'keywordreview' && ['needs_review', 'waiting_confirmation', 'awaiting_keyword_review', 'blocked'].includes(normalizedState)) {
     return { label: '输入/筛词', action: 'keyword-review', tone: 'warn' };
@@ -361,7 +379,7 @@ export function getWorkflowBlockerActions(nodeId, state = {}) {
   const productDetailsBlocked = nodeId === 'collectRank' && (
     blocker === 'order_sheet_product_details_required' || platformStatus === 'product_details_required'
   );
-  const chromeBlocked = ['verify', 'collectRank'].includes(nodeId) && (
+  const chromeBlocked = ['mine', 'verify', 'collectRank'].includes(nodeId) && (
     blocker.includes('browser_cdp_unavailable') ||
     blocker.includes('cdp_unavailable') ||
     platformStatus.includes('cdp_unavailable') ||
@@ -400,12 +418,14 @@ export function getWorkflowBlockerActions(nodeId, state = {}) {
     }
     actions.push({
       action: 'retry-node',
-      label: productDetailChromeBlocked ? '重试获取商品资料' : nodeId === 'collectRank' ? '重试采集' : '重跑验真',
+      label: productDetailChromeBlocked ? '重试获取商品资料' : nodeId === 'collectRank' ? '重试采集' : nodeId === 'mine' ? '继续拓词' : '重跑验真',
       description: productDetailChromeBlocked
         ? 'Chrome 就绪并登录淘宝后，重新读取全部指定商品的标题、价格和规格。'
         : nodeId === 'collectRank'
           ? 'Chrome 就绪并完成登录后，重新采集商品排行第一页。'
-          : 'Chrome 就绪并完成登录后，从生意参谋校验节点重新执行。'
+          : nodeId === 'mine'
+            ? 'Chrome 就绪并完成登录后，从未完成词根继续拓词。'
+            : 'Chrome 就绪并完成登录后，从生意参谋校验节点重新执行。'
     });
   } else if (nodeId === 'verify' && (blocker === 'verified_empty' || blocker === 'no_generation_eligible_keywords')) {
     actions.push({
@@ -498,10 +518,30 @@ export function getWorkflowNodeViewModel(nodeId, state = {}) {
       ? (state.uploadId ? `${state.uploadName || '刷单表'} · ${state.uploadSummary?.parsedSheetCount || state.groups?.length || 0} 个订单组 · ${state.uploadSummary?.productCount || 0} 个商品` : '尚未上传刷单表')
       : String(nodeId) === 'start' && state.orderSheetConfig === true
       ? getOrderSheetConfigSummary(state)
+      : String(nodeId) === 'start' && state.competitorConfig === true
+        ? getCompetitorConfigSummary(state)
+      : String(nodeId) === 'start' && (state.rootsText != null || Array.isArray(state.roots))
+        ? getRootKeywordConfigSummary(state)
       : String(nodeId) === 'generateSheet' && state.sheetConfig === true
         ? getSheetConfigSummary(state)
         : ''
   };
+}
+
+export function getCompetitorConfigSummary(state = {}) {
+  const parsed = parseCompetitorShareInputs(state.competitorText || '');
+  const hotLimit = Math.max(5, Math.min(50, Number.parseInt(state.hotLimit, 10) || 20));
+  const newLimit = Math.max(5, Math.min(50, Number.parseInt(state.newLimit, 10) || 20));
+  const detailLimit = Math.max(0, Math.min(20, Number.parseInt(state.detailLimit, 10) || 0));
+  return parsed.links.length > 0
+    ? `${parsed.links.length} 条同行链接 · 爆款 ${hotLimit}/店 · 新品 ${newLimit}/店 · 链接 ${detailLimit}/榜`
+    : '尚未录入同行链接';
+}
+
+export function getRootKeywordConfigSummary(state = {}) {
+  const roots = parseRootKeywords(state.rootsText ?? state.roots);
+  const profile = state.sycmRiskProfile === 'conservative' ? '保守节奏' : state.sycmRiskProfile === 'custom' ? '自定义节奏' : '标准节奏';
+  return roots.length > 0 ? `${roots.length} 个词根 · ${profile} · 串行查询` : '尚未录入词根';
 }
 
 /**
@@ -621,6 +661,30 @@ export function getWorkflowNodeSuccessLabel(nodeId, state = {}) {
       ? `生成评价表，写入 ${count} 条商品`
       : `生成刷单表，写入 ${count} 条商品和 ${imageCount} 张主图`;
   }
+  if (normalized === 'resolveShops') {
+    const count = Number(output.count || 0);
+    const failed = Number(output.failed || 0);
+    return count > 0 ? `识别 ${count} 家同行店铺${failed ? `，失败 ${failed} 条` : ''}` : '';
+  }
+  if (normalized === 'collectCompetitors') {
+    const hotCount = Number(output.hotCount || 0);
+    const newCount = Number(output.newCount || 0);
+    return hotCount + newCount > 0 ? `采集 ${hotCount} 个爆款样本、${newCount} 个新品样本` : '';
+  }
+  if (normalized === 'enrichCompetitors') {
+    const count = Number(output.count || 0);
+    const failed = Number(output.failed || 0);
+    return count + failed > 0 ? `补全 ${count} 个商品链接${failed ? `，失败 ${failed} 个` : ''}` : '';
+  }
+  if (normalized === 'analyzeCompetitors') {
+    const count = Number(output.count || 0);
+    const status = String(state.status || state.state || '').toLowerCase();
+    return count > 0 ? `发现 ${count} 个待验真机会词` : status === 'completed' ? '同行分析已完成' : '';
+  }
+  if (normalized === 'competitorReport') {
+    const count = Number(output.count || 0);
+    return count > 0 ? `报告包含 ${count} 条商品记录` : '';
+  }
   return '';
 }
 
@@ -635,6 +699,11 @@ export function getWorkflowNodeResultLocation(nodeId, state = {}) {
   if (normalized === 'collectRank') return output.file || '';
   if (normalized === 'confirmProducts') return output.file || '';
   if (normalized === 'generateSheet') return output.file || '';
+  if (normalized === 'resolveShops') return output.file || '';
+  if (normalized === 'collectCompetitors') return [output.file, output.newFile].filter(Boolean).join('\n');
+  if (normalized === 'enrichCompetitors') return output.file || '';
+  if (normalized === 'analyzeCompetitors') return output.file || '';
+  if (normalized === 'competitorReport') return output.file || '';
   if (normalized === 'export') {
     const locations = [
       output.batchFile ? `铺货清单：${output.batchFile}` : '',
@@ -659,6 +728,11 @@ export function getWorkflowResultSummaryView(nodeId, state = {}) {
     collectRank: '商品资料获取结果',
     confirmProducts: '商品确认与组合方案',
     generateSheet: sheetType === 'review' ? '商品评价表' : '商品排行刷单表',
+    resolveShops: '已识别同行店铺',
+    collectCompetitors: '爆款与新品采集结果',
+    enrichCompetitors: '重点商品补全结果',
+    analyzeCompetitors: '同行对比分析',
+    competitorReport: '同行分析报告',
     export: '铺货清单与复核结果',
     review: '铺货清单与复核结果',
     end: '流程完成结果'
@@ -675,6 +749,11 @@ export function getWorkflowResultSummaryView(nodeId, state = {}) {
     generateSheet: sheetType === 'review'
       ? 'Excel 按1拖多评价格式写入刷单日期、店铺和商品标题，并附带生意参谋原始指标。'
       : 'Excel 按动销一拖多格式写入标题、主图、下单金额、做单要求和店铺，并附带生意参谋原始指标。',
+    resolveShops: '按店铺 ID 合并重复分享链接，保留店铺名称、粉丝和经营信号。',
+    collectCompetitors: '销量榜和新品榜分别展示；付款人数是页面区间或下限，不等同于30天销量。',
+    enrichCompetitors: '重点商品已进入详情页补充真实商品 ID 和可点击链接。',
+    analyzeCompetitors: '分析基于已采集事实数据，机会词仍需进入生意参谋验真。',
+    competitorReport: '报告包含店铺概览、爆款、新品、机会词和采集异常，可直接下载。',
     export: '自动导出的清单和被拦截的复核项会合并在下方操作台。',
     review: '自动导出的清单和被拦截的复核项会合并在下方操作台。',
     end: '流程完成后可从各节点查看对应产物。'
@@ -689,6 +768,11 @@ export function getWorkflowResultSummaryView(nodeId, state = {}) {
     collectRank: '核对商品资料',
     confirmProducts: '查看组合方案',
     generateSheet: '下载 Excel',
+    resolveShops: '查看同行店铺',
+    collectCompetitors: '查看爆款与新品',
+    enrichCompetitors: '查看重点商品',
+    analyzeCompetitors: '查看分析结果',
+    competitorReport: '下载分析报告',
     export: '查看铺货复核',
     review: '查看铺货复核',
     end: '查看完成结果'
@@ -729,7 +813,8 @@ export function labelWorkflowBlockerReason(blocker) {
     export_empty: '导出无结果',
     review_rejected_rows: '需要人工复核',
     order_sheet_product_details_required: '指定商品资料不完整',
-    product_confirmation_required: '需要确认商品与编组'
+    product_confirmation_required: '需要确认商品与编组',
+    taobao_native_manual_action_required: '淘宝客户端需要人工处理'
   };
   return labels[normalized] || String(blocker || '');
 }
@@ -809,6 +894,8 @@ export function getWorkflowOperationMessage(action, result, error = '') {
               ? '人工选品失败'
             : action === 'start-sycm-chrome'
               ? '启动 Chrome 失败'
+              : action === 'start-taobao-native'
+                ? '启动淘宝客户端失败'
           : '操作失败';
     return `${prefix}: ${error || '未知错误'}`;
   }
@@ -823,6 +910,7 @@ export function getWorkflowOperationMessage(action, result, error = '') {
   if (action === 'confirm-keyword-review') return '已打开人工筛词，请核对保留项和筛除项后确认。';
   if (action === 'product-review') return '已打开人工选品，请勾选 1688 货源或手动添加商品后确认。';
   if (action === 'start-sycm-chrome') return result?.userMessage || 'Chrome 已启动。请登录生意参谋后重跑验真。';
+  if (action === 'start-taobao-native') return result?.userMessage || '淘宝客户端已打开。请完成登录或验证后重试。';
   return '操作已提交。';
 }
 
@@ -831,6 +919,12 @@ export function buildWorkflowOperationRequest(runId, action, nodeId = '') {
   if (action === 'start-sycm-chrome') {
     return {
       endpoint: '/api/workflows/sycm/chrome/start',
+      body: { runId, nodeId }
+    };
+  }
+  if (action === 'start-taobao-native') {
+    return {
+      endpoint: '/api/workflows/taobao-native/start',
       body: { runId, nodeId }
     };
   }
@@ -868,9 +962,25 @@ export function getWorkflowTemplateView(template = {}) {
   const mode = String(template.mode || template.workflow?.mode || '').toLowerCase();
   const id = String(template.id || '').toLowerCase();
   const isKeyword = mode === 'keyword' || id === 'exact-keyword-v1';
+  const isRootKeyword = mode === 'root-keyword' || id === 'root-keyword-selection-v1';
   const isManual = mode === 'manual' || ['manual-selection-v1', 'manual-selection-v2'].includes(id);
   const isOrderSheet = mode === 'order-sheet' || id === 'sycm-order-sheet-v1';
-  const defaults = isOrderSheet
+  const isCompetitor = mode === 'competitor-analysis' || id === 'competitor-analysis-v1';
+  const defaults = isRootKeyword
+    ? {
+        entryLabel: '入口：手动词根',
+        scenarioLabel: '适合：从短词根持续拓展选品机会',
+        flowSummary: '流程：录入词根 → 分时拓词 → 人工筛词 → 机会确认 → 货源选品 → 标题生成 → 铺货复核',
+        modeHint: '不限制词根和候选词数量；所有生意参谋查询串行执行，并按安全节奏自动冷却。'
+      }
+    : isCompetitor
+    ? {
+        entryLabel: '入口：同行分享链接',
+        scenarioLabel: '适合：分析同行爆款与新品',
+        flowSummary: '流程：识别店铺 → 采集销量榜/新品榜 → 补全商品 → 对比分析 → Excel',
+        modeHint: '支持完整淘宝分享文案、短链接、商品链接和店铺链接，使用当前淘宝客户端登录状态。'
+      }
+    : isOrderSheet
     ? {
         entryLabel: '入口：生意参谋商品排行',
         scenarioLabel: '适合：按指定范围制作商品动销表',
@@ -931,7 +1041,9 @@ function inferRunTitle(run = {}) {
   const workflowMode = String(run.workflow?.mode || run.mode || '').toLowerCase();
   if (workflowId === 'daily-selection-v1' || workflowMode === 'daily') return '每日蓝海选品流水线';
   if (workflowId === 'exact-keyword-v1' || workflowMode === 'keyword') return '精确关键词选品流水线';
+  if (workflowId === 'root-keyword-selection-v1' || workflowMode === 'root-keyword') return '词根拓词选品流水线';
   if (workflowId === 'sycm-order-sheet-v1' || workflowMode === 'order-sheet') return '制作刷单表格流水线';
+  if (workflowId === 'competitor-analysis-v1' || workflowMode === 'competitor-analysis') return '同行分析流水线';
   const nodes = Array.isArray(run.workflow?.nodes) ? run.workflow.nodes : [];
   const start = nodes.find((node) => node.id === 'start') || nodes[0] || {};
   return String(start.data?.keyword || start.data?.label || run.runId || '未命名流程').trim();
@@ -943,10 +1055,29 @@ function isOrderSheetRun(run = {}) {
   return workflowId === 'sycm-order-sheet-v1' || workflowMode === 'order-sheet';
 }
 
+function isCompetitorRun(run = {}) {
+  const workflowId = String(run.workflow?.id || run.templateId || '').toLowerCase();
+  const workflowMode = String(run.workflow?.mode || run.mode || run.options?.mode || '').toLowerCase();
+  return workflowId === 'competitor-analysis-v1' || workflowMode === 'competitor-analysis';
+}
+
 function labelUnifiedRunStage(run = {}) {
   const stage = String(run.stage || '').toLowerCase();
   if (isOrderSheetRun(run) && ['submitted', 'workflow_complete'].includes(stage)) {
     return '表格已生成';
+  }
+  if (isCompetitorRun(run)) {
+    const activeNode = getWorkflowRunActiveNodeId(run);
+    const labels = {
+      start: '录入同行',
+      resolveShops: '识别同行店铺',
+      collectCompetitors: '采集爆款与新品',
+      enrichCompetitors: '补全商品链接',
+      analyzeCompetitors: '同行对比分析',
+      competitorReport: '生成分析报告',
+      end: '分析完成'
+    };
+    return labels[activeNode] || (run.status === 'workflow_complete' ? '分析完成' : '同行分析');
   }
   const labels = {
     seed: '种子启动',
@@ -1088,6 +1219,50 @@ export function parseExactKeywords(input) {
     .flatMap((value) => String(value || '').split(/[\r\n,，;；、]+/))
     .map((value) => value.trim())
     .filter(Boolean))];
+}
+
+export function parseRootKeywords(input) {
+  return [...new Map((Array.isArray(input) ? input : [input])
+    .flatMap((value) => String(value || '').split(/[\r\n,，;；、]+/))
+    .map((value) => value.trim().replace(/\s+/g, ' '))
+    .filter(Boolean)
+    .map((value) => [value.replace(/\s+/g, '').toLowerCase(), value])).values()];
+}
+
+export function parseCompetitorShareInputs(input) {
+  const urls = String(input || '').match(/https?:\/\/[^\s<>{}\[\]"'，；]+/gi) || [];
+  const seen = new Set();
+  const links = [];
+  let duplicateCount = 0;
+  let invalidCount = 0;
+  for (const value of urls) {
+    const text = value.replace(/[)）\]】>,，。；;]+$/g, '');
+    try {
+      const url = new URL(text);
+      const host = url.hostname.toLowerCase();
+      const trusted = ['taobao.com', 'tmall.com', 'tmall.hk', 'tb.cn'].some(suffix => host === suffix || host.endsWith(`.${suffix}`));
+      const unsafeAuthority = Boolean(url.username || url.password || (url.port && !['80', '443'].includes(url.port)));
+      if (!trusted || unsafeAuthority) {
+        invalidCount += 1;
+        continue;
+      }
+      url.hash = '';
+      if (seen.has(url.href)) {
+        duplicateCount += 1;
+        continue;
+      }
+      seen.add(url.href);
+      links.push(url.href);
+    } catch (_error) {
+      invalidCount += 1;
+    }
+  }
+  return {
+    links: links.slice(0, 10),
+    duplicateCount,
+    invalidCount,
+    truncatedCount: Math.max(0, links.length - 10)
+  };
 }
 
 function isAllowedOrderSheetItemUrl(url) {
@@ -1247,6 +1422,18 @@ export function getWorkflowLaunchParams(nodes = []) {
 
 export function getWorkflowLaunchBlocker(mode, nodes = []) {
   const params = getStartNodeParams(nodes);
+  if (mode === 'competitor-analysis') {
+    const parsed = parseCompetitorShareInputs(params.competitorText || '');
+    if (parsed.links.length === 0) {
+      const message = '请先在开始节点粘贴至少一条淘宝或天猫同行分享链接';
+      return {
+        status: 'blocked',
+        error: message,
+        logs: [{ timestamp: new Date().toISOString(), level: 'error', message: `[competitor_links_required] ${message}` }]
+      };
+    }
+    return null;
+  }
   if (mode === 'review-sheet') {
     const groups = Array.isArray(params.groups) ? params.groups : [];
     if (!params.uploadId || groups.length === 0) {
@@ -1307,6 +1494,16 @@ export function getWorkflowLaunchBlocker(mode, nodes = []) {
         logs: [{ timestamp: new Date().toISOString(), level: 'error', message: `[date_range_invalid] ${message}` }]
       };
     }
+  }
+  if (mode === 'root-keyword') {
+    const roots = parseRootKeywords(params.rootsText ?? params.roots);
+    if (roots.length > 0) return null;
+    const message = '请先在录入词根节点输入至少一个词根';
+    return {
+      status: 'blocked',
+      error: message,
+      logs: [{ timestamp: new Date().toISOString(), level: 'error', message: `[root_keywords_required] ${message}` }]
+    };
   }
   if (mode !== 'keyword') return null;
   const keywords = parseExactKeywords(params.keywordsText ?? params.keywords ?? params.keyword);
