@@ -6,7 +6,7 @@ const os = require('os');
 const path = require('path');
 const test = require('node:test');
 const ExcelJS = require('exceljs');
-const { readJsonl } = require('../../pipeline-flow/src/run-store');
+const { getRun, readJsonl } = require('../../pipeline-flow/src/run-store');
 const {
   addReviewAttachment,
   buildReviewSheet,
@@ -21,6 +21,7 @@ const {
   readReviewSourceUpload,
   removeReviewAttachment,
   regroupReviewSourceUpload,
+  saveReviewDrafts,
   saveReviewSourceUpload,
   titleFreeReview
 } = require('..');
@@ -61,6 +62,45 @@ test('prefers explicit order numbers when one worksheet contains multiple orders
   assert.equal(parsed.groups[0].inferred, false);
 });
 
+test('autosaves review edits without advancing status and confirm reuses cached edits', async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'review-autosave-'));
+  const upload = await saveReviewSourceUpload({ buffer: await fixtureBuffer(), fileName: '刷单表.xlsx', dataDir });
+  const groups = upload.groups.map((group, index) => ({
+    ...group,
+    buyerName: `买家${index + 1}`,
+    orderNumber: `ORDER-${index + 1}`
+  }));
+  await importReviewSource({ dataDir, runId: 'test-review-autosave', uploadId: upload.uploadId, groups });
+  const generated = await generateReviewDrafts({ dataDir, runId: 'test-review-autosave', useAI: false });
+  const persisted = readJsonl(path.join(generated.runDir, 'review-drafts.jsonl'));
+
+  // 模拟面板边改边存：只提交改过的行，对应文件顺手 trim
+  const saved = saveReviewDrafts({
+    dataDir,
+    runId: 'test-review-autosave',
+    reviews: [{ id: persisted[0].id, reviewContent: '人工修改后的评价', correspondingFile: ' 凭证.png ' }]
+  });
+  assert.equal(saved.count, persisted.length);
+  assert.equal(saved.savedCount, 1);
+
+  // 缓存不推进流程：仍停在人工复核
+  const runState = getRun({ dataDir, runId: 'test-review-autosave' }).run;
+  assert.equal(runState.status, 'needs_review');
+  assert.equal(runState.mustReview, true);
+
+  const cached = readJsonl(path.join(generated.runDir, 'review-drafts.jsonl'));
+  assert.equal(cached[0].reviewContent, '人工修改后的评价');
+  assert.equal(cached[0].correspondingFile, '凭证.png');
+  assert.equal(cached[0].status, 'pending_review');
+  assert.ok(cached[0].editedAt);
+  assert.equal(cached[1].reviewContent, persisted[1].reviewContent);
+  assert.equal(cached[1].editedAt, undefined);
+
+  // 模拟关闭窗口后重新打开：confirm 不带编辑也能拿到缓存内容
+  const confirmed = confirmReviewDrafts({ dataDir, runId: 'test-review-autosave', reviews: [] });
+  const confirmedRow = confirmed.drafts.find((row) => row.id === persisted[0].id);
+  assert.equal(confirmedRow.reviewContent, '人工修改后的评价');
+});
 test('normalizes typed Excel dates before showing editable order groups', async () => {
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet('日期订单');

@@ -702,6 +702,38 @@ async function generateReviewDrafts(options = {}) {
  * @param {string} [options.dataDir] Pipeline data directory.
  * @returns {object} Confirmation result.
  */
+/**
+ * 保存用户对评价草稿的临时修改（自动缓存），不推进流水线状态。
+ * 关闭窗口后重新打开时，面板从 review-drafts.jsonl 读回的就是这里落盘的内容。
+ * 允许评价内容为空：用户可能正删到一半，完整性校验仍由 confirmReviewDrafts 负责。
+ * @param {object} [options] 保存选项。
+ * @param {string} options.runId Workflow run ID。
+ * @param {Array<object>} [options.reviews] 修改行，按 id 匹配。
+ * @param {string} [options.dataDir] Pipeline data directory。
+ * @returns {{count:number, savedCount:number, savedAt:string}} 保存结果。
+ */
+function saveReviewDrafts({ dataDir = DEFAULT_FLOW_DIR, runId, reviews = [] } = {}) {
+  const context = getRun({ dataDir, runId });
+  const files = ensureReviewRunFiles(context.run, context.runDir);
+  const edits = new Map((Array.isArray(reviews) ? reviews : []).map(row => [String(row.id || ''), row]));
+  const savedAt = new Date().toISOString();
+  let savedCount = 0;
+  const drafts = readJsonl(files.reviewDrafts).map(row => {
+    const edit = edits.get(row.id);
+    if (!edit) return row;
+    savedCount += 1;
+    return {
+      ...row,
+      reviewContent: String(edit.reviewContent ?? row.reviewContent ?? '').slice(0, 500),
+      correspondingFile: String(edit.correspondingFile ?? row.correspondingFile ?? '').trim().slice(0, 200),
+      editedAt: savedAt
+    };
+  });
+  fs.writeFileSync(files.reviewDrafts, '', 'utf8');
+  appendJsonl(files.reviewDrafts, drafts);
+  // 状态保持 needs_review，不写 run 元数据：缓存对流程可见性没有影响
+  return { count: drafts.length, savedCount, savedAt };
+}
 function confirmReviewDrafts({ dataDir = DEFAULT_FLOW_DIR, runId, reviews = [] } = {}) {
   const context = getRun({ dataDir, runId });
   const files = ensureReviewRunFiles(context.run, context.runDir);
@@ -885,6 +917,7 @@ module.exports = {
   buildReviewSheet,
   confirmReviewDrafts,
   generateReviewDrafts,
+  saveReviewDrafts,
   importReviewSource,
   listReviewAttachments,
   mentionsTitle,

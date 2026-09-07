@@ -128,7 +128,7 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
     setSelectedNodeId,
     refreshHistory: fetchHistoryRuns
   });
-  const [artifactState, setArtifactState] = useNodeArtifact({
+  const [artifactState, setArtifactState, refreshArtifact] = useNodeArtifact({
     runId: currentRunId,
     nodeId: selectedNodeId,
     limit: selectedNodeId === 'generate' || selectedNodeId === 'collectRank' ? 200 : undefined
@@ -163,6 +163,13 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
     generateTitleFromNode
   } = useTitleGeneration({ active: selectedNodeId === 'generate', runId: currentRunId });
   const { activeOverlay, closeOverlay, openOverlay } = useWorkflowOverlay();
+  // 重新打开同一节点的弹窗时强制刷新产物：评价草稿的自动保存写在服务端，
+  // 不重新请求就会一直显示首次打开时缓存在内存里的旧内容
+  useEffect(() => {
+    if (activeOverlay?.nodeId && artifactState.nodeId === activeOverlay.nodeId) {
+      refreshArtifact();
+    }
+  }, [activeOverlay, artifactState.nodeId, refreshArtifact]);
 
   // 加载工作流模板
   const loadTemplate = (template) => {

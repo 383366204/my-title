@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Check, ImagePlus, RefreshCw, Trash2 } from 'lucide-react';
 
 import {
@@ -6,10 +6,14 @@ import {
   deleteReviewAttachment,
   listReviewAttachments,
   reviewAttachmentUrl,
+  saveReviewDrafts,
   uploadReviewAttachment
 } from '../../../api/workflow-api.js';
+import { collectChangedReviews, snapshotDraftRows } from '../review-draft-autosave.js';
 
 const ATTACHMENT_ACCEPT = 'image/png,image/jpeg,image/gif';
+// 停止输入 0.8 秒后落盘一次，避免每个按键都打请求
+const AUTOSAVE_DELAY_MS = 800;
 
 export function ReviewDraftPanel({ artifactState, onConfirm, confirming = false, currentRunId }) {
   const artifactRows = artifactState?.artifact?.rows;
@@ -17,10 +21,25 @@ export function ReviewDraftPanel({ artifactState, onConfirm, confirming = false,
   const [attachments, setAttachments] = useState({});
   const [uploadingDraftId, setUploadingDraftId] = useState('');
   const [attachmentError, setAttachmentError] = useState('');
+  const [saveStatus, setSaveStatus] = useState('idle');
+  const [saveError, setSaveError] = useState('');
+  const [savedAt, setSavedAt] = useState('');
 
+  const rowsRef = useRef([]);
+  const baselineRef = useRef(new Map());
+  const dirtyRef = useRef(false);
+  const timerRef = useRef(null);
+
+  useEffect(() => { rowsRef.current = rows; }, [rows]);
+
+  // 从节点产物加载草稿。本地还有未落盘修改时跳过覆盖，避免刷新打断正在输入的内容；
+  // 自动保存成功后基线会更新，刷新拿到的服务端数据也已经带上缓存修改。
   useEffect(() => {
+    if (dirtyRef.current) return;
     const sourceRows = Array.isArray(artifactRows) ? artifactRows : [];
-    setRows(sourceRows.map((row) => ({ ...row })));
+    const next = sourceRows.map((row) => ({ ...row }));
+    setRows(next);
+    baselineRef.current = snapshotDraftRows(next);
   }, [artifactRows]);
 
   useEffect(() => {
@@ -35,13 +54,97 @@ export function ReviewDraftPanel({ artifactState, onConfirm, confirming = false,
     return () => { cancelled = true; };
   }, [currentRunId]);
 
+  const flushSave = useCallback(async ({ keepalive = false } = {}) => {
+    if (!currentRunId) return;
+    const changed = collectChangedReviews(rowsRef.current, baselineRef.current);
+    if (changed.length === 0) {
+      dirtyRef.current = false;
+      return;
+    }
+    if (!keepalive) setSaveStatus('saving');
+    try {
+      await saveReviewDrafts(currentRunId, changed, keepalive ? { keepalive: true } : {});
+      // 只把「保存后没再被改过」的行并入基线；保存期间的新输入仍保持脏状态，
+      // 且输入时已经排过新的防抖保存，这里无需再补调度
+      for (const item of changed) {
+        const row = rowsRef.current.find((current) => String(current.id) === item.id);
+        if (row
+          && String(row.reviewContent || '') === item.reviewContent
+          && String(row.correspondingFile || '') === item.correspondingFile) {
+          baselineRef.current.set(item.id, {
+            reviewContent: item.reviewContent,
+            correspondingFile: item.correspondingFile
+          });
+        }
+      }
+      dirtyRef.current = collectChangedReviews(rowsRef.current, baselineRef.current).length > 0;
+      if (!keepalive && !dirtyRef.current) {
+        setSaveStatus('saved');
+        setSavedAt(new Date().toLocaleTimeString('zh-CN', { hour12: false }));
+        setSaveError('');
+      }
+    } catch (error) {
+      if (keepalive) return; // 关窗兜底失败无法提示，只能放弃
+      dirtyRef.current = true;
+      setSaveStatus('error');
+      setSaveError(error.message || '自动保存失败');
+    }
+  }, [currentRunId]);
+
+  const scheduleSave = useCallback(() => {
+    dirtyRef.current = true;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      timerRef.current = null;
+      flushSave();
+    }, AUTOSAVE_DELAY_MS);
+  }, [flushSave]);
+
+  // 卸载或切换运行时，把还没落盘的修改立刻补一次（旧 runId 的闭包会写回旧运行）
+  useEffect(() => () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    if (dirtyRef.current) flushSave();
+  }, [flushSave]);
+
+  // 浏览器窗口关闭/刷新前兜底：keepalive 请求在页面卸载后仍会发出
+  useEffect(() => {
+    const handlePageHide = () => {
+      if (!dirtyRef.current) return;
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      flushSave({ keepalive: true });
+    };
+    window.addEventListener('pagehide', handlePageHide);
+    return () => window.removeEventListener('pagehide', handlePageHide);
+  }, [flushSave]);
+
   if (artifactState?.status === 'loading') return <div className="artifact-empty"><RefreshCw size={13} className="animate-spin" /> 正在加载评价草稿…</div>;
   if (artifactState?.status === 'error') return <div className="artifact-error">{artifactState.error || '评价草稿加载失败'}</div>;
   if (rows.length === 0) return <div className="artifact-empty">还没有评价草稿，请先运行流水线。</div>;
 
-  const updateRow = (index, field, value) => setRows((current) => current.map((row, rowIndex) => (
-    rowIndex === index ? { ...row, [field]: value } : row
-  )));
+  const updateRow = (index, field, value) => {
+    setRows((current) => current.map((row, rowIndex) => (
+      rowIndex === index ? { ...row, [field]: value } : row
+    )));
+    scheduleSave();
+  };
+
+  const handleConfirm = () => {
+    // 确认接口本身会带上全部行内容，取消挂起的自动保存，避免和生成表格抢写草稿文件
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    dirtyRef.current = false;
+    baselineRef.current = snapshotDraftRows(rowsRef.current);
+    onConfirm(rowsRef.current);
+  };
+
   const emptyCount = rows.filter((row) => !String(row.reviewContent || '').trim()).length;
   const attachmentsOf = (row) => (Array.isArray(attachments[row.id]) ? attachments[row.id] : []);
 
@@ -85,6 +188,11 @@ export function ReviewDraftPanel({ artifactState, onConfirm, confirming = false,
         <div><strong>评价草稿</strong><span>评价不复述商品标题；仍引用标题的内容已被系统换成通用文案，请逐条核对后再生成 Excel。</span></div>
         <b className={emptyCount > 0 ? 'is-missing' : ''}>{emptyCount > 0 ? `${emptyCount} 条未填写` : `${rows.length} 条可导出`}</b>
       </div>
+      {saveStatus === 'saving' && <div className="review-autosave-hint">正在自动保存修改…</div>}
+      {saveStatus === 'saved' && <div className="review-autosave-hint">修改已自动保存 {savedAt}，关闭窗口后仍会保留</div>}
+      {saveStatus === 'error' && (
+        <div className="artifact-error">自动保存失败：{saveError}。修改仍保留在本页，可继续编辑或直接确认生成。</div>
+      )}
       {attachmentError && <div className="artifact-error">{attachmentError}</div>}
       <div className="review-draft-list">
         {rows.map((row, index) => (
@@ -144,7 +252,7 @@ export function ReviewDraftPanel({ artifactState, onConfirm, confirming = false,
         ))}
       </div>
       <div className="start-configuration-actions">
-        <button type="button" className="node-primary-button" disabled={confirming || emptyCount > 0} onClick={() => onConfirm(rows)}>
+        <button type="button" className="node-primary-button" disabled={confirming || emptyCount > 0} onClick={handleConfirm}>
           {confirming ? <RefreshCw size={13} className="animate-spin" /> : <Check size={13} />}
           {confirming ? '正在生成评价表…' : '确认评价并生成表格'}
         </button>

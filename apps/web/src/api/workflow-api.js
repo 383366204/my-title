@@ -53,6 +53,12 @@ export const confirmReviewSheet = (runId, reviews) => requestJson(`${workflowRun
   method: 'POST',
   body: { reviews }
 });
+// options 透传 fetch 参数（如 keepalive），供关窗前兜底保存使用
+export const saveReviewDrafts = (runId, reviews, options = {}) => requestJson(`${workflowRunPath(runId)}/review-drafts`, {
+  method: 'POST',
+  body: { reviews },
+  ...options
+});
 
 // 与后端 MAX_REVIEW_ATTACHMENTS 保持一致：每条评价最多 4 张配图
 export const MAX_REVIEW_ATTACHMENTS = 4;

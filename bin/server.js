@@ -65,6 +65,7 @@ const {
 } = require('../skills/pipeline-flow/runtime/runner');
 const {
   confirmReviewDrafts,
+  saveReviewDrafts,
   addReviewAttachment,
   listReviewAttachments,
   readReviewAttachment,
@@ -1503,6 +1504,21 @@ app.delete('/api/workflows/runs/:runId/review-assets/:attachmentId', (req, res) 
   }
 });
 
+// 评价草稿自动缓存：只落盘人工修改，不推进状态、不触发后续节点
+app.post('/api/workflows/runs/:runId/review-drafts', (req, res) => {
+  try {
+    const runId = req.params.runId;
+    const runtime = readRuntimeState({ runId });
+    if (!runtime || runtime.mode !== 'review-sheet') {
+      return res.status(409).json({ ok: false, error: '当前运行不是评价表流水线。' });
+    }
+    const reviews = Array.isArray(req.body?.reviews) ? req.body.reviews : [];
+    const result = saveReviewDrafts({ runId, reviews });
+    return res.json({ ok: true, data: result });
+  } catch (err) {
+    return res.status(400).json({ ok: false, error: err.message });
+  }
+});
 app.post('/api/workflows/runs/:runId/review-confirm', (req, res) => {
   if (activeWorkbenchProcess) {
     return res.status(409).json({ ok: false, error: '已有工作流正在运行，请等待完成后再继续。' });

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { getWorkflowArtifact } from '../../../api/workflow-api.js';
 
@@ -11,6 +11,9 @@ const emptyArtifactState = (nodeId = null) => ({
 
 export function useNodeArtifact({ runId, nodeId, limit } = {}) {
   const [artifactState, setArtifactState] = useState(() => emptyArtifactState(nodeId));
+  // 同一节点关闭弹窗后再打开时 nodeId 不变，必须靠 token 强制重新请求，
+  // 否则面板拿到的还是内存里的旧产物（例如评价草稿的自动保存内容就不会显示）。
+  const [refreshToken, setRefreshToken] = useState(0);
 
   useEffect(() => {
     if (!nodeId || !runId) {
@@ -35,7 +38,9 @@ export function useNodeArtifact({ runId, nodeId, limit } = {}) {
     return () => {
       cancelled = true;
     };
-  }, [limit, nodeId, runId]);
+  }, [limit, nodeId, refreshToken, runId]);
 
-  return [artifactState, setArtifactState];
+  const refreshArtifact = useCallback(() => setRefreshToken((token) => token + 1), []);
+
+  return [artifactState, setArtifactState, refreshArtifact];
 }
