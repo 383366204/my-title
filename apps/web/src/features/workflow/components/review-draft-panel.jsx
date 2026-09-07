@@ -3,6 +3,7 @@ import { Check, ImagePlus, RefreshCw, Trash2 } from 'lucide-react';
 
 import {
   MAX_REVIEW_ATTACHMENTS,
+  MAX_REVIEW_ATTACHMENT_BYTES,
   deleteReviewAttachment,
   listReviewAttachments,
   reviewAttachmentUrl,
@@ -10,6 +11,7 @@ import {
   uploadReviewAttachment
 } from '../../../api/workflow-api.js';
 import { collectChangedReviews, snapshotDraftRows } from '../review-draft-autosave.js';
+import { canAutoCompress, compressedFileName, compressReviewImage } from '../review-image-compress.js';
 
 const ATTACHMENT_ACCEPT = 'image/png,image/jpeg,image/gif';
 // 停止输入 0.8 秒后落盘一次，避免每个按键都打请求
@@ -21,6 +23,7 @@ export function ReviewDraftPanel({ artifactState, onConfirm, confirming = false,
   const [attachments, setAttachments] = useState({});
   const [uploadingDraftId, setUploadingDraftId] = useState('');
   const [attachmentError, setAttachmentError] = useState('');
+  const [attachmentNotice, setAttachmentNotice] = useState('');
   const [saveStatus, setSaveStatus] = useState('idle');
   const [saveError, setSaveError] = useState('');
   const [savedAt, setSavedAt] = useState('');
@@ -160,7 +163,23 @@ export function ReviewDraftPanel({ artifactState, onConfirm, confirming = false,
           setAttachmentError(`每条评价最多 ${MAX_REVIEW_ATTACHMENTS} 张图片，多余的已跳过`);
           break;
         }
-        const result = await uploadReviewAttachment(currentRunId, row.id, file);
+        let uploadFile = file;
+        if (file.size > MAX_REVIEW_ATTACHMENT_BYTES) {
+          const limitMb = MAX_REVIEW_ATTACHMENT_BYTES / 1024 / 1024;
+          if (!canAutoCompress(file)) {
+            setAttachmentError(`「${file.name}」超过单张 ${limitMb}MB，GIF 无法自动压缩，请转成 JPG 后上传`);
+            continue;
+          }
+          setAttachmentNotice(`「${file.name}」 ${(file.size / 1024 / 1024).toFixed(1)}MB 超过 ${limitMb}MB，正在自动压缩…`);
+          const compressed = await compressReviewImage(file, { limitBytes: MAX_REVIEW_ATTACHMENT_BYTES });
+          if (!compressed || compressed.blob.size > MAX_REVIEW_ATTACHMENT_BYTES) {
+            setAttachmentError(`「${file.name}」自动压缩后仍超过 ${limitMb}MB，请裁剪或降低分辨率后重试`);
+            continue;
+          }
+          uploadFile = new File([compressed.blob], compressedFileName(file.name), { type: 'image/jpeg' });
+          setAttachmentNotice(`「${file.name}」已压缩至 ${(compressed.blob.size / 1024 / 1024).toFixed(1)}MB，正在上传…`);
+        }
+        const result = await uploadReviewAttachment(currentRunId, row.id, uploadFile);
         latest = Array.isArray(result?.attachments) ? result.attachments : latest;
       }
       setAttachments((current) => ({ ...current, [row.id]: latest }));
@@ -168,6 +187,7 @@ export function ReviewDraftPanel({ artifactState, onConfirm, confirming = false,
       setAttachmentError(error.message || '配图上传失败');
     } finally {
       setUploadingDraftId('');
+      setAttachmentNotice('');
     }
   };
 
@@ -193,6 +213,7 @@ export function ReviewDraftPanel({ artifactState, onConfirm, confirming = false,
       {saveStatus === 'error' && (
         <div className="artifact-error">自动保存失败：{saveError}。修改仍保留在本页，可继续编辑或直接确认生成。</div>
       )}
+      {attachmentNotice && <div className="review-autosave-hint">{attachmentNotice}</div>}
       {attachmentError && <div className="artifact-error">{attachmentError}</div>}
       <div className="review-draft-list">
         {rows.map((row, index) => (

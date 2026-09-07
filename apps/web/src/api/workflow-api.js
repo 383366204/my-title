@@ -63,6 +63,9 @@ export const saveReviewDrafts = (runId, reviews, options = {}) => requestJson(`$
 // 与后端 MAX_REVIEW_ATTACHMENTS 保持一致：每条评价最多 4 张配图
 export const MAX_REVIEW_ATTACHMENTS = 4;
 
+// 与服务端 review-assets 路由的 8mb express.raw 上限保持一致，上传前先在前端拦截
+export const MAX_REVIEW_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+
 const reviewAssetsPath = (runId) => `${workflowRunPath(runId)}/review-assets`;
 
 export const reviewAttachmentUrl = (runId, attachmentId) => `${reviewAssetsPath(runId)}/${encodeURIComponent(attachmentId)}`;
