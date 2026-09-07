@@ -45,7 +45,8 @@ test('draft payload drops bulky static fields but keeps identity and edits', () 
   assert.equal(trimmed.title, '测试商品');
   assert.equal(trimmed.orderAmount, 39.9);
   assert.equal(trimmed.selectedSkuId, 's3');
-  assert.equal(trimmed.selectedSkuImageUrl, 'https://img.alicdn.com/s3.jpg');
+  // 规格图体积可能很大（甚至混入 base64 占位图），只回传 selectedSkuId，由服务端反查存盘规格回填
+  assert.equal(trimmed.selectedSkuImageUrl, undefined);
   assert.equal(trimmed.skuSelectionMode, 'manual');
 });
 

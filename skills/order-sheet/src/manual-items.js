@@ -33,6 +33,17 @@ function isAllowedEndpoint({ protocol = '', hostname = '', port = '' } = {}) {
   return isAllowedDomain(hostname) && allowedPorts.includes(normalizedPort);
 }
 
+/**
+ * 清洗图片地址：丢弃 data: 内联图。懒加载占位图常是几百 KB 的 base64，
+ * 混进商品资料后会让草稿回传体积失控，且无法用于制表下载。
+ * @param {unknown} value 原始图片地址
+ * @returns {string} 可用的 http(s) 图片地址，占位图返回空串
+ */
+function sanitizeImageUrl(value) {
+  const raw = String(value || '').trim();
+  return /^data:/i.test(raw) ? '' : raw;
+}
+
 function normalizeSkuOptions(options) {
   if (!Array.isArray(options)) return [];
   const seen = new Set();
@@ -50,7 +61,7 @@ function normalizeSkuOptions(options) {
       quantity: Number.isFinite(quantity) ? quantity : null,
       available: option?.available !== false && (!Number.isFinite(quantity) || quantity > 0),
       propPath: String(option?.propPath || '').trim(),
-      imageUrl: String(option?.imageUrl || option?.image || '').trim()
+      imageUrl: sanitizeImageUrl(option?.imageUrl || option?.image)
     };
   }).filter((option) => {
     const key = option.skuId || `${option.name}:${option.price}`;
@@ -81,7 +92,7 @@ function parseManualItem(input) {
   const rawUrl = rawUrlValue.match(/https?:\/\/[^\s，,；;]+/i)?.[0] || rawUrlValue;
   const rawItemId = raw.itemId != null ? String(raw.itemId).trim() : (raw.id != null ? String(raw.id).trim() : '');
   const title = String(raw.title || '').trim();
-  const imageUrl = String(raw.imageUrl || raw.image || '').trim();
+  const imageUrl = sanitizeImageUrl(raw.imageUrl || raw.image);
   const storeName = String(raw.storeName || '').trim();
 
   const parseAmount = (val) => {
@@ -95,7 +106,7 @@ function parseManualItem(input) {
   const selectedSkuId = String(raw.selectedSkuId || raw.skuId || '').trim();
   const selectedSkuName = String(raw.selectedSkuName || raw.skuName || '').trim();
   const selectedSkuPrice = parseAmount(raw.selectedSkuPrice != null ? raw.selectedSkuPrice : raw.skuPrice);
-  const selectedSkuImageUrl = String(raw.selectedSkuImageUrl || '').trim();
+  const selectedSkuImageUrl = sanitizeImageUrl(raw.selectedSkuImageUrl);
   const lowestSkuId = String(raw.lowestSkuId || '').trim();
   const lowestSkuName = String(raw.lowestSkuName || '').trim();
   const lowestSkuPrice = parseAmount(raw.lowestSkuPrice);
@@ -538,7 +549,7 @@ function parseBrowserSnapshot(snapshot = {}, fallbackItem = {}) {
     title: pickTitle(Array.isArray(snapshot.titleCandidates) && snapshot.titleCandidates.length > 0
       ? snapshot.titleCandidates
       : [snapshot.title]),
-    imageUrl: String(snapshot.imageUrl || '').trim(),
+    imageUrl: sanitizeImageUrl(snapshot.imageUrl),
     storeName: String(snapshot.storeName || '').trim(),
     referencePrice,
     skuOptions,
@@ -746,6 +757,7 @@ async function enrichManualItems(items = [], _options = {}) {
 
 module.exports = {
   fetchTaobaoItemPage,
+  sanitizeImageUrl,
   createTaobaoChromeSession,
   isAllowedEndpoint,
   isAllowedDomain,

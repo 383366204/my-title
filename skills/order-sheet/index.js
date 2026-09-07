@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { collectProductRankPage } = require('../sycm-research/src/product-rank');
 const { generateOrderSheet } = require('./src/generate-order-sheet');
-const { parseManualItems, enrichManualItems } = require('./src/manual-items');
+const { parseManualItems, enrichManualItems, sanitizeImageUrl } = require('./src/manual-items');
 const {
   DEFAULT_ORDER_GROUP_SIZE,
   getProductKey,
@@ -148,7 +148,7 @@ function updateOrderSheetManualProducts(options = {}) {
       selectedSkuId: update.selectedSkuId || row.selectedSkuId || '',
       selectedSkuName: update.selectedSkuName || row.selectedSkuName || '',
       selectedSkuPrice: update.selectedSkuPrice ?? row.selectedSkuPrice ?? null,
-      selectedSkuImageUrl: update.selectedSkuImageUrl || row.selectedSkuImageUrl || '',
+      selectedSkuImageUrl: sanitizeImageUrl(update.selectedSkuImageUrl || row.selectedSkuImageUrl),
       lowestSkuId: update.lowestSkuId || row.lowestSkuId || '',
       lowestSkuName: update.lowestSkuName || row.lowestSkuName || '',
       lowestSkuPrice: update.lowestSkuPrice ?? row.lowestSkuPrice ?? row.referencePrice ?? null,
@@ -571,7 +571,15 @@ function buildProductCatalog(rows, draft) {
 function restoreProductFields(product, catalog) {
   if (!product || typeof product !== 'object') return product;
   const stored = catalog.get(getProductKey(product));
-  return stored ? { ...stored, ...product } : product;
+  if (!stored) return product;
+  const restored = { ...stored, ...product };
+  // 前端不再回传 selectedSkuImageUrl（防 base64 占位图撑爆请求体），
+  // 这里按回传的 selectedSkuId 从存盘规格里反查回填，保证换规格后规格图同步更新。
+  if (Array.isArray(restored.skuOptions) && restored.skuOptions.length > 0) {
+    const selected = restored.skuOptions.find(option => String(option?.skuId || '') === String(restored.selectedSkuId || ''));
+    restored.selectedSkuImageUrl = sanitizeImageUrl(selected?.imageUrl);
+  }
+  return restored;
 }
 
 function restoreDraftGroups(groups, catalog) {

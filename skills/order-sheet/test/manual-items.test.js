@@ -94,6 +94,25 @@ describe('manual items parser', () => {
     assert.equal(emptyTitleItem.title, '');
   });
 
+  it('drops inline data: placeholder images from product and SKU fields', () => {
+    const dataUrl = 'data:image/gif;base64,R0lGODlhAQABAAAAACw=';
+    const item = parseManualItem({
+      id: '8008',
+      title: '带占位图的商品',
+      imageUrl: dataUrl,
+      selectedSkuImageUrl: dataUrl,
+      skuOptions: [
+        { skuId: 's1', name: '规格一', price: 10, quantity: 5, available: true, imageUrl: dataUrl },
+        { skuId: 's2', name: '规格二', price: 12, quantity: 5, available: true, imageUrl: 'https://img.alicdn.com/s2.jpg' }
+      ]
+    });
+
+    assert.equal(item.imageUrl, '');
+    assert.equal(item.selectedSkuImageUrl, undefined);
+    assert.equal(item.skuOptions[0].imageUrl, '');
+    assert.equal(item.skuOptions[1].imageUrl, 'https://img.alicdn.com/s2.jpg');
+  });
+
   it('deduplicates items by itemId stably and caps at 100 items', () => {
     const textInput = `
       1001

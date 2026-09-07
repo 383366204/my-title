@@ -1,8 +1,9 @@
 /**
  * 编组草稿的最小回传负载。
- * 面板只需要回传身份字段和可编辑字段；skuOptions、主图、排行指标等静态数据体积很大
+ * 面板只需要回传身份字段和可编辑字段；skuOptions、主图、规格图、排行指标等静态数据体积很大
  * （一个多规格商品约 4KB，12 个商品就能超过 Express 默认的 100KB body 上限触发 413），
- * 由服务端用已存盘的商品资料补齐。
+ * 由服务端用已存盘的商品资料补齐。selectedSkuImageUrl 只回传 selectedSkuId，
+ * 服务端按存盘 skuOptions 反查回填，避免 base64 占位图撑爆请求体。
  */
 const DRAFT_PRODUCT_FIELDS = [
   'itemId',
@@ -18,7 +19,6 @@ const DRAFT_PRODUCT_FIELDS = [
   'selectedSkuId',
   'selectedSkuName',
   'selectedSkuPrice',
-  'selectedSkuImageUrl',
   'lowestSkuId',
   'lowestSkuName',
   'lowestSkuPrice',

@@ -539,8 +539,8 @@ describe('order sheet workflow', () => {
           storeName: '甲店',
           imageUrl: 'https://img.alicdn.com/a.jpg',
           skuOptions: [
-            { skuId: 'a1', name: '规格一', price: 30, quantity: 5, available: true },
-            { skuId: 'a2', name: '规格二', price: 31, quantity: 5, available: true }
+            { skuId: 'a1', name: '规格一', price: 30, quantity: 5, available: true, imageUrl: 'https://img.alicdn.com/a1.jpg' },
+            { skuId: 'a2', name: '规格二', price: 31, quantity: 5, available: true, imageUrl: 'https://img.alicdn.com/a2.jpg' }
           ]
         },
         {
@@ -590,6 +590,8 @@ describe('order sheet workflow', () => {
     assert.equal(main.title, '改过的甲标题');
     assert.equal(main.orderAmount, 66);
     assert.equal(main.selectedSkuId, 'a2');
+    // 前端不回传 selectedSkuImageUrl，服务端按 selectedSkuId 从存盘规格反查回填
+    assert.equal(main.selectedSkuImageUrl, 'https://img.alicdn.com/a2.jpg');
     assert.equal(main.skuSelectionMode, 'manual');
     // 未提交的静态字段由服务端补齐，规格下拉框和主图都不会丢
     assert.equal(main.skuOptions.length, 2);

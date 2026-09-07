@@ -280,12 +280,14 @@ async function readProductRankRows(cdp) {
       const itemIdText = clean(productCell?.querySelector('.goods-subIndex-text')?.innerText);
       const itemId = (itemIdText.match(/ID[:：]?\\s*(\\d+)/i) || [])[1] || '';
       const rawHref = titleLink?.href || '';
+      // 懒加载未完成时 img.src 是 data: 占位图，几百 KB 的 base64 会把商品资料和回传负载撑爆
+      const rawImageUrl = productCell?.querySelector('img')?.src || '';
       return {
         rank: index + 1,
         itemId,
         title: clean(titleLink?.getAttribute('title') || titleLink?.innerText),
         productUrl: rawHref || (itemId ? 'https://item.taobao.com/item.htm?id=' + itemId : ''),
-        imageUrl: productCell?.querySelector('img')?.src || '',
+        imageUrl: /^data:/i.test(rawImageUrl) ? '' : rawImageUrl,
         paymentAmount: valueOf(row, 'alife-dt-card-common-table-payAmt'),
         refundAmount: valueOf(row, 'alife-dt-card-common-table-sucRefundAmt'),
         paidItemCount: valueOf(row, 'alife-dt-card-common-table-payItmCnt'),
