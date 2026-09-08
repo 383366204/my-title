@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, ImagePlus, RefreshCw, Trash2 } from 'lucide-react';
+import { AlertTriangle, Check, ImagePlus, RefreshCw, SearchCheck, Sparkles, Trash2 } from 'lucide-react';
 
 import {
   MAX_REVIEW_ATTACHMENTS,
   MAX_REVIEW_ATTACHMENT_BYTES,
+  checkReviewDrafts,
   deleteReviewAttachment,
   listReviewAttachments,
   reviewAttachmentUrl,
+  rewriteReviewDrafts,
   saveReviewDrafts,
   uploadReviewAttachment
 } from '../../../api/workflow-api.js';
@@ -27,6 +29,9 @@ export function ReviewDraftPanel({ artifactState, onConfirm, confirming = false,
   const [saveStatus, setSaveStatus] = useState('idle');
   const [saveError, setSaveError] = useState('');
   const [savedAt, setSavedAt] = useState('');
+  const [qualityError, setQualityError] = useState('');
+  const [qualityAction, setQualityAction] = useState('');
+  const [filter, setFilter] = useState('all');
 
   const rowsRef = useRef([]);
   const baselineRef = useRef(new Map());
@@ -35,15 +40,30 @@ export function ReviewDraftPanel({ artifactState, onConfirm, confirming = false,
 
   useEffect(() => { rowsRef.current = rows; }, [rows]);
 
+  const replaceRows = useCallback((nextRows) => {
+    const normalized = (Array.isArray(nextRows) ? nextRows : []).map(row => ({ ...row }));
+    rowsRef.current = normalized;
+    setRows(normalized);
+    baselineRef.current = snapshotDraftRows(normalized);
+    dirtyRef.current = false;
+  }, []);
+
+  const mergeQuality = useCallback((qualityById = {}) => {
+    const next = rowsRef.current.map(row => ({
+      ...row,
+      quality: qualityById[String(row.id)] || row.quality
+    }));
+    rowsRef.current = next;
+    setRows(next);
+  }, []);
+
   // 从节点产物加载草稿。本地还有未落盘修改时跳过覆盖，避免刷新打断正在输入的内容；
   // 自动保存成功后基线会更新，刷新拿到的服务端数据也已经带上缓存修改。
   useEffect(() => {
     if (dirtyRef.current) return;
     const sourceRows = Array.isArray(artifactRows) ? artifactRows : [];
-    const next = sourceRows.map((row) => ({ ...row }));
-    setRows(next);
-    baselineRef.current = snapshotDraftRows(next);
-  }, [artifactRows]);
+    replaceRows(sourceRows);
+  }, [artifactRows, replaceRows]);
 
   useEffect(() => {
     if (!currentRunId) {
@@ -66,15 +86,18 @@ export function ReviewDraftPanel({ artifactState, onConfirm, confirming = false,
     }
     if (!keepalive) setSaveStatus('saving');
     try {
-      await saveReviewDrafts(currentRunId, changed, keepalive ? { keepalive: true } : {});
+      const result = await saveReviewDrafts(currentRunId, changed, keepalive ? { keepalive: true } : {});
+      if (!keepalive && result?.qualityById) mergeQuality(result.qualityById);
       // 只把「保存后没再被改过」的行并入基线；保存期间的新输入仍保持脏状态，
       // 且输入时已经排过新的防抖保存，这里无需再补调度
       for (const item of changed) {
         const row = rowsRef.current.find((current) => String(current.id) === item.id);
         if (row
+          && String(row.experienceNotes || '') === item.experienceNotes
           && String(row.reviewContent || '') === item.reviewContent
           && String(row.correspondingFile || '') === item.correspondingFile) {
           baselineRef.current.set(item.id, {
+            experienceNotes: item.experienceNotes,
             reviewContent: item.reviewContent,
             correspondingFile: item.correspondingFile
           });
@@ -86,13 +109,15 @@ export function ReviewDraftPanel({ artifactState, onConfirm, confirming = false,
         setSavedAt(new Date().toLocaleTimeString('zh-CN', { hour12: false }));
         setSaveError('');
       }
+      return result;
     } catch (error) {
-      if (keepalive) return; // 关窗兜底失败无法提示，只能放弃
+      if (keepalive) return { failed: true }; // 关窗兜底失败无法提示，只能放弃
       dirtyRef.current = true;
       setSaveStatus('error');
       setSaveError(error.message || '自动保存失败');
+      return { failed: true };
     }
-  }, [currentRunId]);
+  }, [currentRunId, mergeQuality]);
 
   const scheduleSave = useCallback(() => {
     dirtyRef.current = true;
@@ -131,24 +156,78 @@ export function ReviewDraftPanel({ artifactState, onConfirm, confirming = false,
   if (rows.length === 0) return <div className="artifact-empty">还没有评价草稿，请先运行流水线。</div>;
 
   const updateRow = (index, field, value) => {
-    setRows((current) => current.map((row, rowIndex) => (
-      rowIndex === index ? { ...row, [field]: value } : row
-    )));
+    const next = rowsRef.current.map((row, rowIndex) => (
+      rowIndex === index
+        ? { ...row, [field]: value, quality: field === 'reviewContent' ? { level: 'pending', reason: '等待重新检查' } : row.quality }
+        : row
+    ));
+    rowsRef.current = next;
+    setRows(next);
     scheduleSave();
+  };
+
+  const stopPendingSave = () => {
+    if (!timerRef.current) return;
+    clearTimeout(timerRef.current);
+    timerRef.current = null;
+  };
+
+  const handleQualityCheck = async () => {
+    if (!currentRunId || qualityAction) return;
+    setQualityAction('check');
+    setQualityError('');
+    stopPendingSave();
+    try {
+      const saved = await flushSave();
+      if (saved?.failed) return;
+      const result = await checkReviewDrafts(currentRunId);
+      if (Array.isArray(result?.rows)) replaceRows(result.rows);
+    } catch (error) {
+      setQualityError(error.message || '重复检查失败');
+    } finally {
+      setQualityAction('');
+    }
+  };
+
+  const handleRewrite = async (ids) => {
+    const targets = (Array.isArray(ids) ? ids : []).filter(Boolean);
+    if (!currentRunId || targets.length === 0 || qualityAction) return;
+    setQualityAction('rewrite');
+    setQualityError('');
+    stopPendingSave();
+    try {
+      const saved = await flushSave();
+      if (saved?.failed) return;
+      const result = await rewriteReviewDrafts(currentRunId, targets);
+      if (Array.isArray(result?.rows)) replaceRows(result.rows);
+    } catch (error) {
+      setQualityError(error.message || '评价整理失败');
+    } finally {
+      setQualityAction('');
+    }
   };
 
   const handleConfirm = () => {
     // 确认接口本身会带上全部行内容，取消挂起的自动保存，避免和生成表格抢写草稿文件
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
+    stopPendingSave();
     dirtyRef.current = false;
     baselineRef.current = snapshotDraftRows(rowsRef.current);
     onConfirm(rowsRef.current);
   };
 
   const emptyCount = rows.filter((row) => !String(row.reviewContent || '').trim()).length;
+  const missingExperienceCount = rows.filter((row) => !String(row.experienceNotes || '').trim()).length;
+  const blockedCount = rows.filter((row) => row.quality?.level === 'blocked' && String(row.reviewContent || '').trim()).length;
+  const warningCount = rows.filter((row) => row.quality?.level === 'warning').length;
+  const actionableIds = rows.filter(row => (
+    String(row.experienceNotes || '').trim()
+    && (!String(row.reviewContent || '').trim() || ['blocked', 'warning'].includes(row.quality?.level))
+  )).map(row => row.id);
+  const visibleRows = rows.filter(row => {
+    if (filter === 'problems') return ['blocked', 'warning'].includes(row.quality?.level);
+    if (filter === 'missing') return !String(row.experienceNotes || '').trim() || !String(row.reviewContent || '').trim();
+    return true;
+  });
   const attachmentsOf = (row) => (Array.isArray(attachments[row.id]) ? attachments[row.id] : []);
 
   const handleFiles = async (row, fileList) => {
@@ -205,8 +284,10 @@ export function ReviewDraftPanel({ artifactState, onConfirm, confirming = false,
   return (
     <div className="review-draft-panel">
       <div className="review-source-groups-head">
-        <div><strong>评价草稿</strong><span>评价不复述商品标题；仍引用标题的内容已被系统换成通用文案，请逐条核对后再生成 Excel。</span></div>
-        <b className={emptyCount > 0 ? 'is-missing' : ''}>{emptyCount > 0 ? `${emptyCount} 条未填写` : `${rows.length} 条可导出`}</b>
+        <div><strong>真实体验整理</strong><span>先填写实际体验，再整理成评价；系统会检查本批和历史内容是否重复。</span></div>
+        <b className={emptyCount > 0 || blockedCount > 0 ? 'is-missing' : ''}>
+          {emptyCount > 0 ? `${emptyCount} 条待整理` : blockedCount > 0 ? `${blockedCount} 条重复` : `${rows.length} 条可导出`}
+        </b>
       </div>
       {saveStatus === 'saving' && <div className="review-autosave-hint">正在自动保存修改…</div>}
       {saveStatus === 'saved' && <div className="review-autosave-hint">修改已自动保存 {savedAt}，关闭窗口后仍会保留</div>}
@@ -215,23 +296,76 @@ export function ReviewDraftPanel({ artifactState, onConfirm, confirming = false,
       )}
       {attachmentNotice && <div className="review-autosave-hint">{attachmentNotice}</div>}
       {attachmentError && <div className="artifact-error">{attachmentError}</div>}
+      {qualityError && <div className="artifact-error">{qualityError}</div>}
+      <div className="review-quality-toolbar">
+        <div className="review-quality-filters" aria-label="评价筛选">
+          <button type="button" className={filter === 'all' ? 'active' : ''} onClick={() => setFilter('all')}>全部 {rows.length}</button>
+          <button type="button" className={filter === 'problems' ? 'active' : ''} onClick={() => setFilter('problems')}>相似 {blockedCount + warningCount}</button>
+          <button type="button" className={filter === 'missing' ? 'active' : ''} onClick={() => setFilter('missing')}>待补充 {missingExperienceCount}</button>
+        </div>
+        <div className="review-quality-actions">
+          <button type="button" className="node-secondary-button" disabled={Boolean(qualityAction)} onClick={handleQualityCheck}>
+            {qualityAction === 'check' ? <RefreshCw size={13} className="animate-spin" /> : <SearchCheck size={13} />}
+            检查重复
+          </button>
+          <button type="button" className="node-secondary-button" disabled={actionableIds.length === 0 || Boolean(qualityAction)} onClick={() => handleRewrite(actionableIds)}>
+            {qualityAction === 'rewrite' ? <RefreshCw size={13} className="animate-spin" /> : <Sparkles size={13} />}
+            整理待处理项
+          </button>
+        </div>
+      </div>
       <div className="review-draft-list">
-        {rows.map((row, index) => (
-          <article className="review-draft-row" key={row.id || index}>
+        {visibleRows.length === 0 && <div className="artifact-empty">当前筛选下没有内容。</div>}
+        {visibleRows.map((row, visibleIndex) => {
+          const index = rows.findIndex(item => String(item.id) === String(row.id));
+          const qualityLevel = row.quality?.level === 'none' ? 'passed' : row.quality?.level || 'pending';
+          return (
+          <article className={`review-draft-row is-quality-${qualityLevel}`} key={row.id || visibleIndex}>
             <div>
               <strong>{row.title}</strong>
               <span>
                 {row.sourceSheet} · 第 {row.sourceRow} 行
-                {row.origin === 'replaced' && <em className="review-draft-replaced">已替换引用标题的文案</em>}
+                {row.origin === 'replaced' && <em className="review-draft-replaced">已移除标题复述</em>}
               </span>
             </div>
+            <div className={`review-quality-state is-${qualityLevel}`}>
+              {qualityLevel === 'blocked' || qualityLevel === 'warning' ? <AlertTriangle size={13} /> : qualityLevel === 'passed' ? <Check size={13} /> : <SearchCheck size={13} />}
+              <span>
+                {qualityLevel === 'blocked' ? '重复阻塞' : qualityLevel === 'warning' ? '相似提醒' : qualityLevel === 'passed' ? '检查通过' : '等待检查'}
+                {row.quality?.score > 0 ? ` · 相似度 ${Math.round(row.quality.score * 100)}%` : ''}
+              </span>
+              {row.quality?.reason && <small>{row.quality.reason}</small>}
+            </div>
             <label className="node-field">
-              <span>评价内容</span>
-              <textarea rows="3" maxLength="500" value={row.reviewContent || ''} onChange={(event) => updateRow(index, 'reviewContent', event.target.value)} />
+              <span>真实体验要点</span>
+              <textarea
+                rows="2"
+                maxLength="500"
+                disabled={Boolean(qualityAction)}
+                value={row.experienceNotes || ''}
+                onChange={(event) => updateRow(index, 'experienceNotes', event.target.value)}
+                placeholder="只填写实际发生的体验，例如包装、尺寸、使用感受；没有体验时请留空"
+              />
             </label>
             <label className="node-field">
+              <span>整理后的评价</span>
+              <textarea
+                rows="3"
+                maxLength="500"
+                disabled={Boolean(qualityAction)}
+                value={row.reviewContent || ''}
+                onChange={(event) => updateRow(index, 'reviewContent', event.target.value)}
+                placeholder={row.experienceNotes ? '可人工修改；修改后请重新检查重复' : '补充真实体验要点后才能生成'}
+              />
+            </label>
+            <div className="review-row-actions">
+              <button type="button" className="node-secondary-button" disabled={!String(row.experienceNotes || '').trim() || Boolean(qualityAction)} onClick={() => handleRewrite([row.id])}>
+                <Sparkles size={13} /> 根据体验整理
+              </button>
+            </div>
+            <label className="node-field">
               <span>对应文件</span>
-              <input type="text" maxLength="200" value={row.correspondingFile || ''} onChange={(event) => updateRow(index, 'correspondingFile', event.target.value)} placeholder="可留空，上传图片后自动填入文件名" />
+              <input type="text" maxLength="200" disabled={Boolean(qualityAction)} value={row.correspondingFile || ''} onChange={(event) => updateRow(index, 'correspondingFile', event.target.value)} placeholder="可留空，上传图片后自动填入文件名" />
             </label>
             <div className="review-draft-attachments">
               <div className="review-draft-attachments-head">
@@ -270,10 +404,17 @@ export function ReviewDraftPanel({ artifactState, onConfirm, confirming = false,
               </label>
             </div>
           </article>
-        ))}
+          );
+        })}
       </div>
       <div className="start-configuration-actions">
-        <button type="button" className="node-primary-button" disabled={confirming || emptyCount > 0} onClick={handleConfirm}>
+        {(emptyCount > 0 || blockedCount > 0) && (
+          <span className="review-confirm-blocked">
+            <AlertTriangle size={13} />
+            {emptyCount > 0 ? `还有 ${emptyCount} 条未整理` : `还有 ${blockedCount} 条批内重复需要修改`}
+          </span>
+        )}
+        <button type="button" className="node-primary-button" disabled={confirming || Boolean(qualityAction) || emptyCount > 0 || blockedCount > 0} onClick={handleConfirm}>
           {confirming ? <RefreshCw size={13} className="animate-spin" /> : <Check size={13} />}
           {confirming ? '正在生成评价表…' : '确认评价并生成表格'}
         </button>

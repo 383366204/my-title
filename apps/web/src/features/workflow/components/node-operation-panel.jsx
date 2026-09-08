@@ -68,8 +68,8 @@ const NODE_PANEL_COPY = {
     description: '自动可铺货项和被系统拦截项在这里统一查看、加入、移除和复制。'
   },
   'review-drafts': {
-    title: '评价生成与复核',
-    description: '逐条编辑评价草稿，确认后生成最终评价表。'
+    title: '真实体验整理',
+    description: '填写实际体验、整理文案并检查重复，确认后生成评价表。'
   },
   'order-sheet-products': {
     title: '商品资料操作台',

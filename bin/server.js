@@ -66,8 +66,10 @@ const {
 const { TaobaoNativeClient } = require('../skills/competitor-analysis');
 const { launchTaobaoDesktop } = require('../skills/title-gen/src/taobao-utils');
 const {
+  checkReviewDrafts,
   confirmReviewDrafts,
   saveReviewDrafts,
+  rewriteReviewDrafts,
   addReviewAttachment,
   listReviewAttachments,
   readReviewAttachment,
@@ -1520,9 +1522,43 @@ app.post('/api/workflows/runs/:runId/review-drafts', (req, res) => {
     const result = saveReviewDrafts({ runId, reviews });
     return res.json({ ok: true, data: result });
   } catch (err) {
-    return res.status(400).json({ ok: false, error: err.message });
+    return res.status(err.code === 'REVIEW_DRAFT_LOCKED' ? 409 : 400).json({ ok: false, error: err.message });
   }
 });
+
+app.post('/api/workflows/runs/:runId/review-drafts/check', (req, res) => {
+  try {
+    const runId = req.params.runId;
+    const runtime = readRuntimeState({ runId });
+    if (!runtime || runtime.mode !== 'review-sheet') {
+      return res.status(409).json({ ok: false, error: '当前运行不是评价表流水线。' });
+    }
+    return res.json({ ok: true, data: checkReviewDrafts({ runId }) });
+  } catch (err) {
+    return res.status(err.code === 'REVIEW_DRAFT_LOCKED' ? 409 : 400).json({ ok: false, error: err.message });
+  }
+});
+
+app.post('/api/workflows/runs/:runId/review-drafts/rewrite', async (req, res) => {
+  try {
+    const runId = req.params.runId;
+    const runtime = readRuntimeState({ runId });
+    if (!runtime || runtime.mode !== 'review-sheet') {
+      return res.status(409).json({ ok: false, error: '当前运行不是评价表流水线。' });
+    }
+    const result = await rewriteReviewDrafts({
+      runId,
+      ids: Array.isArray(req.body?.ids) ? req.body.ids : [],
+      reviewTone: runtime.params?.reviewTone,
+      reviewLength: runtime.params?.reviewLength,
+      useAI: runtime.params?.useAI
+    });
+    return res.json({ ok: true, data: result });
+  } catch (err) {
+    return res.status(err.code === 'REVIEW_DRAFT_LOCKED' ? 409 : 400).json({ ok: false, error: err.message });
+  }
+});
+
 app.post('/api/workflows/runs/:runId/review-confirm', (req, res) => {
   if (activeWorkbenchProcess) {
     return res.status(409).json({ ok: false, error: '已有工作流正在运行，请等待完成后再继续。' });

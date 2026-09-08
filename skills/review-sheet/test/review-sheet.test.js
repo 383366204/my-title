@@ -10,6 +10,7 @@ const { getRun, readJsonl } = require('../../pipeline-flow/src/run-store');
 const {
   addReviewAttachment,
   buildReviewSheet,
+  checkReviewDrafts,
   confirmReviewDrafts,
   generateReviewDrafts,
   importReviewSource,
@@ -20,6 +21,7 @@ const {
   readReviewAttachment,
   readReviewSourceUpload,
   removeReviewAttachment,
+  rewriteReviewDrafts,
   regroupReviewSourceUpload,
   saveReviewDrafts,
   saveReviewSourceUpload,
@@ -29,13 +31,13 @@ const {
 async function fixtureBuffer() {
   const workbook = new ExcelJS.Workbook();
   const first = workbook.addWorksheet('订单一');
-  first.addRow(['标题', '主图', '价格', '加购件数', '做单要求', '店铺名', '备注']);
-  first.addRow(['商品甲', '', 10, 1, '', '测试店铺', '']);
-  first.getRow(5).values = ['商品乙'];
+  first.addRow(['标题', '主图', '价格', '加购件数', '做单要求', '店铺名', '备注', '真实体验']);
+  first.addRow(['商品甲', '', 10, 1, '', '测试店铺', '', '包装完整']);
+  first.getRow(5).values = ['商品乙', '', '', '', '', '', '', '使用顺手'];
   const second = workbook.addWorksheet('订单二');
   second.state = 'hidden';
-  second.addRow(['产品标题', '店铺名称']);
-  second.addRow(['商品甲', '测试店铺']);
+  second.addRow(['产品标题', '店铺名称', '体验要点']);
+  second.addRow(['商品甲', '测试店铺', '尺寸合适']);
   return Buffer.from(await workbook.xlsx.writeBuffer());
 }
 
@@ -46,6 +48,7 @@ test('parses worksheets as inferred order groups without removing duplicate titl
   assert.equal(parsed.groups[0].products.length, 2);
   assert.equal(parsed.groups[1].products[0].title, '商品甲');
   assert.equal(parsed.groups[0].storeName, '测试店铺');
+  assert.equal(parsed.groups[0].products[0].experienceNotes, '包装完整');
 });
 
 test('prefers explicit order numbers when one worksheet contains multiple orders', async () => {
@@ -100,6 +103,64 @@ test('autosaves review edits without advancing status and confirm reuses cached 
   const confirmed = confirmReviewDrafts({ dataDir, runId: 'test-review-autosave', reviews: [] });
   const confirmedRow = confirmed.drafts.find((row) => row.id === persisted[0].id);
   assert.equal(confirmedRow.reviewContent, '人工修改后的评价');
+  assert.throws(
+    () => saveReviewDrafts({ dataDir, runId: 'test-review-autosave', reviews: [{ id: persisted[0].id, reviewContent: '迟到的自动保存' }] }),
+    error => error.code === 'REVIEW_DRAFT_LOCKED'
+  );
+});
+
+test('blocks batch duplicates during review confirmation and exposes the matched row', async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'review-duplicate-'));
+  const upload = await saveReviewSourceUpload({ buffer: await fixtureBuffer(), fileName: '刷单表.xlsx', dataDir });
+  await importReviewSource({
+    dataDir,
+    runId: 'test-review-duplicate',
+    uploadId: upload.uploadId,
+    groups: upload.groups.map(group => ({ id: group.id, storeName: '测试店铺' }))
+  });
+  const generated = await generateReviewDrafts({ dataDir, runId: 'test-review-duplicate', useAI: false });
+  const rows = readJsonl(path.join(generated.runDir, 'review-drafts.jsonl'));
+  const duplicate = '包装完整，实际使用起来很顺手，大小也很合适。';
+  saveReviewDrafts({
+    dataDir,
+    runId: 'test-review-duplicate',
+    reviews: rows.slice(0, 2).map(row => ({ id: row.id, reviewContent: duplicate }))
+  });
+  const checked = checkReviewDrafts({ dataDir, runId: 'test-review-duplicate' });
+  assert.equal(checked.qualitySummary.blocked, 1);
+  assert.equal(checked.rows[1].quality.matchedDraftId, rows[0].id);
+  assert.throws(
+    () => confirmReviewDrafts({ dataDir, runId: 'test-review-duplicate', reviews: [] }),
+    /高度重复/
+  );
+});
+
+test('discards a delayed AI rewrite after the user has already confirmed', async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'review-rewrite-race-'));
+  await twoProductUpload(dataDir);
+  const generated = await generateReviewDrafts({ dataDir, runId: 'draft-run', useAI: false });
+  const rows = readJsonl(path.join(generated.runDir, 'review-drafts.jsonl'));
+  let finishRequest;
+  const pendingResponse = new Promise(resolve => { finishRequest = resolve; });
+  const previousKey = process.env.LLM_API_KEY;
+  process.env.LLM_API_KEY = 'test-key-for-rewrite-race';
+  try {
+    const rewrite = rewriteReviewDrafts({
+      dataDir,
+      runId: 'draft-run',
+      ids: [rows[0].id],
+      llmProvider: 'openai-compatible',
+      request: async () => pendingResponse
+    });
+    confirmReviewDrafts({ dataDir, runId: 'draft-run', reviews: [] });
+    finishRequest({ data: { choices: [{ message: { content: JSON.stringify(['整理后的真实体验']) } }] } });
+    await assert.rejects(rewrite, error => error.code === 'REVIEW_DRAFT_LOCKED');
+    const persisted = readJsonl(path.join(generated.runDir, 'review-drafts.jsonl'));
+    assert.equal(persisted.every(row => row.status === 'approved'), true);
+  } finally {
+    if (previousKey === undefined) delete process.env.LLM_API_KEY;
+    else process.env.LLM_API_KEY = previousKey;
+  }
 });
 test('normalizes typed Excel dates before showing editable order groups', async () => {
   const workbook = new ExcelJS.Workbook();
@@ -141,9 +202,9 @@ test('imports, drafts, confirms and exports a review workbook', async () => {
 async function manyProductBuffer(count) {
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet('动销一拖多');
-  sheet.addRow(['标题', '主图', '价格（下单金额）', '加购件数', '做单要求', '店铺名', '下单备注（区分真实单暗号）']);
+  sheet.addRow(['标题', '主图', '价格（下单金额）', '加购件数', '做单要求', '店铺名', '下单备注（区分真实单暗号）', '真实体验']);
   for (let index = 1; index <= count; index += 1) {
-    sheet.addRow([`商品${index}`, '', 10 + index, 1, '浏览后下单', '拾珀天晶', '']);
+    sheet.addRow([`商品${index}`, '', 10 + index, 1, '浏览后下单', '拾珀天晶', '', `体验${index}`]);
   }
   return Buffer.from(await workbook.xlsx.writeBuffer());
 }
@@ -282,9 +343,9 @@ const TITLE_B = '花开见佛嘎乌盒吊坠锆石琉璃随身药师佛像佛龛
 async function twoProductUpload(dataDir) {
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet('动销一拖多');
-  sheet.addRow(['标题', '店铺名']);
-  sheet.addRow([TITLE_A, '拾珀天晶']);
-  sheet.addRow([TITLE_B, '拾珀天晶']);
+  sheet.addRow(['标题', '店铺名', '真实体验']);
+  sheet.addRow([TITLE_A, '拾珀天晶', '佩戴后大小合适']);
+  sheet.addRow([TITLE_B, '拾珀天晶', '开合使用比较顺手']);
   const upload = await saveReviewSourceUpload({
     buffer: Buffer.from(await workbook.xlsx.writeBuffer()),
     fileName: '刷单表.xlsx',
@@ -313,7 +374,7 @@ test('detects title echoes without false-positiving on short or unrelated text',
   }
 });
 
-test('template fallback never quotes the product title', async () => {
+test('fallback only formats provided experience notes and never quotes the product title', async () => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'review-notitle-'));
   await twoProductUpload(dataDir);
 
@@ -323,7 +384,9 @@ test('template fallback never quotes the product title', async () => {
   assert.equal(drafts.length, 2);
   for (const draft of drafts) {
     assert.equal(mentionsTitle(draft.reviewContent, draft.title), false, '降级文案同样不得引用标题');
-    assert.equal(draft.origin, 'template');
+    assert.equal(draft.origin, 'experience');
+    assert.ok(draft.experienceNotes);
+    assert.match(draft.reviewContent, new RegExp(draft.experienceNotes));
   }
 });
 
@@ -359,8 +422,9 @@ test('replaces model output that still quotes the product title', async () => {
     assert.equal(requests.length, 1);
     assert.equal(result.titleEchoFixed, 1);
     const drafts = readJsonl(path.join(result.runDir, 'review-drafts.jsonl'));
-    assert.equal(drafts[0].origin, 'replaced', '复述标题的那条应被换成模板');
+    assert.equal(drafts[0].origin, 'replaced', '复述标题的那条应退回真实体验');
     assert.equal(mentionsTitle(drafts[0].reviewContent, drafts[0].title), false);
+    assert.equal(drafts[0].reviewContent, '佩戴后大小合适。');
     assert.equal(drafts[1].origin, 'llm', '正常文案保持模型原文');
     assert.equal(drafts[1].reviewContent, '东西做工细致，包装也很用心，会考虑回购。');
   } finally {
@@ -390,8 +454,8 @@ function fakePng(width, height) {
 async function draftRunFixture(dataDir, runId) {
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet('动销一拖多');
-  sheet.addRow(['标题', '店铺名']);
-  sheet.addRow([TITLE_A, '拾珀天晶']);
+  sheet.addRow(['标题', '店铺名', '真实体验']);
+  sheet.addRow([TITLE_A, '拾珀天晶', '实物大小合适']);
   const upload = await saveReviewSourceUpload({
     buffer: Buffer.from(await workbook.xlsx.writeBuffer()),
     fileName: '刷单表.xlsx',

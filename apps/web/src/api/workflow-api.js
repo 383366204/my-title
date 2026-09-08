@@ -59,6 +59,13 @@ export const saveReviewDrafts = (runId, reviews, options = {}) => requestJson(`$
   body: { reviews },
   ...options
 });
+export const checkReviewDrafts = (runId) => requestJson(`${workflowRunPath(runId)}/review-drafts/check`, {
+  method: 'POST'
+});
+export const rewriteReviewDrafts = (runId, ids) => requestJson(`${workflowRunPath(runId)}/review-drafts/rewrite`, {
+  method: 'POST',
+  body: { ids }
+});
 
 // 与后端 MAX_REVIEW_ATTACHMENTS 保持一致：每条评价最多 4 张配图
 export const MAX_REVIEW_ATTACHMENTS = 4;

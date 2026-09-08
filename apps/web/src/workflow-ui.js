@@ -649,9 +649,15 @@ export function getWorkflowNodeSuccessLabel(nodeId, state = {}) {
   if (normalized === 'generateReviews') {
     const count = Number(output.count || 0);
     if (count <= 0) return '';
-    return output.degraded === true
-      ? `已生成 ${count} 条评价草稿，部分使用本地规则`
-      : `已生成 ${count} 条评价草稿`;
+    const missing = Number(output.missing || 0);
+    const blocked = Number(output.blocked || 0);
+    const warning = Number(output.warning || 0);
+    const issues = [
+      missing > 0 ? `${missing} 条待补体验` : '',
+      blocked > 0 ? `${blocked} 条重复阻塞` : '',
+      warning > 0 ? `${warning} 条历史相似提醒` : ''
+    ].filter(Boolean);
+    return `已整理 ${count} 条真实体验${issues.length > 0 ? `，${issues.join('、')}` : ''}`;
   }
   if (normalized === 'generateSheet') {
     const count = Number(output.count ?? state.count ?? 0);

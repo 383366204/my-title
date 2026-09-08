@@ -359,7 +359,7 @@ function workflowNodes(mode = 'daily') {
     return withSteps(positionNodes([
       { id: WORKFLOW_NODE_IDS.start, type: 'production-start', data: { label: '上传刷单表', description: '上传已执行的刷单表并确认订单分组', reviewUpload: true, uploadId: '', uploadName: '', groups: [] } },
       { id: WORKFLOW_NODE_IDS.importSheet, type: 'pipeline-import-sheet', data: { label: '解析订单分组', description: '识别工作表、商品和订单信息缺失项' } },
-      { id: WORKFLOW_NODE_IDS.generateReviews, type: 'pipeline-generate-reviews', data: { label: '评价生成与复核', description: '生成评价草稿并在页面逐条确认', reviewConfig: true, reviewTone: '自然真实', reviewLength: 35, useAI: true } },
+      { id: WORKFLOW_NODE_IDS.generateReviews, type: 'pipeline-generate-reviews', data: { label: '真实体验整理', description: '根据真实体验整理文案，查重后逐条确认', reviewConfig: true, reviewTone: '自然真实', reviewLength: 35, useAI: true } },
       { id: WORKFLOW_NODE_IDS.generateSheet, type: 'pipeline-generate-sheet', data: { label: '生成评价表', description: '按确认后的订单组生成评价 Excel', sheetConfig: true, sheetType: 'review', reviewSourceUpload: true, fileName: '', includeSpacerRow: true } },
       { id: WORKFLOW_NODE_IDS.end, type: 'production-end', data: { label: '完成', description: '下载评价表并核对内容' } }
     ], { startX: 120, stepX: 280 }));
@@ -1208,9 +1208,14 @@ function outputForNode(id, summary) {
     };
   }
   if (id === WORKFLOW_NODE_IDS.generateReviews) {
+    const quality = summary.reviewGeneration?.qualitySummary || {};
+    const missing = Number(quality.missing || 0);
     return {
       count: Number(counts.reviewDrafts || 0),
       degraded: summary.reviewGeneration?.degraded === true,
+      missing,
+      blocked: Math.max(0, Number(quality.blocked || 0) - missing),
+      warning: Number(quality.warning || 0),
       file: summary.files?.reviewDrafts || ''
     };
   }

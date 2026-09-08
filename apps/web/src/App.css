@@ -2251,6 +2251,52 @@ code, pre {
   padding: 0 2px;
 }
 
+.review-quality-toolbar {
+  align-items: center;
+  border-bottom: 1px solid rgba(71, 85, 105, 0.5);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: space-between;
+  padding-bottom: 12px;
+}
+
+.review-quality-filters,
+.review-quality-actions,
+.review-row-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.review-quality-filters {
+  background: rgba(15, 23, 42, 0.72);
+  border: 1px solid rgba(71, 85, 105, 0.68);
+  border-radius: 6px;
+  padding: 3px;
+}
+
+.review-quality-filters button {
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: #94a3b8;
+  cursor: pointer;
+  font-size: 11px;
+  min-height: 28px;
+  padding: 5px 8px;
+}
+
+.review-quality-filters button:hover {
+  color: #e2e8f0;
+}
+
+.review-quality-filters button.active {
+  background: rgba(59, 130, 246, 0.2);
+  color: #bfdbfe;
+}
+
 .review-source-group,
 .review-draft-row {
   background: rgba(15, 23, 42, 0.56);
@@ -2259,6 +2305,59 @@ code, pre {
   display: grid;
   gap: 10px;
   padding: 12px;
+}
+
+.review-draft-row.is-quality-blocked {
+  border-color: rgba(248, 113, 113, 0.68);
+}
+
+.review-draft-row.is-quality-warning {
+  border-color: rgba(245, 158, 11, 0.62);
+}
+
+.review-quality-state {
+  align-items: center !important;
+  background: rgba(71, 85, 105, 0.22);
+  border-radius: 5px;
+  color: #94a3b8;
+  display: flex !important;
+  flex-direction: row !important;
+  font-size: 11px;
+  gap: 5px !important;
+  padding: 6px 8px;
+}
+
+.review-quality-state.is-passed {
+  background: rgba(16, 185, 129, 0.1);
+  color: #6ee7b7;
+}
+
+.review-quality-state.is-warning {
+  background: rgba(245, 158, 11, 0.12);
+  color: #fcd34d;
+}
+
+.review-quality-state.is-blocked {
+  background: rgba(239, 68, 68, 0.12);
+  color: #fca5a5;
+}
+
+.review-quality-state small {
+  color: inherit;
+  font-size: 10px;
+  opacity: 0.82;
+}
+
+.review-row-actions {
+  justify-content: flex-end;
+}
+
+.review-confirm-blocked {
+  align-items: center;
+  color: #fca5a5;
+  display: inline-flex;
+  font-size: 11px;
+  gap: 5px;
 }
 
 .review-source-group-fields {
@@ -2412,6 +2511,17 @@ code, pre {
 
   .review-source-group-fields .node-field:first-child {
     grid-column: auto;
+  }
+
+  .review-quality-toolbar,
+  .review-quality-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .review-quality-actions .node-secondary-button {
+    justify-content: center;
+    width: 100%;
   }
 }
 
