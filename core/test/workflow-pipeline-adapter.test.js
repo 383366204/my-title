@@ -1243,6 +1243,27 @@ describe('workflow pipeline adapter', () => {
     assert.equal(run.nodeStates.verify.status, 'idle');
   });
 
+  it('keeps product-selection diagnostics when a failed runtime overlays the node state', () => {
+    const run = pipelineSummaryToWorkflowRun({
+      runId: 'product_gate_failed',
+      status: 'select_failed',
+      stage: 'selected',
+      counts: { productsEvaluated: 54, productRejected: 54, selectedProducts: 0 },
+      funnel: { select: { input: 54, rejected: 54, selected: 0 } },
+      files: {},
+      runtime: {
+        status: 'failed',
+        activeStep: WORKFLOW_NODE_IDS.select,
+        progress: { select: { status: 'failed', current: 54, total: 54, percent: 100 } }
+      }
+    });
+
+    assert.match(run.nodeStates.select.actionHint, /已获取 54 个 1688 货源/);
+    assert.doesNotMatch(run.nodeStates.select.actionHint, /确认生意参谋页面状态/);
+    assert.equal(run.nodeStates.select.platform, '1688');
+    assert.equal(run.nodeStates.select.nextRecommendedAction.action, 'product-review');
+  });
+
   it('offers Chrome recovery when manual order-sheet product enrichment cannot reach CDP', () => {
     const dataDir = tempPipelineDir();
     const productRankFile = path.join(dataDir, 'runs', 'order_sheet_cdp_failed', 'sycm-product-rank.jsonl');

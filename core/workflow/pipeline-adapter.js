@@ -1562,6 +1562,8 @@ function summaryInterventionForNode(summary, nodeId) {
   }
   if (nodeId === WORKFLOW_NODE_IDS.select && status === 'select_failed') {
     const manualMode = summary.runtime?.mode === 'manual' || summary.options?.mode === 'manual';
+    const evaluatedCount = Number(summary.counts?.productsEvaluated || summary.funnel?.select?.input || 0);
+    const rejectedCount = Number(summary.counts?.productRejected || summary.funnel?.select?.rejected || 0);
     const detailFailure = manualMode
       ? (summary.previews?.selectedProducts || []).find(row => row?.status === 'enrich_failed')
       : null;
@@ -1578,6 +1580,19 @@ function summaryInterventionForNode(summary, nodeId) {
           action: 'retry-node',
           label: '重试获取商品资料',
           description: '重新读取 1688 商品标题、类目和价格，再继续提取候选词。'
+        }
+      };
+    }
+    if (evaluatedCount > 0) {
+      return {
+        blocker: 'no_selected_products',
+        actionHint: `已获取 ${evaluatedCount} 个 1688 货源，但没有商品通过机会评分${rejectedCount > 0 ? `，其中 ${rejectedCount} 个被评分门槛拦截` : ''}。可人工勾选合适货源，或调整筛选条件后重新搜索。`,
+        platform: '1688',
+        platformStatus: 'product_opportunity_rejected',
+        nextRecommendedAction: {
+          action: 'product-review',
+          label: '勾选 1688 货源',
+          description: '查看已获取的候选货源，人工勾选合适商品后继续生成标题。'
         }
       };
     }
@@ -1915,27 +1930,30 @@ function buildNodeStates(summary) {
   if (runtime && activeStep && states[activeStep]) {
     const runtimeStatus = nodeStatusFromRuntimeProgress({ status: runtime.status }) || 'running';
     const runtimeFailed = runtimeStatus === 'failed';
-    const activeProgress = states[activeStep].progress || {};
+    const currentState = states[activeStep];
+    const activeProgress = currentState.progress || {};
     states[activeStep] = {
-      ...states[activeStep],
+      ...currentState,
       status: runtimeStatus,
-      output: states[activeStep].output || outputForNode(activeStep, summary),
+      output: currentState.output || outputForNode(activeStep, summary),
       progress: normalizeNodeProgress({
         ...activeProgress,
         status: runtimeStatus,
         message: activeProgress.message || (runtimeStatus === 'paused' ? '已暂停' : '')
       }),
-      error: runtime.error || states[activeStep].error || null,
-      blocker: runtimeFailed ? null : runtime.blocker || states[activeStep].blocker || null,
-      actionHint: runtimeFailed ? '请确认生意参谋页面状态后重试当前节点。' : runtime.actionHint || states[activeStep].actionHint || null,
+      error: runtime.error || currentState.error || null,
+      blocker: runtime.blocker || currentState.blocker || null,
+      actionHint: runtimeFailed
+        ? currentState.actionHint || runtime.error || '当前节点执行失败，请查看节点结果和运行日志后重试。'
+        : runtime.actionHint || currentState.actionHint || null,
       nextRecommendedAction: runtimeFailed
-        ? { action: 'retry-node', label: activeStep === WORKFLOW_NODE_IDS.collectRank ? '重试采集' : '重试节点', description: '保留当前运行参数并重新执行该节点。' }
-        : runtime.nextRecommendedAction || states[activeStep].nextRecommendedAction || null,
-      platform: runtimeFailed ? null : runtime.platform || states[activeStep].platform || null,
-      platformStatus: runtimeFailed ? null : runtime.platformStatus || states[activeStep].platformStatus || null,
-      manualAction: runtimeFailed ? null : runtime.manualAction || states[activeStep].manualAction || null,
-      durationMs: runtime.durationMs || states[activeStep].durationMs || null,
-      outputSummary: runtime.outputSummary || states[activeStep].outputSummary || null
+        ? currentState.nextRecommendedAction || { action: 'retry-node', label: activeStep === WORKFLOW_NODE_IDS.collectRank ? '重试采集' : '重试节点', description: '保留当前运行参数并重新执行该节点。' }
+        : runtime.nextRecommendedAction || currentState.nextRecommendedAction || null,
+      platform: runtime.platform || currentState.platform || null,
+      platformStatus: runtime.platformStatus || currentState.platformStatus || null,
+      manualAction: runtime.manualAction || currentState.manualAction || null,
+      durationMs: runtime.durationMs || currentState.durationMs || null,
+      outputSummary: runtime.outputSummary || currentState.outputSummary || null
     };
   }
   if (summary.options?.mode === 'competitor-analysis') {

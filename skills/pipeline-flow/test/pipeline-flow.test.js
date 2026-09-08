@@ -434,6 +434,40 @@ describe('pipeline-flow', () => {
     });
   });
 
+  test('flowSelectProducts normalizes legacy 1688 image URLs before opportunity scoring', async () => {
+    const dataDir = tempDataDir();
+    const runId = 'legacy_1688_product_shape';
+    flowManualStart({ dataDir, runId, items: [{ keyword: '宠物磨牙玩具', url: 'https://detail.1688.com/offer/999999.html' }] });
+    const run = getRun({ dataDir, runId }).run;
+    fs.writeFileSync(run.files.verifiedKeywords, JSON.stringify({
+      keyword: '宠物磨牙玩具',
+      status: 'verified',
+      canGenerate: true,
+      decision: 'continue'
+    }) + '\n');
+
+    const result = await flowSelectProducts({
+      dataDir,
+      runId,
+      limit: 1,
+      productsPerKeyword: 1,
+      searchProducts: async () => [{
+        id: '300001',
+        title: '宠物磨牙玩具耐咬训练球',
+        price: '12.8',
+        url: 'https://cbu01.alicdn.com/img/ibank/300001.jpg',
+        stats: { last30DaysSales: 360 }
+      }]
+    });
+
+    const selected = result.selected.find(row => row.status === 'selected');
+    assert.ok(selected);
+    assert.strictEqual(selected.url, 'https://detail.1688.com/offer/300001.html');
+    assert.strictEqual(selected.imageUrl, 'https://cbu01.alicdn.com/img/ibank/300001.jpg');
+    assert.ok(!selected.productOpportunity.riskFlags.includes('invalid_url'));
+    assert.ok(!selected.productOpportunity.riskFlags.includes('image_missing'));
+  });
+
   test('flowReviewProducts allows an explicit manual override for rejected 1688 candidates', () => {
     const dataDir = tempDataDir();
     const runId = 'manual_product_override';

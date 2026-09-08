@@ -84,7 +84,12 @@ async function flowSelectProducts(options = {}) {
         options.searchOptions || {}
       );
       const scoredProducts = (Array.isArray(products) ? products : []).map(product => {
-        const opportunity = scoreProductOpportunity(product, {
+        const normalizedProduct = {
+          ...product,
+          url: productUrl(product),
+          imageUrl: productImage(product)
+        };
+        const opportunity = scoreProductOpportunity(normalizedProduct, {
           keyword: item.keyword,
           verifyMode: item.verifyMode,
           confidence: item.confidence,
@@ -109,13 +114,13 @@ async function flowSelectProducts(options = {}) {
           usage: item.usage || '',
           fallbackUsed: !!item.fallbackUsed,
           fallbackReason: item.fallbackReason || '',
-          product,
-          url: productUrl(product),
-          sourceTitle: productTitle(product),
-          title: productTitle(product),
-          price: productPrice(product),
-          sales30days: productSales(product),
-          imageUrl: productImage(product),
+          product: normalizedProduct,
+          url: normalizedProduct.url,
+          sourceTitle: productTitle(normalizedProduct),
+          title: productTitle(normalizedProduct),
+          price: productPrice(normalizedProduct),
+          sales30days: productSales(normalizedProduct),
+          imageUrl: normalizedProduct.imageUrl,
           productOpportunity: opportunity,
           opportunityScore: opportunity.score,
           decision: opportunity.decision,
