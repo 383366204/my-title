@@ -249,7 +249,7 @@ test('uploaded review sheet workflow requires complete local order groups', () =
   });
   assert.equal(getWorkflowNodeSuccessLabel('generateReviews', {
     output: { count: 20, degraded: true }
-  }), '已生成 20 条评价草稿，部分使用本地规则');
+  }), '已整理 20 条真实体验');
 });
 import {
   labelPipelineStatus,

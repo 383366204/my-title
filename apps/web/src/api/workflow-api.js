@@ -121,3 +121,57 @@ export async function getWorkflowArtifact(runId, nodeId, { limit } = {}) {
 }
 
 export const runWorkflowOperation = (endpoint, body = {}) => requestJson(endpoint, { method: 'POST', body });
+
+/**
+ * @param {string|null} runId 当前运行 ID。
+ * @param {string} action 操作代码。
+ * @param {string} [nodeId] 目标节点 ID。
+ * @returns {object} HTTP 地址和请求体。
+ */
+export function buildWorkflowOperationRequest(runId, action, nodeId = "") {
+  const encodedRunId = encodeURIComponent(String(runId || ''));
+  if (action === 'start-sycm-chrome') {
+    return {
+      endpoint: '/api/workflows/sycm/chrome/start',
+      body: { runId, nodeId }
+    };
+  }
+  if (action === 'start-taobao-native') {
+    return {
+      endpoint: '/api/workflows/taobao-native/start',
+      body: { runId, nodeId }
+    };
+  }
+  if (action === 'retry-node') {
+    return {
+      endpoint: `/api/workflows/runs/${encodedRunId}/retry-node`,
+      body: { nodeId }
+    };
+  }
+  if (action === 'mine-more') {
+    return {
+      endpoint: `/api/workflows/runs/${encodedRunId}/retry-node`,
+      body: { nodeId: 'mine' }
+    };
+  }
+  return {
+    endpoint: `/api/workflows/runs/${encodedRunId}/${action}`,
+    body: {}
+  };
+}
+
+/**
+ * @param {string} runId 待删除运行 ID。
+ * @returns {object} 含显式删除确认的 HTTP 请求描述。
+ */
+export function buildWorkflowDeleteRunRequest(runId) {
+  const encodedRunId = encodeURIComponent(String(runId || ''));
+  return {
+    endpoint: `/api/workflows/runs/${encodedRunId}`,
+    options: {
+      method: 'DELETE',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ confirm: true })
+    }
+  };
+}

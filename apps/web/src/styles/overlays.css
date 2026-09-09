@@ -1,0 +1,115 @@
+.workflow-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 22px;
+  background: rgba(2, 6, 23, 0.72);
+  backdrop-filter: blur(6px);
+}
+
+.workflow-modal {
+  width: min(900px, 100%);
+  max-height: min(760px, calc(100vh - 44px));
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 12px;
+  border: 1px solid rgba(51, 65, 85, 0.96);
+  border-radius: 10px;
+  background: #0f172a;
+  box-shadow: 0 26px 80px rgba(2, 6, 23, 0.48);
+  padding: 14px;
+}
+
+.workflow-modal-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 32px;
+  gap: 12px;
+  align-items: start;
+}
+
+.workflow-modal-head strong,
+.workflow-modal-head span {
+  display: block;
+  min-width: 0;
+}
+
+.workflow-modal-head strong {
+  color: #f8fafc;
+  font-size: 15px;
+  line-height: 1.35;
+}
+
+.workflow-modal-head span {
+  margin-top: 4px;
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.workflow-modal-close {
+  width: 32px;
+  height: 32px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid #334155;
+  border-radius: 7px;
+  background: #111c31;
+  color: #cbd5e1;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease, color 160ms ease;
+}
+
+.workflow-modal-close:hover {
+  border-color: #64748b;
+  background: #1e293b;
+  color: #f8fafc;
+}
+
+.workflow-node-overlay {
+  width: min(920px, calc(100vw - 44px));
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.workflow-node-overlay.is-wide {
+  width: min(1120px, calc(100vw - 44px));
+}
+
+.workflow-node-overlay-body {
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.workflow-node-overlay-body > .export-preview-direct {
+  min-height: min(620px, calc(100vh - 150px));
+}
+
+.workflow-overlay-diagnostics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.workflow-overlay-diagnostics > div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  border: 1px solid rgba(51, 65, 85, 0.85);
+  border-radius: 7px;
+  background: rgba(2, 6, 23, 0.5);
+  padding: 9px;
+}
+
+.workflow-overlay-diagnostics span {
+  color: #94a3b8;
+  font-size: 10px;
+}
+
+.workflow-overlay-diagnostics strong {
+  color: #e2e8f0;
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}

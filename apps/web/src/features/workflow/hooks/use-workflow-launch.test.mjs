@@ -2,7 +2,18 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { buildWorkflowDefinition } from './use-workflow-launch.js';
-import { patchCanvasNode, runtimeNodeFields, updateNodeById } from './use-workflow-runtime.js';
+import { patchCanvasNode, progressNodeFields, runtimeNodeFields, updateNodeById } from './use-workflow-runtime.js';
+
+test('progress patches distinguish explicit clearing from missing fields', () => {
+  const node = { id: 'verify', data: { blocker: 'cooling', actionHint: 'wait', cooldownRemainingMs: 5000, progress: { total: 3 } } };
+  const cleared = patchCanvasNode(node, progressNodeFields(node.data, { blocker: null, cooldownRemainingMs: 0, current: 1 }));
+  assert.equal(cleared.data.blocker, null);
+  assert.equal(cleared.data.cooldownRemainingMs, 0);
+  assert.equal(cleared.data.actionHint, 'wait');
+  assert.equal(cleared.data.progress.total, 3);
+  assert.equal(runtimeNodeFields(null).blocker, null);
+  assert.equal(runtimeNodeFields({ durationMs: 0 }).durationMs, 0);
+});
 
 test('buildWorkflowDefinition builds standardized workflow payload', () => {
   const nodes = [

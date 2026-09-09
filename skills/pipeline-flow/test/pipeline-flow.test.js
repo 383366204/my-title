@@ -1,8 +1,11 @@
-const { test, describe } = require('node:test');
+const { test, describe, mock } = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const extraction = require('../../title-gen/src/extract-core');
+// 流水线测试验证编排；关键词提取使用本地降级，避免真实模型请求。
+mock.method(extraction, 'extractKeywords', async (_mode, input) => extraction.fallbackExtract(input.data));
 const { addSeed } = require('../../keyword-mining');
 const {
   flowDaily,
@@ -672,6 +675,7 @@ describe('pipeline-flow', () => {
   test('hybrid discovery falls back to the legacy seed path only when inspiration returns no candidates', async () => {
     const dataDir = tempDataDir();
     const keywordDataDir = path.join(dataDir, 'keyword-mining');
+    let seedPhase = false;
     addSeed('项链', { category: '饰品', dataDir: keywordDataDir });
     const result = await flowMine({
       dataDir,
@@ -687,7 +691,9 @@ describe('pipeline-flow', () => {
       newsItems: [{ title: '多地进入高温天气', inspirationWord: '高温' }],
       dictionaryWords: ['哲学'],
       trendItems: [],
-      sycmExtractor: async keyword => keyword === '项链'
+      // 灵感也可能选到项链；只在种子回退阶段返回 fixture，避免依赖随机词根。
+      onProgress: progress => { if (progress.stage === 'load-seeds') seedPhase = true; },
+      sycmExtractor: async keyword => seedPhase && keyword === '项链'
         ? { data: [{ keyword }, { keyword: '纯银项链女', searchPopularity: 1500, demandSupplyRatio: 1.6, clickRate: 20 }] }
         : { data: [] }
     });

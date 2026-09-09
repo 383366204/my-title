@@ -1,6 +1,6 @@
 import { Clock, RefreshCw, Trash2 } from 'lucide-react';
 
-import { getUnifiedWorkflowHistoryItem } from '../../../workflow-ui.js';
+import { getUnifiedWorkflowHistoryItem } from '../workflow-history-view.js';
 
 function formatDateTime(value) {
   if (!value) return '未知时间';

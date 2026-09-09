@@ -1,4 +1,4 @@
-import { parseCompetitorShareInputs, parseExactKeywords, parseOrderSheetManualItems, parseRootKeywords } from '../../../workflow-ui.js';
+import { parseCompetitorShareInputs, parseExactKeywords, parseOrderSheetManualItems, parseRootKeywords } from '../workflow-launch-params.js';
 
 const DAILY_START_FIELDS = [
   { key: 'mine', label: '候选词上限', min: 1, max: 200 },

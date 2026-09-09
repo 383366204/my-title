@@ -1,10 +1,9 @@
 import { useCallback } from 'react';
+import { useWorkflowRequestScope } from './use-workflow-request-scope.js';
 
+import { getWorkflowOperationMessage } from '../workflow-node-actions.js';
 import {
   buildWorkflowOperationRequest,
-  getWorkflowOperationMessage
-} from '../../../workflow-ui.js';
-import {
   cancelWorkflow,
   runWorkflowOperation as requestWorkflowOperation
 } from '../../../api/workflow-api.js';
@@ -25,31 +24,39 @@ export function useWorkflowCommands(options = {}) {
   const {
     canCancelRun = false,
     currentRunId = null,
+    activeTemplateId = null,
     reloadRun = async () => {},
     selectedNodeId = null,
     setLogs = () => {},
     setNodes = () => {},
     setRunStatus = () => {}
   } = options || {};
+  const scope = useWorkflowRequestScope(JSON.stringify([currentRunId, currentRunId ? null : activeTemplateId]));
 
   const handleCancelWorkflow = useCallback(async () => {
-    if (!canCancelRun) return;
+    if (!canCancelRun || !currentRunId) return;
+    const ticket = scope.begin('cancel');
+    if (!ticket) return;
     try {
       await cancelWorkflow(currentRunId);
+      if (!ticket.isCurrent()) return;
       setLogs((previous) => [...previous, {
         timestamp: new Date().toISOString(),
         level: 'warn',
         message: '已请求取消，当前步骤会在安全边界停止。'
       }]);
     } catch (error) {
+      if (!ticket.isCurrent()) return;
       console.error('取消工作流失败', error);
       setLogs((previous) => [...previous, {
         timestamp: new Date().toISOString(),
         level: 'error',
         message: `取消请求失败: ${error.message}`
       }]);
+    } finally {
+      ticket.finish();
     }
-  }, [canCancelRun, currentRunId, setLogs]);
+  }, [canCancelRun, currentRunId, setLogs, scope]);
 
   const runRemoteOperation = useCallback(async (action, nodeId = null) => {
     const targetNodeId = nodeId || selectedNodeId;
@@ -64,12 +71,13 @@ export function useWorkflowCommands(options = {}) {
       alert(message);
       return;
     }
-
-    const { endpoint, body } = buildWorkflowOperationRequest(currentRunId, action, operationNodeId);
+    const ticket = scope.begin('command');
+    if (!ticket) return;
+    const { isCurrent } = ticket;
     const pendingMessage = action === 'mine-more'
       ? '正在补充候选词…'
       : action === 'retry-node'
-        ? '正在提交重跑验真请求…'
+        ? '正在提交当前节点重跑请求…'
         : action === 'resume'
           ? '正在恢复流程…'
           : action === 'pause'
@@ -102,7 +110,9 @@ export function useWorkflowCommands(options = {}) {
     if (action === 'resume') setRunStatus('resuming');
 
     try {
+      const { endpoint, body } = buildWorkflowOperationRequest(currentRunId, action, operationNodeId);
       const operationResult = await requestWorkflowOperation(endpoint, body);
+      if (!isCurrent()) return;
       const message = getWorkflowOperationMessage(action, operationResult);
       setLogs((previous) => [...previous, {
         timestamp: new Date().toISOString(),
@@ -127,8 +137,10 @@ export function useWorkflowCommands(options = {}) {
       }
       if (currentRunId) await reloadRun(currentRunId, { preserveLogs: true });
     } catch (error) {
+      if (!isCurrent()) return;
       const message = getWorkflowOperationMessage(action, 'error', error.message);
       if (currentRunId) await reloadRun(currentRunId, { preserveLogs: true });
+      if (!isCurrent()) return;
       if (operationNodeId) {
         setNodes((currentNodes) => currentNodes.map((node) => (
           node.id === operationNodeId || (action === 'mine-more' && node.id === targetNodeId)
@@ -143,8 +155,17 @@ export function useWorkflowCommands(options = {}) {
       }]);
       alert(message);
       console.error(error);
+    } finally {
+      if (ticket.finish()) {
+        setNodes((currentNodes) => currentNodes.map((node) => (
+          node.id === operationNodeId || (action === 'mine-more' && node.id === targetNodeId)
+            ? { ...node, data: { ...node.data, pendingAction: null } }
+            : node
+        )));
+      }
     }
   }, [
+    scope,
     currentRunId,
     reloadRun,
     selectedNodeId,

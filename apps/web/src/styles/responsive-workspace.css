@@ -1,0 +1,75 @@
+/* 窄屏展开侧栏时覆盖画布，避免挤压为不可操作的窄列。 */
+@media (max-width: 980px) {
+  .workflow-main-row {
+    position: relative;
+  }
+
+  .workflow-left-sidebar:not(.is-collapsed),
+  .workflow-right-sidebar:not(.is-collapsed) {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    z-index: 20;
+    width: min(360px, calc(100% - 42px));
+    max-width: calc(100% - 42px);
+    background: #0f172a;
+    box-shadow: 0 0 20px rgb(0 0 0 / 35%);
+  }
+
+  .workflow-left-sidebar:not(.is-collapsed) {
+    left: 0;
+  }
+
+  .workflow-right-sidebar:not(.is-collapsed) {
+    right: 0;
+  }
+
+  .workflow-top-action-strip {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .workflow-top-context {
+    flex: 1 1 220px;
+    min-width: 0;
+  }
+
+  .workflow-top-context strong,
+  .workflow-top-context small {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .workflow-top-status {
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 760px) {
+  .workflow-console-panel {
+    flex-basis: 160px;
+    min-height: 120px;
+    max-height: 25vh;
+  }
+
+  .workflow-top-action-strip {
+    padding: 12px;
+  }
+
+  .workflow-top-status {
+    width: 100%;
+    justify-content: flex-start;
+    gap: 8px;
+  }
+
+  .workflow-canvas-scroll {
+    min-height: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workflow-left-sidebar,
+  .workflow-right-sidebar {
+    transition: none;
+  }
+}

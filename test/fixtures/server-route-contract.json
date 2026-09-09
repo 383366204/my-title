@@ -1,0 +1,352 @@
+[
+  {
+    "method": "delete",
+    "path": "/api/seeds/:keyword",
+    "handlers": 1
+  },
+  {
+    "method": "delete",
+    "path": "/api/workflows/runs/:runId",
+    "handlers": 1
+  },
+  {
+    "method": "delete",
+    "path": "/api/workflows/runs/:runId/review-assets/:attachmentId",
+    "handlers": 1
+  },
+  {
+    "method": "get",
+    "path": "*",
+    "handlers": 1
+  },
+  {
+    "method": "get",
+    "path": "/api/distribution/runs/:jobId",
+    "handlers": 1
+  },
+  {
+    "method": "get",
+    "path": "/api/mine/run",
+    "handlers": 1
+  },
+  {
+    "method": "get",
+    "path": "/api/pipeline/current",
+    "handlers": 1
+  },
+  {
+    "method": "get",
+    "path": "/api/pipeline/runs/:runId",
+    "handlers": 1
+  },
+  {
+    "method": "get",
+    "path": "/api/platform/status",
+    "handlers": 1
+  },
+  {
+    "method": "get",
+    "path": "/api/seeds",
+    "handlers": 1
+  },
+  {
+    "method": "get",
+    "path": "/api/seeds/audit",
+    "handlers": 1
+  },
+  {
+    "method": "get",
+    "path": "/api/status",
+    "handlers": 1
+  },
+  {
+    "method": "get",
+    "path": "/api/workbench/runs",
+    "handlers": 1
+  },
+  {
+    "method": "get",
+    "path": "/api/workbench/runs/:runId",
+    "handlers": 1
+  },
+  {
+    "method": "get",
+    "path": "/api/workflow/batches",
+    "handlers": 1
+  },
+  {
+    "method": "get",
+    "path": "/api/workflows/runs",
+    "handlers": 1
+  },
+  {
+    "method": "get",
+    "path": "/api/workflows/runs/:runId",
+    "handlers": 1
+  },
+  {
+    "method": "get",
+    "path": "/api/workflows/runs/:runId/artifacts/:nodeId",
+    "handlers": 1
+  },
+  {
+    "method": "get",
+    "path": "/api/workflows/runs/:runId/artifacts/:nodeId/raw",
+    "handlers": 1
+  },
+  {
+    "method": "get",
+    "path": "/api/workflows/runs/:runId/events",
+    "handlers": 1
+  },
+  {
+    "method": "get",
+    "path": "/api/workflows/runs/:runId/order-sheet-draft",
+    "handlers": 1
+  },
+  {
+    "method": "get",
+    "path": "/api/workflows/runs/:runId/order-sheet/draft",
+    "handlers": 1
+  },
+  {
+    "method": "get",
+    "path": "/api/workflows/runs/:runId/review-assets",
+    "handlers": 1
+  },
+  {
+    "method": "get",
+    "path": "/api/workflows/runs/:runId/review-assets/:attachmentId",
+    "handlers": 1
+  },
+  {
+    "method": "get",
+    "path": "/api/workflows/templates",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/1688/resolve-share",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/config/clean",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/distribution/check",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/distribution/chrome/start",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/distribution/manual-complete",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/distribution/runs/:jobId/:action",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/distribution/submit",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/miner/opportunities",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/miner/peer",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/miner/sycm-market",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/pipeline/runs/:runId/:step",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/pipeline/runs/:runId/:step/retry",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/pipeline/runs/:runId/candidates",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/pipeline/runs/:runId/pause",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/pipeline/runs/:runId/resume",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/pipeline/start",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/review-sheets/upload",
+    "handlers": 2
+  },
+  {
+    "method": "post",
+    "path": "/api/review-sheets/uploads/:uploadId/group-size",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/seeds",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/seeds/:keyword/status",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/seeds/:keyword/toggle",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/seeds/replenishment/preview",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/seeds/suggestions/preview",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/title/generate",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/workbench/run",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/workflows/run",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/workflows/runs/:runId/cancel",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/workflows/runs/:runId/keyword-review",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/workflows/runs/:runId/order-sheet-confirm",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/workflows/runs/:runId/order-sheet-draft",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/workflows/runs/:runId/order-sheet-products",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/workflows/runs/:runId/order-sheet/confirm",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/workflows/runs/:runId/order-sheet/draft",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/workflows/runs/:runId/pause",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/workflows/runs/:runId/product-review",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/workflows/runs/:runId/resume",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/workflows/runs/:runId/retry-node",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/workflows/runs/:runId/review-assets",
+    "handlers": 2
+  },
+  {
+    "method": "post",
+    "path": "/api/workflows/runs/:runId/review-confirm",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/workflows/runs/:runId/review-drafts",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/workflows/runs/:runId/review-drafts/check",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/workflows/runs/:runId/review-drafts/rewrite",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/workflows/sycm/chrome/start",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/workflows/taobao-native/start",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/workflows/validate",
+    "handlers": 1
+  }
+]

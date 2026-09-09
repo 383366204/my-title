@@ -1,0 +1,57 @@
+/* Platform Status Strip */
+.platform-status-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.platform-status {
+  min-width: 0;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  transition: all 0.2s ease;
+}
+
+.platform-status strong {
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.platform-status span {
+  color: var(--text-secondary);
+}
+
+.platform-status small {
+  font-size: 11px;
+  color: var(--accent-blue);
+  word-break: break-all;
+}
+
+.platform-status-ready {
+  border-left: 4px solid var(--accent-green);
+}
+
+.platform-status-blocked,
+.platform-status-slider_required,
+.platform-status-login_required,
+.platform-status-rate_limited,
+.platform-status-permission_required {
+  border-left: 4px solid var(--accent-red);
+}
+
+.platform-status-platform_cooling_down {
+  border-left: 4px solid var(--accent-purple);
+}
+
+@media (max-width: 980px) {
+  .platform-status-strip {
+    grid-template-columns: 1fr;
+  }
+}

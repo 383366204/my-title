@@ -1,4 +1,4 @@
-import { getWorkflowNodePanelKind, getWorkflowResultSummaryView } from '../../../workflow-ui.js';
+import { getWorkflowNodePanelKind, getWorkflowResultSummaryView } from '../workflow-node-view.js';
 import { ArtifactPanel } from './artifact-panel.jsx';
 import { DistributionExportPanel } from './distribution-export-panel.jsx';
 import { KeywordMiningOperationPanel } from './keyword-mining-operation-panel.jsx';

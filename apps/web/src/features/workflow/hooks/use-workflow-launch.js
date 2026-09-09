@@ -1,9 +1,6 @@
 import { useCallback, useRef } from 'react';
 
-import {
-  getWorkflowLaunchParams,
-  getWorkflowLaunchBlocker
-} from '../../../workflow-ui.js';
+import { getWorkflowLaunchParams, getWorkflowLaunchBlocker } from '../workflow-launch-params.js';
 import {
   startWorkflow,
   validateWorkflow

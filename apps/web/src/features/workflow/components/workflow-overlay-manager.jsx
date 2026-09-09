@@ -1,6 +1,6 @@
 import { X } from 'lucide-react';
 
-import { getWorkflowNodeDetailRows } from '../../../workflow-ui.js';
+import { getWorkflowNodeDetailRows } from '../workflow-node-view.js';
 import { WORKFLOW_OVERLAYS } from '../workflow-action-registry.js';
 import { ArtifactPanel } from './artifact-panel.jsx';
 import { DistributionExportPanel } from './distribution-export-panel.jsx';

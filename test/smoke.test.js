@@ -28,4 +28,8 @@ async function smokeTest() {
   }
 }
 
-smokeTest();
+if (process.env.ECOM_LIVE_TESTS === '1') {
+  smokeTest();
+} else {
+  require('node:test').test('live platform smoke test', { skip: 'Set ECOM_LIVE_TESTS=1 to enable real platform requests' }, () => {});
+}

@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { ChevronLeft, FileCode2, Settings } from 'lucide-react';
 
-import { getWorkflowNodeDetailRows, getWorkflowNodeViewModel } from '../../../workflow-ui.js';
+import { getWorkflowNodeDetailRows, getWorkflowNodeViewModel } from '../workflow-node-view.js';
 
 export function WorkflowRightSidebar({ collapsed, isViewingRun, onToggle, selectedNode }) {
   const detailScrollRef = useRef(null);

@@ -1,9 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 
-import {
-  formatWorkflowProgressLabel,
-  normalizeWorkflowProgressEvent
-} from '../../../workflow-ui.js';
+import { formatWorkflowProgressLabel, normalizeWorkflowProgressEvent } from '../workflow-node-view.js';
 import {
   effectiveCanvasNodeId,
   getCanvasNodeState
@@ -18,6 +15,7 @@ const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'cancelled']);
  * @returns {object} Extracted node runtime fields.
  */
 export function runtimeNodeFields(state = {}) {
+  state = state || {};
   return {
     status: state.status,
     output: state.output,
@@ -28,7 +26,7 @@ export function runtimeNodeFields(state = {}) {
     nextRecommendedAction: state.nextRecommendedAction || null,
     platformStatus: state.platformStatus || null,
     manualAction: state.manualAction || null,
-    durationMs: state.durationMs || null,
+    durationMs: state.durationMs ?? null,
     outputSummary: state.outputSummary || null,
     cooldownRemainingMs: state.cooldownRemainingMs || 0
   };
@@ -41,16 +39,14 @@ export function runtimeNodeFields(state = {}) {
  * @returns {object} Progress fields patch object.
  */
 export function progressNodeFields(currentData = {}, progress = {}) {
-  return {
+  const patch = {
     status: progress.status || currentData.status,
-    progress,
-    blocker: progress.blocker || currentData.blocker || null,
-    actionHint: progress.actionHint || currentData.actionHint || null,
-    nextRecommendedAction: progress.nextRecommendedAction || currentData.nextRecommendedAction || null,
-    platformStatus: progress.platformStatus || currentData.platformStatus || null,
-    manualAction: progress.manualAction || currentData.manualAction || null,
-    cooldownRemainingMs: progress.cooldownRemainingMs || currentData.cooldownRemainingMs || 0
+    progress: { ...currentData.progress, ...progress }
   };
+  for (const field of ['blocker', 'actionHint', 'nextRecommendedAction', 'platformStatus', 'manualAction', 'cooldownRemainingMs']) {
+    if (Object.hasOwn(progress, field)) patch[field] = progress[field];
+  }
+  return patch;
 }
 
 /**
@@ -108,6 +104,7 @@ export function useWorkflowRuntime({ setNodes, setSelectedNodeId, refreshHistory
 
   const handleRuntimeMessage = useCallback((data, connection) => {
     const payload = data.payload || {};
+    if (payload.replay && !['log', 'progress'].includes(data.event)) return;
     if (data.event === 'init') {
       const { status, nodeStates } = payload;
       if (status) setRunStatus(status);
@@ -116,6 +113,8 @@ export function useWorkflowRuntime({ setNodes, setSelectedNodeId, refreshHistory
     }
 
     if (data.event === 'status_change') {
+      // 追加日志中的状态事件不能抢先关闭连接，终态由同步快照后的通知确认。
+      if (payload.eventId) return;
       const { status } = payload;
       if (status) setRunStatus(status);
       if (TERMINAL_RUN_STATUSES.has(status)) {
@@ -157,6 +156,18 @@ export function useWorkflowRuntime({ setNodes, setSelectedNodeId, refreshHistory
 
   const { connect: listenToRunEvents, disconnect: disconnectRunEvents } = useWorkflowEvents({
     onMessage: handleRuntimeMessage,
+    onConnectionError: ({ reconnecting }) => {
+      setLogs((previous) => [...previous, {
+        timestamp: new Date().toISOString(),
+        level: 'warn',
+        message: reconnecting ? '运行连接中断，正在自动恢复。' : '运行连接已关闭，请重新打开运行历史以同步状态。'
+      }]);
+    },
+    onReconnect: () => {
+      setLogs((previous) => [...previous, {
+        timestamp: new Date().toISOString(), level: 'info', message: '运行连接已恢复，正在同步最新状态。'
+      }]);
+    },
     onMalformedMessage: () => {
       setLogs((previous) => [...previous, {
         timestamp: new Date().toISOString(),

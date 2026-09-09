@@ -1,11 +1,8 @@
 import { Handle, Position } from '@xyflow/react';
 import { Download, RefreshCw, Settings2 } from 'lucide-react';
 
-import {
-  getWorkflowBlockerActions,
-  getWorkflowNodeViewModel,
-  getWorkflowRuntimeActions
-} from '../../../../workflow-ui.js';
+import { getWorkflowBlockerActions, getWorkflowRuntimeActions } from '../../workflow-node-actions.js';
+import { getWorkflowNodeViewModel } from '../../workflow-node-view.js';
 import { labelPipelineStatus } from '../../../../pipeline-labels.js';
 import {
   WorkflowBlockerCallout,

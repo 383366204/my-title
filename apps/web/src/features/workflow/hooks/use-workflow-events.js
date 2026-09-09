@@ -1,42 +1,30 @@
 import { useCallback, useEffect, useRef } from 'react';
 
 import { workflowEventsUrl } from '../../../api/workflow-api.js';
+import { createWorkflowEventConnection } from '../workflow-event-connection.js';
 
-export function useWorkflowEvents({ onMessage, onMalformedMessage, onConnectionError } = {}) {
+export function useWorkflowEvents({ onMessage, onMalformedMessage, onConnectionError, onReconnect } = {}) {
   const sourceRef = useRef(null);
-  const callbacksRef = useRef({ onMessage, onMalformedMessage, onConnectionError });
+  const callbacksRef = useRef({ onMessage, onMalformedMessage, onConnectionError, onReconnect });
 
   useEffect(() => {
-    callbacksRef.current = { onMessage, onMalformedMessage, onConnectionError };
-  }, [onConnectionError, onMalformedMessage, onMessage]);
+    callbacksRef.current = { onMessage, onMalformedMessage, onConnectionError, onReconnect };
+  }, [onConnectionError, onMalformedMessage, onMessage, onReconnect]);
 
   const disconnect = useCallback(() => {
-    sourceRef.current?.close();
+    sourceRef.current?.disconnect();
     sourceRef.current = null;
   }, []);
 
   const connect = useCallback((runId) => {
     disconnect();
-    const source = new EventSource(workflowEventsUrl(runId));
-    sourceRef.current = source;
-    const connection = {
-      disconnect: () => {
-        source.close();
-        if (sourceRef.current === source) sourceRef.current = null;
-      }
-    };
-
-    source.onmessage = (event) => {
-      try {
-        callbacksRef.current.onMessage?.(JSON.parse(event.data), connection);
-      } catch {
-        callbacksRef.current.onMalformedMessage?.();
-      }
-    };
-    source.onerror = () => {
-      connection.disconnect();
-      callbacksRef.current.onConnectionError?.();
-    };
+    const connection = createWorkflowEventConnection(workflowEventsUrl(runId), {
+      onMessage: (...args) => callbacksRef.current.onMessage?.(...args),
+      onMalformedMessage: () => callbacksRef.current.onMalformedMessage?.(),
+      onConnectionError: (...args) => callbacksRef.current.onConnectionError?.(...args),
+      onReconnect: () => callbacksRef.current.onReconnect?.()
+    });
+    sourceRef.current = connection;
     return connection;
   }, [disconnect]);
 

@@ -1,6 +1,6 @@
 import { Download, ExternalLink, RefreshCw } from 'lucide-react';
 
-import { getWorkflowArtifactView, summarizeWorkflowArtifact } from '../../../workflow-ui.js';
+import { getWorkflowArtifactView, summarizeWorkflowArtifact } from '../artifact-view.js';
 
 export function ArtifactPanel({ state }) {
   const artifact = state.artifact;

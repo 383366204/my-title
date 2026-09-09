@@ -45,7 +45,10 @@ export function resetWorkflowNodeData(data = {}, overrides = {}) {
     durationMs: null,
     outputSummary: null,
     cooldownRemainingMs: 0,
-    distributionJob: null
+    distributionJob: null,
+    pendingAction: null,
+    operationMessage: '',
+    chromeStartMessage: ''
   };
 }
 

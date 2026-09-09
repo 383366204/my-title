@@ -6,7 +6,8 @@ import {
 } from '@xyflow/react';
 import { Play, RotateCcw, Settings2, Square } from 'lucide-react';
 
-import { isWorkflowInputNodeType, labelWorkflowNodeStatus } from '../../../workflow-ui.js';
+import { isWorkflowInputNodeType } from '../workflow-launch-params.js';
+import { labelWorkflowNodeStatus } from '../workflow-node-view.js';
 import { nodeTypes } from '../workflow-node-types.js';
 
 const isInputNodeType = isWorkflowInputNodeType;

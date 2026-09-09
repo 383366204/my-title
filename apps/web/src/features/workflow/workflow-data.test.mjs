@@ -21,7 +21,10 @@ test('clears prior runtime state while preserving inputs for a repeated run', ()
     status: 'completed',
     output: { count: 20 },
     durationMs: 900,
-    distributionJob: { jobId: 'job-old' }
+    distributionJob: { jobId: 'job-old' },
+    pendingAction: 'pause',
+    operationMessage: '旧操作',
+    chromeStartMessage: '旧提示'
   }, { pages: 5 });
 
   assert.equal(data.pages, 5);
@@ -34,6 +37,9 @@ test('clears prior runtime state while preserving inputs for a repeated run', ()
   assert.equal(data.output, null);
   assert.equal(data.durationMs, null);
   assert.equal(data.distributionJob, null);
+  assert.equal(data.pendingAction, null);
+  assert.equal(data.operationMessage, '');
+  assert.equal(data.chromeStartMessage, '');
 });
 
 test('normalizes wrapped template and run API responses', () => {

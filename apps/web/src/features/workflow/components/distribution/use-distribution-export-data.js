@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { getWorkflowArtifact } from '../../../../api/workflow-api.js';
-import { getWorkflowArtifactView } from '../../../../workflow-ui.js';
+import { getWorkflowArtifactView } from '../../artifact-view.js';
 import { usePersistentMap } from '../../hooks/use-persistent-map.js';
 import {
   buildDistributionText,
