@@ -173,7 +173,7 @@ npm run test:core-skills
 npm run test:all
 ```
 
-不要使用 `node --test core/test/` 目录形式；当前 Node 26 会把目录当作模块入口。请使用显式 glob，例如 `node --test core/test/*.js`。
+测试统一放在 `test/` 下，并按 `unit/core`、`unit/skills`、`unit/web`、`integration` 和 `browser` 分类。日常执行 `npm test`，完整回归执行 `npm run test:all`；不要把目录路径直接传给 `node --test`。
 
 ## 平台状态诊断
 

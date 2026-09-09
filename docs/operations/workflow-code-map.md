@@ -48,19 +48,19 @@
 | runtime-view.js | 当前运行摘要与旧记录的画布快照回退 |
 | sycm-access-recovery.js | Chrome 就绪后清理可恢复的连接阻塞，不绕过平台限流 |
 
-`test/workbench-cli.test.js` 检查模式专属参数、数值过滤、关键词独立参数以及原有 200 KiB 字节截断行为；UTF-8 边界处理保持旧实现，不宣称截断后不会出现替换字符。
+`test/integration/workbench-cli.test.js` 检查模式专属参数、数值过滤、关键词独立参数以及原有 200 KiB 字节截断行为；UTF-8 边界处理保持旧实现，不宣称截断后不会出现替换字符。
 
-`test/http-fallbacks.test.js` 验证真实 API 优先、未知 API 的 JSON 404、静态文件、SPA GET/HEAD 和非 GET 拒绝、实际上传限制及其他错误透传。兜底注册必须留在全部业务路由之后。
+`test/integration/http-fallbacks.test.js` 验证真实 API 优先、未知 API 的 JSON 404、静态文件、SPA GET/HEAD 和非 GET 拒绝、实际上传限制及其他错误透传。兜底注册必须留在全部业务路由之后。
 
-`test/selection-review-routes.test.js` 覆盖 verify/select 分支、generate 等待状态、输入规范化、旧记录无 runtime、未完成复核和异常返回。该测试不证明底层复核服务已有版本冲突保护。
+`test/integration/selection-review-routes.test.js` 覆盖 verify/select 分支、generate 等待状态、输入规范化、旧记录无 runtime、未完成复核和异常返回。该测试不证明底层复核服务已有版本冲突保护。
 
 `core/server/order-sheet-draft-routes.js` 是此前阶段留下的草稿兼容层，不持有自己的任务互斥锁。入口中其余刷单、虚假评价专用接口不在本次收尾范围，保持原位置和行为。
 
 铺货模块由 server 创建单个任务服务，沿用 process.cwd 下的 distribution-runs 数据目录；确认日志读取器通过 getter 获取最新 app.locals 注入。自动提交在环境检查前占用准备标记，后台执行器同步抛错也走任务失败清理。它不是跨进程锁，也不改变平台侧幂等策略。
 
-`test/distribution-routes.test.js` 用临时文件、延迟环境检查和模拟提交器覆盖确认、防重复提交、检查失败释放、暂停取消、同步/异步异常、完成节点同步及重新核对。不会提交真实商品。
+`test/integration/distribution-routes.test.js` 用临时文件、延迟环境检查和模拟提交器覆盖确认、防重复提交、检查失败释放、暂停取消、同步/异步异常、完成节点同步及重新核对。不会提交真实商品。
 
-`core/test/workflow-query-routes.test.js` 验证历史删除确认、动态任务锁、运行状态保护、产物缺失、完整预览、文件下载及 SSE 握手。所有文件均为临时测试数据，不访问生产产物。
+`test/unit/core/workflow-query-routes.test.js` 验证历史删除确认、动态任务锁、运行状态保护、产物缺失、完整预览、文件下载及 SSE 握手。所有文件均为临时测试数据，不访问生产产物。
 
 种子模块接收同一个 DEFAULT_DATA_DIR 和事件写入函数，研究模块接收同一个 AsyncLocalStorage，平台模块接收运行时 getter。不要在各注册函数中另建日志上下文或改用模块目录作为业务数据目录。
 
@@ -141,14 +141,14 @@
 
 ## 验证入口
 
-`npm test` 覆盖 Web 状态、CLI 与主要工作流 API 测试；`npm run test:pipeline` 覆盖流水线；`npm run web:build` 验证生产构建。此次另独立验证 `core/test`、1688 和标题生成测试，没有执行包含两类专用表格测试的完整 `test:all`。
+`npm test` 覆盖 core、Web 状态、CLI 与主要工作流 API 测试；`npm run test:core-skills` 覆盖全部 skill 单元测试；`npm run test:pipeline` 可单独验证流水线；`npm run web:build` 验证生产构建。所有测试代码统一位于根目录 `test/`。
 
 真实平台 smoke 需要显式 ECOM_LIVE_TESTS=1。普通回归不得使用真实铺货动作来证明成功。
 
 `npm run test:workflow-browser` 顺序执行三个浏览器脚本：19 个命令/确认竞态场景、历史/SSE/目录刷新矩阵，以及五种选品/同行分析模板在 1440、980、390 像素视口的画布、侧栏、长产物与手动输入滚动检查。全部业务 HTTP 用替身。需要可用的 Playwright 包与本机 Chrome；若 Playwright 不在项目依赖中，用 `ECOM_PLAYWRIGHT_MODULE` 指向已安装包。测试结束自动关闭临时服务，不连接用户的 3000 端口后端。
 
-`node --test test/workflow-concurrency.test.js core/test/workbench-coordinator.test.js` 使用临时 HTTP 端口、延迟 Promise 与模拟子进程，验证跨路由互斥、准备失败、运行失败、取消未结束、迟到退出事件和旧入口兼容；不会调用真实平台或生成业务文件。
+`node --test test/integration/workflow-concurrency.test.js test/unit/core/workbench-coordinator.test.js` 使用临时 HTTP 端口、延迟 Promise 与模拟子进程，验证跨路由互斥、准备失败、运行失败、取消未结束、迟到退出事件和旧入口兼容；不会调用真实平台或生成业务文件。
 
-`test/server-route-contract.test.js` 对照重构前 HEAD 提取的 70 组路径、方法和路由中间件数量，另检查通配步骤路由与 SPA 兜底顺序。新增合法接口时需要同步更新此 fixture，而不能直接删除断言。
+`test/integration/server-route-contract.test.js` 对照重构前 HEAD 提取的 70 组路径、方法和路由中间件数量，另检查通配步骤路由与 SPA 兜底顺序。新增合法接口时需要同步更新此 fixture，而不能直接删除断言。
 
-`test/domain-routes.test.js` 在临时目录和 HTTP 替身中验证种子生命周期、缓存清理白名单、关键词验真失败、标题搜索适配器、分享解析、SSE 并发上下文及平台启动失败返回。它不证明真实 Chrome、淘宝或生意参谋当前可用。
+`test/integration/domain-routes.test.js` 在临时目录和 HTTP 替身中验证种子生命周期、缓存清理白名单、关键词验真失败、标题搜索适配器、分享解析、SSE 并发上下文及平台启动失败返回。它不证明真实 Chrome、淘宝或生意参谋当前可用。

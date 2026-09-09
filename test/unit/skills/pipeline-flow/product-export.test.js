@@ -1,0 +1,96 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const test = require('node:test');
+const {
+  normalizeManualOfferDetail,
+  productCategory,
+  productTitle,
+  productUrl
+} = require('../../../../skills/pipeline-flow/src/product-normalizer');
+const {
+  categoryAssessment,
+  classifyExportStatus,
+  distributionLine,
+  validateGeneratedRow
+} = require('../../../../skills/pipeline-flow/src/export-validator');
+
+test('normalizes nested 1688 detail payloads and common product fields', () => {
+  const detail = normalizeManualOfferDetail({
+    model: {
+      bizData: JSON.stringify({
+        result: {
+          subject: '桌面抽屉收纳盒',
+          categoryName: '家居用品 > 收纳整理 > 收纳盒',
+          mainPic: 'https://img.example.com/box.webp',
+          offerPrice: '12.80'
+        }
+      })
+    }
+  }, { offerId: '123' });
+
+  assert.equal(detail.offerId, '123');
+  assert.equal(detail.title, '桌面抽屉收纳盒');
+  assert.equal(detail.category, '家居用品 > 收纳整理 > 收纳盒');
+  assert.equal(detail.imageUrl, 'https://img.example.com/box.webp');
+  assert.equal(detail.price, '12.80');
+  assert.equal(productUrl({ offerId: '123' }), 'https://detail.1688.com/offer/123.html');
+  assert.equal(productTitle({ generatedTitle: '生成标题' }), '生成标题');
+  assert.equal(productCategory({ stats: { categoryName: '收纳盒' } }), '收纳盒');
+});
+
+test('normalizes offer_detail all_info markdown keyed by offer id', () => {
+  const detail = normalizeManualOfferDetail({
+    success: true,
+    model: {
+      bizData: {
+        993531162503: {
+          all_info: '# 商品ID\n993531162503\n\n# 商品标题\n双层叠戴十字架海星项链女\n\n# 商品价格\n1.48元\n\n# 商品类目\n|类目级别|类目名称|\n|--|--|\n|一级类目|服饰配件、饰品|\n|二级类目|项饰|\n|三级类目|项链|'
+        }
+      }
+    }
+  }, { offerId: '993531162503' });
+
+  assert.equal(detail.title, '双层叠戴十字架海星项链女');
+  assert.equal(detail.category, '项链');
+  assert.equal(detail.price, '1.48元');
+});
+
+test('assesses matching and conflicting product categories', () => {
+  const matched = categoryAssessment({
+    recommendedCategory: '家居用品 > 收纳整理',
+    product: { categoryName: '收纳整理 > 收纳盒' }
+  });
+  const conflict = categoryAssessment({
+    recommendedCategory: '女装 > 连衣裙',
+    product: { categoryName: '数码产品 > 手机配件' }
+  });
+
+  assert.equal(matched.confidence, 'high');
+  assert.equal(conflict.confidence, 'low');
+  assert.equal(conflict.reason, '生意参谋类目与商品类目疑似冲突');
+});
+
+test('keeps hot-tier limits and manual-review export classification stable', () => {
+  const title = '桌面收纳盒抽屉式办公室学生文具透明塑料杂物整理储物盒大容量';
+  const validation = validateGeneratedRow({
+    keyword: '桌面收纳盒',
+    url: 'https://detail.1688.com/offer/123.html',
+    title,
+    verifyMode: 'hot',
+    recommendedCategory: '家居用品 > 收纳整理',
+    product: { categoryName: '收纳整理 > 收纳盒' }
+  }, { hotUsed: 2, hotExportLimit: 2 });
+
+  assert.equal(validation.ok, false);
+  assert.ok(validation.reasons.includes('hot_export_limit'));
+  assert.equal(classifyExportStatus({ ok: false, reasons: ['product_opportunity_manual_review'] }), 'review_candidate');
+  assert.equal(
+    distributionLine({
+      url: 'https://detail.1688.com/offer/123.html',
+      title,
+      recommendedCategory: '家居用品 > 收纳整理'
+    }),
+    `https://detail.1688.com/offer/123.html$$${title}$$家居用品 > 收纳整理`
+  );
+});

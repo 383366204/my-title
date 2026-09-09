@@ -7,11 +7,13 @@
     "ecom-ai-tools": "bin/cli.js"
   },
   "scripts": {
-    "test": "node --test test/*.test.js test/*.test.mjs apps/web/src/*.test.mjs apps/web/src/features/workflow/*.test.mjs apps/web/src/features/workflow/hooks/*.test.mjs",
-    "test:pipeline": "node --test skills/pipeline-flow/test/*.test.js",
+    "test": "npm run test:unit && npm run test:integration",
+    "test:unit": "node --test test/unit/core/*.test.js test/unit/architecture/*.test.js test/unit/web/*.test.mjs",
+    "test:integration": "node --test test/integration/*.test.js test/integration/*.test.mjs",
+    "test:pipeline": "node --test test/unit/skills/pipeline-flow/*.test.js",
     "test:workflow-browser": "node test/browser/run-regressions.mjs",
-    "test:core-skills": "node --test core/test/*.js skills/alibaba1688/test/*.js skills/title-gen/test/*.js skills/order-sheet/test/*.js skills/review-sheet/test/*.js",
-    "test:all": "npm test && npm run test:core-skills && npm run test:pipeline && npm run web:build",
+    "test:core-skills": "node --test test/unit/skills/*/*.test.js",
+    "test:all": "npm test && npm run test:core-skills && npm run web:build",
     "ui": "node bin/server.js",
     "web:dev": "npm run dev --prefix apps/web",
     "web:build": "npm run build --prefix apps/web",

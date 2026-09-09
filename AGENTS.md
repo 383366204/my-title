@@ -60,7 +60,7 @@ my-title/
 │       └── references/
 ├── data/
 │   └── banned-words.json   # 违禁词分类数据
-├── test/                   # 集成测试（e2e, cli, smoke）
+├── test/                   # 统一测试树（unit、integration、browser、fixtures、helpers）
 ├── .env.example            # API 密钥模板
 └── package.json            # Bin: bin/cli.js
 ```
@@ -159,9 +159,10 @@ node bin/cli.js trend "项链" --json
 node bin/cli.js sycm "关键词" --mode blue
 
 # 测试
-node --test skills/alibaba1688/test/
-node --test skills/title-gen/test/
-node --test core/test/
+npm test
+npm run test:core-skills
+npm run test:pipeline
+npm run test:workflow-browser
 
 # 初始设置
 cp .env.example .env

@@ -1,0 +1,1542 @@
+'use strict';
+
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { describe, it } = require('node:test');
+const assert = require('node:assert');
+
+const { WORKFLOW_NODE_IDS } = require('../../../core/workflow/pipeline-definition-common');
+const { listProductionWorkflowTemplates } = require('../../../core/workflow/pipeline-templates');
+const {
+  sanitizeWorkflowParams,
+  buildPipelineCliArgs,
+  validateProductionWorkflow,
+  resolveProductionWorkflowLaunch,
+  resolveProductionWorkflowDefinition
+} = require('../../../core/workflow/pipeline-params');
+const { pipelineSummaryToWorkflowRun, listWorkflowRuns, getWorkflowRun } = require('../../../core/workflow/pipeline-runs');
+const { readWorkflowNodeArtifact } = require('../../../core/workflow/pipeline-artifacts');
+const {
+  writeWorkflowDefinition,
+  readWorkflowDefinition,
+  appendWorkflowEvent,
+  readWorkflowEvents,
+  deleteWorkflowRun
+} = require('../../../core/workflow/pipeline-storage');
+
+function tempPipelineDir() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-pipeline-adapter-'));
+}
+
+function writeJson(file, data) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf8');
+}
+
+function writeText(file, text) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, text, 'utf8');
+}
+
+describe('workflow pipeline adapter', () => {
+  it('lists the fixed production workflow templates', () => {
+    assert.deepEqual(WORKFLOW_NODE_IDS, {
+      start: 'start',
+      mine: 'mine',
+      keywordReview: 'keywordReview',
+      verify: 'verify',
+      select: 'select',
+      generate: 'generate',
+      export: 'export',
+      review: 'review',
+      collectRank: 'collectRank',
+      confirmProducts: 'confirmProducts',
+      importSheet: 'importSheet',
+      generateReviews: 'generateReviews',
+      generateSheet: 'generateSheet',
+      resolveShops: 'resolveShops',
+      collectCompetitors: 'collectCompetitors',
+      enrichCompetitors: 'enrichCompetitors',
+      analyzeCompetitors: 'analyzeCompetitors',
+      competitorReport: 'competitorReport',
+      end: 'end'
+    });
+
+    const templates = listProductionWorkflowTemplates();
+
+    assert.deepEqual(templates.map(template => template.id), ['daily-selection-v1', 'exact-keyword-v1', 'root-keyword-selection-v1', 'manual-selection-v2', 'sycm-order-sheet-v1', 'uploaded-review-sheet-v1', 'competitor-analysis-v1']);
+    assert.deepEqual(templates.map(template => template.entryLabel), ['入口：动态灵感', '入口：手动关键词', '入口：手动词根', '入口：1688链接（关键词可选）', '入口：商品排行或指定商品', '入口：已执行的刷单表', '入口：同行分享链接']);
+    const rootTemplate = templates.find(template => template.id === 'root-keyword-selection-v1');
+    const manualTemplate = templates.find(template => template.id === 'manual-selection-v2');
+    const orderTemplate = templates.find(template => template.id === 'sycm-order-sheet-v1');
+    const reviewTemplate = templates.find(template => template.id === 'uploaded-review-sheet-v1');
+    const competitorTemplate = templates.find(template => template.id === 'competitor-analysis-v1');
+    assert.match(templates[0].scenarioLabel, /每天自动发现/);
+    assert.match(templates[1].scenarioLabel, /明确目标词/);
+    assert.match(templates[0].flowSummary, /灵感选词/);
+    assert.match(templates[1].flowSummary, /跳过挖词/);
+    assert.match(templates[0].modeHint, /不要求预先维护种子池/);
+    assert.match(templates[1].modeHint, /逐词验真/);
+    assert.match(rootTemplate.flowSummary, /分时拓词/);
+    assert.match(manualTemplate.flowSummary, /录入链接/);
+    assert.match(manualTemplate.flowSummary, /生意参谋验真/);
+    assert.match(orderTemplate.flowSummary, /获取商品资料/);
+    assert.match(orderTemplate.flowSummary, /确认商品与编组/);
+    const orderSheetStart = orderTemplate.workflow.nodes.find(node => node.id === WORKFLOW_NODE_IDS.start);
+    const orderSheetConfirm = orderTemplate.workflow.nodes.find(node => node.id === WORKFLOW_NODE_IDS.confirmProducts);
+    const orderSheetGenerate = orderTemplate.workflow.nodes.find(node => node.id === WORKFLOW_NODE_IDS.generateSheet);
+    assert.equal(orderSheetStart.data.orderSheetConfig, true);
+    assert.equal(orderSheetStart.data.inputMode, 'rank');
+    assert.equal(orderSheetStart.data.pages, 1);
+    assert.equal(orderSheetStart.data.sortMetric, 'itmUv');
+    assert.equal(orderTemplate.workflow.nodes.find(node => node.id === WORKFLOW_NODE_IDS.collectRank).data.label, '获取商品资料');
+    assert.equal(orderSheetConfirm.data.label, '确认商品与编组');
+    assert.equal(orderSheetGenerate.data.sheetConfig, true);
+    assert.equal(orderSheetGenerate.data.sheetType, 'order');
+    assert.equal(orderSheetGenerate.data.orderSheetOnly, true);
+    assert.equal(orderSheetGenerate.data.rowSpan, 3);
+    const reviewSheetStart = reviewTemplate.workflow.nodes.find(node => node.id === WORKFLOW_NODE_IDS.start);
+    const reviewSheetGenerate = reviewTemplate.workflow.nodes.find(node => node.id === WORKFLOW_NODE_IDS.generateSheet);
+    assert.equal(reviewSheetStart.data.reviewUpload, true);
+    assert.equal(reviewSheetGenerate.data.reviewSourceUpload, true);
+    assert.equal(reviewSheetGenerate.data.sheetType, 'review');
+    const competitorStart = competitorTemplate.workflow.nodes.find(node => node.id === WORKFLOW_NODE_IDS.start);
+    const competitorEnd = competitorTemplate.workflow.nodes.find(node => node.id === WORKFLOW_NODE_IDS.end);
+    assert.equal(competitorStart.data.competitorConfig, true);
+    assert.equal(competitorStart.data.hotLimit, 20);
+    assert.equal(competitorStart.data.newLimit, 20);
+    assert.equal(competitorStart.data.detailLimit, 20);
+    assert.equal(competitorEnd.data.competitorDownload, true);
+    const dailyStart = templates[0].workflow.nodes.find(node => node.id === WORKFLOW_NODE_IDS.start);
+    const keywordStart = templates[1].workflow.nodes.find(node => node.id === WORKFLOW_NODE_IDS.start);
+    assert.deepEqual(Object.keys(dailyStart.data).sort(), [
+      'description',
+      'discoveryMode',
+      'export',
+      'familyCooldownDays',
+      'generate',
+      'inspirationSycmPages',
+      'inspirationUseLLM',
+      'label',
+      'length',
+      'mine',
+      'pages',
+      'productsPerKeyword',
+      'rootCooldownDays',
+      'rootLimit',
+      'rootMode',
+      'select',
+      'source',
+      'stepIndex',
+      'stepTotal',
+      'verify'
+    ]);
+    assert.equal(keywordStart.data.keyword, '');
+    assert.equal(keywordStart.data.keywordsText, '');
+    assert.deepEqual(manualTemplate.workflow.nodes.find(node => node.id === WORKFLOW_NODE_IDS.start).data.items, []);
+    for (const template of templates) {
+      assert.equal(template.production, true);
+      assert.ok(template.workflow);
+    }
+    assert.deepEqual(templates[0].workflow.nodes.map(node => node.id), [
+      WORKFLOW_NODE_IDS.start,
+      WORKFLOW_NODE_IDS.mine,
+      WORKFLOW_NODE_IDS.keywordReview,
+      WORKFLOW_NODE_IDS.verify,
+      WORKFLOW_NODE_IDS.select,
+      WORKFLOW_NODE_IDS.generate,
+      WORKFLOW_NODE_IDS.export,
+      WORKFLOW_NODE_IDS.end
+    ]);
+    assert.deepEqual(templates[0].workflow.edges.map(edge => `${edge.source}->${edge.target}`), [
+      'start->mine',
+      'mine->keywordReview',
+      'keywordReview->verify',
+      'verify->select',
+      'select->generate',
+      'generate->export',
+      'export->end'
+    ]);
+    assert.ok(templates[0].workflow.edges.every(edge => edge.type === 'straight'));
+    assert.deepEqual(templates[1].workflow.nodes.map(node => node.id), [
+      WORKFLOW_NODE_IDS.start,
+      WORKFLOW_NODE_IDS.verify,
+      WORKFLOW_NODE_IDS.select,
+      WORKFLOW_NODE_IDS.generate,
+      WORKFLOW_NODE_IDS.export,
+      WORKFLOW_NODE_IDS.end
+    ]);
+    assert.deepEqual(templates[1].workflow.edges.map(edge => `${edge.source}->${edge.target}`), [
+      'start->verify',
+      'verify->select',
+      'select->generate',
+      'generate->export',
+      'export->end'
+    ]);
+    assert.ok(templates[1].workflow.edges.every(edge => edge.type === 'straight'));
+    assert.deepEqual(manualTemplate.workflow.nodes.map(node => node.id), [
+      WORKFLOW_NODE_IDS.start,
+      WORKFLOW_NODE_IDS.select,
+      WORKFLOW_NODE_IDS.verify,
+      WORKFLOW_NODE_IDS.generate,
+      WORKFLOW_NODE_IDS.export,
+      WORKFLOW_NODE_IDS.end
+    ]);
+    assert.deepEqual(manualTemplate.workflow.edges.map(edge => `${edge.source}->${edge.target}`), [
+      'start->select',
+      'select->verify',
+      'verify->generate',
+      'generate->export',
+      'export->end'
+    ]);
+    assert.ok(manualTemplate.workflow.edges.every(edge => edge.type === 'straight'));
+    assert.deepEqual(orderTemplate.workflow.nodes.map(node => node.id), [
+      WORKFLOW_NODE_IDS.start,
+      WORKFLOW_NODE_IDS.collectRank,
+      WORKFLOW_NODE_IDS.confirmProducts,
+      WORKFLOW_NODE_IDS.generateSheet,
+      WORKFLOW_NODE_IDS.end
+    ]);
+    assert.deepEqual(orderTemplate.workflow.edges.map(edge => `${edge.source}->${edge.target}`), [
+      'start->collectRank',
+      'collectRank->confirmProducts',
+      'confirmProducts->generateSheet',
+      'generateSheet->end'
+    ]);
+    assert.deepEqual(competitorTemplate.workflow.nodes.map(node => node.id), [
+      WORKFLOW_NODE_IDS.start,
+      WORKFLOW_NODE_IDS.resolveShops,
+      WORKFLOW_NODE_IDS.collectCompetitors,
+      WORKFLOW_NODE_IDS.enrichCompetitors,
+      WORKFLOW_NODE_IDS.analyzeCompetitors,
+      WORKFLOW_NODE_IDS.competitorReport,
+      WORKFLOW_NODE_IDS.end
+    ]);
+    assert.deepEqual(competitorTemplate.workflow.edges.map(edge => `${edge.source}->${edge.target}`), [
+      'start->resolveShops',
+      'resolveShops->collectCompetitors',
+      'collectCompetitors->enrichCompetitors',
+      'enrichCompetitors->analyzeCompetitors',
+      'analyzeCompetitors->competitorReport',
+      'competitorReport->end'
+    ]);
+  });
+
+  it('keeps production workflow template nodes compact and ordered for canvas fit', () => {
+    const templates = listProductionWorkflowTemplates();
+
+    for (const template of templates) {
+      const nodes = template.workflow.nodes;
+      const xs = nodes.map(node => node.position.x);
+      const ys = nodes.map(node => node.position.y);
+      const minX = Math.min(...xs);
+      const maxX = Math.max(...xs);
+      const minY = Math.min(...ys);
+      const maxY = Math.max(...ys);
+      const uniquePositions = new Set(nodes.map(node => `${node.position.x},${node.position.y}`));
+      const nodeWidth = 232;
+      const nodeHeight = 118;
+      const minGap = 24;
+
+      const expectedIds = template.mode === 'competitor-analysis'
+        ? [
+            WORKFLOW_NODE_IDS.start,
+            WORKFLOW_NODE_IDS.resolveShops,
+            WORKFLOW_NODE_IDS.collectCompetitors,
+            WORKFLOW_NODE_IDS.enrichCompetitors,
+            WORKFLOW_NODE_IDS.analyzeCompetitors,
+            WORKFLOW_NODE_IDS.competitorReport,
+            WORKFLOW_NODE_IDS.end
+          ]
+        : template.mode === 'order-sheet'
+        ? [
+            WORKFLOW_NODE_IDS.start,
+            WORKFLOW_NODE_IDS.collectRank,
+            WORKFLOW_NODE_IDS.confirmProducts,
+            WORKFLOW_NODE_IDS.generateSheet,
+            WORKFLOW_NODE_IDS.end
+          ]
+        : template.mode === 'review-sheet'
+          ? [
+              WORKFLOW_NODE_IDS.start,
+              WORKFLOW_NODE_IDS.importSheet,
+              WORKFLOW_NODE_IDS.generateReviews,
+              WORKFLOW_NODE_IDS.generateSheet,
+              WORKFLOW_NODE_IDS.end
+            ]
+        : template.mode === 'keyword'
+        ? [
+            WORKFLOW_NODE_IDS.start,
+            WORKFLOW_NODE_IDS.verify,
+            WORKFLOW_NODE_IDS.select,
+            WORKFLOW_NODE_IDS.generate,
+            WORKFLOW_NODE_IDS.export,
+            WORKFLOW_NODE_IDS.end
+          ]
+        : template.mode === 'manual'
+          ? [
+              WORKFLOW_NODE_IDS.start,
+              WORKFLOW_NODE_IDS.select,
+              WORKFLOW_NODE_IDS.verify,
+              WORKFLOW_NODE_IDS.generate,
+              WORKFLOW_NODE_IDS.export,
+              WORKFLOW_NODE_IDS.end
+            ]
+        : [
+            WORKFLOW_NODE_IDS.start,
+            WORKFLOW_NODE_IDS.mine,
+            WORKFLOW_NODE_IDS.keywordReview,
+            WORKFLOW_NODE_IDS.verify,
+            WORKFLOW_NODE_IDS.select,
+            WORKFLOW_NODE_IDS.generate,
+            WORKFLOW_NODE_IDS.export,
+            WORKFLOW_NODE_IDS.end
+          ];
+      assert.deepEqual(nodes.map(node => node.id), expectedIds);
+      assert.equal(uniquePositions.size, nodes.length, 'template nodes should not share the same canvas position');
+      assert.ok(maxY - minY <= 80, `template ${template.id} should read as a single horizontal pipeline`);
+      assert.ok(maxX - minX <= 1820, `template ${template.id} should not keep legacy wide spacing`);
+      assert.deepEqual(nodes.map(node => node.data.stepIndex), nodes.map((_, index) => index + 1));
+      assert.deepEqual(nodes.map(node => node.data.stepTotal), nodes.map(() => nodes.length));
+      for (let index = 0; index < nodes.length; index += 1) {
+        if (index > 0) {
+          assert.ok(
+            nodes[index].position.x > nodes[index - 1].position.x,
+            `template ${template.id} node ${nodes[index].id} should be placed after ${nodes[index - 1].id}`
+          );
+        }
+        for (let other = index + 1; other < nodes.length; other += 1) {
+          const a = nodes[index].position;
+          const b = nodes[other].position;
+          const separatedHorizontally = Math.abs(a.x - b.x) >= nodeWidth + minGap;
+          const separatedVertically = Math.abs(a.y - b.y) >= nodeHeight + minGap;
+          assert.ok(
+            separatedHorizontally || separatedVertically,
+            `template nodes ${nodes[index].id} and ${nodes[other].id} are too close`
+          );
+        }
+      }
+    }
+  });
+
+  it('validates production workflow graphs without the legacy node registry', () => {
+    const templates = listProductionWorkflowTemplates();
+    const [template, keywordTemplate] = templates;
+    const rootKeywordTemplate = templates.find(item => item.id === 'root-keyword-selection-v1');
+
+    assert.deepEqual(validateProductionWorkflow(template.workflow), {
+      ok: true,
+      errors: [],
+      production: true,
+      templateId: 'daily-selection-v1'
+    });
+    assert.deepEqual(validateProductionWorkflow(keywordTemplate.workflow), {
+      ok: true,
+      errors: [],
+      production: true,
+      templateId: 'exact-keyword-v1'
+    });
+    assert.deepEqual(validateProductionWorkflow(rootKeywordTemplate.workflow, {
+      templateId: rootKeywordTemplate.id,
+      mode: rootKeywordTemplate.mode
+    }), {
+      ok: true,
+      errors: [],
+      production: true,
+      templateId: 'root-keyword-selection-v1'
+    });
+
+    const invalid = validateProductionWorkflow({
+      nodes: [{ id: 'start', type: 'production-start', data: {} }],
+      edges: []
+    });
+    assert.equal(invalid.ok, false);
+    assert.equal(invalid.production, true);
+    assert.ok(invalid.errors.some(error => error.code === 'production_template_mismatch'));
+  });
+
+  it('resolves legacy workflow launch from template or keyword-bearing nodes', () => {
+    const templates = listProductionWorkflowTemplates();
+    assert.deepEqual(resolveProductionWorkflowLaunch({
+      templateId: 'daily-selection-v1',
+      params: { mine: 3 }
+    }), {
+      mode: 'daily',
+      params: { mine: 3 }
+    });
+
+    assert.deepEqual(resolveProductionWorkflowLaunch({
+      workflow: {
+        nodes: [
+          { id: 'node_1', type: 'keyword-input', data: { keyword: '  纯银耳环  ' } }
+        ],
+        edges: []
+      }
+    }), {
+      mode: 'keyword',
+      params: { keyword: '纯银耳环' }
+    });
+
+    assert.deepEqual(resolveProductionWorkflowLaunch({
+      workflow: {
+        nodes: [
+          { id: 'start', type: 'production-start', data: { keywordsText: '纯银耳环\n桌面收纳盒\n纯银耳环' } }
+        ],
+        edges: []
+      }
+    }), {
+      mode: 'keyword',
+      params: {
+        keyword: '纯银耳环',
+        keywords: ['纯银耳环', '桌面收纳盒']
+      }
+    });
+
+    assert.deepEqual(resolveProductionWorkflowLaunch({
+      workflow: templates[0].workflow
+    }), {
+      mode: 'daily',
+      params: {}
+    });
+
+    assert.throws(() => resolveProductionWorkflowLaunch({
+      workflow: { nodes: [{ id: 'node_1', type: 'keyword-input', data: {} }], edges: [] }
+    }), /无法从工作流解析启动模式/);
+    assert.throws(() => resolveProductionWorkflowLaunch({ templateId: 'missing-template' }), /未知 workflow template/);
+  });
+
+  it('prefers extracted keyword mode for legacy production workflow launch without explicit mode or template', () => {
+    const [template] = listProductionWorkflowTemplates();
+    const workflow = JSON.parse(JSON.stringify(template.workflow));
+    workflow.nodes.find(node => node.id === WORKFLOW_NODE_IDS.start).data.keyword = '纯银项链';
+
+    const launch = resolveProductionWorkflowLaunch({ workflow });
+    const args = buildPipelineCliArgs(launch.mode, launch.params);
+
+    assert.deepEqual(launch, {
+      mode: 'keyword',
+      params: { keyword: '纯银项链' }
+    });
+    assert.deepEqual(args.slice(0, 4), ['bin/cli.js', 'flow', 'keyword', '纯银项链']);
+  });
+
+  it('sanitizes daily and exact keyword parameters with range limits', () => {
+    assert.deepEqual(sanitizeWorkflowParams('daily', {
+      mine: '999',
+      verify: '0',
+      generate: 'abc',
+      export: 200,
+      productsPerKeyword: -1,
+      length: 120,
+      port: '9223',
+      pages: 9,
+      minBlueRows: '-5',
+      fallbackHot: false,
+      source: 'invalid',
+      rootMode: 'invalid',
+      rootLimit: '99',
+      rootCooldownDays: '-4',
+      maxObservingSeeds: '99',
+      maxNewSeeds: '-2',
+      autoReplenishSeeds: false,
+      recordSeedFeedback: false
+    }), {
+      mine: 200,
+      discoveryMode: 'inspiration',
+      source: 'inspiration',
+      rootMode: 'auto',
+      rootLimit: 20,
+      rootCooldownDays: 0,
+      familyCooldownDays: 7,
+      inspirationSycmPages: 1,
+      inspirationUseLLM: true,
+      maxObservingSeeds: 10,
+      maxObservingPoolSize: 24,
+      maxNewSeeds: 0,
+      autoReplenishSeeds: false,
+      recordSeedFeedback: false,
+      verify: 1,
+      select: 10,
+      generate: 10,
+      export: 100,
+      productsPerKeyword: 1,
+      length: 80,
+      port: 9223,
+      pages: 5,
+      minBlueRows: 0,
+      fallbackHot: false,
+      autoApproveKeywords: true,
+      autoExpandVerify: true,
+      verifyReserve: 8,
+      autoAllowReviewKeywords: true,
+      reviewKeywordLimit: 2
+    });
+
+    assert.deepEqual(sanitizeWorkflowParams('keyword', {
+      keyword: '  纯银项链女  ',
+      export: 0,
+      productsPerKeyword: 18,
+      length: 20,
+      port: '9222',
+      pages: 2,
+      minBlueRows: 3,
+      fallbackHot: true
+    }), {
+      keyword: '纯银项链女',
+      export: 1,
+      productsPerKeyword: 18,
+      length: 30,
+      port: 9222,
+      pages: 2,
+      minBlueRows: 3,
+      fallbackHot: true
+    });
+
+    assert.deepEqual(sanitizeWorkflowParams('keyword', {
+      keywords: [' 纯银项链女 ', '桌面收纳盒', '纯银项链女']
+    }), {
+      keyword: '纯银项链女',
+      keywords: ['纯银项链女', '桌面收纳盒'],
+      export: 20,
+      productsPerKeyword: 12,
+      length: 60,
+      port: 9222,
+      pages: 1,
+      minBlueRows: 1,
+      fallbackHot: true
+    });
+
+    assert.throws(() => sanitizeWorkflowParams('keyword', { keyword: '   ' }), /关键词不能为空/);
+    const manyRoots = Array.from({ length: 120 }, (_, index) => `词根${index + 1}`);
+    const rootParams = sanitizeWorkflowParams('root-keyword', {
+      roots: [...manyRoots, '词根1'],
+      sycmRiskProfile: 'conservative'
+    });
+    assert.equal(rootParams.roots.length, 120);
+    assert.deepEqual(rootParams.duplicateRoots, ['词根1']);
+    assert.equal(rootParams.sycmMinIntervalMs, 90_000);
+    assert.equal(rootParams.sycmMaxIntervalMs, 180_000);
+    assert.equal(rootParams.sycmBatchSize, 8);
+    assert.equal(rootParams.sycmMinBatchCooldownMs, 600_000);
+    assert.equal(rootParams.sycmMaxPages, 9999);
+    assert.throws(() => sanitizeWorkflowParams('root-keyword', { rootsText: '  ' }), /词根不能为空/);
+    assert.deepEqual(sanitizeWorkflowParams('competitor-analysis', {
+      competitorText: '  https://m.tb.cn/h.example  ',
+      maxShops: 99,
+      hotLimit: 2,
+      newLimit: 80,
+      detailLimit: -1,
+      waitMs: 100,
+      compareHistory: false
+    }), {
+      competitorText: 'https://m.tb.cn/h.example',
+      competitorInputs: [],
+      maxShops: 10,
+      hotLimit: 5,
+      newLimit: 50,
+      detailLimit: 0,
+      waitMs: 500,
+      compareHistory: false
+    });
+    assert.throws(() => sanitizeWorkflowParams('competitor-analysis', {}), /同行链接/);
+    assert.equal(sanitizeWorkflowParams('competitor-analysis', {
+      competitorText: 'https://m.tb.cn/h.example'
+    }).detailLimit, 20);
+    assert.deepEqual(sanitizeWorkflowParams('manual', {
+      defaultKeyword: ' 法式连衣裙 ',
+      items: [
+        { url: 'https://detail.1688.com/offer/123456.html?spm=test' },
+        { keyword: '碎花连衣裙', url: 'https://detail.m.1688.com/page/index.htm?offerId=789012' }
+      ],
+      export: 200,
+      length: 20
+    }), {
+      defaultKeyword: '法式连衣裙',
+      items: [
+        { clientId: 'manual-123456', keyword: '法式连衣裙', userKeyword: '法式连衣裙', keywordSource: 'manual', url: 'https://detail.1688.com/offer/123456.html', offerId: '123456', title: '', category: '' },
+        { clientId: 'manual-789012', keyword: '碎花连衣裙', userKeyword: '碎花连衣裙', keywordSource: 'manual', url: 'https://detail.1688.com/offer/789012.html', offerId: '789012', title: '', category: '' }
+      ],
+      verify: 6,
+      port: 9222,
+      pages: 1,
+      minBlueRows: 1,
+      fallbackHot: true,
+      autoAllowReviewKeywords: true,
+      export: 100,
+      length: 30
+    });
+    assert.throws(() => sanitizeWorkflowParams('manual', {
+      defaultKeyword: '法式连衣裙',
+      items: [
+        { url: 'https://detail.1688.com/offer/123456.html' },
+        { url: 'https://detail.1688.com/offer/123456.html?spm=duplicate' }
+      ]
+    }), /商品重复/);
+    const linkOnly = sanitizeWorkflowParams('manual', {
+      items: [{ url: 'https://detail.1688.com/offer/456789.html' }]
+    });
+    assert.equal(linkOnly.items[0].keyword, '');
+    assert.equal(linkOnly.items[0].keywordSource, 'auto_extract');
+    assert.equal(linkOnly.verify, 3);
+    assert.throws(() => sanitizeWorkflowParams('manual', { items: [] }), /1688 商品链接/);
+    assert.deepEqual(sanitizeWorkflowParams('order-sheet', {
+      port: 9223,
+      dateMode: 'custom',
+      startDate: '2026-08-05',
+      endDate: '2026-08-09',
+      orderDate: '2026-08-12',
+      storeName: '竹里人',
+      sheetType: 'review',
+      pages: 9,
+      sortMetric: 'payAmt'
+    }), {
+      inputMode: 'rank',
+      manualItemsText: '',
+      manualItems: [],
+      port: 9223,
+      dateMode: 'custom',
+      startDate: '2026-08-05',
+      endDate: '2026-08-09',
+      orderDate: '2026-08-12',
+      storeName: '竹里人',
+      sheetType: 'order',
+      pages: 5,
+      sortMetric: 'payAmt',
+      productLimit: 0,
+      fileName: '',
+      includeRawData: true,
+      includeImages: true,
+      amountMode: 'average',
+      missingAmountPolicy: 'blank',
+      cartQuantity: 1,
+      rowSpan: 3,
+      dragCount: 4,
+      workRequirement: '',
+      orderNote: '',
+      reviewGroupSize: 4,
+      includeSpacerRow: true
+    });
+
+    assert.deepEqual(sanitizeWorkflowParams('order-sheet', {
+      inputMode: 'hybrid',
+      manualItemsText: '748392010293\nhttps://detail.tmall.com/item.htm?id=987654321'
+    }), {
+      inputMode: 'hybrid',
+      manualItemsText: '748392010293\nhttps://detail.tmall.com/item.htm?id=987654321',
+      manualItems: [
+        {
+          itemId: '748392010293',
+          title: '',
+          productUrl: 'https://item.taobao.com/item.htm?id=748392010293',
+          imageUrl: '',
+          storeName: '',
+          orderAmount: null,
+          paymentAmount: null,
+          sourceType: 'manual',
+          enrichmentStatus: 'normalized'
+        },
+        {
+          itemId: '987654321',
+          title: '',
+          productUrl: 'https://detail.tmall.com/item.htm?id=987654321',
+          imageUrl: '',
+          storeName: '',
+          orderAmount: null,
+          paymentAmount: null,
+          sourceType: 'manual',
+          enrichmentStatus: 'normalized'
+        }
+      ],
+      port: 9222,
+      dateMode: 'latest_day',
+      startDate: '',
+      endDate: '',
+      orderDate: new Intl.DateTimeFormat('en-CA', {
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      }).format(new Date()),
+      storeName: '',
+      sheetType: 'order',
+      pages: 1,
+      sortMetric: 'itmUv',
+      productLimit: 0,
+      fileName: '',
+      includeRawData: true,
+      includeImages: true,
+      amountMode: 'average',
+      missingAmountPolicy: 'blank',
+      cartQuantity: 1,
+      rowSpan: 3,
+      dragCount: 4,
+      workRequirement: '',
+      orderNote: '',
+      reviewGroupSize: 4,
+      includeSpacerRow: true
+    });
+
+    assert.throws(() => sanitizeWorkflowParams('order-sheet', {
+      inputMode: 'manual',
+      manualItemsText: ''
+    }), /manual 模式下必须包含至少 1 条手工商品/);
+
+    assert.equal(sanitizeWorkflowParams('order-sheet', {
+      inputMode: 'hybrid',
+      manualItemsText: ''
+    }).inputMode, 'rank');
+    assert.deepEqual(sanitizeWorkflowParams('review-sheet', {
+      uploadId: '2f9e14d8-57f0-4c12-b2bd-f5efc3e34721',
+      uploadName: '竹里人动销一拖多.xlsx',
+      groups: [{
+        id: 'group-1',
+        orderDate: '2026-08-13',
+        storeName: '竹里人',
+        buyerName: '买家一',
+        buyerPhone: '13800000001',
+        orderNumber: 'ORDER-1',
+        products: [{ title: '不应进入启动参数' }]
+      }],
+      reviewTone: '生活化',
+      reviewLength: 120,
+      useAI: false,
+      fileName: '评价表'
+    }), {
+      uploadId: '2f9e14d8-57f0-4c12-b2bd-f5efc3e34721',
+      uploadName: '竹里人动销一拖多.xlsx',
+      groups: [{
+        id: 'group-1',
+        orderDate: '2026-08-13',
+        storeName: '竹里人',
+        buyerName: '买家一',
+        buyerPhone: '13800000001',
+        orderNumber: 'ORDER-1'
+      }],
+      reviewTone: '生活化',
+      reviewLength: 100,
+      useAI: false,
+      fileName: '评价表',
+      includeSpacerRow: true,
+      sheetType: 'review'
+    });
+    assert.throws(() => sanitizeWorkflowParams('review-sheet', {}), /请先上传刷单表/);
+    assert.throws(() => sanitizeWorkflowParams('order-sheet', {
+      dateMode: 'custom',
+      startDate: '2026-07-01',
+      endDate: '2026-08-09'
+    }), /最多选择 31 天/);
+    assert.throws(() => sanitizeWorkflowParams('order-sheet', {
+      orderDate: '2026-02-30'
+    }), /刷单日期无效/);
+    assert.throws(() => sanitizeWorkflowParams('unknown', {}), /未知 workflow mode/);
+  });
+
+  it('builds shell-free CLI args for production pipeline modes', () => {
+    assert.deepEqual(buildPipelineCliArgs('daily', sanitizeWorkflowParams('daily', {
+      mine: 20,
+      verify: 5,
+      generate: 3,
+      export: 8,
+      productsPerKeyword: 4,
+      length: 60,
+      port: 9222,
+      pages: 1,
+      minBlueRows: 1,
+      fallbackHot: false
+    })), [
+      'bin/cli.js',
+      'flow',
+      'daily',
+      '--mine', '20',
+      '--discovery-mode', 'inspiration',
+      '--source', 'inspiration',
+      '--root-mode', 'auto',
+      '--root-limit', '8',
+      '--root-cooldown-days', '14',
+      '--family-cooldown-days', '7',
+      '--verify', '5',
+      '--generate', '3',
+      '--export', '8',
+      '--products-per-keyword', '4',
+      '--length', '60',
+      '--port', '9222',
+      '--pages', '1',
+      '--min-blue-rows', '1',
+      '--verify-reserve', '8',
+      '--no-hot-fallback',
+      '--json'
+    ]);
+
+    assert.deepEqual(buildPipelineCliArgs('keyword', sanitizeWorkflowParams('keyword', {
+      keyword: '纯银 项链',
+      export: 8,
+      productsPerKeyword: 4,
+      length: 60,
+      port: 9222,
+      pages: 1,
+      minBlueRows: 1
+    })), [
+      'bin/cli.js',
+      'flow',
+      'keyword',
+      '纯银 项链',
+      '--export', '8',
+      '--products-per-keyword', '4',
+      '--length', '60',
+      '--port', '9222',
+      '--pages', '1',
+      '--min-blue-rows', '1',
+      '--json'
+    ]);
+
+    const batchKeywordArgs = buildPipelineCliArgs('keyword', {
+      keywords: ['纯银项链', '桌面收纳盒']
+    });
+    assert.equal(batchKeywordArgs[3], '纯银项链\n桌面收纳盒');
+  });
+
+  it('rejects unknown modes and never emits shell-like numeric params in CLI args', () => {
+    assert.throws(() => buildPipelineCliArgs('unknown', {}), /未知 workflow mode/);
+
+    const args = buildPipelineCliArgs('daily', {
+      mine: '20; touch /tmp/pwned',
+      verify: '5 && whoami',
+      generate: '3$(whoami)',
+      export: '`id`',
+      productsPerKeyword: '4 | cat',
+      length: '60',
+      port: '9222',
+      pages: '1',
+      minBlueRows: '1'
+    });
+
+    assert.equal(args.some(arg => /[;&|`$()]/.test(arg)), false);
+    for (const flag of ['--mine', '--verify', '--generate', '--export', '--products-per-keyword']) {
+      const value = args[args.indexOf(flag) + 1];
+      assert.match(value, /^\d+$/, `${flag} should be a plain numeric spawn argument`);
+    }
+  });
+
+  it('maps pipeline summary into workflow run node states and action metadata', () => {
+    const summary = {
+      runId: 'review_run',
+      status: 'needs_review',
+      stage: 'review',
+      startedAt: '2026-06-29T04:00:00.000Z',
+      updatedAt: '2026-06-29T04:10:00.000Z',
+      counts: {
+        candidates: 2,
+        sycmVerified: 1,
+        generatedProducts: 1,
+        readyToDistribute: 1,
+        reviewCandidates: 1
+      },
+      diversity: {
+        keyword: { familyCount: 2, newFamilyCount: 1 },
+        product: { uniqueOffers: 1, newOffers: 1, suppliers: 1 }
+      },
+      policy: { version: 2, productGate: 'strict' },
+      funnel: { export: { input: 2, passed: 1, review: 1 } },
+      failureReasons: { export: { product_opportunity_manual_review: 1 } },
+      files: {
+        candidates: '/tmp/candidates.jsonl',
+        verifiedKeywords: '/tmp/verified-keywords.jsonl',
+        generatedProducts: '/tmp/generated-products.jsonl',
+        distributionBatch: '/tmp/distribution-batch.txt',
+        distributionReview: '/tmp/distribution-review.md'
+      },
+      batchCount: 1,
+      requiresUserAction: true,
+      blockers: ['review_rejected_rows'],
+      nextCommand: 'Review /tmp/distribution-review.md',
+      nextActionCode: 'review_required'
+    };
+
+    const run = pipelineSummaryToWorkflowRun(summary);
+
+    assert.equal(run.runId, 'review_run');
+    assert.equal(run.status, 'needs_review');
+    assert.equal(run.workflow.id, 'daily-selection-v1');
+    assert.equal(run.requiresUserAction, true);
+    assert.deepEqual(run.policy, { version: 2, productGate: 'strict' });
+    assert.deepEqual(run.funnel.export, { input: 2, passed: 1, review: 1 });
+    assert.deepEqual(run.failureReasons.export, { product_opportunity_manual_review: 1 });
+    assert.deepEqual(run.blockers, ['review_rejected_rows']);
+    assert.equal(run.nodeStates.start.status, 'completed');
+    assert.equal(run.nodeStates.mine.status, 'completed');
+    assert.equal(run.nodeStates.verify.status, 'completed');
+    assert.equal(run.nodeStates.generate.status, 'completed');
+    assert.equal(run.nodeStates.export.status, 'needs_review');
+    assert.equal(run.nodeStates.end.status, 'idle');
+    assert.equal(run.nodeStates.mine.output.count, 2);
+    assert.equal(run.nodeStates.mine.output.diversity.familyCount, 2);
+    assert.equal(run.nodeStates.select.output.diversity.newOffers, 1);
+    assert.equal(run.nodeStates.export.output.reviewFile, '/tmp/distribution-review.md');
+  });
+
+  it('attaches runtime state and maps runtime progress into workflow node states', () => {
+    const dataDir = tempPipelineDir();
+    const runId = 'runtime_progress_run';
+    const runDir = path.join(dataDir, 'runs', runId);
+    writeJson(path.join(runDir, 'run.json'), {
+      runId,
+      status: 'created',
+      startedAt: '2026-06-29T04:00:00.000Z',
+      updatedAt: '2026-06-29T04:01:00.000Z',
+      counts: {},
+      files: {}
+    });
+    writeJson(path.join(runDir, 'runtime.json'), {
+      status: 'running',
+      activeStep: WORKFLOW_NODE_IDS.verify,
+      steps: ['mine', 'verify', 'generate', 'export', 'review'],
+      progress: {
+        mine: { status: 'completed', current: 3, total: 3, percent: 100, message: '挖词完成' },
+        verify: { status: 'running', current: 2, total: 5, percent: 40, message: '验真 2/5' }
+      },
+      startedAt: '2026-06-29T04:00:05.000Z',
+      updatedAt: '2026-06-29T04:01:30.000Z'
+    });
+
+    const run = getWorkflowRun({ dataDir, runId });
+
+    assert.equal(run.runtime.status, 'running');
+    assert.equal(run.runtime.activeStep, WORKFLOW_NODE_IDS.verify);
+    assert.equal(run.nodeStates.mine.status, 'completed');
+    assert.deepEqual(run.nodeStates.mine.progress, {
+      status: 'completed',
+      current: 3,
+      total: 3,
+      percent: 100,
+      message: '挖词完成'
+    });
+    assert.equal(run.nodeStates.verify.status, 'running');
+    assert.equal(run.nodeStates.verify.progress.percent, 40);
+    assert.equal(run.nodeStates.verify.progress.message, '验真 2/5');
+    assert.equal(run.nodeStates.generate.status, 'idle');
+  });
+
+  it('maps paused runtime state to the active pipeline node', () => {
+    const dataDir = tempPipelineDir();
+    const runId = 'paused_runtime_run';
+    const runDir = path.join(dataDir, 'runs', runId);
+    writeJson(path.join(runDir, 'run.json'), {
+      runId,
+      status: 'mined',
+      startedAt: '2026-06-29T04:00:00.000Z',
+      updatedAt: '2026-06-29T04:01:00.000Z',
+      counts: {},
+      files: {}
+    });
+    writeJson(path.join(runDir, 'runtime.json'), {
+      status: 'paused',
+      activeStep: WORKFLOW_NODE_IDS.verify,
+      steps: ['mine', 'verify', 'generate', 'export', 'review'],
+      progress: {
+        mine: { status: 'completed', current: 1, total: 1, percent: 100, message: '完成' }
+      }
+    });
+
+    const run = getWorkflowRun({ dataDir, runId });
+
+    assert.equal(run.nodeStates.verify.status, 'paused');
+    assert.equal(run.nodeStates.verify.progress.status, 'paused');
+    assert.equal(run.status, 'paused');
+  });
+
+  it('surfaces summary blocker guidance when runtime only reports a blocked step', () => {
+    const dataDir = tempPipelineDir();
+    const runId = 'verified_empty_runtime_run';
+    const runDir = path.join(dataDir, 'runs', runId);
+    writeJson(path.join(runDir, 'run.json'), {
+      runId,
+      status: 'verified_empty',
+      startedAt: '2026-06-29T04:00:00.000Z',
+      updatedAt: '2026-06-29T04:01:00.000Z',
+      counts: {
+        candidates: 1,
+        sycmVerified: 0,
+        sycmRejected: 1
+      },
+      files: {}
+    });
+    writeJson(path.join(runDir, 'runtime.json'), {
+      status: 'blocked',
+      activeStep: WORKFLOW_NODE_IDS.verify,
+      steps: ['mine', 'verify', 'generate', 'export', 'review'],
+      progress: {
+        mine: { status: 'completed', current: 1, total: 1, percent: 100, message: '完成' },
+        verify: { status: 'completed', current: 1, total: 1, percent: 100, message: '完成' }
+      }
+    });
+
+    const run = getWorkflowRun({ dataDir, runId });
+
+    assert.equal(run.status, 'blocked');
+    assert.equal(run.nodeStates.verify.status, 'blocked');
+    assert.equal(run.nodeStates.verify.blocker, 'verified_empty');
+    assert.match(run.nodeStates.verify.actionHint, /验真没有通过词/);
+    assert.match(run.nodeStates.verify.actionHint, /重新挖词/);
+    assert.deepEqual(run.nodeStates.verify.nextRecommendedAction, {
+      action: 'mine-more',
+      label: '补充候选词',
+      description: '当前没有通过生意参谋验真的词，先补充候选词再重跑验真。'
+    });
+  });
+
+  it('keeps inspiration SYCM connection failures on the mining node', () => {
+    const dataDir = tempPipelineDir();
+    const runId = 'mining_chrome_failure_run';
+    const runDir = path.join(dataDir, 'runs', runId);
+    writeJson(path.join(runDir, 'run.json'), {
+      runId,
+      status: 'mining_manual_action_required',
+      startedAt: '2026-06-29T04:00:00.000Z',
+      updatedAt: '2026-06-29T04:01:00.000Z',
+      counts: { candidates: 0, inspirations: 8, selectedRoots: 2 },
+      discovery: {
+        mode: 'inspiration',
+        blocker: 'sycm_chrome_unavailable',
+        blockerReason: 'No Chrome tab found on port 9222'
+      },
+      files: {}
+    });
+
+    const run = getWorkflowRun({ dataDir, runId });
+
+    assert.equal(run.nodeStates.mine.status, 'blocked');
+    assert.equal(run.nodeStates.keywordReview.status, 'idle');
+    assert.equal(run.nodeStates.mine.blocker, 'sycm_chrome_unavailable');
+    assert.match(run.nodeStates.mine.actionHint, /No Chrome tab/);
+    assert.equal(run.nodeStates.mine.nextRecommendedAction.action, 'start-sycm-chrome');
+  });
+
+  it('surfaces SYCM CDP failures from sycm results instead of generic empty verification guidance', () => {
+    const dataDir = tempPipelineDir();
+    const runId = 'sycm_cdp_failure_run';
+    const runDir = path.join(dataDir, 'runs', runId);
+    writeJson(path.join(runDir, 'run.json'), {
+      runId,
+      status: 'verified_empty',
+      startedAt: '2026-06-29T04:00:00.000Z',
+      updatedAt: '2026-06-29T04:01:00.000Z',
+      counts: {
+        candidates: 1,
+        sycmVerified: 0,
+        sycmRejected: 1
+      },
+      files: {
+        sycmResults: path.join(runDir, 'sycm-results.jsonl'),
+        verifiedKeywords: path.join(runDir, 'verified-keywords.jsonl')
+      }
+    });
+    writeJson(path.join(runDir, 'runtime.json'), {
+      status: 'blocked',
+      activeStep: WORKFLOW_NODE_IDS.verify,
+      steps: ['mine', 'verify', 'generate', 'export', 'review'],
+      progress: {
+        verify: { status: 'completed', current: 1, total: 1, percent: 100, message: '完成' }
+      }
+    });
+    writeText(path.join(runDir, 'sycm-results.jsonl'), JSON.stringify({
+      keyword: '纯银项链',
+      ok: false,
+      status: 'transient_failure',
+      error: 'connect ECONNREFUSED 127.0.0.1:9222',
+      manualAction: {
+        status: 'transient_failure',
+        userMessage: '生意参谋暂时访问失败，可稍后重试。'
+      }
+    }) + '\n');
+
+    const run = getWorkflowRun({ dataDir, runId });
+
+    assert.equal(run.nodeStates.verify.status, 'blocked');
+    assert.equal(run.nodeStates.verify.blocker, 'sycm_transient_failure');
+    assert.equal(run.nodeStates.verify.platform, 'sycm');
+    assert.equal(run.nodeStates.verify.platformStatus, 'transient_failure');
+    assert.match(run.nodeStates.verify.actionHint, /Chrome CDP 不可用/);
+    assert.match(run.nodeStates.verify.actionHint, /9222/);
+    assert.deepEqual(run.nodeStates.verify.nextRecommendedAction, {
+      action: 'start-sycm-chrome',
+      label: '启动 Chrome',
+      description: '启动带远程调试端口的 Chrome，登录生意参谋后重试校验。'
+    });
+  });
+
+  it('maps missing Chrome tab cooldown errors to a Chrome startup action', () => {
+    const dataDir = tempPipelineDir();
+    const runId = 'sycm-no-chrome-tab-run';
+    const runDir = path.join(dataDir, 'runs', runId);
+    fs.mkdirSync(runDir, { recursive: true });
+    fs.writeFileSync(path.join(runDir, 'run.json'), JSON.stringify({
+      runId,
+      status: 'manual_action_required',
+      stage: 'verified',
+      files: { sycmResults: path.join(runDir, 'sycm-results.jsonl') }
+    }));
+    fs.writeFileSync(path.join(runDir, 'sycm-results.jsonl'), JSON.stringify({
+      ok: false,
+      status: 'transient_failure',
+      error: 'sycm access is cooling down: No Chrome tab found on port 9222'
+    }) + '\n');
+
+    const run = getWorkflowRun({ dataDir, runId });
+
+    assert.equal(run.nodeStates.verify.status, 'blocked');
+    assert.match(run.nodeStates.verify.actionHint, /Chrome CDP 不可用/);
+    assert.equal(run.nodeStates.verify.nextRecommendedAction.action, 'start-sycm-chrome');
+  });
+
+  it('surfaces a Taobao desktop access restriction instead of a page retry', () => {
+    const run = pipelineSummaryToWorkflowRun({
+      runId: 'competitor-access-restricted',
+      status: 'manual_action_required',
+      blockers: ['taobao_native_manual_action_required'],
+      options: { mode: 'competitor-analysis' },
+      manualAction: {
+        platform: 'taobao-native',
+        status: 'TAOBAO_NATIVE_TOOL_ERROR',
+        userMessage: '淘宝店铺的排序页面未完整加载。',
+        errors: [{
+          code: 'TAOBAO_NATIVE_TOOL_ERROR',
+          message: '内测期间仅开放部分用户使用，请关注后续公告'
+        }]
+      },
+      runtime: {
+        status: 'blocked',
+        activeStep: WORKFLOW_NODE_IDS.collectCompetitors,
+        mode: 'competitor-analysis',
+        progress: {
+          collectCompetitors: {
+            status: 'blocked',
+            current: 0,
+            total: 4,
+            message: '淘宝店铺的排序页面未完整加载。'
+          }
+        }
+      }
+    });
+
+    const state = run.nodeStates.collectCompetitors;
+    assert.equal(state.platformStatus, 'TAOBAO_NATIVE_ACCESS_RESTRICTED');
+    assert.match(state.actionHint, /完全退出并重新启动客户端/);
+    assert.match(state.progress.message, /账号开放状态/);
+    assert.equal(state.nextRecommendedAction.label, '打开淘宝客户端');
+  });
+
+  it('maps explicit pipeline statuses to production node states', () => {
+    const cases = [
+      {
+        status: 'manual_action_required',
+        stage: 'verified',
+        expected: { verify: 'blocked', generate: 'idle', export: 'idle', review: 'idle', end: 'idle' }
+      },
+      {
+        status: 'verified_partial_manual_required',
+        stage: 'verified',
+        expected: { verify: 'blocked', generate: 'idle', export: 'idle', review: 'idle', end: 'idle' }
+      },
+      {
+        status: 'verified_empty',
+        stage: 'verified',
+        expected: { verify: 'blocked', generate: 'idle', export: 'idle', review: 'idle', end: 'idle' }
+      },
+      {
+        status: 'generate_failed',
+        stage: 'generated',
+        expected: { verify: 'completed', generate: 'failed', export: 'idle', review: 'idle', end: 'idle' }
+      },
+      {
+        status: 'needs_review',
+        stage: 'review',
+        expected: { export: 'needs_review', review: 'idle', end: 'idle' }
+      },
+      {
+        status: 'ready_to_distribute',
+        stage: 'ready',
+        expected: { export: 'waiting_confirmation', review: 'idle', end: 'idle' }
+      },
+      {
+        status: 'awaiting_user_confirmation',
+        stage: 'ready',
+        expected: { export: 'waiting_confirmation', review: 'idle', end: 'idle' }
+      },
+      {
+        status: 'workflow_complete',
+        stage: 'submitted',
+        expected: {
+          start: 'completed',
+          mine: 'completed',
+          verify: 'completed',
+          generate: 'completed',
+          export: 'completed',
+          review: 'completed',
+          end: 'completed'
+        }
+      }
+    ];
+
+    for (const item of cases) {
+      const run = pipelineSummaryToWorkflowRun({
+        runId: `${item.status}_run`,
+        status: item.status,
+        stage: item.stage,
+        startedAt: '2026-06-29T04:00:00.000Z',
+        updatedAt: '2026-06-29T04:10:00.000Z',
+        counts: { candidates: 2, sycmVerified: 1, generatedProducts: 1, readyToDistribute: 1 },
+        files: {}
+      });
+
+      for (const [nodeId, expectedStatus] of Object.entries(item.expected)) {
+        assert.equal(run.nodeStates[nodeId].status, expectedStatus, `${item.status} maps ${nodeId}`);
+      }
+    }
+  });
+
+  it('shows the actual MiniMax title-generation failure instead of a stale GLM hint', () => {
+    const run = pipelineSummaryToWorkflowRun({
+      runId: 'minimax_generate_failed',
+      status: 'generate_failed',
+      stage: 'generated',
+      counts: { generatedProducts: 0 },
+      files: {},
+      previews: {
+        generatedProducts: [{
+          status: 'generate_failed',
+          error: '标题生成超时(120s)，请简化关键词或减少数量',
+          code: 'title_generation_timeout',
+          llmProvider: 'minimax',
+          llmModel: 'MiniMax-M3'
+        }]
+      }
+    });
+
+    assert.match(run.nodeStates.generate.actionHint, /MiniMax（MiniMax-M3）/);
+    assert.match(run.nodeStates.generate.actionHint, /标题生成超时\(120s\)/);
+    assert.doesNotMatch(run.nodeStates.generate.actionHint, /检查 GLM 配置/);
+    assert.equal(run.nodeStates.generate.nextRecommendedAction.action, 'retry-node');
+  });
+
+  it('shows manual 1688 detail failures on the product node before SYCM verification', () => {
+    const run = pipelineSummaryToWorkflowRun({
+      runId: 'manual_detail_failed',
+      status: 'select_failed',
+      stage: 'selected',
+      options: { mode: 'manual', workflowVersion: 3 },
+      counts: { selectedProducts: 0, productEnrichFailed: 1 },
+      files: {},
+      previews: {
+        selectedProducts: [{
+          status: 'enrich_failed',
+          offerId: '993531162503',
+          enrichError: '1688 返回结果中没有商品标题'
+        }]
+      }
+    });
+
+    assert.equal(run.nodeStates.select.blocker, 'product_detail_fetch_failed');
+    assert.match(run.nodeStates.select.actionHint, /尚未进入生意参谋验真/);
+    assert.equal(run.nodeStates.select.platform, '1688');
+    assert.equal(run.nodeStates.select.nextRecommendedAction.label, '重试获取商品资料');
+    assert.equal(run.nodeStates.verify.status, 'idle');
+  });
+
+  it('keeps product-selection diagnostics when a failed runtime overlays the node state', () => {
+    const run = pipelineSummaryToWorkflowRun({
+      runId: 'product_gate_failed',
+      status: 'select_failed',
+      stage: 'selected',
+      counts: { productsEvaluated: 54, productRejected: 54, selectedProducts: 0 },
+      funnel: { select: { input: 54, rejected: 54, selected: 0 } },
+      files: {},
+      runtime: {
+        status: 'failed',
+        activeStep: WORKFLOW_NODE_IDS.select,
+        progress: { select: { status: 'failed', current: 54, total: 54, percent: 100 } }
+      }
+    });
+
+    assert.match(run.nodeStates.select.actionHint, /已获取 54 个 1688 货源/);
+    assert.doesNotMatch(run.nodeStates.select.actionHint, /确认生意参谋页面状态/);
+    assert.equal(run.nodeStates.select.platform, '1688');
+    assert.equal(run.nodeStates.select.nextRecommendedAction.action, 'product-review');
+  });
+
+  it('offers Chrome recovery when manual order-sheet product enrichment cannot reach CDP', () => {
+    const dataDir = tempPipelineDir();
+    const productRankFile = path.join(dataDir, 'runs', 'order_sheet_cdp_failed', 'sycm-product-rank.jsonl');
+    writeText(productRankFile, JSON.stringify({
+      itemId: '1042421302304',
+      enrichmentStatus: 'failed',
+      enrichmentError: 'Chrome 调试连接不可用（端口 9222）：connect ECONNREFUSED 127.0.0.1:9222'
+    }) + '\n');
+
+    const run = pipelineSummaryToWorkflowRun({
+      runId: 'order_sheet_cdp_failed',
+      status: 'manual_action_required',
+      options: { mode: 'order-sheet', inputMode: 'manual' },
+      files: { productRank: productRankFile },
+      runtime: {
+        status: 'blocked',
+        activeStep: WORKFLOW_NODE_IDS.collectRank,
+        mode: 'order-sheet',
+        params: { inputMode: 'manual', port: 9222 },
+        progress: {
+          collectRank: { status: 'completed', current: 1, total: 1, percent: 100, message: '商品资料读取完成' }
+        },
+        manualAction: {
+          platform: 'taobao',
+          status: 'product_details_required',
+          userMessage: '1 个指定商品没有读取到标题。'
+        }
+      }
+    });
+
+    assert.equal(run.nodeStates.collectRank.status, 'blocked');
+    assert.equal(run.nodeStates.collectRank.blocker, 'order_sheet_browser_cdp_unavailable');
+    assert.equal(run.nodeStates.collectRank.platform, 'taobao');
+    assert.equal(run.nodeStates.collectRank.platformStatus, 'browser_cdp_unavailable');
+    assert.match(run.nodeStates.collectRank.actionHint, /9222/);
+    assert.deepEqual(run.nodeStates.collectRank.nextRecommendedAction, {
+      action: 'start-sycm-chrome',
+      label: '启动 Chrome',
+      description: '启动带调试端口的 Chrome，并打开第一个待读取的淘宝商品。'
+    });
+  });
+
+  it('lists, gets, and reads workflow node artifacts from pipeline runs', () => {
+    const dataDir = tempPipelineDir();
+    const runId = 'artifact_run';
+    const runDir = path.join(dataDir, 'runs', runId);
+    writeJson(path.join(runDir, 'run.json'), {
+      runId,
+      status: 'generated',
+      startedAt: '2026-06-29T04:00:00.000Z',
+      updatedAt: '2026-06-29T04:10:00.000Z',
+      counts: { candidates: 2, sycmVerified: 1, generatedProducts: 1 },
+      discovery: { mode: 'inspiration', stats: { inspirationCount: 1, selectedRootCount: 1 } },
+      files: {
+        candidates: path.join(runDir, 'candidates.jsonl'),
+        inspirations: path.join(runDir, 'inspirations.jsonl'),
+        rootCandidates: path.join(runDir, 'root-candidates.jsonl'),
+        verifiedKeywords: path.join(runDir, 'verified-keywords.jsonl'),
+        generatedProducts: path.join(runDir, 'generated-products.jsonl')
+      }
+    });
+    writeText(path.join(runDir, 'candidates.jsonl'), '{"keyword":"项链"}\n{"keyword":"耳环"}\n');
+    writeText(path.join(runDir, 'inspirations.jsonl'), '{"id":"insp-1","inspirationWord":"通勤"}\n');
+    writeText(path.join(runDir, 'root-candidates.jsonl'), '{"rootKeyword":"项链","status":"selected"}\n');
+    writeText(path.join(runDir, 'verified-keywords.jsonl'), '{"keyword":"项链","status":"verified"}\n');
+    writeText(path.join(runDir, 'generated-products.jsonl'), '{"title":"纯银项链"}\n');
+
+    const listed = listWorkflowRuns({ dataDir });
+    const run = getWorkflowRun({ dataDir, runId });
+    const legacyRun = getWorkflowRun(runId, { dataDir });
+    const startArtifact = readWorkflowNodeArtifact({ dataDir, runId, nodeId: WORKFLOW_NODE_IDS.start });
+    const mineArtifact = readWorkflowNodeArtifact({ dataDir, runId, nodeId: WORKFLOW_NODE_IDS.mine });
+    const generateArtifact = readWorkflowNodeArtifact({ dataDir, runId, nodeId: WORKFLOW_NODE_IDS.generate });
+
+    assert.equal(listed.latest.runId, runId);
+    assert.equal(legacyRun.runId, runId);
+    assert.equal(run.nodeStates.generate.status, 'completed');
+    assert.equal(run.nodeStates.export.status, 'running');
+    assert.equal(startArtifact, null);
+    assert.deepEqual(mineArtifact.rows.map(row => row.keyword), ['项链', '耳环']);
+    assert.deepEqual(mineArtifact.inspirationRows.map(row => row.inspirationWord), ['通勤']);
+    assert.deepEqual(mineArtifact.rootRows.map(row => row.rootKeyword), ['项链']);
+    assert.equal(mineArtifact.discovery.mode, 'inspiration');
+    assert.deepEqual(generateArtifact.rows, [{ title: '纯银项链' }]);
+    assert.equal(readWorkflowNodeArtifact({ dataDir, runId, nodeId: WORKFLOW_NODE_IDS.end }), null);
+  });
+
+  it('deletes pipeline workflow run directories and clears latest pointer', () => {
+    const dataDir = tempPipelineDir();
+    const runId = 'delete_run';
+    const runDir = path.join(dataDir, 'runs', runId);
+    writeJson(path.join(runDir, 'run.json'), {
+      runId,
+      status: 'mined',
+      startedAt: '2026-06-29T04:00:00.000Z',
+      updatedAt: '2026-06-29T04:10:00.000Z',
+      counts: { candidates: 1 },
+      files: { candidates: path.join(runDir, 'candidates.jsonl') }
+    });
+    writeJson(path.join(dataDir, 'latest.json'), { runId, runDir, updatedAt: '2026-06-29T04:10:00.000Z' });
+    writeText(path.join(runDir, 'candidates.jsonl'), '{"keyword":"项链"}\n');
+
+    const result = deleteWorkflowRun({ dataDir, runId });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.deleted.pipelineRun, true);
+    assert.equal(fs.existsSync(runDir), false);
+    assert.equal(fs.existsSync(path.join(dataDir, 'latest.json')), false);
+    assert.equal(getWorkflowRun({ dataDir, runId }), null);
+  });
+
+  it('persists workflow definitions and events next to pipeline runs', () => {
+    const dataDir = tempPipelineDir();
+    const runId = 'snapshot_run-1';
+    const definition = {
+      nodes: [{ id: WORKFLOW_NODE_IDS.start, type: 'production-start', data: { label: '开始' } }],
+      edges: []
+    };
+    const event = {
+      type: 'node_moved',
+      nodeId: WORKFLOW_NODE_IDS.start,
+      position: { x: 24, y: 48 }
+    };
+
+    const definitionFile = writeWorkflowDefinition({ dataDir, runId, definition });
+    const eventFile = appendWorkflowEvent({ dataDir, runId, event });
+
+    assert.equal(definitionFile, path.join(dataDir, 'runs', runId, 'workflow-definition.json'));
+    assert.equal(eventFile, path.join(dataDir, 'runs', runId, 'workflow-events.jsonl'));
+    assert.deepEqual(JSON.parse(fs.readFileSync(definitionFile, 'utf8')), definition);
+    assert.deepEqual(readWorkflowDefinition({ dataDir, runId }), definition);
+    assert.deepEqual(readWorkflowEvents({ dataDir, runId }), [event]);
+  });
+
+  it('restores the persisted workflow snapshot when mapping run history', () => {
+    const dataDir = tempPipelineDir();
+    const runId = 'snapshot_history_run';
+    const template = listProductionWorkflowTemplates().find(item => item.mode === 'daily');
+    const definition = {
+      id: template.id,
+      mode: template.mode,
+      nodes: template.workflow.nodes.map((node, index) => ({
+        ...node,
+        position: { x: 100 + index * 280, y: 240 },
+        data: { ...node.data, snapshotMarker: `node-${index}` }
+      })),
+      edges: template.workflow.edges
+    };
+    writeWorkflowDefinition({ dataDir, runId, definition });
+
+    const run = pipelineSummaryToWorkflowRun({
+      runId,
+      status: 'created',
+      options: { mode: 'daily' },
+      counts: {},
+      files: {}
+    }, { dataDir });
+
+    assert.deepEqual(run.workflow, definition);
+    assert.equal(run.workflow.nodes[0].position.y, 240);
+    assert.equal(run.workflow.nodes[0].data.snapshotMarker, 'node-0');
+  });
+
+  it('resolves a validated workflow snapshot and rejects template mismatches', () => {
+    const templates = listProductionWorkflowTemplates();
+    const daily = templates.find(item => item.mode === 'daily');
+    const launch = resolveProductionWorkflowLaunch({
+      templateId: daily.id,
+      mode: daily.mode,
+      workflow: daily.workflow,
+      params: { mine: 12 }
+    });
+
+    const definition = resolveProductionWorkflowDefinition({
+      templateId: daily.id,
+      workflow: daily.workflow
+    }, launch);
+    assert.equal(definition.id, daily.id);
+    assert.equal(definition.mode, 'daily');
+    assert.deepEqual(definition.nodes, daily.workflow.nodes);
+
+    const rootKeyword = templates.find(item => item.id === 'root-keyword-selection-v1');
+    const rootLaunch = resolveProductionWorkflowLaunch({
+      templateId: rootKeyword.id,
+      mode: rootKeyword.mode,
+      workflow: rootKeyword.workflow
+    });
+    const rootDefinition = resolveProductionWorkflowDefinition({
+      templateId: rootKeyword.id,
+      workflow: rootKeyword.workflow
+    }, rootLaunch);
+    assert.equal(rootDefinition.id, rootKeyword.id);
+    assert.equal(rootDefinition.mode, 'root-keyword');
+
+    assert.throws(() => resolveProductionWorkflowDefinition({
+      templateId: 'exact-keyword-v1',
+      workflow: daily.workflow
+    }, launch), /工作流定义与所选模板不一致/);
+  });
+
+  it('rejects unsafe workflow run ids for snapshots and events', () => {
+    const dataDir = tempPipelineDir();
+
+    assert.throws(() => writeWorkflowDefinition({
+      dataDir,
+      runId: '../outside',
+      definition: { nodes: [], edges: [] }
+    }), /Invalid workflow run id/);
+    assert.throws(() => appendWorkflowEvent({
+      dataDir,
+      runId: 'bad/run',
+      event: { type: 'node_moved' }
+    }), /Invalid workflow run id/);
+    assert.throws(() => readWorkflowEvents({
+      dataDir,
+      runId: 'bad.run'
+    }), /Invalid workflow run id/);
+  });
+
+  it('attaches persisted workflow events to workflow run details', () => {
+    const dataDir = tempPipelineDir();
+    const runId = 'eventful_run';
+    const runDir = path.join(dataDir, 'runs', runId);
+    writeJson(path.join(runDir, 'run.json'), {
+      runId,
+      status: 'created',
+      startedAt: '2026-06-29T04:00:00.000Z',
+      updatedAt: '2026-06-29T04:01:00.000Z',
+      counts: {},
+      files: {}
+    });
+    appendWorkflowEvent({ dataDir, runId, event: { type: 'node_selected', nodeId: WORKFLOW_NODE_IDS.mine } });
+    appendWorkflowEvent({ dataDir, runId, event: { type: 'viewport_changed', zoom: 0.8 } });
+
+    const run = getWorkflowRun({ dataDir, runId });
+
+    assert.deepEqual(run.workflowEvents, [
+      { type: 'node_selected', nodeId: WORKFLOW_NODE_IDS.mine },
+      { type: 'viewport_changed', zoom: 0.8 }
+    ]);
+  });
+
+    it('attaches distribution review actions to the merged export node', () => {
+    const reviewRun = pipelineSummaryToWorkflowRun({
+      runId: 'needs_review_action_run',
+      status: 'needs_review',
+      stage: 'review',
+      startedAt: '2026-06-29T04:00:00.000Z',
+      updatedAt: '2026-06-29T04:10:00.000Z',
+      counts: { readyToDistribute: 1 },
+      files: {}
+    });
+
+    assert.deepEqual(reviewRun.nodeStates.export.nextRecommendedAction, {
+      action: 'open-review',
+      label: '处理铺货复核',
+      description: '查看自动清单、拦截原因，并人工加入可铺货项。'
+    });
+
+    const readyRun = pipelineSummaryToWorkflowRun({
+      runId: 'ready_confirm_action_run',
+      status: 'ready_to_distribute',
+      stage: 'ready',
+      startedAt: '2026-06-29T04:00:00.000Z',
+      updatedAt: '2026-06-29T04:10:00.000Z',
+      counts: { readyToDistribute: 2 },
+      files: {}
+    });
+
+    assert.deepEqual(readyRun.nodeStates.export.nextRecommendedAction, {
+      action: 'confirm-distribution',
+      label: '确认铺货清单',
+      description: '铺货前必须人工确认具体商品清单，确认后再进入提交动作。'
+    });
+  });
+});

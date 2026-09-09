@@ -1,0 +1,898 @@
+const { test, describe } = require('node:test');
+const assert = require('node:assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { addSeed, listSeeds, loadSeeds } = require('../../../../skills/keyword-mining/src/seed-store');
+const { mineKeywords, clusterBySignature, diversifyCandidates } = require('../../../../skills/keyword-mining/src/pipeline');
+const { scoreKeyword } = require('../../../../skills/keyword-mining/src/score-keyword');
+const { expandSeed } = require('../../../../skills/keyword-mining/src/expand-keywords');
+const { rejectCandidate } = require('../../../../skills/keyword-mining/src/reject-combinations');
+const { keywordSignature } = require('../../../../skills/keyword-mining/src/keyword-signature');
+const { selectDiverseCandidates } = require('../../../../skills/keyword-mining/src/diversity-selector');
+const { normalizeAIResponse, generateAIKeywordCandidates, parseAIJson } = require('../../../../skills/keyword-mining/src/ai-mine-keywords');
+const { normalizeSynonyms } = require('../../../../skills/keyword-mining/src/config-loader');
+const { classifySeed } = require('../../../../skills/keyword-mining/src/seed-classifier');
+const { gateCandidate } = require('../../../../skills/keyword-mining/src/candidate-gate');
+const { buildSeedProfile, auditSeedPool, scheduleSeedProfiles } = require('../../../../skills/keyword-mining/src/seed-profile');
+const { applySeedFeedback } = require('../../../../skills/keyword-mining/src/seed-feedback');
+const { prepareSeedSuggestions } = require('../../../../skills/keyword-mining/src/seed-suggestions');
+const { buildSeedReplenishmentPlan } = require('../../../../skills/keyword-mining/src/seed-replenishment');
+const { extractShortRoot, selectShortRoots } = require('../../../../skills/keyword-mining/src/root-keywords');
+const { extractSearchPopularityFromSycmJson, extractSycmMetricsFromJson } = require('../../../../skills/keyword-mining/src/sycm-precheck');
+
+function tempDataDir() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'keyword-mining-'));
+}
+
+describe('keyword-mining', () => {
+  test('short root extraction keeps concrete product roots and rejects broad roots', () => {
+    assert.equal(extractShortRoot({ keyword: '纯银项链女高级感' }).root, '项链');
+    assert.equal(extractShortRoot({ keyword: '女装爆款' }), null);
+  });
+
+  test('short root rotation skips roots checked within cooldown', () => {
+    const dataDir = tempDataDir();
+    fs.writeFileSync(path.join(dataDir, 'root-history.jsonl'), JSON.stringify({ root: '项链', checkedAt: new Date().toISOString() }) + '\n');
+    const roots = selectShortRoots([
+      { keyword: '纯银项链女' },
+      { keyword: '和田玉吊坠女' }
+    ], { dataDir, limit: 2, cooldownDays: 7 });
+    assert.deepEqual(roots.map(item => item.root), ['吊坠']);
+  });
+
+  test('short root rotation falls back to the least recently used family', () => {
+    const dataDir = tempDataDir();
+    const now = Date.now();
+    fs.writeFileSync(path.join(dataDir, 'root-history.jsonl'), [
+      { root: '项链', checkedAt: new Date(now - 86400000).toISOString() },
+      { root: '吊坠', checkedAt: new Date(now - 2 * 86400000).toISOString() }
+    ].map(row => JSON.stringify(row)).join('\n') + '\n');
+
+    const roots = selectShortRoots([
+      { keyword: '纯银项链女' },
+      { keyword: '和田玉吊坠女' }
+    ], { dataDir, limit: 1, cooldownDays: 7 });
+
+    assert.deepEqual(roots.map(item => item.root), ['吊坠']);
+    assert.strictEqual(roots[0].cooldownFallback, true);
+  });
+
+  test('addSeed stores and sorts seeds', () => {
+    const dataDir = tempDataDir();
+    addSeed('戒指', { category: '饰品', priority: 10, reason: 'test', dataDir });
+    addSeed('宠物玩具', { category: '宠物', priority: 8, dataDir });
+
+    const seeds = listSeeds({ dataDir });
+    assert.strictEqual(seeds.length, 2);
+    assert.strictEqual(seeds[0].keyword, '戒指');
+    assert.strictEqual(seeds[0].priorityScore, 10);
+  });
+
+  test('listSeeds only returns active lifecycle seeds to daily mining by default', () => {
+    const dataDir = tempDataDir();
+    fs.writeFileSync(path.join(dataDir, 'seeds.json'), JSON.stringify([
+      { keyword: '活跃词', status: 'active', priority: 5 },
+      { keyword: '观察词', status: 'observing', priority: 9 },
+      { keyword: '探索词', status: 'explore', priority: 9 },
+      { keyword: '冷却词', status: 'cooling', priority: 9 }
+    ]));
+
+    assert.deepStrictEqual(listSeeds({ dataDir }).map(seed => seed.keyword), ['活跃词']);
+    assert.strictEqual(listSeeds({ dataDir, includePaused: true }).length, 4);
+  });
+
+  test('expandSeed creates specific candidates', () => {
+    const candidates = expandSeed({ keyword: '戒指', category: '饰品' }, { maxPerSeed: 30 });
+    const words = candidates.map(item => item.keyword);
+
+    assert.ok(words.includes('玛瑙戒指'));
+    assert.ok(words.includes('戒指女'));
+    assert.ok(candidates.every(item => item.seed === '戒指'));
+  });
+
+  test('expandSeed uses category rules for pet products', () => {
+    const candidates = expandSeed({ keyword: '宠物玩具', category: '宠物' }, { maxPerSeed: 60 });
+    const words = candidates.map(item => item.keyword);
+
+    assert.ok(words.includes('狗狗宠物玩具'));
+    assert.ok(words.includes('耐咬宠物玩具'));
+    assert.ok(words.includes('猫咪耐咬宠物玩具'));
+  });
+
+  test('expandSeed avoids material stacking and mismatched hair accessory crowds', () => {
+    const ringWords = expandSeed({ keyword: '玛瑙戒指', category: '饰品' }, { maxPerSeed: 80 }).map(item => item.keyword);
+    const hairWords = expandSeed({ keyword: '发夹', category: '发饰' }, { maxPerSeed: 80 }).map(item => item.keyword);
+
+    assert.ok(!ringWords.some(word => word.includes('纯银玛瑙戒指')));
+    assert.ok(!hairWords.some(word => word.includes('男士')));
+    assert.ok(hairWords.includes('珍珠发夹'));
+  });
+
+  test('classifySeed separates concrete products from broad scene seeds', () => {
+    assert.strictEqual(classifySeed({ keyword: '手机壳', category: '数码配件' }).role, 'product');
+    assert.strictEqual(classifySeed({ keyword: '情侣手机壳', category: '数码配件' }).role, 'qualified_product');
+    assert.strictEqual(classifySeed({ keyword: '宿舍好物', category: '开学宿舍' }).role, 'abstract');
+    assert.strictEqual(classifySeed({ keyword: '中秋', category: '节日礼品' }).role, 'event');
+    assert.strictEqual(classifySeed({ keyword: '床帘蚊帐一体', category: '开学宿舍' }).coreProduct, '床帘蚊帐');
+    assert.strictEqual(classifySeed({ keyword: '月饼包装礼盒', category: '中秋' }).coreProduct, '月饼包装盒');
+    assert.strictEqual(classifySeed({ keyword: '逗猫棒', category: '宠物' }).coreProduct, '逗猫咪棒');
+    assert.strictEqual(classifySeed({ keyword: '儿童益智玩具', category: '玩具' }).coreProduct, '婴童益智玩具');
+  });
+
+  test('seed profiles expose family dedupe, quality, and migration recommendations', () => {
+    const profile = buildSeedProfile({ keyword: '情侣手机壳', category: '七夕情侣', status: 'active', priority: 10 });
+    const report = auditSeedPool([
+      { keyword: '手机壳', category: '数码配件', status: 'active' },
+      { keyword: '情侣手机壳', category: '七夕情侣', status: 'active' },
+      { keyword: '宿舍好物', category: '开学宿舍', status: 'active' }
+    ]);
+
+    assert.strictEqual(profile.coreProduct, '手机壳');
+    assert.strictEqual(profile.familyKey, '手机壳');
+    assert.strictEqual(profile.role, 'discovery_root');
+    assert.ok(profile.qualityScore > 0);
+    assert.strictEqual(report.summary.repeatedFamilyGroups, 1);
+    assert.strictEqual(report.summary.contextOnly, 1);
+    assert.strictEqual(report.migration.find(item => item.keyword === '宿舍好物').recommendedStatus, 'observing');
+    assert.strictEqual(buildSeedProfile({ keyword: '汽车冰垫' }).familyKey, '冰垫');
+    assert.strictEqual(buildSeedProfile({ keyword: '办公室冰垫' }).familyKey, '冰垫');
+    assert.strictEqual(buildSeedProfile({ keyword: '手持小风扇' }).familyKey, '小风扇');
+    assert.strictEqual(buildSeedProfile({ keyword: '床帘蚊帐' }).familyKey, '床帘');
+  });
+
+  test('seed scheduler rotates stale roots while reserving observing capacity', () => {
+    const now = new Date('2026-07-31T00:00:00.000Z');
+    const profiles = auditSeedPool([
+      { keyword: '项链', status: 'active', priority: 10, lastUsedAt: '2026-07-31T00:00:00.000Z', consecutiveRuns: 5 },
+      { keyword: '吊坠', status: 'active', priority: 8, lastUsedAt: '2026-07-20T00:00:00.000Z' },
+      { keyword: '小风扇', status: 'observing', priority: 6 }
+    ]).profiles;
+
+    const scheduled = scheduleSeedProfiles(profiles, { maxSeeds: 2, maxObservingSeeds: 1, now });
+
+    assert.deepStrictEqual(new Set(scheduled.map(seed => seed.keyword)), new Set(['吊坠', '小风扇']));
+    assert.ok(scheduled.every(seed => Number.isFinite(seed.rotationScore)));
+  });
+
+  test('seed scheduler retries expired cooling roots but never revives paused roots', () => {
+    const now = new Date('2026-07-31T00:00:00.000Z');
+    const profiles = auditSeedPool([
+      { keyword: '项链', status: 'active', priority: 8 },
+      { keyword: '手机壳', status: 'cooling', priority: 8, lastUsedAt: '2026-07-20T00:00:00.000Z' },
+      { keyword: '戒指', status: 'paused', priority: 10, lastUsedAt: '2026-07-01T00:00:00.000Z' }
+    ]).profiles;
+
+    const scheduled = scheduleSeedProfiles(profiles, {
+      maxSeeds: 2,
+      maxObservingSeeds: 1,
+      coolingRetryDays: 3,
+      now
+    });
+
+    assert.deepStrictEqual(new Set(scheduled.map(seed => seed.keyword)), new Set(['项链', '手机壳']));
+    assert.ok(!scheduled.some(seed => seed.keyword === '戒指'));
+  });
+
+  test('seed feedback updates outcome stats without reviving manually paused seeds', () => {
+    const dataDir = tempDataDir();
+    addSeed('吊坠', { category: '饰品', status: 'observing', dataDir });
+    addSeed('手机壳', { category: '数码配件', status: 'paused', dataDir });
+
+    applySeedFeedback([
+      { root: '吊坠', runs: 2, candidates: 8, verified: 3, generationEligible: 1 },
+      { root: '手机壳', runs: 2, candidates: 8, verified: 3, generationEligible: 1 }
+    ], { dataDir });
+
+    const seeds = loadSeeds(dataDir);
+    const pendant = seeds.find(seed => seed.keyword === '吊坠');
+    const phoneCase = seeds.find(seed => seed.keyword === '手机壳');
+    assert.strictEqual(pendant.status, 'active');
+    assert.strictEqual(pendant.stats.generationEligible, 1);
+    assert.ok(pendant.lastUsedAt);
+    assert.strictEqual(pendant.consecutiveRuns, 1);
+    assert.strictEqual(phoneCase.status, 'paused');
+  });
+
+  test('seed feedback cools roots that repeatedly fail without verified output', () => {
+    const dataDir = tempDataDir();
+    addSeed('项链', { category: '饰品', status: 'active', dataDir });
+
+    applySeedFeedback([{ root: '项链', runs: 3, failures: 3 }], { dataDir });
+
+    const seed = loadSeeds(dataDir)[0];
+    assert.strictEqual(seed.status, 'cooling');
+    assert.strictEqual(seed.stats.failures, 3);
+  });
+
+  test('seed suggestions extract concrete roots and reject duplicate or abstract families', () => {
+    const result = prepareSeedSuggestions([
+      { keyword: '情侣手机壳', source: 'sycm_hot', searchPopularity: 800 },
+      { keyword: '宿舍好物', source: 'sycm_hot', searchPopularity: 600 },
+      { keyword: '宿舍遮光床帘', source: 'sycm_hot', searchPopularity: 500 },
+      { keyword: '学生宿舍床帘', source: 'sycm_hot', searchPopularity: 450 },
+      { keyword: '便携小风扇', source: 'sycm_hot', searchPopularity: 900 }
+    ], {
+      existingSeeds: [{ keyword: '手机壳', status: 'active' }],
+      maxSuggestions: 5
+    });
+
+    assert.deepStrictEqual(result.accepted.map(item => item.keyword), ['床帘', '小风扇']);
+    assert.ok(result.accepted.every(item => item.status === 'observing'));
+    assert.ok(result.rejected.some(item => item.sourceKeyword === '情侣手机壳' && item.reason === 'duplicate_family'));
+    assert.ok(result.rejected.some(item => item.sourceKeyword === '宿舍好物' && item.reason === 'not_concrete_product'));
+    assert.ok(result.rejected.some(item => item.sourceKeyword === '学生宿舍床帘' && item.reason === 'duplicate_family'));
+  });
+
+  test('seed replenishment plan applies per-source quotas and cross-source family dedupe', () => {
+    const result = buildSeedReplenishmentPlan({
+      sycm: [
+        { keyword: '便携小风扇', searchPopularity: 900 },
+        { keyword: '遮光床帘', searchPopularity: 700 }
+      ],
+      verified: [
+        { keyword: '学生宿舍床帘', searchPopularity: 800 },
+        { keyword: '创意钥匙扣', searchPopularity: 600 }
+      ]
+    }, {
+      existingSeeds: [],
+      sourceQuotas: { sycm: 1, verified: 2 },
+      maxSuggestions: 3
+    });
+
+    assert.deepStrictEqual(result.accepted.map(item => item.keyword), ['小风扇', '床帘', '钥匙扣']);
+    assert.strictEqual(result.bySource.sycm.accepted, 1);
+    assert.strictEqual(result.bySource.verified.accepted, 2);
+    assert.strictEqual(result.summary.sourcesUsed, 2);
+  });
+
+  test('seed suggestions respect a zero-capacity observing pool', () => {
+    const result = prepareSeedSuggestions([
+      { keyword: '便携小风扇', source: 'sycm_hot', searchPopularity: 900 }
+    ], {
+      existingSeeds: [],
+      maxSuggestions: 0
+    });
+
+    assert.strictEqual(result.accepted.length, 0);
+    assert.strictEqual(result.rejected[0].reason, 'suggestion_limit_reached');
+  });
+
+  test('SYCM mining can replenish observing roots from already fetched related words', async () => {
+    const dataDir = tempDataDir();
+    addSeed('项链', { category: '饰品', priority: 10, dataDir });
+
+    const result = await mineKeywords({
+      dataDir,
+      source: 'sycm_hot',
+      rootLimit: 1,
+      count: 3,
+      persist: false,
+      autoReplenishSeeds: true,
+      sycmExtractor: async keyword => ({
+        data: [
+          { keyword },
+          { keyword: '便携小风扇', searchPopularity: 900, demandSupplyRatio: 1.8 }
+        ]
+      })
+    });
+
+    const replenished = loadSeeds(dataDir).find(seed => seed.keyword === '小风扇');
+    assert.strictEqual(result.stats.seedReplenishment.accepted, 1);
+    assert.strictEqual(replenished.status, 'observing');
+    assert.strictEqual(replenished.familyKey, '小风扇');
+  });
+
+  test('SYCM mining stops replenishing when the observing pool reaches capacity', async () => {
+    const dataDir = tempDataDir();
+    addSeed('项链', { category: '饰品', priority: 10, dataDir });
+    addSeed('小风扇', { category: '家居', priority: 6, status: 'observing', dataDir });
+
+    const result = await mineKeywords({
+      dataDir,
+      source: 'sycm_hot',
+      rootLimit: 1,
+      count: 3,
+      persist: false,
+      autoReplenishSeeds: true,
+      maxObservingPoolSize: 1,
+      sycmExtractor: async keyword => ({
+        data: [
+          { keyword },
+          { keyword: '宿舍遮光床帘', searchPopularity: 800, demandSupplyRatio: 1.6 }
+        ]
+      })
+    });
+
+    assert.strictEqual(result.stats.seedReplenishment.accepted, 0);
+    assert.strictEqual(result.stats.seedReplenishment.capacityReached, true);
+    assert.strictEqual(loadSeeds(dataDir).some(seed => seed.keyword === '床帘'), false);
+  });
+
+  test('SYCM mining respects an explicit zero daily replenishment limit', async () => {
+    const dataDir = tempDataDir();
+    addSeed('项链', { category: '饰品', priority: 10, dataDir });
+
+    const result = await mineKeywords({
+      dataDir,
+      source: 'sycm_hot',
+      rootLimit: 1,
+      count: 3,
+      persist: false,
+      autoReplenishSeeds: true,
+      maxNewSeeds: 0,
+      sycmExtractor: async keyword => ({
+        data: [
+          { keyword },
+          { keyword: '便携小风扇', searchPopularity: 900, demandSupplyRatio: 1.8 }
+        ]
+      })
+    });
+
+    assert.strictEqual(result.stats.seedReplenishment.accepted, 0);
+    assert.strictEqual(loadSeeds(dataDir).some(seed => seed.keyword === '小风扇'), false);
+  });
+
+  test('expandSeed blocks mechanical function and scene prefixes for incompatible seeds', () => {
+    const dormWords = expandSeed({ keyword: '宿舍好物', category: '开学宿舍' }, { maxPerSeed: 80 }).map(item => item.keyword);
+    const festivalWords = expandSeed({ keyword: '中秋灯笼', category: '节日礼品' }, { maxPerSeed: 80 }).map(item => item.keyword);
+    const phoneCaseWords = expandSeed({ keyword: '情侣手机壳', category: '数码配件' }, { maxPerSeed: 80 }).map(item => item.keyword);
+    const outfitWords = expandSeed({ keyword: '情侣装夏', category: '服饰' }, { maxPerSeed: 80 }).map(item => item.keyword);
+    const moonCakeWords = expandSeed({ keyword: '月饼包装礼盒', category: '节日礼品' }, { maxPerSeed: 80 }).map(item => item.keyword);
+
+    assert.ok(!dormWords.includes('收纳宿舍好物'));
+    assert.ok(!dormWords.includes('便携宿舍好物'));
+    assert.ok(!festivalWords.includes('送礼中秋灯笼'));
+    assert.ok(!festivalWords.includes('便携中秋灯笼'));
+    assert.ok(!festivalWords.includes('收纳中秋灯笼'));
+    assert.ok(!phoneCaseWords.includes('便携情侣手机壳'));
+    assert.ok(!phoneCaseWords.includes('送礼情侣手机壳'));
+    assert.ok(!phoneCaseWords.includes('生日情侣手机壳'));
+    assert.ok(!phoneCaseWords.includes('情侣手机壳儿童'));
+    assert.ok(!outfitWords.includes('便携情侣装夏'));
+    assert.ok(!outfitWords.includes('收纳情侣装夏'));
+    assert.ok(!outfitWords.includes('情侣装夏儿童'));
+    assert.ok(!moonCakeWords.includes('便携月饼包装礼盒'));
+    assert.ok(!moonCakeWords.includes('收纳月饼包装礼盒'));
+    assert.ok(!moonCakeWords.includes('月饼包装礼盒儿童'));
+    assert.ok(!festivalWords.includes('中秋灯笼儿童'));
+    assert.ok(!phoneCaseWords.includes('学生党情侣手机壳'));
+    assert.ok(!festivalWords.includes('上班族中秋灯笼'));
+    assert.ok(!festivalWords.includes('高级感中秋灯笼'));
+  });
+
+  test('rejectCandidate blocks unreasonable combinations', () => {
+    assert.strictEqual(rejectCandidate('宝宝戒指').rejected, true);
+    assert.strictEqual(rejectCandidate('玛瑙宠物玩具').rejected, true);
+    assert.strictEqual(scoreKeyword('宝宝戒指').nextAction, 'reject');
+  });
+
+  test('facet reject rules normalize synonyms before blocking risky combinations', () => {
+    assert.strictEqual(rejectCandidate('小孩戒指').rejected, true);
+    assert.strictEqual(rejectCandidate('婴儿指环').rejected, true);
+    assert.strictEqual(normalizeSynonyms('礼物戒指').includes('送礼'), true);
+  });
+
+  test('scoreKeyword favors concrete product long-tail words', () => {
+    const scored = scoreKeyword('玛瑙戒指女');
+
+    assert.ok(scored.localScore >= 65);
+    assert.strictEqual(scored.nextAction, 'sycm_verify');
+    assert.strictEqual(scored.tier, 'high');
+    assert.ok(scored.reason.includes('材质+商品词+人群组合'));
+    assert.strictEqual(scored.coreProduct, '戒指');
+    assert.ok(scored.signature.includes('戒指'));
+    assert.ok(scored.signature.includes('玛瑙'));
+  });
+
+  test('keywordSignature groups reordered modifiers into the same direction', () => {
+    const a = keywordSignature('夏季防晒冰袖女');
+    const b = keywordSignature('防晒冰袖女夏季');
+
+    assert.strictEqual(a.coreProduct, '冰袖');
+    assert.strictEqual(a.signature, b.signature);
+  });
+
+  test('clusterBySignature keeps the best keyword and records alternatives', () => {
+    const items = ['夏季防晒冰袖女', '防晒冰袖女夏季', '珍珠发夹女'].map((word, index) => {
+      const scored = scoreKeyword(word);
+      return {
+        keyword: word,
+        localScore: scored.localScore + index,
+        signature: scored.signature,
+        coreProduct: scored.coreProduct
+      };
+    });
+
+    const clustered = clusterBySignature(items);
+    const iceSleeve = clustered.find(item => item.coreProduct === '冰袖');
+
+    assert.strictEqual(clustered.length, 2);
+    assert.ok(iceSleeve.cluster.includes('夏季防晒冰袖女'));
+    assert.ok(iceSleeve.cluster.includes('防晒冰袖女夏季'));
+    assert.strictEqual(iceSleeve.clusterSize, 2);
+  });
+
+  test('diversifyCandidates limits repeated core products', () => {
+    const items = ['玛瑙戒指女', '纯银戒指女', '朱砂戒指女', '珍珠发夹女'].map(word => {
+      const scored = scoreKeyword(word);
+      return {
+        keyword: word,
+        localScore: scored.localScore,
+        signature: scored.signature,
+        coreProduct: scored.coreProduct,
+        seed: scored.coreProduct,
+        category: '',
+        pattern: 'test'
+      };
+    });
+
+    const selected = diversifyCandidates(items, {
+      count: 10,
+      maxPerSeed: 10,
+      maxPerCategory: 10,
+      maxPerPattern: 10,
+      maxPerProductCore: 2
+    });
+
+    assert.strictEqual(selected.filter(item => item.coreProduct === '戒指').length, 2);
+    assert.ok(selected.some(item => item.coreProduct === '发夹'));
+  });
+
+  test('history-aware selection favors fresh families without lowering the quality floor', () => {
+    const now = '2026-07-31T00:00:00.000Z';
+    const items = [
+      { keyword: '学生遮光床帘', coreProduct: '床帘', familyKey: '床帘', signature: '床帘|学生|遮光', localScore: 86, seed: '床帘', pattern: 'test' },
+      { keyword: '大学宿舍床帘', coreProduct: '床帘', familyKey: '床帘', signature: '床帘|大学|宿舍', localScore: 84, seed: '床帘', pattern: 'test' },
+      { keyword: '便携小风扇', coreProduct: '小风扇', familyKey: '小风扇', signature: '小风扇|便携', localScore: 80, seed: '小风扇', pattern: 'test' },
+      { keyword: '宠物磨牙玩具', coreProduct: '宠物玩具', familyKey: '宠物玩具', signature: '宠物玩具|磨牙', localScore: 79, seed: '宠物玩具', pattern: 'test' }
+    ];
+    const history = {
+      keywords: {},
+      signatures: {},
+      families: {
+        'family:床帘': { lastSeenAt: '2026-07-30T00:00:00.000Z', runCount: 4, status: 'generated' }
+      }
+    };
+
+    const result = selectDiverseCandidates(items, {
+      count: 3,
+      maxPerSeed: 3,
+      maxPerCategory: 10,
+      maxPerPattern: 10,
+      maxPerProductCore: 3,
+      history,
+      now,
+      mode: 'balanced'
+    });
+
+    assert.strictEqual(result.selected.length, 3);
+    assert.strictEqual(result.stats.familyCount, 3);
+    assert.ok(result.selected.every(item => item.localScore >= 79));
+    assert.ok(result.selected.some(item => item.diversity.noveltyStatus === 'new_family'));
+  });
+
+  test('history-aware selection counts exact history filtering once per keyword', () => {
+    const result = selectDiverseCandidates([
+      { keyword: '旧词', coreProduct: '戒指', signature: '戒指|旧', localScore: 90, seed: '戒指', pattern: 'test' },
+      { keyword: '新词一', coreProduct: '项链', signature: '项链|新', localScore: 80, seed: '项链', pattern: 'test' },
+      { keyword: '新词二', coreProduct: '吊坠', signature: '吊坠|新', localScore: 79, seed: '吊坠', pattern: 'test' }
+    ], {
+      count: 3,
+      history: {
+        keywords: {
+          'kw:旧词': { lastSeenAt: '2026-07-30T00:00:00.000Z', runCount: 1 }
+        }
+      },
+      now: '2026-07-31T00:00:00.000Z',
+      excludeExactHistory: true
+    });
+
+    assert.strictEqual(result.stats.exactHistoryFiltered, 1);
+    assert.strictEqual(result.stats.shortfall, 1);
+  });
+
+  test('mineKeywords returns ranked candidates without persisting when disabled', async () => {
+    const dataDir = tempDataDir();
+    addSeed('戒指', { category: '饰品', priority: 10, dataDir });
+    addSeed('宠物玩具', { category: '宠物', priority: 9, dataDir });
+
+    const result = await mineKeywords({ dataDir, count: 10, persist: false });
+
+    assert.strictEqual(result.ok, true);
+    assert.strictEqual(result.seedsUsed, 2);
+    assert.ok(result.stats.expanded > 0);
+    assert.ok(result.stats.duplicatesRemoved >= 0);
+    assert.ok(result.candidates.length > 0);
+    assert.ok(result.candidates[0].localScore >= result.candidates[result.candidates.length - 1].localScore);
+    assert.ok(result.candidates.every(item => item.gateStatus));
+    assert.ok(result.candidates.every(item => item.canDistribute === false));
+    assert.strictEqual(fs.existsSync(path.join(dataDir, 'candidates.jsonl')), false);
+  });
+
+  test('mineKeywords excludes context seeds and dedupes active product families', async () => {
+    const dataDir = tempDataDir();
+    addSeed('手机壳', { category: '数码配件', priority: 10, dataDir });
+    addSeed('情侣手机壳', { category: '数码配件', priority: 9, dataDir });
+    addSeed('宿舍好物', { category: '开学宿舍', priority: 8, dataDir });
+
+    const result = await mineKeywords({ dataDir, count: 5, persist: false });
+
+    assert.strictEqual(result.stats.rootFamiliesUsed, 1);
+    assert.strictEqual(result.stats.duplicateRootFamiliesRemoved, 1);
+    assert.strictEqual(result.stats.skippedContextSeeds, 1);
+    assert.ok(result.candidates.every(item => item.seed !== '宿舍好物'));
+    assert.ok(new Set(result.candidates.map(item => item.seed)).size <= 1);
+  });
+
+  test('SYCM root history persists independently from candidate persistence', async () => {
+    const dataDir = tempDataDir();
+    addSeed('项链', { category: '饰品', priority: 10, dataDir });
+    addSeed('吊坠', { category: '饰品', priority: 9, dataDir });
+    const queried = [];
+    const sycmExtractor = async (keyword) => {
+      queried.push(keyword);
+      return { data: [{ keyword }, { keyword: `${keyword}女`, searchPopularity: 100 }] };
+    };
+
+    await mineKeywords({
+      dataDir,
+      source: 'sycm_hot',
+      rootLimit: 1,
+      count: 3,
+      persist: false,
+      sycmExtractor
+    });
+    await mineKeywords({
+      dataDir,
+      source: 'sycm_hot',
+      rootLimit: 1,
+      count: 3,
+      persist: false,
+      sycmExtractor
+    });
+
+    assert.deepStrictEqual(queried, ['项链', '吊坠']);
+    assert.strictEqual(fs.existsSync(path.join(dataDir, 'candidates.jsonl')), false);
+    const history = fs.readFileSync(path.join(dataDir, 'root-history.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+    assert.strictEqual(history.length, 2);
+    assert.ok(history.every(row => row.result === 'success' && row.candidateCount === 2));
+  });
+
+  test('daily SYCM mining reserves a limited slot for observing seeds', async () => {
+    const dataDir = tempDataDir();
+    addSeed('项链', { category: '饰品', status: 'active', dataDir });
+    addSeed('小风扇', { category: '家居', status: 'observing', dataDir });
+    addSeed('床帘', { category: '家居', status: 'observing', dataDir });
+    const queried = [];
+
+    const result = await mineKeywords({
+      dataDir,
+      source: 'sycm_hot',
+      rootLimit: 3,
+      maxObservingSeeds: 1,
+      persist: false,
+      sycmExtractor: async keyword => {
+        queried.push(keyword);
+        return { data: [{ keyword }, { keyword: `${keyword}女`, searchPopularity: 100 }] };
+      }
+    });
+
+    assert.strictEqual(result.stats.observingSeedsUsed, 1);
+    assert.strictEqual(queried.length, 2);
+    assert.ok(queried.includes('项链'));
+    assert.strictEqual(queried.filter(keyword => ['小风扇', '床帘'].includes(keyword)).length, 1);
+  });
+
+  test('mineKeywords skips recently seen candidates when daily dedupe is enabled', async () => {
+    const dataDir = tempDataDir();
+    addSeed('戒指', { category: '饰品', priority: 10, dataDir });
+    addSeed('宠物玩具', { category: '宠物', priority: 9, dataDir });
+
+    const first = await mineKeywords({
+      dataDir,
+      count: 3,
+      persist: false,
+      excludeSeen: true,
+      recordSeen: true
+    });
+    const second = await mineKeywords({
+      dataDir,
+      count: 3,
+      persist: false,
+      excludeSeen: true,
+      recordSeen: false
+    });
+
+    const firstWords = new Set(first.candidates.map(item => item.keyword));
+    const secondWords = second.candidates.map(item => item.keyword);
+    assert.ok(firstWords.size > 0);
+    assert.ok(secondWords.length > 0);
+    assert.ok(secondWords.every(word => !firstWords.has(word)));
+    assert.ok(second.stats.seenFiltered >= first.candidates.length);
+  });
+
+  test('mineKeywords reports progress for visible mining stages', async () => {
+    const dataDir = tempDataDir();
+    addSeed('戒指', { category: '饰品', priority: 10, dataDir });
+    addSeed('宠物玩具', { category: '宠物', priority: 9, dataDir });
+    const progress = [];
+
+    const result = await mineKeywords({
+      dataDir,
+      count: 10,
+      persist: false,
+      onProgress: (event) => progress.push(event)
+    });
+
+    assert.strictEqual(result.ok, true);
+    assert.ok(progress.some(event => event.stage === 'load-seeds' && event.message === '读取种子池'));
+    assert.ok(progress.some(event => event.stage === 'expand' && event.message.includes('扩展候选词')));
+    assert.ok(progress.some(event => event.stage === 'rank' && event.message.includes('排序筛选')));
+    assert.ok(progress.some(event => event.stage === 'complete' && event.message === `挖词完成 ${result.candidates.length} 个`));
+  });
+
+  test('mineKeywords default seed pool produces candidates', async () => {
+    const result = await mineKeywords({ count: 5, persist: false });
+
+    assert.strictEqual(result.ok, true);
+    assert.ok(result.stats.expanded > 0);
+    assert.ok(result.candidates.length > 0);
+  });
+
+  test('scoreKeyword treats new seeds as product words', () => {
+    const scored = scoreKeyword({ keyword: '便携瑜伽垫', seed: '瑜伽垫', pattern: 'style+seed' });
+
+    assert.strictEqual(scored.coreProduct, '瑜伽垫');
+    assert.ok(scored.localScore >= 50);
+    assert.notStrictEqual(scored.nextAction, 'reject');
+  });
+
+  test('scoreKeyword does not promote broad seeds as concrete products', () => {
+    const scored = scoreKeyword({ keyword: '收纳宿舍好物', seed: '宿舍好物', pattern: 'function+seed' });
+
+    assert.notStrictEqual(scored.coreProduct, '宿舍好物');
+    assert.ok(scored.localScore < 62);
+    assert.notStrictEqual(scored.nextAction, 'sycm_verify');
+  });
+
+  test('gateCandidate marks unverified and rejected candidates distinctly', () => {
+    const unverified = gateCandidate({
+      keyword: '玛瑙戒指女',
+      localScore: 88,
+      nextAction: 'sycm_verify',
+      coreProduct: '戒指'
+    });
+    const verified = gateCandidate({
+      keyword: '玛瑙戒指女',
+      localScore: 88,
+      nextAction: 'sycm_verify',
+      coreProduct: '戒指',
+      sycmData: { searchPopularity: 128, demandSupplyRatio: 1.4, clickRate: 18, conversionRate: 2.5 }
+    }, { minSearchPopularity: 50 });
+    const popularityOnly = gateCandidate({
+      keyword: '玛瑙戒指女',
+      localScore: 88,
+      nextAction: 'sycm_verify',
+      coreProduct: '戒指',
+      sycmData: { searchPopularity: 128 }
+    }, { minSearchPopularity: 50 });
+    const rejected = gateCandidate({
+      keyword: '收纳宿舍好物',
+      localScore: 52,
+      nextAction: 'observe',
+      coreProduct: '',
+      compatibility: { allowed: false, reason: '抽象场景词不适合直接拼接功能词' }
+    });
+
+    assert.strictEqual(unverified.gateStatus, 'candidate');
+    assert.strictEqual(unverified.canDistribute, false);
+    assert.strictEqual(verified.gateStatus, 'verified');
+    assert.strictEqual(verified.canDistribute, true);
+    assert.strictEqual(popularityOnly.gateStatus, 'review');
+    assert.strictEqual(popularityOnly.canDistribute, false);
+    assert.strictEqual(rejected.gateStatus, 'rejected');
+  });
+
+  test('sycm precheck reads CLI data payload shape', () => {
+    const popularity = extractSearchPopularityFromSycmJson({
+      ok: true,
+      data: [{ keyword: '弹力带', searchPopularity: 128 }]
+    });
+
+    assert.strictEqual(popularity, 128);
+  });
+
+  test('sycm precheck extracts market metrics beyond search popularity', () => {
+    const metrics = extractSycmMetricsFromJson({
+      ok: true,
+      data: [{
+        keyword: '弹力带',
+        searchPopularity: '128',
+        demandSupplyRatio: '1.8',
+        clickRate: '12.5%',
+        conversionRate: '2.1%',
+        buyerCount: '36'
+      }]
+    });
+
+    assert.deepStrictEqual(metrics, {
+      searchPopularity: 128,
+      demandSupplyRatio: 1.8,
+      clickRate: 12.5,
+      conversionRate: 2.1,
+      buyerCount: 36
+    });
+  });
+
+  test('mineKeywords applies diversity limits and next commands', async () => {
+    const dataDir = tempDataDir();
+    addSeed('戒指', { category: '饰品', priority: 10, dataDir });
+    addSeed('宠物玩具', { category: '宠物', priority: 9, dataDir });
+
+    const result = await mineKeywords({ dataDir, count: 12, outputMaxPerSeed: 2, persist: false });
+    const bySeed = new Map();
+    for (const item of result.candidates) {
+      bySeed.set(item.seed, (bySeed.get(item.seed) || 0) + 1);
+      assert.ok(item.nextCommands.hotCheck.includes('--mode hot'));
+      assert.ok(item.nextCommands.blueExplore.includes('--mode blue'));
+      assert.ok(['high', 'mid', 'low'].includes(item.tier));
+    }
+
+    assert.ok(result.candidates.length > 0);
+    assert.ok([...bySeed.values()].every(count => count <= 2));
+  });
+
+  test('mineKeywords separates direct seeds by default', async () => {
+    const dataDir = tempDataDir();
+    addSeed('水枪玩具', { category: '玩具', priority: 10, type: 'direct', dataDir });
+
+    const result = await mineKeywords({ dataDir, count: 5, persist: false });
+
+    assert.ok(result.directKeywords.some(item => item.keyword === '水枪玩具' && item.pattern === 'direct-seed'));
+    assert.ok(!result.candidates.some(item => item.keyword === '水枪玩具' && item.pattern === 'direct-seed'));
+  });
+
+  test('mineKeywords can optionally include direct seeds as candidates', async () => {
+    const dataDir = tempDataDir();
+    addSeed('水枪玩具', { category: '玩具', priority: 10, type: 'direct', dataDir });
+
+    const result = await mineKeywords({ dataDir, count: 5, persist: false, includeDirect: true });
+
+    assert.ok(result.candidates.some(item => item.keyword === '水枪玩具' && item.pattern === 'direct-seed'));
+  });
+
+  test('normalizeAIResponse filters invalid AI candidates', () => {
+    const candidates = normalizeAIResponse({
+      candidates: [
+        { keyword: '便携弹力带', seed: '弹力带', category: '运动健身', confidence: 85, reason: '具体商品' },
+        { keyword: '便携弹力带', seed: '弹力带', confidence: 80 },
+        { keyword: '', confidence: 90 }
+      ]
+    }, 10);
+
+    assert.strictEqual(candidates.length, 1);
+    assert.strictEqual(candidates[0].keyword, '便携弹力带');
+    assert.strictEqual(candidates[0].source, 'ai');
+    assert.strictEqual(candidates[0].aiConfidence, 85);
+  });
+
+  test('parseAIJson salvages candidate objects from truncated output', () => {
+    const parsed = parseAIJson('prefix {"candidates":[{"keyword":"便携瑜伽垫","confidence":80},{"keyword":"收纳瑜伽垫","confidence":70}');
+    const candidates = normalizeAIResponse(parsed, 10);
+
+    assert.ok(candidates.some(item => item.keyword === '便携瑜伽垫'));
+  });
+
+  test('generateAIKeywordCandidates splits large AI requests into batches and keeps partial success', async () => {
+    const calls = [];
+    const result = await generateAIKeywordCandidates({
+      seeds: [{ keyword: '瑜伽垫', category: '运动健身' }],
+      maxCandidates: 45,
+      batchSize: 20,
+      llmClient: {
+        provider: 'mock-ai',
+        model: 'mock-model',
+        async generateKeywordCandidates({ maxCandidates, batchIndex }) {
+          calls.push({ maxCandidates, batchIndex });
+          if (batchIndex === 2) throw new Error('batch failed');
+          return {
+            candidates: [
+              { keyword: `便携瑜伽垫${batchIndex}`, seed: '瑜伽垫', category: '运动健身', confidence: 80 }
+            ]
+          };
+        }
+      }
+    });
+
+    assert.deepStrictEqual(calls.map(call => call.maxCandidates), [20, 20, 5]);
+    assert.strictEqual(result.meta.batches, 3);
+    assert.strictEqual(result.meta.failedBatches.length, 1);
+    assert.strictEqual(result.candidates.length, 2);
+  });
+
+  test('mineKeywords supports AI-only source with injected client', async () => {
+    const dataDir = tempDataDir();
+    addSeed('弹力带', { category: '运动健身', priority: 10, dataDir });
+
+    const result = await mineKeywords({
+      dataDir,
+      source: 'ai',
+      aiCandidates: 5,
+      count: 5,
+      persist: false,
+      llmClient: {
+        provider: 'mock-ai',
+        model: 'mock-model',
+        async generateKeywordCandidates() {
+          return {
+            candidates: [
+              { keyword: '便携弹力带', seed: '弹力带', category: '运动健身', confidence: 86, reason: '适合居家训练' },
+              { keyword: '收纳弹力带', seed: '弹力带', category: '运动健身', confidence: 74, reason: '功能明确' }
+            ]
+          };
+        }
+      }
+    });
+
+    assert.strictEqual(result.stats.source, 'ai');
+    assert.strictEqual(result.stats.ai.provider, 'mock-ai');
+    assert.strictEqual(result.stats.ai.generated, 2);
+    assert.ok(result.candidates.every(item => item.source === 'ai'));
+    assert.ok(result.candidates.some(item => item.keyword === '便携弹力带'));
+  });
+
+  test('mineKeywords supports hybrid source', async () => {
+    const dataDir = tempDataDir();
+    addSeed('弹力带', { category: '运动健身', priority: 10, dataDir });
+
+    const result = await mineKeywords({
+      dataDir,
+      source: 'hybrid',
+      aiCandidates: 3,
+      count: 10,
+      persist: false,
+      llmClient: {
+        provider: 'mock-ai',
+        model: 'mock-model',
+        async generateKeywordCandidates() {
+          return {
+            candidates: [
+              { keyword: '便携弹力带', seed: '弹力带', category: '运动健身', confidence: 88, reason: '场景明确' }
+            ]
+          };
+        }
+      }
+    });
+
+    assert.strictEqual(result.stats.source, 'hybrid');
+    assert.ok(result.stats.expanded > result.stats.ai.generated);
+    assert.ok(result.candidates.some(item => item.source === 'ai'));
+    assert.ok(result.candidates.some(item => item.source === 'local'));
+  });
+
+  test('mineKeywords falls back to local candidates when hybrid AI fails', async () => {
+    const dataDir = tempDataDir();
+    addSeed('弹力带', { category: '运动健身', priority: 10, dataDir });
+
+    const result = await mineKeywords({
+      dataDir,
+      source: 'hybrid',
+      count: 5,
+      persist: false,
+      llmClient: {
+        provider: 'mock-ai',
+        model: 'mock-model',
+        async generateKeywordCandidates() {
+          throw new Error('temporary AI failure');
+        }
+      }
+    });
+
+    assert.strictEqual(result.stats.source, 'hybrid');
+    assert.strictEqual(result.stats.ai.generated, 0);
+    assert.match(result.stats.ai.error, /temporary AI failure/);
+    assert.ok(result.candidates.length > 0);
+    assert.ok(result.candidates.every(item => item.source === 'local'));
+  });
+});
