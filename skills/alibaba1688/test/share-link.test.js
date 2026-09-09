@@ -3,11 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const {
-  extract1688ShareUrls,
-  parse1688ShareText,
-  resolve1688ShareText
-} = require('..');
+const { extract1688ShareUrls, parse1688ShareText, resolve1688ShareText } = require('../src/client');
 
 const canonical = {
   offerId: '945020396141',

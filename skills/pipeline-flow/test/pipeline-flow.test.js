@@ -6,31 +6,21 @@ const path = require('path');
 const extraction = require('../../title-gen/src/extract-core');
 // 流水线测试验证编排；关键词提取使用本地降级，避免真实模型请求。
 mock.method(extraction, 'extractKeywords', async (_mode, input) => extraction.fallbackExtract(input.data));
-const { addSeed } = require('../../keyword-mining');
-const {
-  flowDaily,
-  flowMine,
-  flowReviewCandidates,
-  flowSelectProducts,
-  flowReviewProducts,
-  flowManualStart,
-  flowEnrichManualProducts,
-  flowVerifyManualProducts,
-  flowVerify,
-  flowGenerate,
-  flowExport,
-  flowKeyword,
-  appendRunCandidates,
-  getRun,
-  readJsonl,
-  scoreSycmRows,
-  fetchSycmWithFallback,
-  validateGeneratedRow,
-  categoryAssessment,
-  scoreKeywordOpportunity,
-  scoreProductOpportunity,
-  summarizeOpportunities
-} = require('..');
+const { addSeed } = require('../../keyword-mining/src/seed-store');
+const { flowDaily, flowKeyword } = require('../src/flow-orchestrator');
+const { flowMine, appendRunCandidates } = require('../src/keyword-mining-flow');
+const { flowReviewCandidates } = require('../src/keyword-review-flow');
+const { flowSelectProducts } = require('../src/product-selection-flow');
+const { flowReviewProducts, flowManualStart, flowEnrichManualProducts } = require('../src/manual-flow');
+const { flowVerifyManualProducts } = require('../src/manual-keyword-flow');
+const { flowVerify } = require('../src/keyword-verification-flow');
+const { flowGenerate } = require('../src/title-generation-flow');
+const { flowExport } = require('../src/export-flow');
+const { getRun, readJsonl } = require('../src/run-store');
+const { scoreSycmRows, fetchSycmWithFallback } = require('../src/sycm-verifier');
+const { validateGeneratedRow, categoryAssessment } = require('../src/export-validator');
+const { scoreKeywordOpportunity, scoreProductOpportunity } = require('../src/opportunity-scoring');
+const { summarizeOpportunities } = require('../src/opportunity-store');
 
 function tempDataDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'pipeline-flow-'));

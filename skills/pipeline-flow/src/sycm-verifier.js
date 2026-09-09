@@ -1,6 +1,6 @@
 'use strict';
 
-const { extractSycmData, DEFAULT_FILTER_CONDITIONS } = require('../../sycm-research');
+const { extractSycmData, DEFAULT_FILTER_CONDITIONS } = require('../../sycm-research/src/sycm-cdp-extractor');
 
 const DEFAULT_RELAXED_FILTER_CONDITIONS = {
   demandSupplyRatio: 0.5,

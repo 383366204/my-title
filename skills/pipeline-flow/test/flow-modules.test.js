@@ -3,12 +3,7 @@
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const test = require('node:test');
-const pipeline = require('..');
-const {
-  buildFlowCommand,
-  isGenerationEligibleKeyword,
-  resolveOpportunityDir
-} = require('../src/flow-context');
+const { buildFlowCommand, isGenerationEligibleKeyword, resolveOpportunityDir } = require('../src/flow-context');
 const manualFlow = require('../src/manual-flow');
 const miningFlow = require('../src/keyword-mining-flow');
 const reviewFlow = require('../src/keyword-review-flow');
@@ -19,21 +14,14 @@ const { flowGenerate } = require('../src/title-generation-flow');
 const { flowExport } = require('../src/export-flow');
 const { createWorkflowRunner } = require('../src/workflow-runner');
 
-test('pipeline facade exposes the extracted stage implementations', () => {
-  assert.equal(pipeline.flowManualStart, manualFlow.flowManualStart);
-  assert.equal(pipeline.flowEnrichManualProducts, manualFlow.flowEnrichManualProducts);
-  assert.equal(pipeline.flowReviewProducts, manualFlow.flowReviewProducts);
-  assert.equal(pipeline.flowSelectProducts, flowSelectProducts);
-  assert.equal(pipeline.flowGenerate, flowGenerate);
-  assert.equal(pipeline.flowExport, flowExport);
-  assert.equal(pipeline.appendRunCandidates, miningFlow.appendRunCandidates);
-  assert.equal(pipeline.flowMine, miningFlow.flowMine);
-  assert.equal(pipeline.flowReviewCandidates, reviewFlow.flowReviewCandidates);
-  assert.equal(pipeline.flowVerify, verificationFlow.flowVerify);
-  assert.equal(pipeline.flowKeywordStart, orchestrator.flowKeywordStart);
-  assert.equal(pipeline.flowKeyword, orchestrator.flowKeyword);
-  assert.equal(pipeline.flowDaily, orchestrator.flowDaily);
-  assert.equal(pipeline.createWorkflowRunner, createWorkflowRunner);
+test('stage implementations are available through their owning modules', () => {
+  const stages = [
+    manualFlow.flowManualStart, manualFlow.flowEnrichManualProducts, manualFlow.flowReviewProducts,
+    flowSelectProducts, flowGenerate, flowExport, miningFlow.appendRunCandidates, miningFlow.flowMine,
+    reviewFlow.flowReviewCandidates, verificationFlow.flowVerify,
+    orchestrator.flowKeywordStart, orchestrator.flowKeyword, orchestrator.flowDaily, createWorkflowRunner
+  ];
+  for (const stage of stages) assert.equal(typeof stage, 'function');
 });
 
 test('flow context keeps stage commands and opportunity paths stable', () => {

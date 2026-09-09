@@ -34,7 +34,7 @@ node bin/cli.js search-1688-web "<keyword>" --max-products 20 --max-resolve-link
 3. Node API:
 
 ```js
-const { searchWeb1688 } = require("./skills/alibaba1688");
+const { searchWeb1688 } = require("./skills/alibaba1688/src/search-web-1688");
 
 const result = await searchWeb1688({
   keyword: "<keyword>",

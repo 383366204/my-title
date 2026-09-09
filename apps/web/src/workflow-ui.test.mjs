@@ -6,37 +6,25 @@ import {
   getWorkflowAction,
   getCanvasNodeTone,
   getWorkflowNodeAction,
-  summarizeWorkflowArtifact,
-  normalizeCandidateForTitle,
-  buildReviewProduct,
-  formatWorkflowProgressLabel,
-  getPipelineMonitorNodeStatus,
-  getPipelineSummaryVisualState,
-  normalizeWorkflowProgressEvent,
-  parseCompetitorShareInputs,
-  parseExactKeywords,
-  parseRootKeywords,
-  parseOrderSheetManualItems,
-  getStartNodeParams,
-  getWorkflowLaunchParams,
-  getWorkflowLaunchBlocker,
   getWorkflowBlockerActions,
   getMiningRecoveryHint,
   getMiningRecoveryAction,
-  getWorkflowArtifactView,
-  getWorkflowNodeViewModel,
-  getWorkflowNodeDetailRows,
   getWorkflowOperationMessage,
   getWorkflowRuntimeActions,
-  buildWorkflowOperationRequest,
-  buildWorkflowDeleteRunRequest,
-  getWorkflowTemplateView,
-  labelWorkflowNodeStatus,
-  getWorkflowRunActiveNodeId,
-  getUnifiedWorkflowHistoryItem,
   getPipelineFirstNavItems,
   getWorkflowNodeIdForLegacyTarget,
-  getPipelineFirstActionTarget,
+  getPipelineFirstActionTarget
+} from './features/workflow/workflow-node-actions.js';
+import { summarizeWorkflowArtifact, getWorkflowArtifactView } from './features/workflow/artifact-view.js';
+import {
+  normalizeCandidateForTitle,
+  buildReviewProduct,
+  formatWorkflowProgressLabel,
+  normalizeWorkflowProgressEvent,
+  getWorkflowNodeViewModel,
+  getWorkflowNodeDetailRows,
+  getWorkflowTemplateView,
+  labelWorkflowNodeStatus,
   getWorkflowNodePanelKind,
   getWorkflowNodeSuccessLabel,
   getWorkflowNodeResultLocation,
@@ -45,7 +33,23 @@ import {
   getOrderSheetConfigSummary,
   getRootKeywordConfigSummary,
   getSheetConfigSummary
-} from './workflow-ui.js';
+} from './features/workflow/workflow-node-view.js';
+import {
+  getPipelineMonitorNodeStatus,
+  getPipelineSummaryVisualState,
+  getWorkflowRunActiveNodeId,
+  getUnifiedWorkflowHistoryItem
+} from './features/workflow/workflow-history-view.js';
+import {
+  parseCompetitorShareInputs,
+  parseExactKeywords,
+  parseRootKeywords,
+  parseOrderSheetManualItems,
+  getStartNodeParams,
+  getWorkflowLaunchParams,
+  getWorkflowLaunchBlocker
+} from './features/workflow/workflow-launch-params.js';
+import { buildWorkflowOperationRequest, buildWorkflowDeleteRunRequest } from './api/workflow-api.js';
 
 test('order-sheet item input parses direct IDs, links, short links, duplicates, and overrides', () => {
   const parsed = parseOrderSheetManualItems([
@@ -251,12 +255,7 @@ test('uploaded review sheet workflow requires complete local order groups', () =
     output: { count: 20, degraded: true }
   }), '已整理 20 条真实体验');
 });
-import {
-  labelPipelineStatus,
-  labelPipelineStage,
-  labelPipelineCount,
-  labelNextAction
-} from './pipeline-labels.js';
+import { labelPipelineStatus, labelPipelineStage, labelPipelineCount, labelNextAction } from './pipeline-labels.js';
 import {
   getPipelineActionView,
   getPipelineSummaryText,

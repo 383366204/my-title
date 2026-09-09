@@ -10,20 +10,12 @@ const workflowDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-observab
 process.env.ECOM_WORKFLOW_DATA_DIR = workflowDataDir;
 process.env.ECOM_PLATFORM_GUARD_DIR = path.join(workflowDataDir, 'platform-access');
 
-const {
-  createRun,
-  getRun,
-  resumeWorkflow,
-  startWorkflow,
-  normalizeNodeStatus,
-  normalizePlatformError,
-  registerNode
-} = require('../core/workflow');
+const { createRun, getRun } = require('../core/workflow/run-store');
+const { resumeWorkflow, startWorkflow } = require('../core/workflow/scheduler');
+const { normalizeNodeStatus, normalizePlatformError } = require('../core/workflow/state-helper');
+const { registerNode } = require('../core/workflow/registry');
 
-const {
-  PlatformAccessError,
-  reportPlatformBlocker
-} = require('../core/platform-access-guard');
+const { PlatformAccessError, reportPlatformBlocker } = require('../core/platform-access-guard');
 
 test('Workflow Observability - Run Store Initialization Fields', (t) => {
   const mockWorkflow = {

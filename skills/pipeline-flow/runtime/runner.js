@@ -4,32 +4,19 @@ const fs = require('fs');
 const path = require('path');
 const { normalizeExactKeywords } = require('../../../core/exact-keywords');
 const { normalizeRootKeywords } = require('../../../core/root-keywords');
-const {
-  DEFAULT_FLOW_DIR,
-  createRunId,
-  flowMine,
-  flowExpandRootKeywords,
-  flowReviewCandidates,
-  flowVerify,
-  flowSelectProducts,
-  flowGenerate,
-  flowExport,
-  flowManualStart,
-  flowEnrichManualProducts,
-  flowVerifyManualProducts,
-  flowKeywordStart,
-  flowKeyword
-} = require('../index');
-const {
-  buildOrderSheet,
-  collectOrderSheetProducts,
-  prepareOrderSheetDraft
-} = require('../../order-sheet');
-const {
-  buildReviewSheet,
-  generateReviewDrafts,
-  importReviewSource
-} = require('../../review-sheet');
+const { DEFAULT_FLOW_DIR, createRunId } = require('../src/run-store');
+const { flowMine } = require('../src/keyword-mining-flow');
+const { flowExpandRootKeywords } = require('../src/root-keyword-expansion-flow');
+const { flowReviewCandidates } = require('../src/keyword-review-flow');
+const { flowVerify } = require('../src/keyword-verification-flow');
+const { flowSelectProducts } = require('../src/product-selection-flow');
+const { flowGenerate } = require('../src/title-generation-flow');
+const { flowExport } = require('../src/export-flow');
+const { flowManualStart, flowEnrichManualProducts } = require('../src/manual-flow');
+const { flowVerifyManualProducts } = require('../src/manual-keyword-flow');
+const { flowKeywordStart, flowKeyword } = require('../src/flow-orchestrator');
+const { buildOrderSheet, collectOrderSheetProducts, prepareOrderSheetDraft } = require('../../order-sheet');
+const { buildReviewSheet, generateReviewDrafts, importReviewSource } = require('../../review-sheet');
 const {
   analyzeCompetitors,
   buildCompetitorAnalysisReport,

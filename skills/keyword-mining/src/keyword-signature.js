@@ -1,7 +1,7 @@
 const { normalizeKeyword } = require('./seed-store');
 const { FACETS } = require('./expand-keywords');
 const { normalizeSynonyms, mergeFacets } = require('./config-loader');
-const { BASE_PRODUCT_WORDS, findProductWord } = require('./product-words');
+const { findProductWord } = require('./product-words');
 
 const OPTIONAL_FACETS = new Set(['style', 'scene', 'price_band', 'pain_point', 'trend_word']);
 const RIGID_FACETS = new Set(['material', 'crowd', 'function']);
@@ -66,7 +66,6 @@ function keywordSignature(keyword, options = {}) {
 }
 
 module.exports = {
-  PRODUCT_WORDS: BASE_PRODUCT_WORDS,
   keywordSignature,
   findCoreProduct
 };

@@ -9,18 +9,11 @@ const os = require('os');
 const workflowDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-test-'));
 process.env.ECOM_WORKFLOW_DATA_DIR = workflowDataDir;
 
-const {
-  createRun,
-  getRun,
-  updateRun,
-  listRuns,
-  getNodeDefinition,
-  listNodeTypes,
-  startWorkflow,
-  cancelWorkflow,
-  subscribeRun,
-  validateWorkflow
-} = require('../core/workflow');
+const { createRun, getRun, updateRun, listRuns } = require('../core/workflow/run-store');
+const { getNodeDefinition, listNodeTypes } = require('../core/workflow/registry');
+const { startWorkflow, cancelWorkflow } = require('../core/workflow/scheduler');
+const { subscribeRun } = require('../core/workflow/events');
+const { validateWorkflow } = require('../core/workflow/validator');
 
 test('Workflow Registry - should contain standard nodes', (t) => {
   const nodeTypes = listNodeTypes();
@@ -220,7 +213,7 @@ test('Workflow Run Store - can pause and reset a failed node for retry', () => {
     }
   });
 
-  const { markRunPaused, resetRunNodeForRetry } = require('../core/workflow');
+  const { markRunPaused, resetRunNodeForRetry } = require('../core/workflow/run-store');
   updateRun(run.runId, {
     nodeStates: {
       ...getRun(run.runId).nodeStates,
@@ -267,7 +260,8 @@ test('Workflow Run Store - can pause and reset a failed node for retry', () => {
 
 test('Workflow Scheduler - resumes from first non-completed node after retry reset', async () => {
   let failingCalls = 0;
-  const { registerNode, retryWorkflowNode } = require('../core/workflow');
+  const { registerNode } = require('../core/workflow/registry');
+  const { retryWorkflowNode } = require('../core/workflow/scheduler');
   registerNode('test-flaky-recovery-node', {
     execute: async (inputs) => {
       failingCalls += 1;

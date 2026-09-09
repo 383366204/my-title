@@ -1,7 +1,7 @@
 'use strict';
 
 const fs = require('fs');
-const { extractKeywords } = require('../../title-gen');
+const { extractKeywords } = require('../../title-gen/src/extract-core');
 const { flowVerify } = require('./keyword-verification-flow');
 const { appendJsonl, getRun, readJsonl, setRunStageMetrics, writeRun } = require('./run-store');
 const { buildFlowCommand, flowResponse, isGenerationEligibleKeyword } = require('./flow-context');

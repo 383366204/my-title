@@ -1,8 +1,4 @@
-const {
-  isTaobaoNativeInstalled,
-  runTaobaoNativeSync,
-  ensureTaobaoDesktopReady
-} = require('./taobao-utils');
+const { isTaobaoNativeInstalled, runTaobaoNativeSync, ensureTaobaoDesktopReady } = require('./taobao-utils');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -130,4 +126,6 @@ async function searchTaobaoTitles(keyword, options = {}) {
   }
 }
 
-module.exports = { searchTaobaoTitles, isTaobaoNativeInstalled };
+module.exports = {
+  searchTaobaoTitles
+};

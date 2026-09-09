@@ -513,4 +513,3 @@ module.exports.parse1688ShareText = parse1688ShareText;
 module.exports.extract1688ShareUrls = extract1688ShareUrls;
 module.exports.resolve1688ShortUrl = resolve1688ShortUrl;
 module.exports.resolve1688ShareText = resolve1688ShareText;
-module.exports.RateLimitError = RateLimitError;

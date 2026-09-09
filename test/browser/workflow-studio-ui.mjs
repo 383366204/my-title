@@ -7,7 +7,7 @@ import { createServer } from '../../apps/web/node_modules/vite/dist/node/index.j
 
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.ECOM_PLAYWRIGHT_MODULE || 'playwright');
-const { listProductionWorkflowTemplates } = require('../../core/workflow/pipeline-adapter');
+const { listProductionWorkflowTemplates } = require('../../core/workflow/pipeline-templates');
 const templates = listProductionWorkflowTemplates().filter(t => !['order-sheet', 'review-sheet'].includes(t.mode));
 const root = fileURLToPath(new URL('../../apps/web', import.meta.url));
 const output = process.env.ECOM_SCREENSHOT_DIR || '/tmp/workflow-studio-qa';

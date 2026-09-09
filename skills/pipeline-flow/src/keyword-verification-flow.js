@@ -2,8 +2,8 @@
 
 const fs = require('fs');
 const path = require('path');
-const { applySeedFeedback } = require('../../keyword-mining');
-const { extractSycmData } = require('../../sycm-research');
+const { applySeedFeedback } = require('../../keyword-mining/src/seed-feedback');
+const { extractSycmData } = require('../../sycm-research/src/sycm-cdp-extractor');
 const { scoreKeywordOpportunity } = require('./opportunity-scoring');
 const { appendOpportunity } = require('./opportunity-store');
 const { fetchSycmWithFallback, scoreSycmRows } = require('./sycm-verifier');

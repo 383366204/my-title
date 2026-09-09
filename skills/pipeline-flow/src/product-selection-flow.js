@@ -2,33 +2,16 @@
 
 const fs = require('fs');
 const path = require('path');
-const { applySeedFeedback } = require('../../keyword-mining');
+const { applySeedFeedback } = require('../../keyword-mining/src/seed-feedback');
 const { extractKeywords } = require('../../title-gen/src/extract-core');
-const { searchAll } = require('../../alibaba1688');
+const { searchAll } = require('../../alibaba1688/src/search-1688');
 const { scoreProductOpportunity } = require('./opportunity-scoring');
 const { buildPipelineDiversityHistory } = require('./diversity-history');
 const { createProductDiversityState, selectDiverseProducts } = require('./product-diversity');
-const {
-  DEFAULT_FLOW_DIR,
-  appendJsonl,
-  getRun,
-  readJsonl,
-  setRunStageMetrics,
-  writeRun
-} = require('./run-store');
-const {
-  productImage,
-  productPrice,
-  productSales,
-  productTitle,
-  productUrl
-} = require('./product-normalizer');
+const { DEFAULT_FLOW_DIR, appendJsonl, getRun, readJsonl, setRunStageMetrics, writeRun } = require('./run-store');
+const { productImage, productPrice, productSales, productTitle, productUrl } = require('./product-normalizer');
 const { DEFAULT_PRODUCTS_PER_KEYWORD } = require('./flow-constants');
-const {
-  buildFlowCommand,
-  flowResponse,
-  isGenerationEligibleKeyword
-} = require('./flow-context');
+const { buildFlowCommand, flowResponse, isGenerationEligibleKeyword } = require('./flow-context');
 
 /**
  * Select and score 1688 products for verified keywords.

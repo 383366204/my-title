@@ -28,7 +28,6 @@ my-title/
 ├── skills/
 │   ├── alibaba1688/        # Skill: 1688 搜索 + 热榜 + 趋势
 │   │   ├── SKILL.md
-│   │   ├── index.js        # 公共接口
 │   │   ├── mcp-server.mjs  # 独立 MCP 入口
 │   │   ├── src/
 │   │   │   ├── client.js       # 1688 API 客户端类
@@ -39,14 +38,12 @@ my-title/
 │   │   └── test/
 │   ├── sycm-research/      # Skill: 生意参谋数据提取
 │   │   ├── SKILL.md
-│   │   ├── index.js
 │   │   ├── mcp-server.mjs
 │   │   └── src/
 │   │       ├── sycm-cdp-extractor.js  # CDP 数据提取
 │   │       └── sycm-browser-helper.js # Chrome 调试辅助
 │   ├── title-gen/          # Skill: 标题生成
 │   │   ├── SKILL.md
-│   │   ├── index.js
 │   │   ├── mcp-server.mjs
 │   │   ├── src/
 │   │   │   ├── index.js    # 主编排器（run 函数）
@@ -178,7 +175,8 @@ cp .env.example .env
 - **依赖项**: commander, axios, dotenv
 - **入口**: CLI 通过 `bin/cli.js`，MCP 通过 `bin/mcp-server.mjs`
 - **环境变量**: 需要 GLM_API_KEY 和 ALI_1688_AK
-- **Skill 独立性**: 每个 skill 有自己的 index.js 和 mcp-server.mjs，可独立使用
+- **Skill 独立性**: 直接从各 skill 的 src 实现文件引入；有 MCP 入口的 skill 也可独立使用。纯转导出 index.js 已移除。
+- **导出约定**: 只导出本文件实现的符号，不使用 re-export 或聚合 barrel；调用方直接引用实现文件。
 - **编排层**: bin/ 是 thin shell，负责串联 skills/ 和 core/
 
 ---

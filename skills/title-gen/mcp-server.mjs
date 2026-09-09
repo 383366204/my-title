@@ -1,11 +1,8 @@
 import { createServer } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { 
-  run, 
-  batchRun, 
-  suggestKeywords, 
-  suggestAndVerify 
-} from './index.js';
+import { run } from './src/index.js';
+import { batchRun } from './src/batch.js';
+import { suggestKeywords, suggestAndVerify } from './src/keyword-suggester.js';
 
 const server = createServer({
   name: 'ecom-ai-tools-title-gen',

@@ -173,7 +173,7 @@ circuit breaking before Chrome/CDP is touched. If the guard returns
 ## Public API
 
 ```js
-const { extractSycmData } = require("./skills/sycm-research");
+const { extractSycmData } = require("./skills/sycm-research/src/sycm-cdp-extractor");
 
 const result = await extractSycmData("戒指", {
   mode: "blue",

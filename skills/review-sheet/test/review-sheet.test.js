@@ -15,7 +15,6 @@ const {
   generateReviewDrafts,
   importReviewSource,
   listReviewAttachments,
-  mentionsTitle,
   normalizeReviewGroupSize,
   parseReviewSourceWorkbook,
   readReviewAttachment,
@@ -26,7 +25,8 @@ const {
   saveReviewDrafts,
   saveReviewSourceUpload,
   titleFreeReview
-} = require('..');
+} = require('../index');
+const { mentionsTitle } = require('../src/review-generator');
 
 async function fixtureBuffer() {
   const workbook = new ExcelJS.Workbook();

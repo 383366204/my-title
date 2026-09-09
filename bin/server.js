@@ -34,57 +34,46 @@ const {
   loadSeeds,
   saveSeeds,
   recordSeedEvent,
-  mineKeywords,
-  auditSeedPool,
-  prepareSeedSuggestions,
-  buildSeedReplenishmentPlan,
   DEFAULT_DATA_DIR
-} = require('../skills/keyword-mining');
+} = require('../skills/keyword-mining/src/seed-store');
+const { mineKeywords } = require('../skills/keyword-mining/src/pipeline');
+const { auditSeedPool } = require('../skills/keyword-mining/src/seed-profile');
+const { prepareSeedSuggestions } = require('../skills/keyword-mining/src/seed-suggestions');
+const { buildSeedReplenishmentPlan } = require('../skills/keyword-mining/src/seed-replenishment');
 
-const { generateTitlePipeline } = require('../skills/title-gen');
-const { searchAll, resolve1688ShareText } = require('../skills/alibaba1688');
+const { generateTitlePipeline } = require('../skills/title-gen/src/pipeline');
+const { searchAll } = require('../skills/alibaba1688/src/search-1688');
+const { resolve1688ShareText } = require('../skills/alibaba1688/src/client');
 const {
   autoLaunchChrome,
   isChromeDevToolsAvailable,
   openChromeUrl,
   SYCM_SELECTORS
-} = require('../skills/sycm-research');
+} = require('../skills/sycm-research/src/sycm-browser-helper');
 
+const { WORKFLOW_NODE_IDS } = require('../core/workflow/pipeline-definition-common');
+const { listProductionWorkflowTemplates } = require('../core/workflow/pipeline-templates');
 const {
-  WORKFLOW_NODE_IDS,
-  listProductionWorkflowTemplates,
   sanitizeWorkflowParams,
   validateProductionWorkflow,
   resolveProductionWorkflowLaunch,
-  resolveProductionWorkflowDefinition,
-  writeWorkflowDefinition,
-  listWorkflowRuns,
-  getWorkflowRun,
-  readWorkflowNodeArtifact,
-  deleteWorkflowRun
-} = require('../core/workflow/pipeline-adapter');
-const {
-  resumeWorkflow,
-  retryWorkflowNode,
-  markRunPaused,
-  getRun
-} = require('../core/workflow');
-const {
-  createRunId,
-  flowMine,
-  flowReviewCandidates,
-  flowVerify,
-  flowSelectProducts,
-  flowGenerate,
-  flowExport,
-  appendRunCandidates,
-  flowReviewProducts,
-  markRunDistributionComplete
-} = require('../skills/pipeline-flow');
-const {
-  runPipelineRuntime
-} = require('../skills/pipeline-flow/runtime/runner');
-const { TaobaoNativeClient } = require('../skills/competitor-analysis');
+  resolveProductionWorkflowDefinition
+} = require('../core/workflow/pipeline-params');
+const { writeWorkflowDefinition, deleteWorkflowRun } = require('../core/workflow/pipeline-storage');
+const { listWorkflowRuns, getWorkflowRun } = require('../core/workflow/pipeline-runs');
+const { readWorkflowNodeArtifact } = require('../core/workflow/pipeline-artifacts');
+const { resumeWorkflow, retryWorkflowNode } = require('../core/workflow/scheduler');
+const { markRunPaused, getRun } = require('../core/workflow/run-store');
+const { createRunId, markRunDistributionComplete } = require('../skills/pipeline-flow/src/run-store');
+const { flowMine, appendRunCandidates } = require('../skills/pipeline-flow/src/keyword-mining-flow');
+const { flowReviewCandidates } = require('../skills/pipeline-flow/src/keyword-review-flow');
+const { flowVerify } = require('../skills/pipeline-flow/src/keyword-verification-flow');
+const { flowSelectProducts } = require('../skills/pipeline-flow/src/product-selection-flow');
+const { flowGenerate } = require('../skills/pipeline-flow/src/title-generation-flow');
+const { flowExport } = require('../skills/pipeline-flow/src/export-flow');
+const { flowReviewProducts } = require('../skills/pipeline-flow/src/manual-flow');
+const { runPipelineRuntime } = require('../skills/pipeline-flow/runtime/runner');
+const { TaobaoNativeClient } = require('../skills/competitor-analysis/src/taobao-native-client');
 const { launchTaobaoDesktop } = require('../skills/title-gen/src/taobao-utils');
 const {
   checkReviewDrafts,
@@ -121,14 +110,8 @@ const {
   appendRuntimeEvent
 } = require('../skills/pipeline-flow/runtime/store');
 
-const {
-  listPipelineRuns,
-  summarizePipelineRun
-} = require('../core/pipeline-run-summary');
-const {
-  clearPlatformAccessBlocker,
-  getPlatformAccessStatus
-} = require('../core/platform-access-guard');
+const { listPipelineRuns, summarizePipelineRun } = require('../core/pipeline-run-summary');
+const { clearPlatformAccessBlocker, getPlatformAccessStatus } = require('../core/platform-access-guard');
 
 const app = express();
 // 刷单表草稿会带完整商品 + SKU 数据（单个商品可有数百个规格），默认 100kb 会把保存请求直接拒成 413
@@ -327,8 +310,8 @@ async function runPipelineStep(step, runId, body = {}) {
 const { searchTaobaoTitles } = require('../skills/title-gen/src/search-taobao');
 const { extractNouns } = require('../core/word-segmenter');
 const { precheckCandidates } = require('../skills/keyword-mining/src/sycm-precheck');
-const { fetchOpportunities } = require('../skills/alibaba1688');
-const { extractSycmData } = require('../skills/sycm-research');
+const { fetchOpportunities } = require('../skills/alibaba1688/src/insights');
+const { extractSycmData } = require('../skills/sycm-research/src/sycm-cdp-extractor');
 
 // ==================== Workflow APIs ====================
 

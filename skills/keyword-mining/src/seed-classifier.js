@@ -1,6 +1,6 @@
 const { normalizeKeyword } = require('./seed-store');
 const { mergeFacets, normalizeSynonyms } = require('./config-loader');
-const { BASE_PRODUCT_WORDS, findProductWord } = require('./product-words');
+const { findProductWord } = require('./product-words');
 
 const DEFAULT_FACETS = {
   crowd: ['女', '男士', '儿童', '宝宝', '学生', '情侣', '宝妈', '上班族', '租房党', '学生党'],
@@ -77,4 +77,7 @@ function classifySeed(seed, options = {}) {
   return { keyword, category, role: 'product', coreProduct, facetHits, facetWords, reason: '具体商品词' };
 }
 
-module.exports = { classifySeed, DEFAULT_PRODUCT_WORDS: BASE_PRODUCT_WORDS, DEFAULT_FACETS };
+module.exports = {
+  classifySeed,
+  DEFAULT_FACETS
+};

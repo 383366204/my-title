@@ -1,9 +1,5 @@
-import {
-  InputNode,
-  MiningNode,
-  ProductionNode,
-  TitleGeneratorNode
-} from './components/workflow-nodes.jsx';
+import { InputNode, MiningNode, TitleGeneratorNode } from './components/nodes/legacy-nodes.jsx';
+import { ProductionNode } from './components/nodes/production-node.jsx';
 
 export const nodeTypes = {
   'keyword-input': InputNode,

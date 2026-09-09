@@ -126,7 +126,8 @@ https://detail.1688.com/offer/<id>.html$$<铺货标题>$$<SYCM推荐类目>
 ## Public API
 
 ```js
-const { run, batchRun } = require("./skills/title-gen");
+const { run } = require("./skills/title-gen/src/index");
+const { batchRun } = require("./skills/title-gen/src/batch");
 
 const result = await run("戒指女款2026新款", {
   maxLength: 60,

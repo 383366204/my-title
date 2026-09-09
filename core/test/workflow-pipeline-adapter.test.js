@@ -6,24 +6,24 @@ const path = require('path');
 const { describe, it } = require('node:test');
 const assert = require('node:assert');
 
+const { WORKFLOW_NODE_IDS } = require('../workflow/pipeline-definition-common');
+const { listProductionWorkflowTemplates } = require('../workflow/pipeline-templates');
 const {
-  WORKFLOW_NODE_IDS,
-  listProductionWorkflowTemplates,
   sanitizeWorkflowParams,
   buildPipelineCliArgs,
   validateProductionWorkflow,
   resolveProductionWorkflowLaunch,
-  resolveProductionWorkflowDefinition,
-  pipelineSummaryToWorkflowRun,
-  listWorkflowRuns,
-  getWorkflowRun,
-  readWorkflowNodeArtifact,
+  resolveProductionWorkflowDefinition
+} = require('../workflow/pipeline-params');
+const { pipelineSummaryToWorkflowRun, listWorkflowRuns, getWorkflowRun } = require('../workflow/pipeline-runs');
+const { readWorkflowNodeArtifact } = require('../workflow/pipeline-artifacts');
+const {
   writeWorkflowDefinition,
   readWorkflowDefinition,
   appendWorkflowEvent,
   readWorkflowEvents,
   deleteWorkflowRun
-} = require('../workflow/pipeline-adapter');
+} = require('../workflow/pipeline-storage');
 
 function tempPipelineDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-pipeline-adapter-'));

@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { createWorkflowRunner } = require('../index');
+const { createWorkflowRunner } = require('../src/workflow-runner');
 
 test('workflow stops before submit and requires confirmation', async () => {
   const runner = createWorkflowRunner({

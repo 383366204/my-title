@@ -3,15 +3,11 @@
 const fs = require('fs');
 const path = require('path');
 const { normalizeRootKeywords } = require('../../../core/root-keywords');
-const { extractSycmData } = require('../../sycm-research');
-const { gateCandidate, keywordSignature, scoreKeyword } = require('../../keyword-mining');
-const {
-  appendJsonl,
-  initRun,
-  readJsonl,
-  setRunStageMetrics,
-  writeRun
-} = require('./run-store');
+const { extractSycmData } = require('../../sycm-research/src/sycm-cdp-extractor');
+const { gateCandidate } = require('../../keyword-mining/src/candidate-gate');
+const { keywordSignature } = require('../../keyword-mining/src/keyword-signature');
+const { scoreKeyword } = require('../../keyword-mining/src/score-keyword');
+const { appendJsonl, initRun, readJsonl, setRunStageMetrics, writeRun } = require('./run-store');
 const { flowResponse } = require('./flow-context');
 const { waitInterruptibly } = require('./sycm-request-scheduler');
 

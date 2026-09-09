@@ -372,7 +372,7 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
           message: `查询生意参谋关联词：${query}`
         });
         console.log(`🔍 正在查询词根 "${query}" 的生意参谋关联词...`);
-        const extractor = sycmExtractor || require('../../sycm-research').extractSycmData;
+        const extractor = sycmExtractor || require('../../sycm-research/src/sycm-cdp-extractor').extractSycmData;
         const sycmRes = await extractor(query, {
           mode: sycmMode,
           maxPages: Math.max(1, Number(sycmMaxPages || 1)),

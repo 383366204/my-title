@@ -1,7 +1,7 @@
 'use strict';
 
-const { mineKeywords } = require('../../skills/keyword-mining');
-const { generateTitlePipeline } = require('../../skills/title-gen');
+const { mineKeywords } = require('../../skills/keyword-mining/src/pipeline');
+const { generateTitlePipeline } = require('../../skills/title-gen/src/pipeline');
 
 const registry = {};
 

@@ -151,6 +151,5 @@ module.exports = {
   createLLMClient,
   getLLMCacheVersion,
   getLLMProviderInfo,
-  normalizeProvider,
-  PROMPT_VERSION: GLMClient.PROMPT_VERSION
+  normalizeProvider
 };

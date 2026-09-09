@@ -14,10 +14,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 require('../core/env').loadEnv({ projectRoot: path.resolve(__dirname, '..') });
 
-const { generateTitlePipeline } = require('../skills/title-gen');
-const { searchAll } = require('../skills/alibaba1688');
+const { generateTitlePipeline } = require('../skills/title-gen/src/pipeline');
+const { searchAll } = require('../skills/alibaba1688/src/search-1688');
 const { getRateLimiter, RateLimitError } = require('../skills/alibaba1688/src/rate-limiter');
-const taobaoOpc = require('../skills/taobao-opc');
+const taobaoOpc = require('../skills/taobao-opc/src/mcp-client');
 
 const searchProductsAdapter = ({ coreWord, blueOceanWord, modifiers, semanticGroups, searchMode, webFilters, port, maxProducts, maxPages, maxResolveLinks, scrollLoad, scrollSteps }) =>
   searchAll(coreWord, blueOceanWord, modifiers, semanticGroups, {
@@ -32,7 +32,7 @@ const searchProductsAdapter = ({ coreWord, blueOceanWord, modifiers, semanticGro
   });
 
 async function fetchSycmKeywordDataAdapter({ keyword }) {
-  const { extractSycmData, DEFAULT_FILTER_CONDITIONS } = require('../skills/sycm-research');
+  const { extractSycmData, DEFAULT_FILTER_CONDITIONS } = require('../skills/sycm-research/src/sycm-cdp-extractor');
   const result = await extractSycmData(keyword, {
     port: parseInt(process.env.SYCM_DEBUG_PORT || '9222', 10),
     maxPages: parseInt(process.env.SYCM_MAX_PAGES || '1', 10),
@@ -106,7 +106,7 @@ async function handleApiOpportunities(req, res) {
     return sendErrorResponse(res, 500, 'ALI_1688_AK 未配置');
   }
   try {
-      const { fetchOpportunities } = require('../skills/alibaba1688');
+      const { fetchOpportunities } = require('../skills/alibaba1688/src/insights');
       const result = await fetchOpportunities();
     sendJsonResponse(res, 200, { ok: true, data: result });
   } catch (err) {
@@ -132,7 +132,7 @@ async function handleApiTrend(req, res, body) {
     if (!query || typeof query !== 'string') {
       return sendErrorResponse(res, 400, 'Missing or invalid query parameter');
     }
-      const { fetchTrend } = require('../skills/alibaba1688');
+      const { fetchTrend } = require('../skills/alibaba1688/src/insights');
       const result = await fetchTrend(query);
     sendJsonResponse(res, 200, { ok: true, data: result });
   } catch (err) {
@@ -151,7 +151,7 @@ async function handleApiTrend(req, res, body) {
 
 async function handleApiBatchGenerate(req, res, keywords, length) {
   try {
-    const { batchRun } = require('../skills/title-gen');
+    const { batchRun } = require('../skills/title-gen/src/batch');
     const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     tasks.set(id, { status: 'processing', createdAt: Date.now(), progress: { completed: 0, total: keywords.length } });
 
@@ -891,7 +891,7 @@ server.tool(
       return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: 'ALI_1688_AK 未配置' }) }], isError: true };
     }
     try {
-      const { fetchOpportunities } = require('../skills/alibaba1688');
+      const { fetchOpportunities } = require('../skills/alibaba1688/src/insights');
       const result = await fetchOpportunities();
       return { content: [{ type: 'text', text: JSON.stringify({ ok: true, data: result }) }] };
     } catch (err) {
@@ -921,7 +921,7 @@ server.tool(
       return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: 'ALI_1688_AK 未配置' }) }], isError: true };
     }
     try {
-      const { fetchTrend } = require('../skills/alibaba1688');
+      const { fetchTrend } = require('../skills/alibaba1688/src/insights');
       const result = await fetchTrend(query);
       return { content: [{ type: 'text', text: JSON.stringify({ ok: true, data: result }) }] };
     } catch (err) {
@@ -994,7 +994,7 @@ server.tool(
 
     console.error(`[ecom-ai-tools] batch task ${id} started: ${keywords.length} keywords`);
 
-    const { batchRun } = require('../skills/title-gen');
+    const { batchRun } = require('../skills/title-gen/src/batch');
     batchRun(keywords, {
       maxLength: length || 60,
       silent: true,
@@ -1081,7 +1081,11 @@ server.tool(
   },
   async ({ keyword, port, maxPages, mode, compareType, timePeriod, loginMode, chromeProfileDir, username, password, phone, smsCode, filterConditions, noDefaultFilters }) => {
     try {
-      const { isChromeDevToolsAvailable, autoLaunchChrome, extractSycmData, DEFAULT_FILTER_CONDITIONS } = require('../skills/sycm-research');
+      const {
+        isChromeDevToolsAvailable,
+        autoLaunchChrome
+      } = require('../skills/sycm-research/src/sycm-browser-helper');
+      const { extractSycmData, DEFAULT_FILTER_CONDITIONS } = require('../skills/sycm-research/src/sycm-cdp-extractor');
 
       if (!await isChromeDevToolsAvailable(port)) {
         const launchResult = await autoLaunchChrome(port, { userDataDir: chromeProfileDir });
@@ -1292,7 +1296,7 @@ server.tool(
     }
 
     // 2. Start new task
-    const { suggestAndVerify } = require('../skills/title-gen');
+    const { suggestAndVerify } = require('../skills/title-gen/src/keyword-suggester');
     
     const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     const estimatedSeconds = (parseInt(max_candidates) || 5) * 45 + 10; // ~45s per keyword

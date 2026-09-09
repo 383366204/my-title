@@ -3,7 +3,7 @@
 const fs = require('fs');
 const JSZip = require('jszip');
 
-const { EMBEDDABLE_IMAGE_FORMATS, readImageDimensions, sniffImageFormat } = require('./image-format');
+const { readImageDimensions } = require('./image-format');
 
 const EMU_PER_PIXEL = 9525;
 const EMU_PER_POINT = 12700;
@@ -206,13 +206,10 @@ module.exports = {
   DEFAULT_THUMBNAIL_GAP,
   DEFAULT_THUMBNAIL_INSET,
   DEFAULT_THUMBNAIL_SIZE,
-  EMBEDDABLE_IMAGE_FORMATS,
   addThumbnailImage,
   columnWidthToEmu,
   fitImageBox,
   hardenDrawingAnchors,
   pixelsToColumnWidth,
-  readImageDimensions,
-  rowHeightToEmu,
-  sniffImageFormat
+  rowHeightToEmu
 };

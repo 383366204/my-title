@@ -10,9 +10,6 @@ import path from 'path';
 const require = createRequire(import.meta.url);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Import our skill modules
-const sycmSkill = require('./index.js');
-
 const server = new McpServer({
   name: 'sycm-research',
   version: '1.0.0',
@@ -64,7 +61,7 @@ server.tool(
   },
   async ({ keyword, port, maxPages, mode, compareType, timePeriod, loginMode, chromeProfileDir, username, password, phone, smsCode, filterConditions, noDefaultFilters }) => {
     try {
-      const { isChromeDevToolsAvailable, autoLaunchChrome } = sycmSkill;
+      const { isChromeDevToolsAvailable, autoLaunchChrome } = require('./src/sycm-browser-helper');
       const { extractSycmData, DEFAULT_FILTER_CONDITIONS } = require('./src/sycm-cdp-extractor.js');
 
       if (!await isChromeDevToolsAvailable(port)) {

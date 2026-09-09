@@ -19,9 +19,9 @@ const {
   fetchImage,
   generateOrderSheet,
   imageUrlCandidates,
-  normalizeImageUrl,
-  sniffImageFormat
+  normalizeImageUrl
 } = require('../src/generate-order-sheet');
+const { sniffImageFormat } = require('../../../core/image-format');
 
 describe('order sheet workflow', () => {
   it('normalizes SYCM numbers and verifies visitor descending order', () => {
@@ -522,7 +522,12 @@ describe('order sheet workflow', () => {
   });
 
   it('restores static product fields when the client sends a trimmed draft payload', async () => {
-    const { collectOrderSheetProducts, prepareOrderSheetDraft, saveOrderSheetDraft, getOrderSheetDraft } = require('../index');
+    const {
+      collectOrderSheetProducts,
+      prepareOrderSheetDraft,
+      saveOrderSheetDraft,
+      getOrderSheetDraft
+    } = require('../index');
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'order-sheet-trim-'));
     const runId = 'test_trimmed_draft';
 

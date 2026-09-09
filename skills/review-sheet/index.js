@@ -7,7 +7,12 @@ const ExcelJS = require('exceljs');
 const { getLLMProviderInfo } = require('../../core/llm');
 const { isEmbeddableImage, sniffImageFormat } = require('../../core/image-format');
 const { addThumbnailImage, hardenDrawingAnchors, pixelsToColumnWidth } = require('../../core/excel-image');
-const { factualFallbackReview, llmReviews, mentionsTitle, normalizeExperienceNotes } = require('./src/review-generator');
+const {
+  factualFallbackReview,
+  llmReviews,
+  mentionsTitle,
+  normalizeExperienceNotes
+} = require('./src/review-generator');
 const { assessReviewQuality } = require('./src/review-similarity');
 const { readReviewHistory, recordReviewHistory } = require('./src/review-history-store');
 const {
@@ -1065,7 +1070,6 @@ module.exports = {
   saveReviewDrafts,
   importReviewSource,
   listReviewAttachments,
-  mentionsTitle,
   normalizeReviewGroupSize,
   parseReviewSourceWorkbook,
   readReviewAttachment,

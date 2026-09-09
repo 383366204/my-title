@@ -2,7 +2,8 @@ const { checkBannedWords } = require('../../../core/banned-words');
 const { normalizeKeyword } = require('./seed-store');
 const { FACETS } = require('./expand-keywords');
 const { rejectCandidate } = require('./reject-combinations');
-const { PRODUCT_WORDS, keywordSignature } = require('./keyword-signature');
+const { BASE_PRODUCT_WORDS: PRODUCT_WORDS } = require('./product-words');
+const { keywordSignature } = require('./keyword-signature');
 const { classifySeed } = require('./seed-classifier');
 
 const TOO_BROAD = ['女', '男', '儿童', '新款', '饰品', '用品', '家居', '玩具', '礼物'];

@@ -829,7 +829,6 @@ async function buildOrderSheet(options = {}) {
 }
 
 module.exports = {
-  DEFAULT_ORDER_GROUP_SIZE,
   buildOrderSheet,
   collectOrderSheetProducts,
   confirmOrderSheetProducts,
@@ -838,13 +837,5 @@ module.exports = {
   mergeOrderSheetProducts,
   prepareOrderSheetDraft,
   saveOrderSheetDraft,
-  updateOrderSheetManualProducts,
-  getProductKey,
-  normalizeOrderProduct,
-  autoGroupOrderProducts,
-  rowsToOrderGroups,
-  validateOrderGroups,
-  assertValidOrderGroups,
-  normalizeOrderGroups,
-  flattenOrderGroups
+  updateOrderSheetManualProducts
 };

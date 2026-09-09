@@ -4,11 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { parseCompetitorInputs } = require('./src/input-parser');
 const { analyzeCompetitorData, compareCompetitorSnapshots } = require('./src/analyzer');
-const {
-  collectSortedShopProducts,
-  enrichCompetitorProduct,
-  resolveCompetitorShop
-} = require('./src/collector');
+const { collectSortedShopProducts, enrichCompetitorProduct, resolveCompetitorShop } = require('./src/collector');
 const { writeCompetitorReport } = require('./src/report-writer');
 const { TaobaoNativeClient } = require('./src/taobao-native-client');
 const {
@@ -364,7 +360,6 @@ async function buildCompetitorAnalysisReport(options = {}) {
 }
 
 module.exports = {
-  TaobaoNativeClient,
   analyzeCompetitors,
   buildCompetitorAnalysisReport,
   collectCompetitorProducts,

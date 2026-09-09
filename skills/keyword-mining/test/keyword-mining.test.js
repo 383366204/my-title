@@ -3,31 +3,21 @@ const assert = require('node:assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const {
-  addSeed,
-  listSeeds,
-  mineKeywords,
-  scoreKeyword,
-  expandSeed,
-  rejectCandidate,
-  keywordSignature,
-  clusterBySignature,
-  diversifyCandidates,
-  selectDiverseCandidates,
-  normalizeAIResponse,
-  generateAIKeywordCandidates,
-  parseAIJson,
-  normalizeSynonyms,
-  classifySeed,
-  gateCandidate,
-  buildSeedProfile,
-  auditSeedPool,
-  scheduleSeedProfiles,
-  applySeedFeedback,
-  loadSeeds,
-  prepareSeedSuggestions,
-  buildSeedReplenishmentPlan
-} = require('..');
+const { addSeed, listSeeds, loadSeeds } = require('../src/seed-store');
+const { mineKeywords, clusterBySignature, diversifyCandidates } = require('../src/pipeline');
+const { scoreKeyword } = require('../src/score-keyword');
+const { expandSeed } = require('../src/expand-keywords');
+const { rejectCandidate } = require('../src/reject-combinations');
+const { keywordSignature } = require('../src/keyword-signature');
+const { selectDiverseCandidates } = require('../src/diversity-selector');
+const { normalizeAIResponse, generateAIKeywordCandidates, parseAIJson } = require('../src/ai-mine-keywords');
+const { normalizeSynonyms } = require('../src/config-loader');
+const { classifySeed } = require('../src/seed-classifier');
+const { gateCandidate } = require('../src/candidate-gate');
+const { buildSeedProfile, auditSeedPool, scheduleSeedProfiles } = require('../src/seed-profile');
+const { applySeedFeedback } = require('../src/seed-feedback');
+const { prepareSeedSuggestions } = require('../src/seed-suggestions');
+const { buildSeedReplenishmentPlan } = require('../src/seed-replenishment');
 const { extractShortRoot, selectShortRoots } = require('../src/root-keywords');
 const { extractSearchPopularityFromSycmJson, extractSycmMetricsFromJson } = require('../src/sycm-precheck');
 

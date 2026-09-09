@@ -1,8 +1,16 @@
 const path = require('path');
 const { extractKeywords } = require('./extract-core');
 const { searchTaobaoTitles } = require('./search-taobao');
-const { createLLMClient, getLLMCacheVersion, PROMPT_VERSION } = require('../../../core/llm');
-const { postProcessTitle, constructFallbackTitle, cleanTitle, completeTitle, scoreTitle, extractShoppingGuideTitle } = require('./title-utils');
+const { createLLMClient, getLLMCacheVersion } = require('../../../core/llm/index');
+const { PROMPT_VERSION } = require('../../../core/glm-client');
+const {
+  postProcessTitle,
+  constructFallbackTitle,
+  cleanTitle,
+  completeTitle,
+  scoreTitle,
+  extractShoppingGuideTitle
+} = require('./title-utils');
 const { removeBannedWords } = require('../../../core/banned-words');
 const { ResultCache } = require('./cache');
 const { analyzePeerTitles, recommendResearchKeywords } = require('./keyword-analyzer');

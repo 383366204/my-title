@@ -299,4 +299,10 @@ async function extractKeywords(source, options = {}) {
   return extractCoreAndModifiers(options.data);
 }
 
-module.exports = { extractCoreAndModifiers, fallbackExtract, extractCoreFromPeerTitles, fallbackExtractFromPeers, extractKeywords, RIGIDITY_RULES_TEXT };
+module.exports = {
+  extractCoreAndModifiers,
+  fallbackExtract,
+  extractCoreFromPeerTitles,
+  fallbackExtractFromPeers,
+  extractKeywords
+};

@@ -1,14 +1,10 @@
 const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
-const {
-  assessInspiration,
-  assessRootCandidate,
-  collectInspirations,
-  discoverInspirationRoots,
-  mineKeywords,
-  parseFeedItems,
-  productizeInspirations
-} = require('..');
+const { assessInspiration, assessRootCandidate } = require('../src/inspiration-guard');
+const { collectInspirations, parseFeedItems } = require('../src/inspiration-sources');
+const { discoverInspirationRoots } = require('../src/inspiration-engine');
+const { mineKeywords } = require('../src/pipeline');
+const { productizeInspirations } = require('../src/inspiration-productizer');
 const { buildHistoryKeys } = require('../../../core/history-record');
 
 describe('inspiration discovery', () => {

@@ -2,8 +2,9 @@
 
 require('../core/env').loadEnv();
 const { Command } = require('commander');
-const { batchRun, generateTitlePipeline } = require('../skills/title-gen');
-const { searchAll } = require('../skills/alibaba1688');
+const { batchRun } = require('../skills/title-gen/src/batch');
+const { generateTitlePipeline } = require('../skills/title-gen/src/pipeline');
+const { searchAll } = require('../skills/alibaba1688/src/search-1688');
 const { formatResult } = require('../skills/title-gen/src/output-formatter');
 const { byteLen } = require('../skills/title-gen/src/title-utils');
 const fs = require('fs');
@@ -85,7 +86,7 @@ function resolveRunTimeoutMs(options) {
 }
 
 async function fetchSycmKeywordDataAdapter({ keyword }) {
-  const { extractSycmData, DEFAULT_FILTER_CONDITIONS } = require('../skills/sycm-research');
+  const { extractSycmData, DEFAULT_FILTER_CONDITIONS } = require('../skills/sycm-research/src/sycm-cdp-extractor');
   const result = await extractSycmData(keyword, {
     port: parseInt(process.env.SYCM_DEBUG_PORT || '9222', 10),
     maxPages: parseInt(process.env.SYCM_MAX_PAGES || '1', 10),
@@ -191,7 +192,7 @@ program
 
       // --suggest 模式：自动选词
       if (options.suggest) {
-        const { suggestAndVerify, VALID_STRATEGIES } = require('../skills/title-gen');
+        const { suggestAndVerify, VALID_STRATEGIES } = require('../skills/title-gen/src/keyword-suggester');
         
         const strategy = options.strategy || 'season';
         if (!VALID_STRATEGIES.includes(strategy)) {
@@ -438,7 +439,7 @@ program
       console.error = function(){};
     }
     try {
-      const { fetchOpportunities } = require('../skills/alibaba1688');
+      const { fetchOpportunities } = require('../skills/alibaba1688/src/insights');
         return fetchOpportunities().then(function(result) {
         if (jsonMode) {
           console.log = origLog;
@@ -491,7 +492,7 @@ program
       console.error = () => {};
     }
     try {
-      const { fetchTrend } = require('../skills/alibaba1688');
+      const { fetchTrend } = require('../skills/alibaba1688/src/insights');
       const result = await fetchTrend(query);
 
       if (jsonMode) {
@@ -528,7 +529,7 @@ program
     const mainOpts = command && command.parent ? command.parent.opts() : {};
     const jsonMode = !!options.json || !!mainOpts.json;
     try {
-      const { checkWeb1688Status } = require('../skills/alibaba1688');
+      const { checkWeb1688Status } = require('../skills/alibaba1688/src/search-web-1688');
       const result = await checkWeb1688Status({
         port: parseInt(options.port, 10) || 9222
       });
@@ -588,7 +589,7 @@ program
       console.error = () => {};
     }
     try {
-      const { searchWeb1688 } = require('../skills/alibaba1688');
+      const { searchWeb1688 } = require('../skills/alibaba1688/src/search-web-1688');
       const result = await searchWeb1688({
         keyword,
         port: parseInt(options.port, 10) || 9222,
@@ -663,7 +664,7 @@ function listSeedCommand(options, command) {
   options = options || {};
   const jsonMode = !!options.json || !!mainOpts.json;
   try {
-    const { listSeeds } = require('../skills/keyword-mining');
+    const { listSeeds } = require('../skills/keyword-mining/src/seed-store');
     const seeds = listSeeds({
       includePaused: !!(options.all || mainOpts.all),
       dataDir: options.dataDir || mainOpts.dataDir
@@ -716,7 +717,8 @@ seedCommand
     const root = commandObj && commandObj.parent && commandObj.parent.parent ? commandObj.parent.parent.opts() : {};
     const jsonMode = !!local.json || !!root.json;
     try {
-      const { auditSeedPool, listSeeds } = require('../skills/keyword-mining');
+      const { auditSeedPool } = require('../skills/keyword-mining/src/seed-profile');
+      const { listSeeds } = require('../skills/keyword-mining/src/seed-store');
       const audit = auditSeedPool(listSeeds({
         includePaused: true,
         dataDir: local.dataDir || root.dataDir
@@ -753,7 +755,7 @@ program
     const mainOpts = command.parent ? command.parent.opts() : {};
     const jsonMode = !!options.json || !!mainOpts.json;
     try {
-      const { addSeed } = require('../skills/keyword-mining');
+      const { addSeed } = require('../skills/keyword-mining/src/seed-store');
       const seed = addSeed(keyword, {
         category: options.category,
         priority: parseInt(options.priority, 10) || 5,
@@ -787,7 +789,7 @@ seedCommand
     const root = command.parent && command.parent.parent ? command.parent.parent.opts() : {};
     const jsonMode = !!options.json || !!root.json;
     try {
-      const { addSeed } = require('../skills/keyword-mining');
+      const { addSeed } = require('../skills/keyword-mining/src/seed-store');
       const seed = addSeed(keyword, {
         category: options.category,
         priority: parseInt(options.priority, 10) || 5,
@@ -836,7 +838,7 @@ program
     const mainOpts = command.parent ? command.parent.opts() : {};
     const jsonMode = !!options.json || !!mainOpts.json;
     try {
-      const { mineKeywords } = require('../skills/keyword-mining');
+      const { mineKeywords } = require('../skills/keyword-mining/src/pipeline');
       const outputLimit = parseInt(options.limit || options.count, 10) || 50;
       const result = await mineKeywords({
         count: outputLimit,
@@ -1058,7 +1060,7 @@ flowCommand
     const mainOpts = command.parent && command.parent.parent ? command.parent.parent.opts() : {};
     const jsonMode = !!options.json || !!mainOpts.json;
     try {
-      const { flowDaily } = require('../skills/pipeline-flow');
+      const { flowDaily } = require('../skills/pipeline-flow/src/flow-orchestrator');
       const result = await flowDaily({
         mine: parseInt(options.mine, 10) || 50,
         discoveryMode: options.discoveryMode,
@@ -1108,7 +1110,7 @@ flowCommand
     const mainOpts = command.parent && command.parent.parent ? command.parent.parent.opts() : {};
     const jsonMode = !!options.json || !!mainOpts.json;
     try {
-      const { flowMine } = require('../skills/pipeline-flow');
+      const { flowMine } = require('../skills/pipeline-flow/src/keyword-mining-flow');
       const result = await flowMine({
         limit: parseInt(options.limit, 10) || 50,
         excludeSeen: true,
@@ -1150,7 +1152,7 @@ flowCommand
     const jsonMode = !!options.json || !!mainOpts.json;
     const splitKeywords = value => String(value || '').split(',').map(item => item.trim()).filter(Boolean);
     try {
-      const { flowReviewCandidates } = require('../skills/pipeline-flow');
+      const { flowReviewCandidates } = require('../skills/pipeline-flow/src/keyword-review-flow');
       const result = flowReviewCandidates({
         runId: options.run,
         approveAll: !!options.approveAll,
@@ -1186,7 +1188,7 @@ flowCommand
     const mainOpts = command.parent && command.parent.parent ? command.parent.parent.opts() : {};
     const jsonMode = !!options.json || !!mainOpts.json;
     try {
-      const { flowVerify } = require('../skills/pipeline-flow');
+      const { flowVerify } = require('../skills/pipeline-flow/src/keyword-verification-flow');
       const result = await flowVerify({
         runId: options.run,
         limit: parseInt(options.limit, 10) || 20,
@@ -1229,7 +1231,7 @@ flowCommand
     const mainOpts = command.parent && command.parent.parent ? command.parent.parent.opts() : {};
     const jsonMode = !!options.json || !!mainOpts.json;
     try {
-      const { flowSelectProducts } = require('../skills/pipeline-flow');
+      const { flowSelectProducts } = require('../skills/pipeline-flow/src/product-selection-flow');
       const result = await flowSelectProducts({
         runId: options.run,
         limit: parseInt(options.limit, 10) || 10,
@@ -1270,7 +1272,7 @@ flowCommand
     const mainOpts = command.parent && command.parent.parent ? command.parent.parent.opts() : {};
     const jsonMode = !!options.json || !!mainOpts.json;
     try {
-      const { flowGenerate } = require('../skills/pipeline-flow');
+      const { flowGenerate } = require('../skills/pipeline-flow/src/title-generation-flow');
       const result = await flowGenerate({
         runId: options.run,
         limit: parseInt(options.limit, 10) || 10,
@@ -1310,7 +1312,7 @@ flowCommand
     const mainOpts = command.parent && command.parent.parent ? command.parent.parent.opts() : {};
     const jsonMode = !!options.json || !!mainOpts.json;
     try {
-      const { flowExport } = require('../skills/pipeline-flow');
+      const { flowExport } = require('../skills/pipeline-flow/src/export-flow');
       const result = await flowExport({
         runId: options.run,
         limit: parseInt(options.limit, 10) || 20
@@ -1344,7 +1346,7 @@ flowCommand
     const mainOpts = command.parent && command.parent.parent ? command.parent.parent.opts() : {};
     const jsonMode = !!options.json || !!mainOpts.json;
     try {
-      const { flowKeyword } = require('../skills/pipeline-flow');
+      const { flowKeyword } = require('../skills/pipeline-flow/src/flow-orchestrator');
       const result = await flowKeyword({
         keyword,
         export: parseInt(options.export, 10) || 20,
@@ -1383,7 +1385,7 @@ flowCommand
     const jsonMode = !!options.json || !!mainOpts.json;
     try {
       const path = require('path');
-      const { summarizeOpportunities } = require('../skills/pipeline-flow');
+      const { summarizeOpportunities } = require('../skills/pipeline-flow/src/opportunity-store');
       const dataDir = path.join(options.dataDir || 'data/pipeline', 'opportunities');
       const result = summarizeOpportunities({ dataDir, limit: parseInt(options.limit, 10) || 10 });
       if (jsonMode) {
@@ -1554,7 +1556,11 @@ program
     const mainOpts = commandObj && commandObj.parent ? commandObj.parent.opts() : {};
     const jsonMode = !!options.json || !!mainOpts.json;
     try {
-      const { checkDistributionReadiness, confirmDistributionLog, distributeProducts } = require('../skills/1688-distribution');
+      const {
+        checkDistributionReadiness,
+        confirmDistributionLog,
+        distributeProducts
+      } = require('../skills/1688-distribution');
       const inputText = options.input || mainOpts.input;
       if (!inputText && !options.inputFile) {
         throw new Error('Provide --input or --input-file');
@@ -1690,7 +1696,7 @@ workflowCommand
     const mainOpts = command && command.parent && command.parent.parent ? command.parent.parent.opts() : {};
     const jsonMode = !!options.json || !!mainOpts.json;
     try {
-      const { createWorkflowRunner } = require('../skills/pipeline-flow');
+      const { createWorkflowRunner } = require('../skills/pipeline-flow/src/workflow-runner');
       const deps = options.dryRun
         ? {
             sycm: async () => ({ ok: true, status: 'ready', keyword: options.keyword }),
@@ -1823,7 +1829,14 @@ program
     const maxPages = parseInt(options.maxPages || options.pages) || 1;
     const mode = options.mode || 'blue';
     
-    const { isChromeDevToolsAvailable, autoLaunchChrome, extractSycmData, DEFAULT_FILTER_CONDITIONS, VALID_COMPARE_TYPES, VALID_PERIODS, DEFAULT_PAGE_FILTERS } = require('../skills/sycm-research');
+    const { isChromeDevToolsAvailable, autoLaunchChrome } = require('../skills/sycm-research/src/sycm-browser-helper');
+    const {
+      extractSycmData,
+      DEFAULT_FILTER_CONDITIONS,
+      VALID_COMPARE_TYPES,
+      VALID_PERIODS,
+      DEFAULT_PAGE_FILTERS
+    } = require('../skills/sycm-research/src/sycm-cdp-extractor');
 
     let userCompare = options.compare || DEFAULT_PAGE_FILTERS.compareType;
     let userPeriod = options.period || DEFAULT_PAGE_FILTERS.timePeriod;
@@ -2074,7 +2087,7 @@ program
       console.error = () => {};
     }
     try {
-      const { reverseMine } = require('../skills/keyword-mining');
+      const { reverseMine } = require('../skills/keyword-mining/src/reverse-mine');
       const result = await reverseMine(keyword, {
         topN: parseInt(options.topN, 10) || 10,
         minSearchPopularity: parseInt(options.minPopularity, 10) || 100,

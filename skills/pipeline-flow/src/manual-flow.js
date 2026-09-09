@@ -1,24 +1,11 @@
 'use strict';
 
 const fs = require('fs');
-const { parse1688Url } = require('../../alibaba1688');
+const { parse1688Url } = require('../../alibaba1688/src/client');
 const { flowResponse } = require('./flow-context');
-const {
-  appendJsonl,
-  getRun,
-  initRun,
-  readJsonl,
-  setRunStageMetrics,
-  writeRun
-} = require('./run-store');
-const {
-  createManualDetailFetcher,
-  normalizeManualOfferDetail
-} = require('./product-normalizer');
-const {
-  buildManualCandidateRows,
-  extractManualProductKeywords
-} = require('./manual-keyword-flow');
+const { appendJsonl, getRun, initRun, readJsonl, setRunStageMetrics, writeRun } = require('./run-store');
+const { createManualDetailFetcher, normalizeManualOfferDetail } = require('./product-normalizer');
+const { buildManualCandidateRows, extractManualProductKeywords } = require('./manual-keyword-flow');
 
 /**
  * Create a run from manually entered keywords and 1688 URLs.

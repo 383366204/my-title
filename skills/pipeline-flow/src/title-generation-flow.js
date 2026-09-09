@@ -2,9 +2,9 @@
 
 const fs = require('fs');
 const path = require('path');
-const { applySeedFeedback } = require('../../keyword-mining');
-const { generateTitlePipeline } = require('../../title-gen');
-const { searchAll } = require('../../alibaba1688');
+const { applySeedFeedback } = require('../../keyword-mining/src/seed-feedback');
+const { generateTitlePipeline } = require('../../title-gen/src/pipeline');
+const { searchAll } = require('../../alibaba1688/src/search-1688');
 const { getLLMProviderInfo } = require('../../../core/llm');
 const { scoreProductOpportunity } = require('./opportunity-scoring');
 const { appendOpportunity } = require('./opportunity-store');

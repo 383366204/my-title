@@ -119,4 +119,6 @@ async function generateTitlePipeline(keyword, options = {}) {
   });
 }
 
-module.exports = { generateTitlePipeline, hashProducts };
+module.exports = {
+  generateTitlePipeline
+};

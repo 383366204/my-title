@@ -11,12 +11,8 @@ const workflowDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-api-reco
 process.env.ECOM_WORKFLOW_DATA_DIR = workflowDataDir;
 process.env.NODE_ENV = 'test';
 
-const {
-  createRun,
-  getRun,
-  registerNode,
-  updateRun
-} = require('../core/workflow');
+const { createRun, getRun, updateRun } = require('../core/workflow/run-store');
+const { registerNode } = require('../core/workflow/registry');
 
 const app = require('../bin/server');
 

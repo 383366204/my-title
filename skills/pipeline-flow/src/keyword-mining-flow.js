@@ -2,7 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { mineKeywords } = require('../../keyword-mining');
+const { mineKeywords } = require('../../keyword-mining/src/pipeline');
 const { buildPipelineDiversityHistory } = require('./diversity-history');
 const {
   DEFAULT_FLOW_DIR,
@@ -14,11 +14,7 @@ const {
   setRunStageMetrics,
   writeRun
 } = require('./run-store');
-const {
-  DEFAULT_FALLBACK_CANDIDATES,
-  fallbackCandidates,
-  normalizeExternalCandidate
-} = require('./candidate-helpers');
+const { DEFAULT_FALLBACK_CANDIDATES, fallbackCandidates, normalizeExternalCandidate } = require('./candidate-helpers');
 const { buildFlowCommand, flowResponse } = require('./flow-context');
 
 /**

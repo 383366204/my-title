@@ -23,7 +23,7 @@
 | workflow-request-scope.js | 请求通道防重、过期响应与过期 finally 隔离 |
 | hooks/use-workflow-request-scope.js | 切换运行/模板或卸载时关闭旧请求作用域 |
 
-`apps/web/src/workflow-ui.js` 是兼容再导出，不再放新实现。15 个业务调用方已迁移为直接引用对应模块，兼容入口仍由测试验证；新模块不能反向导入此入口，以免形成循环依赖。命令 URL 和请求体构造位于 `apps/web/src/api/workflow-api.js`。
+前端不再保留转导出层。业务和测试直接引用以上实现模块；命令 URL 和请求体构造位于 `apps/web/src/api/workflow-api.js`。`workflow-node-types.js` 直接从 `components/nodes/legacy-nodes.jsx` 和 `components/nodes/production-node.jsx` 引入组件。
 
 ## 后端入口
 
@@ -64,7 +64,7 @@
 
 种子模块接收同一个 DEFAULT_DATA_DIR 和事件写入函数，研究模块接收同一个 AsyncLocalStorage，平台模块接收运行时 getter。不要在各注册函数中另建日志上下文或改用模块目录作为业务数据目录。
 
-`core/workflow/pipeline-adapter.js` 保留原公共接口，各实现位于同目录：
+后端不再保留 `core/workflow/index.js` 和 `pipeline-adapter.js` 汇总入口。调用方直接从以下实现文件导入：
 
 | 文件 | 职责 |
 | --- | --- |
@@ -79,6 +79,23 @@
 | pipeline-artifacts.js | 读取完整产物与结构化预览 |
 
 这些模块只做工作流适配，不负责重新实现各 skill 的选品、评分、采集或标题算法。
+
+## 直接引用约定
+
+模块只导出自己实现的函数、类和常量，不转导出其他模块的符号。组合 hook、业务编排器和模块注册表有实际行为，仍然保留。
+
+以下纯转发 skill 入口已删除：`alibaba1688/index.js`、`keyword-mining/index.js`、`pipeline-flow/index.js`、`sycm-research/index.js`、`taobao-opc/index.js`、`title-gen/index.js`。CLI、MCP 和项目内调用方已直接引用实现文件，命令参数和工具名称不变。外部脚本若曾 `require('.../skills/title-gen')`，也需要改为具体文件，旧目录导入不再兼容。
+
+| 能力 | 直接引用位置 |
+| --- | --- |
+| 标题编排 / 批量标题 | skills/title-gen/src/pipeline.js / batch.js |
+| 1688 搜索 / 分享链接解析 | skills/alibaba1688/src/search-1688.js / client.js |
+| 生意参谋查询 / Chrome 辅助 | skills/sycm-research/src/sycm-cdp-extractor.js / sycm-browser-helper.js |
+| 挖词 / 种子存储 | skills/keyword-mining/src/pipeline.js / seed-store.js |
+| 流水线编排 / 运行存储 | skills/pipeline-flow/src/flow-orchestrator.js / run-store.js |
+| 淘宝 OPC 客户端 | skills/taobao-opc/src/mcp-client.js |
+
+早期计划和验收记录保留当时的路径，不能作为当前导入示例；以本导航和各 skill 的最新使用示例为准。
 
 ## 调用链
 

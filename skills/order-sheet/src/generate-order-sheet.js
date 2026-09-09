@@ -554,9 +554,7 @@ module.exports = {
   createReviewSheet,
   fetchImage,
   generateOrderSheet,
-  hardenDrawingAnchors,
   imageUrlCandidates,
   normalizeImageUrl,
-  normalizeSheetType,
-  sniffImageFormat
+  normalizeSheetType
 };

@@ -299,7 +299,7 @@ test('Test 6: Ensure 11 fields exist in output products when there are results',
 });
 
 test('hashProducts ignores volatile price changes when product ids are stable', () => {
-  const { hashProducts } = require('../src/pipeline');
+  const { hashProducts } = require('../src/product-hash');
   const first = hashProducts([
     { id: '1001', title: '陶瓷摆件 招财猫', price: '9.90', sales: '100+' },
     { offerId: '1002', title: '陶瓷摆件 小花瓶', price: '12.30', sales: '200+' }

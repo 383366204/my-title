@@ -1,6 +1,6 @@
 'use strict';
 
-const { Alibaba1688Client } = require('../../alibaba1688');
+const Alibaba1688Client = require('../../alibaba1688/src/client');
 
 /**
  * Resolve a canonical 1688 product URL from supported product shapes.
