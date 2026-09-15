@@ -107,7 +107,17 @@ export function getWorkflowNodeAction(nodeId, state) {
       tone: stateDetails.uploadId ? 'success' : 'warn'
     };
   }
-  if (normalizedNodeId === 'generatereviews' && ['needs_review', 'waiting_confirmation'].includes(normalizedState)) {
+if (normalizedNodeId === 'start' && stateDetails.watermarkStudio === true) {
+    return {
+      label: stateDetails.watermarkDone === true ? '查看去水印结果' : '选择图片',
+      action: 'open-watermark-studio',
+      tone: stateDetails.watermarkDone === true ? 'success' : 'warn'
+    };
+  }
+  if (normalizedNodeId === 'removewatermark') {
+    return { label: '去水印工作台', action: 'open-watermark-studio', tone: 'warn' };
+  }
+    if (normalizedNodeId === 'generatereviews' && ['needs_review', 'waiting_confirmation'].includes(normalizedState)) {
     return { label: '复核评价', action: 'review-drafts', tone: 'warn' };
   }
   if (normalizedNodeId === 'start' && stateDetails.orderSheetConfig === true) {

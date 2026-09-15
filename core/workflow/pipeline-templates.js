@@ -37,6 +37,11 @@ function workflowNodes(mode = 'daily') {
         productsPerKeyword: 12,
         port: 9222
       }
+    : mode === 'watermark-removal'
+    ? [
+        [WORKFLOW_NODE_IDS.start, WORKFLOW_NODE_IDS.removeWatermark],
+        [WORKFLOW_NODE_IDS.removeWatermark, WORKFLOW_NODE_IDS.end]
+      ]
     : mode === 'keyword'
     ? {
         label: '开始',
@@ -94,7 +99,23 @@ function workflowNodes(mode = 'daily') {
       { id: WORKFLOW_NODE_IDS.end, type: 'production-end', data: { label: '完成', description: '查看报告或将机会词加入选品流水线', competitorDownload: true } }
     ], { startX: 90, stepX: 275 }));
   }
-  if (mode === 'order-sheet') {
+if (mode === 'watermark-removal') {
+    return withSteps(positionNodes([
+      {
+        id: WORKFLOW_NODE_IDS.start,
+        type: 'production-start',
+        data: {
+          label: '选择图片',
+          description: '打开图片或文件夹，全部在本机处理',
+          watermarkStudio: true,
+          watermarkDone: false
+        }
+      },
+      { id: WORKFLOW_NODE_IDS.removeWatermark, type: 'pipeline-remove-watermark', data: { label: '批量去水印', description: '自动或手动框选水印，批量修复后预览对比' } },
+      { id: WORKFLOW_NODE_IDS.end, type: 'production-end', data: { label: '完成', description: '打包下载去水印后的图片' } }
+    ], { startX: 150, stepX: 300 }));
+  }
+    if (mode === 'order-sheet') {
     return withSteps(positionNodes([
       { id: WORKFLOW_NODE_IDS.start, type: 'production-start', data: { label: '开始', description: '选择商品排行或输入指定商品', orderSheetConfig: true, inputMode: 'rank', manualItemsText: '', manualItems: [], port: 9222, dateMode: 'latest_day', startDate: '', endDate: '', pages: 1, sortMetric: 'itmUv' } },
       { id: WORKFLOW_NODE_IDS.collectRank, type: 'pipeline-collect-rank', data: { label: '获取商品资料', description: '采集排行或补全指定商品的标题、主图和店铺' } },
@@ -204,6 +225,11 @@ function workflowEdges(mode = 'daily') {
           [WORKFLOW_NODE_IDS.generateReviews, WORKFLOW_NODE_IDS.generateSheet],
           [WORKFLOW_NODE_IDS.generateSheet, WORKFLOW_NODE_IDS.end]
         ]
+    : mode === 'watermark-removal'
+    ? [
+        [WORKFLOW_NODE_IDS.start, WORKFLOW_NODE_IDS.removeWatermark],
+        [WORKFLOW_NODE_IDS.removeWatermark, WORKFLOW_NODE_IDS.end]
+      ]
     : mode === 'keyword'
     ? [
         [WORKFLOW_NODE_IDS.start, WORKFLOW_NODE_IDS.verify],
@@ -285,7 +311,13 @@ function listProductionWorkflowTemplates() {
       flowSummary: '流程：录入链接 → 获取商品与候选词 → 生意参谋验真 → MiniMax生成标题 → 铺货复核',
       modeHint: '支持1688商品链接和手机分享口令；填写关键词时会优先验证人工词。'
     }),
-    template('sycm-order-sheet-v1', '制作刷单表格流水线', 'order-sheet', '从商品排行或指定商品生成 Excel', {
+template('batch-watermark-v1', '批量去水印流水线', 'watermark-removal', '批量去除商品图片水印并打包下载', {
+      entryLabel: '入口：本地图片或文件夹',
+      scenarioLabel: '适合：上架前批量清理图片水印',
+      flowSummary: '流程：选择图片 → 自动/手动识别水印 → 批量修复 → 预览对比 → 打包下载',
+      modeHint: '图片全程在本机浏览器内处理，不会上传服务器；同一水印框可一键应用到整批图片。'
+    }),
+        template('sycm-order-sheet-v1', '制作刷单表格流水线', 'order-sheet', '从商品排行或指定商品生成 Excel', {
       entryLabel: '入口：商品排行或指定商品',
       scenarioLabel: '适合：制作动销刷单表',
       flowSummary: '流程：选择商品来源 → 获取商品资料 → 确认商品与编组 → 生成 Excel',

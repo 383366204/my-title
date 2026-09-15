@@ -14,6 +14,7 @@ const WORKFLOW_NODE_IDS = {
   importSheet: 'importSheet',
   generateReviews: 'generateReviews',
   generateSheet: 'generateSheet',
+  removeWatermark: 'removeWatermark',
   resolveShops: 'resolveShops',
   collectCompetitors: 'collectCompetitors',
   enrichCompetitors: 'enrichCompetitors',

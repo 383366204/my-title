@@ -10,7 +10,8 @@ export const WORKFLOW_OVERLAYS = Object.freeze({
   NODE_WORKBENCH: 'node-workbench',
   PRODUCT_SELECT: 'product-select',
   SHEET_CONFIG: 'sheet-config',
-  START_CONFIG: 'start-config'
+  START_CONFIG: 'start-config',
+  WATERMARK_STUDIO: 'watermark-studio'
 });
 
 const command = Object.freeze({ kind: WORKFLOW_ACTION_KINDS.COMMAND });
@@ -19,6 +20,7 @@ const overlay = (target) => Object.freeze({ kind: WORKFLOW_ACTION_KINDS.OVERLAY,
 
 export const WORKFLOW_ACTION_ROUTES = Object.freeze({
   'manual-input': overlay(WORKFLOW_OVERLAYS.START_CONFIG),
+  'open-watermark-studio': overlay(WORKFLOW_OVERLAYS.WATERMARK_STUDIO),
   'configure-sheet': overlay(WORKFLOW_OVERLAYS.SHEET_CONFIG),
   'keyword-review': overlay(WORKFLOW_OVERLAYS.NODE_WORKBENCH),
   'confirm-keyword-review': overlay(WORKFLOW_OVERLAYS.NODE_WORKBENCH),

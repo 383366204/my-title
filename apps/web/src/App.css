@@ -11,4 +11,5 @@
 @import "./styles/theme-overrides.css";
 @import "./styles/platform-status.css";
 @import "./styles/manual-input.css";
+@import "./styles/watermark-studio.css";
 @import "./styles/responsive-workspace.css";

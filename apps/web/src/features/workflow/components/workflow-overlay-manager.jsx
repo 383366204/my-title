@@ -10,6 +10,7 @@ import { NodeOperationPanel } from './node-operation-panel.jsx';
 import { ReviewSourceUploadPanel } from './review-source-upload-panel.jsx';
 import { SheetConfigurationPanel } from './sheet-configuration-panel.jsx';
 import { StartConfigurationPanel } from './start-configuration-panel.jsx';
+import { WatermarkStudioPanel } from './watermark-studio-panel.jsx';
 
 const OVERLAY_COPY = {
   [WORKFLOW_OVERLAYS.ARTIFACT]: ['节点产物', '查看此节点生成的结构化结果。'],
@@ -17,7 +18,8 @@ const OVERLAY_COPY = {
   [WORKFLOW_OVERLAYS.NODE_WORKBENCH]: ['节点操作', '处理当前节点的阻塞、筛选或重试。'],
   [WORKFLOW_OVERLAYS.PRODUCT_SELECT]: ['勾选 1688 货源', '保留合适货源，也可以粘贴新的 1688 链接。'],
   [WORKFLOW_OVERLAYS.SHEET_CONFIG]: ['配置业务表格', '设置表格类型、输出范围和版式内容。'],
-  [WORKFLOW_OVERLAYS.START_CONFIG]: ['配置流水线输入', '配置完成后返回画布启动流水线。']
+  [WORKFLOW_OVERLAYS.START_CONFIG]: ['配置流水线输入', '配置完成后返回画布启动流水线。'],
+  [WORKFLOW_OVERLAYS.WATERMARK_STUDIO]: ['批量去水印', '选择图片或文件夹，在本机批量去除水印。']
 };
 
 function WorkflowOverlayShell({ children, description, label, onClose, wide = false }) {
@@ -93,7 +95,14 @@ export function WorkflowOverlayManager({
     );
   }
 
-  let content = null;
+if (activeOverlay.type === WORKFLOW_OVERLAYS.WATERMARK_STUDIO) {
+    return (
+      <WorkflowOverlayShell label="批量去水印" description="图片全程在本机处理，不上传服务器" onClose={onClose} wide>
+        <WatermarkStudioPanel onClose={onClose} />
+      </WorkflowOverlayShell>
+    );
+  }
+    let content = null;
   if (activeOverlay.type === WORKFLOW_OVERLAYS.START_CONFIG) {
     content = (
       <StartConfigurationPanel

@@ -1,0 +1,324 @@
+/* 批量去水印工作台 */
+
+.watermark-empty {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  justify-content: center;
+  min-height: 420px;
+  padding: 40px 20px;
+  text-align: center;
+}
+
+.watermark-empty-title {
+  color: #e2e8f0;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.watermark-empty p {
+  color: #94a3b8;
+  font-size: 12px;
+  margin: 0;
+}
+
+.watermark-empty-actions {
+  display: flex;
+  gap: 14px;
+}
+
+.watermark-empty-actions button {
+  align-items: center;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  border-radius: 10px;
+  color: #7dd3fc;
+  cursor: pointer;
+  display: flex;
+  font-size: 14px;
+  gap: 8px;
+  padding: 18px 26px;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.watermark-empty-actions button:hover {
+  background: rgba(56, 189, 248, 0.2);
+  transform: translateY(-1px);
+}
+
+.watermark-notice {
+  background: rgba(56, 189, 248, 0.1);
+  border-radius: 6px;
+  color: #7dd3fc;
+  font-size: 11px;
+  padding: 6px 10px;
+}
+
+.watermark-studio {
+  display: grid;
+  gap: 10px;
+}
+
+.watermark-toolbar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.watermark-mode,
+.watermark-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.watermark-mode button,
+.watermark-actions button {
+  align-items: center;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(71, 85, 105, 0.7);
+  border-radius: 6px;
+  color: #cbd5e1;
+  cursor: pointer;
+  display: flex;
+  font-size: 12px;
+  gap: 5px;
+  padding: 7px 11px;
+}
+
+.watermark-mode button.is-active {
+  background: rgba(56, 189, 248, 0.16);
+  border-color: rgba(56, 189, 248, 0.5);
+  color: #7dd3fc;
+}
+
+.watermark-mode button:disabled,
+.watermark-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.watermark-apply-all {
+  align-items: center;
+  color: #94a3b8;
+  display: flex;
+  font-size: 11px;
+  gap: 5px;
+}
+
+.watermark-progress {
+  background: rgba(30, 41, 59, 0.9);
+  border-radius: 4px;
+  height: 5px;
+  overflow: hidden;
+}
+
+.watermark-progress-bar {
+  background: linear-gradient(90deg, #38bdf8, #34d399);
+  height: 100%;
+  transition: width 0.2s ease;
+}
+
+.watermark-body {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 168px minmax(0, 1fr);
+  min-height: 460px;
+}
+
+.watermark-file-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 62vh;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.watermark-file {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(71, 85, 105, 0.6);
+  border-radius: 7px;
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+  text-align: left;
+}
+
+.watermark-file.is-active {
+  border-color: rgba(56, 189, 248, 0.65);
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.35);
+}
+
+.watermark-file img {
+  aspect-ratio: 1;
+  background: #0f172a;
+  border-radius: 4px;
+  object-fit: cover;
+  width: 100%;
+}
+
+.watermark-file-name {
+  color: #cbd5e1;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.watermark-file-status {
+  border-radius: 4px;
+  color: #94a3b8;
+  font-size: 10px;
+}
+
+.watermark-file.is-done .watermark-file-status { color: #6ee7b7; }
+.watermark-file.is-processing .watermark-file-status { color: #7dd3fc; }
+.watermark-file.is-error .watermark-file-status,
+.watermark-file-error { color: #fca5a5; }
+
+.watermark-file-error {
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.watermark-editor {
+  background:
+    linear-gradient(45deg, rgba(30, 41, 59, 0.7) 25%, transparent 25%, transparent 75%, rgba(30, 41, 59, 0.7) 75%),
+    linear-gradient(45deg, rgba(30, 41, 59, 0.7) 25%, transparent 25%, transparent 75%, rgba(30, 41, 59, 0.7) 75%);
+  background-color: rgba(15, 23, 42, 0.9);
+  background-position: 0 0, 10px 10px;
+  background-size: 20px 20px;
+  border: 1px solid rgba(71, 85, 105, 0.6);
+  border-radius: 8px;
+  display: flex;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
+  touch-action: none;
+}
+
+.watermark-compare-original,
+.watermark-compare-original img {
+  max-height: 62vh;
+  max-width: 100%;
+}
+
+.watermark-compare-original {
+  position: relative;
+}
+
+.watermark-compare-original img {
+  display: block;
+  user-select: none;
+}
+
+.watermark-compare-result {
+  inset: 0;
+  position: absolute;
+  z-index: 2;
+}
+
+.watermark-compare-result img {
+  display: block;
+  max-height: 62vh;
+  max-width: 100%;
+  user-select: none;
+}
+
+.watermark-box {
+  border: 1.5px dashed rgba(56, 189, 248, 0.95);
+  background: rgba(56, 189, 248, 0.12);
+  cursor: move;
+  position: absolute;
+  z-index: 3;
+}
+
+.watermark-box.is-drawing {
+  border-color: rgba(52, 211, 153, 0.95);
+  background: rgba(52, 211, 153, 0.12);
+  pointer-events: none;
+}
+
+.watermark-box-tag {
+  background: rgba(56, 189, 248, 0.9);
+  border-radius: 3px;
+  color: #0f172a;
+  font-size: 10px;
+  left: 3px;
+  padding: 1px 4px;
+  position: absolute;
+  top: 3px;
+  white-space: nowrap;
+}
+
+.watermark-box-delete {
+  align-items: center;
+  background: rgba(248, 113, 113, 0.9);
+  border: 0;
+  border-radius: 3px;
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  padding: 2px;
+  position: absolute;
+  right: 3px;
+  top: 3px;
+}
+
+.watermark-box-corner {
+  background: #38bdf8;
+  border-radius: 50%;
+  bottom: -5px;
+  cursor: nwse-resize;
+  height: 10px;
+  position: absolute;
+  right: -5px;
+  width: 10px;
+}
+
+.watermark-compare-slider {
+  align-items: center;
+  background: rgba(15, 23, 42, 0.85);
+  border-radius: 6px;
+  bottom: 10px;
+  color: #94a3b8;
+  display: flex;
+  font-size: 10px;
+  gap: 8px;
+  left: 50%;
+  padding: 5px 10px;
+  position: absolute;
+  transform: translateX(-50%);
+  z-index: 5;
+}
+
+.watermark-compare-slider input {
+  accent-color: #38bdf8;
+  width: 180px;
+}
+
+@media (max-width: 900px) {
+  .watermark-body {
+    grid-template-columns: 1fr;
+  }
+
+  .watermark-file-list {
+    flex-direction: row;
+    max-height: 128px;
+    overflow-x: auto;
+  }
+
+  .watermark-file {
+    min-width: 120px;
+    width: 120px;
+  }
+}

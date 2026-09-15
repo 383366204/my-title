@@ -55,6 +55,7 @@ describe('workflow pipeline adapter', () => {
       importSheet: 'importSheet',
       generateReviews: 'generateReviews',
       generateSheet: 'generateSheet',
+      removeWatermark: 'removeWatermark',
       resolveShops: 'resolveShops',
       collectCompetitors: 'collectCompetitors',
       enrichCompetitors: 'enrichCompetitors',
@@ -65,8 +66,8 @@ describe('workflow pipeline adapter', () => {
 
     const templates = listProductionWorkflowTemplates();
 
-    assert.deepEqual(templates.map(template => template.id), ['daily-selection-v1', 'exact-keyword-v1', 'root-keyword-selection-v1', 'manual-selection-v2', 'sycm-order-sheet-v1', 'uploaded-review-sheet-v1', 'competitor-analysis-v1']);
-    assert.deepEqual(templates.map(template => template.entryLabel), ['入口：动态灵感', '入口：手动关键词', '入口：手动词根', '入口：1688链接（关键词可选）', '入口：商品排行或指定商品', '入口：已执行的刷单表', '入口：同行分享链接']);
+    assert.deepEqual(templates.map(template => template.id), ['daily-selection-v1', 'exact-keyword-v1', 'root-keyword-selection-v1', 'manual-selection-v2', 'batch-watermark-v1', 'sycm-order-sheet-v1', 'uploaded-review-sheet-v1', 'competitor-analysis-v1']);
+    assert.deepEqual(templates.map(template => template.entryLabel), ['入口：动态灵感', '入口：手动关键词', '入口：手动词根', '入口：1688链接（关键词可选）', '入口：本地图片或文件夹', '入口：商品排行或指定商品', '入口：已执行的刷单表', '入口：同行分享链接']);
     const rootTemplate = templates.find(template => template.id === 'root-keyword-selection-v1');
     const manualTemplate = templates.find(template => template.id === 'manual-selection-v2');
     const orderTemplate = templates.find(template => template.id === 'sycm-order-sheet-v1');
@@ -247,6 +248,12 @@ describe('workflow pipeline adapter', () => {
             WORKFLOW_NODE_IDS.enrichCompetitors,
             WORKFLOW_NODE_IDS.analyzeCompetitors,
             WORKFLOW_NODE_IDS.competitorReport,
+            WORKFLOW_NODE_IDS.end
+          ]
+        : template.mode === 'watermark-removal'
+        ? [
+            WORKFLOW_NODE_IDS.start,
+            WORKFLOW_NODE_IDS.removeWatermark,
             WORKFLOW_NODE_IDS.end
           ]
         : template.mode === 'order-sheet'
