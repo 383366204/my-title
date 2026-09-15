@@ -46,16 +46,24 @@ function getHermesSkillsDir(options = {}) {
 }
 
 function getChromeProfileDir(profileName = 'default', options = {}) {
-  const platform = options.platform || (options.osKind === 'windows' ? 'win32' : process.platform);
+  // 显式给了 osKind 时按目标平台选分隔符：windows 用 win32，macos/linux/wsl 用 POSIX，
+  // 不能落到宿主机的 process.platform，否则在 Windows 上会拼出混合分隔符路径。
+  const impliedPlatform = options.osKind === 'windows'
+    ? 'win32'
+    : ['macos', 'linux', 'wsl'].includes(options.osKind)
+      ? 'posix'
+      : '';
+  const platform = options.platform || impliedPlatform || process.platform;
   const homeDir = getHomeDir(options);
-  if (platform === 'win32' || options.osKind === 'windows') {
+  if (platform === 'win32') {
     return options.profileDir
       || process.env.ECOM_CHROME_PROFILE_DIR
       || joinWindowsPath(homeDir, '.hermes', 'chrome-profiles', profileName);
   }
   return options.profileDir
     || process.env.ECOM_CHROME_PROFILE_DIR
-    || path.join(homeDir, '.hermes', 'chrome-profiles', profileName);
+    // 目标是 macOS/Linux 时即使用户在 Windows 上运行，也要拼 POSIX 路径给对端
+    || path.posix.join(homeDir, '.hermes', 'chrome-profiles', profileName);
 }
 
 function fromWindowsPath(winPath) {
@@ -160,7 +168,7 @@ function findTaobaoNativePath(options = {}) {
   const platformKind = options.osKind || detectPlatform(options).kind;
   const homeDir = getHomeDir(options);
   if (platformKind === 'macos') {
-    return path.join(homeDir, 'Library', 'Application Support', 'taobao', 'cli', 'bin', 'taobao-native');
+    return path.posix.join(homeDir, 'Library', 'Application Support', 'taobao', 'cli', 'bin', 'taobao-native');
   }
   if (platformKind === 'windows') {
     return joinWindowsPath(homeDir, 'AppData', 'Local', 'Programs', 'taobao', 'bin', 'taobao-native.cmd');

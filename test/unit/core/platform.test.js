@@ -35,7 +35,8 @@ describe('platform helpers', () => {
     );
     assert.equal(
       getChromeProfileDir('1688', { platform: 'darwin', homeDir: macHome }),
-      path.join(macHome, '.hermes', 'chrome-profiles', '1688')
+      // 目标平台是 darwin 时无论宿主系统都应拼 POSIX 分隔符
+      path.posix.join(macHome, '.hermes', 'chrome-profiles', '1688')
     );
     assert.equal(
       getChromeProfileDir('1688', { platform: 'win32', homeDir: winHome }),
