@@ -1,7 +1,7 @@
 {
   "name": "ecom-ai-tools",
   "version": "1.0.0",
-  "description": "电商选品AI工具箱 - 基于 GLM AI + 1688 搜索的多 skill 架构",
+  "description": "电商全流程运营工具 - 以 Workflow 编排选品、分析、上架、监控、单店月净利润、表单、素材与任务处理的多 skill 架构",
   "main": "bin/cli.js",
   "bin": {
     "ecom-ai-tools": "bin/cli.js"
