@@ -58,21 +58,25 @@ function assessRootCandidate(candidate = {}, options = {}) {
     maxSeeds: 0,
     extraProductWords: options.extraProductWords || []
   });
-  const lengthValid = rootKeyword.length >= 2 && rootKeyword.length <= 8;
+  const lengthValid = rootKeyword.length >= 2 && rootKeyword.length <= 16;
   const concrete = ['product', 'qualified_product'].includes(classification.role) && Boolean(classification.coreProduct);
+  const exploratory = candidate.productizer === 'llm' && Boolean(candidate.productForm?.trim())
+    && Boolean(candidate.productUse?.trim()) && Boolean(candidate.relationReason?.trim()) && Boolean(candidate.category?.trim());
   let rejectReason = '';
   if (!rootKeyword) rejectReason = 'empty_root';
   else if (!lengthValid) rejectReason = 'root_length_out_of_range';
   else if (!banned.valid) rejectReason = 'banned_word';
   else if (brandIp.length > 0) rejectReason = 'brand_or_ip_risk';
   else if (abstract.length > 0) rejectReason = 'abstract_root';
-  else if (!concrete) rejectReason = 'not_concrete_product';
-  const familyKey = productFamily(classification.coreProduct, { ...options, maxSeeds: 0 }) || classification.coreProduct;
+  else if (!concrete && !exploratory) rejectReason = 'not_concrete_product';
+  const coreProduct = classification.coreProduct || (exploratory ? rootKeyword : '');
+  const familyKey = productFamily(coreProduct, { ...options, maxSeeds: 0 }) || coreProduct;
   return {
     ...candidate,
     rootKeyword,
     keyword: rootKeyword,
-    coreProduct: classification.coreProduct || '',
+    coreProduct,
+    exploratory: !concrete && exploratory,
     familyKey,
     groundingStatus: rejectReason ? 'rejected' : 'passed',
     groundingReason: classification.reason,

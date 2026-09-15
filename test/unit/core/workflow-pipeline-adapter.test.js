@@ -77,7 +77,7 @@ describe('workflow pipeline adapter', () => {
     assert.match(templates[1].scenarioLabel, /明确目标词/);
     assert.match(templates[0].flowSummary, /灵感选词/);
     assert.match(templates[1].flowSummary, /跳过挖词/);
-    assert.match(templates[0].modeHint, /不要求预先维护种子池/);
+    assert.match(templates[0].modeHint, /人群、职业、爱好/);
     assert.match(templates[1].modeHint, /逐词验真/);
     assert.match(rootTemplate.flowSummary, /分时拓词/);
     assert.match(manualTemplate.flowSummary, /录入链接/);
@@ -112,8 +112,11 @@ describe('workflow pipeline adapter', () => {
     const dailyStart = templates[0].workflow.nodes.find(node => node.id === WORKFLOW_NODE_IDS.start);
     const keywordStart = templates[1].workflow.nodes.find(node => node.id === WORKFLOW_NODE_IDS.start);
     assert.deepEqual(Object.keys(dailyStart.data).sort(), [
+      'candidateScreening',
+      'customInputs',
       'description',
       'discoveryMode',
+      'enabledDimensions',
       'export',
       'familyCooldownDays',
       'generate',
@@ -451,12 +454,15 @@ describe('workflow pipeline adapter', () => {
     }), {
       mine: 200,
       discoveryMode: 'inspiration',
+      enabledDimensions: ['persona', 'profession', 'hobby', 'scene', 'problem'],
+      customInputs: { persona: [], profession: [], hobby: [], scene: [], problem: [] },
       source: 'inspiration',
       rootMode: 'auto',
       rootLimit: 20,
-      rootCooldownDays: 0,
-      familyCooldownDays: 7,
-      inspirationSycmPages: 1,
+      rootCooldownDays: 30,
+      familyCooldownDays: 0,
+      inspirationSycmPages: 3,
+      candidateScreening: 'balanced',
       inspirationUseLLM: true,
       maxObservingSeeds: 10,
       maxObservingPoolSize: 24,
@@ -757,11 +763,15 @@ describe('workflow pipeline adapter', () => {
       'daily',
       '--mine', '20',
       '--discovery-mode', 'inspiration',
+      '--inspiration-sycm-pages', '3',
+      '--candidate-screening', 'balanced',
+      '--discovery-dimensions', '["persona","profession","hobby","scene","problem"]',
+      '--discovery-inputs', '{"persona":[],"profession":[],"hobby":[],"scene":[],"problem":[]}',
       '--source', 'inspiration',
       '--root-mode', 'auto',
       '--root-limit', '8',
-      '--root-cooldown-days', '14',
-      '--family-cooldown-days', '7',
+      '--root-cooldown-days', '30',
+      '--family-cooldown-days', '0',
       '--verify', '5',
       '--generate', '3',
       '--export', '8',

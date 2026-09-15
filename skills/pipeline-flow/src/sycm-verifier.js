@@ -1,6 +1,7 @@
 'use strict';
 
 const { extractSycmData, DEFAULT_FILTER_CONDITIONS } = require('../../sycm-research/src/sycm-cdp-extractor');
+const { normalizeSycmMetrics, compareMetricThreshold } = require('../../sycm-research/src/metric-parser');
 
 const DEFAULT_RELAXED_FILTER_CONDITIONS = {
   demandSupplyRatio: 0.5,
@@ -17,14 +18,6 @@ const DEFAULT_HOT_FILTER_CONDITIONS = {
   referencePrice: 0
 };
 
-function parseMetricNumber(value) {
-  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
-  const matches = String(value || '').replace(/,/g, '').match(/-?\d+(?:\.\d+)?/g);
-  if (!matches) return 0;
-  const nums = matches.map(Number).filter(Number.isFinite);
-  return nums.length ? Math.max(...nums) : 0;
-}
-
 /**
  * Score rows returned by SYCM for the selected verification tier.
  * @param {object[]} rows SYCM result rows.
@@ -33,35 +26,38 @@ function parseMetricNumber(value) {
  * @returns {object} Verification score and usage metadata.
  */
 function scoreSycmRows(rows, { mode = 'blue' } = {}) {
-  const usableRows = Array.isArray(rows) ? rows : [];
+  const usableRows = Array.isArray(rows) ? rows.filter(row => row && typeof row === 'object' && !Array.isArray(row)) : [];
   if (usableRows.length === 0) {
     return { passed: false, score: 0, reason: '生意参谋无数据' };
   }
 
   const best = usableRows.reduce((max, row) => {
-    const demandSupplyRatio = parseMetricNumber(row.demandSupplyRatio);
-    const searchPopularity = parseMetricNumber(row.searchPopularity);
-    const clickRate = parseMetricNumber(row.clickRate);
-    const conversionRate = parseMetricNumber(row.conversionRate);
-    const score = Math.round(
+    const normalized = normalizeSycmMetrics(row);
+    const demandSupplyRatio = normalized.demandSupplyRatio ?? 0;
+    const searchPopularity = normalized.searchPopularity ?? 0;
+    const clickRate = (normalized.clickRate ?? 0) * 100;
+    const conversionRate = (normalized.conversionRate ?? 0) * 100;
+    const score = Math.max(0, Math.round(
       Math.min(40, demandSupplyRatio * 8) +
       Math.min(25, searchPopularity / 20) +
       Math.min(20, clickRate / 4) +
       Math.min(15, conversionRate * 3)
-    );
-    return score > max.score ? { row, score, demandSupplyRatio, searchPopularity, clickRate, conversionRate } : max;
+    ));
+    return !max.row || score > max.score ? { row, normalized, score, demandSupplyRatio, searchPopularity, clickRate, conversionRate } : max;
   }, { row: null, score: 0, demandSupplyRatio: 0, searchPopularity: 0, clickRate: 0, conversionRate: 0 });
 
   const hasHeat = best.searchPopularity > 0 || best.clickRate > 0 || best.conversionRate > 0;
-  const passed = mode === 'hot'
-    ? hasHeat
-    : mode === 'blue_relaxed'
-      ? best.demandSupplyRatio >= 0.5 && hasHeat
-      : best.demandSupplyRatio >= 1 && hasHeat;
+  const popularityState = compareMetricThreshold(best.normalized.metrics.searchPopularity, Number.MIN_VALUE);
+  const demandState = compareMetricThreshold(best.normalized.metrics.demandSupplyRatio, mode === 'blue_relaxed' ? 0.5 : 1);
+  const needsReview = popularityState === 'review' || (mode !== 'hot' && demandState === 'review');
+  const passed = !needsReview && popularityState === 'passed' && hasHeat && (mode === 'hot' || demandState === 'passed');
   const confidence = mode === 'hot' ? 'trend' : mode === 'blue_relaxed' ? 'medium' : 'high';
   const usage = mode === 'hot' ? 'trend_reference' : mode === 'blue_relaxed' ? 'title_optional' : 'title_core';
   return {
     passed,
+    needsReview,
+    metrics: best.normalized.metrics,
+    metricParserVersion: best.normalized.metricParserVersion,
     score: best.score,
     bestKeyword: best.row && best.row.keyword,
     mode,
@@ -73,7 +69,7 @@ function scoreSycmRows(rows, { mode = 'blue' } = {}) {
         : mode === 'blue_relaxed'
           ? `放宽蓝海通过，供需比${best.demandSupplyRatio}，搜索人气${best.searchPopularity}，点击率${best.clickRate}`
           : `供需比${best.demandSupplyRatio}，搜索人气${best.searchPopularity}，点击率${best.clickRate}`)
-      : '指标不足，暂不进入标题生成'
+      : needsReview ? '关键指标缺失、解析不明确或区间跨越门槛，需人工复核' : '指标不足，暂不进入标题生成'
   };
 }
 
@@ -105,15 +101,15 @@ async function fetchSycmWithFallback(keyword, options = {}) {
     loginMode: options.loginMode || process.env.SYCM_LOGIN_MODE || 'manual',
     pageFilters: { compareType: options.compare || 'cycle', timePeriod: options.period || '7d' }
   };
-  const primaryMode = options.mode || 'blue';
+  const primaryMode = options.verificationMode || options.mode || 'blue';
   const primary = await sycmExtractor(keyword, {
     ...baseOptions,
-    mode: primaryMode,
-    filterConditions: primaryMode === 'blue' ? DEFAULT_FILTER_CONDITIONS : null
+    mode: primaryMode === 'blue_relaxed' ? 'blue' : primaryMode,
+    filterConditions: primaryMode === 'blue' ? DEFAULT_FILTER_CONDITIONS : primaryMode === 'blue_relaxed' ? DEFAULT_RELAXED_FILTER_CONDITIONS : null
   });
   const primaryData = primary && Array.isArray(primary.data) ? primary.data : [];
   const primaryScore = scoreSycmRows(primaryData, { mode: primaryMode });
-  const fallbackEnabled = options.fallbackHot !== false && primaryMode === 'blue';
+  const fallbackEnabled = options.fallbackHot !== false && ['blue', 'blue_relaxed'].includes(primaryMode);
   const minBlueRows = Number(options.minBlueRows || 1);
 
   if (!fallbackEnabled || !shouldFallbackToNextTier({ data: primaryData, sycmScore: primaryScore, minBlueRows })) {
@@ -127,7 +123,7 @@ async function fetchSycmWithFallback(keyword, options = {}) {
     };
   }
 
-  const relaxed = await sycmExtractor(keyword, {
+  const relaxed = primaryMode === 'blue_relaxed' ? primary : await sycmExtractor(keyword, {
     ...baseOptions,
     mode: 'blue',
     filterConditions: options.relaxedFilterConditions || DEFAULT_RELAXED_FILTER_CONDITIONS

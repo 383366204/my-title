@@ -1,6 +1,6 @@
 const { execFile } = require('child_process');
 const path = require('path');
-const { parseMetricNumber } = require('./candidate-gate');
+const { normalizeSycmMetrics, compareMetricThreshold } = require('../../sycm-research/src/metric-parser');
 
 /**
  * SYCM 预检：并发查询候选词的搜索人气，过滤低于阈值的词
@@ -31,14 +31,16 @@ async function precheckCandidates(candidates, { minSearchPopularity = 50, timeou
         filtered.push({ ...candidate, filtered: true, reason: 'sycm无数据或解析失败' });
         return;
       }
-      if (result.searchPopularity < minSearchPopularity) {
+      const popularityState = compareMetricThreshold(result.metrics.searchPopularity, minSearchPopularity);
+      if (popularityState === 'weak') {
         stats.filtered++;
         filtered.push({ ...candidate, filtered: true, reason: `搜索人气${result.searchPopularity}低于阈值${minSearchPopularity}`, ...result });
         return;
       }
       // 通过预检
       stats.passed++;
-      passed.push({ ...candidate, ...result });
+      passed.push({ ...candidate, ...result, sycmData: result,
+        ...(popularityState === 'review' ? { gateStatus: 'review', gateReason: '搜索人气缺失、含糊或区间跨越门槛，需人工复核' } : {}) });
     } catch (err) {
       stats.errors++;
       filtered.push({ ...candidate, filtered: true, reason: `sycm查询异常: ${err.message}` });
@@ -82,28 +84,21 @@ async function precheckCandidates(candidates, { minSearchPopularity = 50, timeou
   return { passed, filtered, stats };
 }
 
+/** @param {object} payload 平台响应。 @returns {number|null} 搜索人气下界。 */
 function extractSearchPopularityFromSycmJson(payload) {
   const metrics = extractSycmMetricsFromJson(payload);
   return metrics ? metrics.searchPopularity : null;
 }
 
+/** @param {object} payload 平台响应。 @returns {object|null} 标准化指标及证据。 */
 function extractSycmMetricsFromJson(payload) {
   const rows = Array.isArray(payload && payload.items)
     ? payload.items
     : Array.isArray(payload && payload.data)
       ? payload.data
       : [];
-  if (!rows.length || rows[0].searchPopularity == null) return null;
-  const row = rows[0];
-  const searchPopularity = parseMetricNumber(row.searchPopularity);
-  if (!Number.isFinite(searchPopularity)) return null;
-  return {
-    searchPopularity,
-    demandSupplyRatio: parseMetricNumber(row.demandSupplyRatio),
-    clickRate: parseMetricNumber(row.clickRate),
-    conversionRate: parseMetricNumber(row.conversionRate || row.payConversionRate),
-    buyerCount: parseMetricNumber(row.buyerCount || row.payBuyerCount)
-  };
+  if (!rows.length || !rows[0]) return null;
+  return normalizeSycmMetrics(rows[0]);
 }
 
 module.exports = { precheckCandidates, extractSearchPopularityFromSycmJson, extractSycmMetricsFromJson };

@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const { mineKeywords } = require('../../keyword-mining/src/pipeline');
+const { summarizeMiningDiagnostics, emptyMiningReason } = require('../../keyword-mining/src/mining-diagnostics');
 const { buildPipelineDiversityHistory } = require('./diversity-history');
 const {
   DEFAULT_FLOW_DIR,
@@ -64,7 +65,8 @@ async function appendRunCandidates(options = {}) {
  */
 async function flowMine(options = {}) {
   const { runDir, run } = initRun(options);
-  const discoveryAttempt = Math.max(1, Number(run.discovery?.attempt || 0) + 1);
+  const resumeDiscovery = run.discovery?.incomplete === true;
+  const discoveryAttempt = Math.max(1, Number(run.discovery?.attempt || 0) + (resumeDiscovery ? 0 : 1));
   const diversityHistory = options.diversityHistory || buildPipelineDiversityHistory({
     dataDir: options.dataDir || DEFAULT_FLOW_DIR,
     excludeRunId: run.runId,
@@ -84,6 +86,14 @@ async function flowMine(options = {}) {
     ? 'inspiration'
     : options.source || 'local';
   const miningOptions = {
+    candidateScreening: options.candidateScreening,
+    enabledDimensions: options.enabledDimensions,
+    customInputs: options.customInputs,
+    llmClient: options.llmClient,
+    researchScopeId: options.researchScopeId || 'default',
+    cycleId: `${run.runId}:${discoveryAttempt}`,
+    snapshotFile: path.join(runDir, `discovery-${discoveryAttempt}.json`),
+    shouldStop: options.shouldStop,
     count: options.limit || options.mine || 50,
     maxSeeds: options.maxSeeds || 20,
     maxObservingSeeds: options.maxObservingSeeds || 3,
@@ -125,8 +135,15 @@ async function flowMine(options = {}) {
     inspirationUseLLM: options.inspirationUseLLM !== false,
     onProgress: options.onProgress
   };
+  if (miningSource === 'inspiration') {
+    run.discovery = { ...run.discovery, attempt: discoveryAttempt, incomplete: true };
+    writeRun(runDir, run);
+  }
   let result = await mineKeywords(miningOptions);
-  if (discoveryMode === 'hybrid' && (!result.candidates || result.candidates.length === 0)) {
+  const miningDiagnostics = summarizeMiningDiagnostics(result);
+  const diagnosticsFile = path.join(runDir, `mining-diagnostics-${discoveryAttempt}.json`);
+  fs.writeFileSync(diagnosticsFile, JSON.stringify({ summary: miningDiagnostics, rows: result.screeningRows || [] }, null, 2), 'utf8');
+  if (discoveryMode === 'hybrid' && !result.stats?.rootQueries?.rows?.some(row => row.result === 'failed') && (!result.candidates || result.candidates.length === 0)) {
     const inspiration = result.inspiration;
     result = await mineKeywords({
       ...miningOptions,
@@ -175,7 +192,9 @@ async function flowMine(options = {}) {
     mode: 'inspiration',
     attempt: discoveryAttempt,
     stats: result.inspiration.stats,
+    miningDiagnostics,
     files: {
+      miningDiagnostics: diagnosticsFile,
       inspirations: run.files.inspirations,
       rootCandidates: run.files.rootCandidates
     }
@@ -201,20 +220,23 @@ async function flowMine(options = {}) {
   const chromeFailure = rootQueryFailures.find(row => /ECONNREFUSED|127\.0\.0\.1:9222|no chrome tab found|chrome[^\n]*(?:tab|debug)|cdp|devtools/i.test(String(row.error || '')));
   const platformFailure = rootQueryFailures.find(row => ['login_required', 'slider_required', 'sycm_feature_required'].includes(String(row.status || '')));
   const manualFailure = chromeFailure || platformFailure;
-  if (miningSource === 'inspiration' && result.candidates.length === 0) {
+  if (miningSource === 'inspiration' && (result.candidates.length === 0 || rootQueryFailures.length > 0)) {
     run.status = manualFailure ? 'mining_manual_action_required' : 'mining_empty';
     run.discovery.blocker = chromeFailure
       ? 'sycm_chrome_unavailable'
       : platformFailure
         ? `sycm_${platformFailure.status}`
         : 'no_inspiration_candidates';
-    run.discovery.blockerReason = manualFailure?.error || (
+    run.discovery.blockerReason = manualFailure?.error || rootQueryFailures[0]?.error || (
       Number(result.inspiration?.stats?.selectedRootCount || 0) === 0
         ? '今日灵感没有选出通过安全、商品化和冷却校验的词根。'
-        : '商品词根没有查询到可用的生意参谋关联词。'
+        : emptyMiningReason(miningDiagnostics)
     );
     run.discovery.manualAction = manualFailure?.manualAction || null;
   }
+  const paused = rootQueryFailures.some(row => row.status === 'paused') || Boolean(options.shouldStop?.());
+  if (result.inspiration) run.discovery.incomplete = rootQueryFailures.length > 0 || paused;
+  if (paused) run.status = 'paused';
   const mineRejected = Number(result.inspiration?.stats?.inspirationRejected || 0)
     + Number(result.stats?.seenFiltered || 0);
   setRunStageMetrics(run, 'mine', {
@@ -233,6 +255,7 @@ async function flowMine(options = {}) {
     ok: !miningBlocked,
     runId: run.runId,
     status: run.status,
+    ...(paused ? { status: 'paused', stepIncomplete: true } : {}),
     candidates: result.candidates,
     stats: result.stats,
     diversity: run.diversity.keyword,

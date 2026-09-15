@@ -1,8 +1,8 @@
 const axios = require('axios');
 const { parseJsonFromLLM, retry } = require('../../../core/llm-utils');
 const { createLLMClient } = require('../../../core/llm');
-const { productWords } = require('./product-words');
 const { normalizeKeyword } = require('./seed-store');
+const { deterministicSample } = require('./inspiration-sources');
 
 const LOCAL_ASSOCIATIONS = [
   { markers: ['高温', '炎热', '清凉', '降温', '夏天', '初夏'], roots: ['小风扇', '冰垫', '凉席', '冰袖', '遮阳帽'] },
@@ -38,20 +38,27 @@ function buildProductizationPrompt(inspirations, { maxRootsPerInspiration = 3 } 
     '',
     '规则：',
     '- 每个灵感最多生成指定数量的商品词根。',
-    '- 词根通常2到6个汉字，必须是具体商品，不得是场景、形容词或泛词。',
+    '- 从人群、任务、场景、痛点推导采购需求，再提取具体商品名词；避免机械拆成单字或拼接形容词。',
+    '- 词根优先简短，但完整商品名可以较长，必须是具体商品，不得是场景、形容词或泛词。',
     '- 禁止品牌、人物、影视动漫IP、灾难营销、医疗功效和夸张词。',
     '- 关联理由必须说明灵感如何转化为商品需求。',
-    '- 优先从允许商品目录中选择；没有合理商品时返回空数组。',
+    '- 不限固定商品目录。未知商品需给出实体形态 productForm、具体用途 productUse 及需求链；没有合理商品时返回空数组。',
+    '- 时事仅用于提出需求假设，不得编造新闻或搜索人气，市场表现留给生意参谋验证。',
     '',
     `每个灵感最多商品数: ${maxRootsPerInspiration}`,
-    `允许商品目录: ${JSON.stringify(productWords({ maxSeeds: 0 }).slice(0, 180))}`,
     `灵感列表: ${JSON.stringify(inspirations.map(item => ({
       inspirationId: item.id,
       sourceType: item.sourceType,
       inspirationWord: item.inspirationWord,
       contextWords: item.contextWords,
       rawSourceText: item.rawSourceText,
-      categoryHint: item.categoryHint
+      categoryHint: item.categoryHint,
+      dimension: item.dimension,
+      actor: item.actor,
+      task: item.task,
+      scene: item.scene,
+      problem: item.problem,
+      purchaseJob: item.purchaseJob
     })))}`,
     '',
     '返回结构：',
@@ -61,6 +68,9 @@ function buildProductizationPrompt(inspirations, { maxRootsPerInspiration = 3 } 
         rootKeyword: '具体商品词根',
         category: '商品类目',
         relationReason: '关联理由',
+        productForm: '商品实体形态',
+        productUse: '商品具体用途',
+        hypothesis: { actor: '需求人群', task: '活动任务', scene: '使用场景', problem: '具体问题', purchaseJob: '采购目的' },
         confidence: 80
       }]
     })
@@ -103,7 +113,11 @@ function localProductize(inspirations = [], maxRootsPerInspiration = 3) {
     const text = `${inspiration.inspirationWord || ''}${inspiration.rawSourceText || ''}${(inspiration.contextWords || []).join('')}`;
     const matched = LOCAL_ASSOCIATIONS.filter(rule => rule.markers.some(marker => text.includes(marker)))
       .flatMap(rule => rule.roots);
-    [...new Set(matched)].slice(0, maxRootsPerInspiration).forEach(rootKeyword => {
+    const unique = [...new Set(matched)];
+    const selected = inspiration.createdAt
+      ? deterministicSample(unique, maxRootsPerInspiration, `${inspiration.id}:${inspiration.createdAt.slice(0, 10)}`)
+      : unique.slice(0, maxRootsPerInspiration);
+    selected.forEach(rootKeyword => {
       roots.push({
         inspirationId: inspiration.id,
         rootKeyword,
@@ -146,6 +160,9 @@ function normalizeProductizedRoots(value, inspirationMap, maxRootsPerInspiration
       relationReason: String(row.relationReason || row.reason || ''),
       confidence: Math.max(0, Math.min(100, Number(row.confidence || 60))),
       productizer: row.productizer || 'llm',
+      productForm: String(row.productForm || ''),
+      productUse: String(row.productUse || ''),
+      hypothesis: Object.fromEntries(['actor', 'task', 'scene', 'problem', 'purchaseJob'].map(key => [key, String(row.hypothesis?.[key] || inspiration[key] || '')])),
       inspiration
     });
   }
@@ -175,7 +192,7 @@ async function productizeInspirations(inspirations = [], {
       errors.push({ offset: 0, error: error.message });
     }
   }
-  if (useLLM && client?.apiKey) {
+  if (useLLM && (client?.apiKey || typeof client?.productizeInspirations === 'function')) {
     for (let offset = 0; offset < inspirations.length; offset += Math.max(1, Number(batchSize || 20))) {
       const batch = inspirations.slice(offset, offset + Math.max(1, Number(batchSize || 20)));
       try {

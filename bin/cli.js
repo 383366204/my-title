@@ -1035,11 +1035,15 @@ flowCommand
   .description('执行每日动态灵感选品流水线，不自动铺货')
   .option('--mine <number>', '候选词数量', '50')
   .option('--discovery-mode <mode>', '发现模式: inspiration/seed/hybrid', 'inspiration')
+  .option('--inspiration-sycm-pages <number>', '每个灵感词根拓词页数（1到10）', '3')
+  .option('--candidate-screening <mode>', '候选筛选: strict/balanced/explore', 'balanced')
+  .option('--discovery-dimensions <json>', '需求分析维度 JSON 数组')
+  .option('--discovery-inputs <json>', '自定义需求 JSON 对象')
   .option('--source <source>', '挖词来源；动态模式固定使用 inspiration', 'inspiration')
   .option('--root-mode <mode>', '词根模式: auto/seed', 'auto')
   .option('--root-limit <number>', '每日最多查询的短商品词根数', '8')
-  .option('--root-cooldown-days <number>', '相同词根冷却天数', '14')
-  .option('--family-cooldown-days <number>', '相同商品族冷却天数', '7')
+  .option('--root-cooldown-days <number>', '种子模式词根冷却天数；动态模式固定30天', '30')
+  .option('--family-cooldown-days <number>', '种子模式商品族冷却天数；动态模式不禁查商品族', '0')
   .option('--no-inspiration-llm', '动态灵感商品化仅使用本地规则')
   .option('--verify <number>', '生意参谋校验数量', '20')
   .option('--generate <number>', '标题生成关键词数量', '10')
@@ -1064,12 +1068,15 @@ flowCommand
       const result = await flowDaily({
         mine: parseInt(options.mine, 10) || 50,
         discoveryMode: options.discoveryMode,
+        enabledDimensions: options.discoveryDimensions ? JSON.parse(options.discoveryDimensions) : undefined,
+        customInputs: options.discoveryInputs ? JSON.parse(options.discoveryInputs) : undefined,
         source: options.source,
         rootMode: options.rootMode,
         rootLimit: parseInt(options.rootLimit, 10) || 8,
         rootCooldownDays: Math.max(0, Number.parseInt(options.rootCooldownDays, 10) || 0),
         familyCooldownDays: Math.max(0, Number.parseInt(options.familyCooldownDays, 10) || 0),
-        inspirationSycmPages: 1,
+        inspirationSycmPages: Math.min(10, Math.max(1, parseInt(options.inspirationSycmPages, 10) || 3)),
+        candidateScreening: options.candidateScreening,
         inspirationUseLLM: options.inspirationLlm !== false,
         verify: parseInt(options.verify, 10) || 20,
         generate: parseInt(options.generate, 10) || 10,

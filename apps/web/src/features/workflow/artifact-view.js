@@ -62,7 +62,7 @@ function compactMetric(label, value) {
 }
 
 function inspirationSourceLabel(value) {
-  return ({ news: '新闻', dictionary: '字典', calendar: '日历', trend: '趋势' })[value] || String(value || '');
+  return ({ news: '新闻', dictionary: '字典', calendar: '日历', trend: '趋势', knowledge_base: '需求知识', user_input: '人工输入' })[value] || String(value || '');
 }
 
 const OPPORTUNITY_DECISION_LABELS = {

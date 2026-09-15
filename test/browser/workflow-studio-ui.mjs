@@ -54,6 +54,19 @@ try {
     }
     await page.locator('#workflow-template-select').selectOption(templates[0].id);
     await page.getByRole('button', { name: '收起选品流水线', exact: true }).click();
+    await page.locator('.react-flow__node[data-id="start"] .production-node-action').click();
+    const configuration = page.getByRole('dialog');
+    await configuration.getByLabel('每词根拓词页数', { exact: true }).fill('7');
+    await configuration.getByLabel('候选筛选强度', { exact: true }).selectOption('explore');
+    assert.equal(await configuration.getByLabel('每词根拓词页数', { exact: true }).inputValue(), '7');
+    await configuration.getByRole('checkbox', { name: '爱好', exact: true }).uncheck();
+    assert.equal(await configuration.getByLabel('自定义爱好', { exact: true }).count(), 0);
+    await configuration.getByRole('checkbox', { name: '爱好', exact: true }).check();
+    await configuration.getByLabel('自定义爱好', { exact: true }).fill('水彩写生\n阳台园艺');
+    await page.screenshot({ path: path.join(output, `discovery-config-${viewport.width}.png`), animations: 'disabled' });
+    const configBounds = await configuration.boundingBox();
+    assert.ok(configBounds.x >= 0 && configBounds.x + configBounds.width <= viewport.width + 1);
+    await configuration.getByRole('button', { name: '完成配置', exact: true }).click();
     await page.locator('.workflow-order-step').first().click();
     await page.getByRole('button', { name: '展开节点诊断', exact: true }).click();
     await page.screenshot({ path: path.join(output, `diagnostics-${viewport.width}.png`), animations: 'disabled' });

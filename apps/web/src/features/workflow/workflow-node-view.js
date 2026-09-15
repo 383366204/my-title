@@ -481,7 +481,7 @@ export function getWorkflowTemplateView(template = {}) {
         entryLabel: '入口：动态灵感',
         scenarioLabel: '适合：每天自动发现新机会',
         flowSummary: '流程：灵感选词 → 人工筛词 → 生意参谋校验 → 货源选品 → 标题生成 → 导出复核',
-        modeHint: '从新闻、字典、日历和趋势动态发现商品词根，不要求预先维护种子池。'
+        modeHint: '结合新闻、季节、人群、职业、爱好和场景需求发现词根；成功查询后 30 天可再次研究。'
       };
   return {
     entryLabel: template.entryLabel || defaults.entryLabel,

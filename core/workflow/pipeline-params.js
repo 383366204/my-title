@@ -6,6 +6,7 @@ const parseManualItems = require('../../skills/order-sheet/src/manual-items').pa
 const DEFAULT_ORDER_GROUP_SIZE = require('../../skills/order-sheet/src/order-groups').DEFAULT_ORDER_GROUP_SIZE;
 const { WORKFLOW_NODE_IDS, localIsoDate } = require('./pipeline-definition-common');
 const { listProductionWorkflowTemplates } = require('./pipeline-templates');
+const { DEFAULT_DIMENSIONS } = require('../../skills/keyword-mining/src/dimension-catalog');
 
 function clampInt(value, fallback, min, max) {
   const parsed = parseInt(value, 10);
@@ -111,14 +112,19 @@ function sanitizeWorkflowParams(mode, raw = {}) {
     return {
       mine: clampInt(raw.mine, 50, 1, 200),
       discoveryMode,
+      enabledDimensions: Array.isArray(raw.enabledDimensions) ? [...new Set(raw.enabledDimensions)].filter(value => DEFAULT_DIMENSIONS.includes(value)) : DEFAULT_DIMENSIONS,
+      customInputs: Object.fromEntries(DEFAULT_DIMENSIONS.map(key => [key,
+        (Array.isArray(raw.customInputs?.[key]) ? raw.customInputs[key] : []).map(value => String(value).trim()).filter(Boolean)
+      ])),
       source: ['local', 'ai', 'hybrid', 'sycm_hot', 'sycm_blue', 'inspiration'].includes(String(raw.source || '').trim())
         ? String(raw.source).trim()
         : discoveryMode === 'inspiration' || discoveryMode === 'hybrid' ? 'inspiration' : 'sycm_hot',
       rootMode: String(raw.rootMode || 'auto') === 'seed' ? 'seed' : 'auto',
       rootLimit: clampInt(raw.rootLimit, 8, 1, 20),
-      rootCooldownDays: clampInt(raw.rootCooldownDays, 14, 0, 60),
-      familyCooldownDays: clampInt(raw.familyCooldownDays, 7, 0, 60),
-      inspirationSycmPages: clampInt(raw.inspirationSycmPages, 1, 1, 1),
+      rootCooldownDays: discoveryMode === 'seed' ? clampInt(raw.rootCooldownDays, 30, 0, 60) : 30,
+      familyCooldownDays: discoveryMode === 'seed' ? clampInt(raw.familyCooldownDays, 0, 0, 60) : 0,
+      inspirationSycmPages: clampInt(raw.inspirationSycmPages, 3, 1, 10),
+      candidateScreening: ['strict', 'balanced', 'explore'].includes(raw.candidateScreening) ? raw.candidateScreening : 'balanced',
       inspirationUseLLM: sanitizeBool(raw.inspirationUseLLM, true),
       maxObservingSeeds: clampInt(raw.maxObservingSeeds, 3, 0, 10),
       maxObservingPoolSize: clampInt(raw.maxObservingPoolSize, 24, 3, 100),
@@ -327,6 +333,10 @@ function buildPipelineCliArgs(mode, params = {}) {
     const args = ['bin/cli.js', 'flow', 'daily'];
     pushFlag(args, '--mine', clean.mine);
     pushFlag(args, '--discovery-mode', clean.discoveryMode);
+    pushFlag(args, '--inspiration-sycm-pages', clean.inspirationSycmPages);
+    pushFlag(args, '--candidate-screening', clean.candidateScreening);
+    pushFlag(args, '--discovery-dimensions', JSON.stringify(clean.enabledDimensions));
+    pushFlag(args, '--discovery-inputs', JSON.stringify(clean.customInputs));
     pushFlag(args, '--source', clean.source);
     pushFlag(args, '--root-mode', clean.rootMode);
     pushFlag(args, '--root-limit', clean.rootLimit);
@@ -498,6 +508,9 @@ function resolveProductionWorkflowLaunch(body = {}) {
     ...(body.params || {}),
     ...(body.options || {})
   };
+  for (const key of ['enabledDimensions', 'customInputs', 'candidateScreening']) {
+    if (Object.prototype.hasOwnProperty.call(body, key)) params[key] = body[key];
+  }
   for (const key of ['keyword', 'keywords', 'roots', 'rootsText', 'sycmMode', 'period', 'compareType', 'sycmRiskProfile', 'sycmMinIntervalMs', 'sycmMaxIntervalMs', 'sycmBatchSize', 'sycmMinBatchCooldownMs', 'sycmMaxBatchCooldownMs', 'sycmMaxRetries', 'mine', 'discoveryMode', 'source', 'rootMode', 'rootLimit', 'rootCooldownDays', 'familyCooldownDays', 'inspirationSycmPages', 'inspirationUseLLM', 'maxObservingSeeds', 'maxObservingPoolSize', 'maxNewSeeds', 'autoReplenishSeeds', 'recordSeedFeedback', 'verify', 'select', 'generate', 'export', 'productsPerKeyword', 'length', 'port', 'pages', 'minBlueRows', 'fallbackHot', 'autoApproveKeywords', 'autoExpandVerify', 'verifyReserve', 'autoAllowReviewKeywords', 'reviewKeywordLimit', 'workRequirement', 'dateMode', 'startDate', 'endDate', 'orderDate', 'storeName', 'sheetType', 'sortMetric', 'productLimit', 'fileName', 'includeRawData', 'includeImages', 'amountMode', 'missingAmountPolicy', 'cartQuantity', 'rowSpan', 'orderNote', 'reviewGroupSize', 'includeSpacerRow', 'uploadId', 'uploadName', 'groups', 'reviewTone', 'reviewLength', 'useAI', 'inputMode', 'manualItems', 'manualItemsText', 'competitorText', 'competitorInputs', 'maxShops', 'hotLimit', 'newLimit', 'detailLimit', 'waitMs', 'compareHistory']) {
     if (Object.prototype.hasOwnProperty.call(body, key)) params[key] = body[key];
   }

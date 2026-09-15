@@ -192,14 +192,15 @@ function createDefaultStepFns({ dataDir, runId, params, mode = 'daily' }) {
         rootLimit: params.rootLimit || (mode === 'daily' ? 8 : 5),
         rootCooldownDays: params.rootCooldownDays ?? (mode === 'daily' ? 14 : 7),
         familyCooldownDays: params.familyCooldownDays ?? 7,
-        inspirationSycmPages: mode === 'daily' ? 1 : params.inspirationSycmPages,
+        inspirationSycmPages: params.inspirationSycmPages ?? (mode === 'daily' ? 3 : 1),
         excludeSeen: params.excludeSeen !== false,
         recordSeen: params.recordSeen !== false,
         recordSeedFeedback,
         autoReplenishSeeds: mode === 'daily'
           ? dailyDiscoveryMode === 'seed' && params.autoReplenishSeeds !== false
           : params.autoReplenishSeeds === true,
-        onProgress: reportProgress
+        onProgress: reportProgress,
+        shouldStop
       });
     },
     verify: async ({ reportProgress }) => {

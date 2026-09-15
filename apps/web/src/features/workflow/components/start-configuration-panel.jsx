@@ -1,8 +1,11 @@
 import { parseCompetitorShareInputs, parseExactKeywords, parseOrderSheetManualItems, parseRootKeywords } from '../workflow-launch-params.js';
 
+import { DiscoveryDimensionFields } from './keyword-mining/discovery-dimension-fields.jsx';
+
 const DAILY_START_FIELDS = [
   { key: 'mine', label: '候选词上限', min: 1, max: 200 },
   { key: 'rootLimit', label: '每日词根数', min: 1, max: 20 },
+  { key: 'inspirationSycmPages', label: '每词根拓词页数', min: 1, max: 10 },
   { key: 'rootCooldownDays', label: '词根冷却天数', min: 0, max: 60 },
   { key: 'familyCooldownDays', label: '商品族冷却天数', min: 0, max: 60 },
   { key: 'verify', label: '生意参谋校验', min: 1, max: 200 },
@@ -12,10 +15,11 @@ const DAILY_START_FIELDS = [
   { key: 'export', label: '导出清单数量', min: 1, max: 100 },
   { key: 'productsPerKeyword', label: '每词货源数', min: 1, max: 50 },
   { key: 'length', label: '标题长度', min: 30, max: 80 },
-  { key: 'pages', label: '采集页数', min: 1, max: 5 }
+  { key: 'pages', label: '逐词校验页数', min: 1, max: 5 }
 ];
 
 const DAILY_START_OPTIONS = [
+  { key: 'candidateScreening', label: '候选筛选强度', options: [{ value: 'balanced', label: '均衡：保留更多复核候选' }, { value: 'strict', label: '严格：优先明确蓝海词' }, { value: 'explore', label: '探索：保留低热度参考词' }] },
   { key: 'discoveryMode', label: '每日发现方式', options: [{ value: 'inspiration', label: '动态灵感（推荐）' }, { value: 'hybrid', label: '动态灵感 + 种子补位' }, { value: 'seed', label: '旧种子池模式' }] },
   { key: 'source', label: '种子补位来源', seedOnly: true, options: [{ value: 'sycm_hot', label: '生意参谋热搜关联词' }, { value: 'sycm_blue', label: '生意参谋蓝海关联词' }, { value: 'local', label: '本地规则扩展' }, { value: 'hybrid', label: '本地规则 + AI' }] },
   { key: 'rootMode', label: '种子词根模式', seedOnly: true, options: [{ value: 'auto', label: '自动提取短词根' }, { value: 'seed', label: '直接使用种子词' }] },
@@ -401,6 +405,8 @@ export function StartConfigurationPanel({ mode, modeHint, node, onDone, onUpdate
           <label className="node-field start-configuration-wide" key={field.key}>
             <span>{field.label}</span>
             <select
+              disabled={readOnly}
+              aria-label={field.label}
               value={data[field.key] ?? field.options[0].value}
               onChange={(event) => onUpdateField(node.id, field.key, event.target.value)}
             >
@@ -408,11 +414,13 @@ export function StartConfigurationPanel({ mode, modeHint, node, onDone, onUpdate
             </select>
           </label>
         ))}
-        {DAILY_START_FIELDS.map((field) => (
+        {data.discoveryMode !== 'seed' && <DiscoveryDimensionFields node={node} onUpdateField={onUpdateField} readOnly={readOnly} />}
+        {DAILY_START_FIELDS.filter(field => data.discoveryMode === 'seed' || !['rootCooldownDays', 'familyCooldownDays'].includes(field.key)).map((field) => (
           <label className="node-field" key={field.key}>
             <span>{field.label}</span>
             <input
               type="number"
+              disabled={readOnly}
               min={field.min}
               max={field.max}
               value={data[field.key] ?? ''}

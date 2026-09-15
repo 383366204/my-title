@@ -6,6 +6,9 @@ const { discoverInspirationRoots } = require('../../../../skills/keyword-mining/
 const { mineKeywords } = require('../../../../skills/keyword-mining/src/pipeline');
 const { productizeInspirations } = require('../../../../skills/keyword-mining/src/inspiration-productizer');
 const { buildHistoryKeys } = require('../../../../core/history-record');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 describe('inspiration discovery', () => {
   test('parses RSS and Atom feeds with a structured XML parser', () => {
@@ -80,7 +83,7 @@ describe('inspiration discovery', () => {
     const result = await discoverInspirationRoots({
       date: '2026-08-02',
       rootLimit: 3,
-      useLLM: false,
+      llmClient: { productizeInspirations: async ({ inspirations }) => ({ roots: inspirations.map(item => ({ inspirationId: item.id, rootKeyword: '小风扇', confidence: 80 })) }) },
       newsItems: [{ title: '高温天气持续', inspirationWord: '高温' }],
       dictionaryWords: [],
       trendItems: [],
@@ -90,10 +93,13 @@ describe('inspiration discovery', () => {
     assert.ok(result.roots.some(item => item.rootKeyword === '小风扇' && item.rejectReason === 'root_cooldown'));
   });
 
-  test('mines SYCM long-tail candidates in inspiration mode without seeds', async () => {
+  test('mines SYCM long-tail candidates in inspiration mode without seeds', async t => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'inspiration-mining-'));
+    t.after(() => fs.rmSync(dataDir, { recursive: true, force: true }));
     const calls = [];
     const result = await mineKeywords({
       source: 'inspiration',
+      dataDir,
       date: '2026-08-02',
       rootLimit: 2,
       count: 4,

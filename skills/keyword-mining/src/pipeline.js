@@ -15,6 +15,10 @@ const { prepareSeedSuggestions } = require('./seed-suggestions');
 const { productFamily } = require('./product-words');
 const { selectDiverseCandidates } = require('./diversity-selector');
 const { discoverInspirationRoots } = require('./inspiration-engine');
+const { researchPolicy } = require('./research-policy');
+const { researchRoot, discoverySnapshot, ROOT_RESEARCH_COOLDOWN_MS } = require('./root-research-store');
+const { randomUUID } = require('crypto');
+const { normalizeSycmMetrics } = require('../../sycm-research/src/metric-parser');
 
 const CANDIDATES_FILE = 'candidates.jsonl';
 const MINING_PROGRESS_TOTAL = 6;
@@ -48,11 +52,17 @@ function clusterBySignature(items) {
     }
     existing.cluster = [...new Set([...(existing.cluster || []), item.keyword])];
     existing.clusterSize = existing.cluster.length;
+    const sourceRoots = [...new Set([...(existing.sourceRoots || [existing.seed]), ...(item.sourceRoots || [item.seed])].filter(Boolean))];
+    const provenance = [...new Map([...(existing.provenance || []), ...(item.provenance || [])].map(row => [row.inspirationId, row])).values()];
+    existing.sourceRoots = sourceRoots;
+    existing.provenance = provenance;
     const better = item.localScore > existing.localScore
       || (item.localScore === existing.localScore && item.keyword.length > existing.keyword.length);
     if (better) {
       groups.set(key, {
         ...item,
+        sourceRoots,
+        provenance,
         cluster: existing.cluster,
         clusterSize: existing.cluster.length
       });
@@ -123,25 +133,6 @@ function sycmProgressMessage(message) {
   }
   const cleaned = raw.replace(/^\[[^\]]+\]\s*/, '').trim();
   return /[\u3400-\u9fff]/.test(cleaned) ? cleaned : '读取生意参谋数据';
-}
-
-function parseSearchPop(val) {
-  if (typeof val === 'number') return val;
-  if (!val) return 0;
-  const m = String(val).replace(/,/g, '').match(/(\d[\d]*)/);
-  return m ? parseInt(m[1], 10) : 0;
-}
-
-function parsePercentOrNumber(val) {
-  if (typeof val === 'number') return val;
-  if (!val) return 0;
-  const str = String(val).trim();
-  if (str.endsWith('%')) {
-    const num = parseFloat(str.slice(0, -1));
-    return Number.isFinite(num) ? num / 100 : 0;
-  }
-  const num = parseFloat(str);
-  return Number.isFinite(num) ? num : 0;
 }
 
 function buildStats({ seeds, expanded, scored, clustered, threshold, source, aiMeta = null }) {
@@ -238,8 +229,13 @@ function buildDirectKeywords(seeds, limit = 20) {
  * @param {object|null} [options.diversityHistory] Recent pipeline history snapshot.
  * @returns {Promise<{ok:boolean,date:string,seedsUsed:number,directKeywords:Array<object>,candidates:Array<object>,stats:object,precheckStats?:object}>}
  */
-async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds = 20, maxObservingSeeds = 3, maxObservingPoolSize = 24, maxPerSeed = 30, outputMaxPerSeed = 5, outputMaxPerCategory = 20, outputMaxPerPattern = 20, outputMaxPerProductCore = 3, persist = true, sycmPrecheck = false, minSearchPopularity = 50, includeDirect = false, excludeSeen = false, excludeKeywords = [], recordSeen: shouldRecordSeen = false, recordSeedFeedback = false, autoReplenishSeeds = false, maxNewSeeds = 3, seenTtlDays = 30, mode = 'balanced', source = 'local', aiCandidates = 80, aiBatchSize = 20, llmClient = null, onProgress = null, rootMode = 'auto', rootLimit = 5, rootCooldownDays = 7, familyCooldownDays = 7, recordRootHistory = true, sycmExtractor = null, sycmMaxPages = 1, sycmPort = 9222, diversityHistory = null, allowHistoryFallback = false, date = new Date().toISOString().slice(0, 10), runAttempt = 0, newsItems = [], newsFeedUrls, dictionaryWords, trendItems = [], inspirationUseLLM = true } = {}) {
+async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds = 20, maxObservingSeeds = 3, maxObservingPoolSize = 24, maxPerSeed = 30, outputMaxPerSeed = 5, outputMaxPerCategory = 20, outputMaxPerPattern = 20, outputMaxPerProductCore = 3, persist = true, sycmPrecheck = false, minSearchPopularity = 50, includeDirect = false, excludeSeen = false, excludeKeywords = [], recordSeen: shouldRecordSeen = false, recordSeedFeedback = false, autoReplenishSeeds = false, maxNewSeeds = 3, seenTtlDays = 30, mode = 'balanced', source = 'local', aiCandidates = 80, aiBatchSize = 20, llmClient = null, onProgress = null, rootMode = 'auto', rootLimit = 5, rootCooldownDays = 7, familyCooldownDays = 7, recordRootHistory = true, sycmExtractor = null, sycmMaxPages = 1, sycmPort = 9222, diversityHistory = null, allowHistoryFallback = false, date = new Date().toISOString().slice(0, 10), runAttempt = 0, newsItems = [], newsFeedUrls, dictionaryWords, trendItems = [], inspirationUseLLM = true,
+  enabledDimensions, customInputs, candidateScreening, researchScopeId = 'default', cycleId = randomUUID(), snapshotFile,
+  shouldStop = () => null
+} = {}) {
   const effectiveSource = normalizeSource(source);
+  const screening = candidateScreening && effectiveSource === 'inspiration' ? researchPolicy(candidateScreening) : null;
+  if (screening) minSearchPopularity = screening.minSearchPopularity;
   const lifecycleSeeds = effectiveSource === 'inspiration' ? [] : listSeeds({ dataDir, includePaused: true });
   const auditedSeeds = auditSeedPool(lifecycleSeeds).profiles;
   const seeds = scheduleSeedProfiles(auditedSeeds, {
@@ -269,7 +265,8 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
   let inspirationDiscovery = null;
   const rootResults = [];
   if (effectiveSource === 'inspiration') {
-    inspirationDiscovery = await discoverInspirationRoots({
+    inspirationDiscovery = await discoverySnapshot(snapshotFile, () => discoverInspirationRoots({
+      dataDir, researchScopeId, enabledDimensions, customInputs,
       date,
       runAttempt,
       rootLimit: Number(rootLimit || 8),
@@ -282,7 +279,7 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
       newsFeedUrls,
       dictionaryWords,
       trendItems
-    });
+    }));
     reportProgress({
       stage: 'productize-inspirations',
       current: 2,
@@ -364,6 +361,10 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
     for (let seedIndex = 0; seedIndex < querySeeds.length; seedIndex++) {
       const seed = querySeeds[seedIndex];
       const query = seed.root || seed.keyword;
+      if (shouldStop()) {
+        rootResults.push({ ...seed, result: 'failed', status: 'paused', error: '已暂停，继续时接着处理剩余词根' });
+        break;
+      }
       try {
         reportProgress({
           stage: 'sycm-expand',
@@ -373,7 +374,10 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
         });
         console.log(`🔍 正在查询词根 "${query}" 的生意参谋关联词...`);
         const extractor = sycmExtractor || require('../../sycm-research/src/sycm-cdp-extractor').extractSycmData;
-        const sycmRes = await extractor(query, {
+        const queryContext = { mode: sycmMode, period: '7d', compareType: 'cycle', maxPages: Math.max(1, Number(sycmMaxPages || 1)), port: Number(sycmPort || 9222) };
+        const extract = () => extractor(query, {
+          shouldStop,
+          ...(effectiveSource === 'inspiration' ? { guardCache: false } : {}),
           mode: sycmMode,
           maxPages: Math.max(1, Number(sycmMaxPages || 1)),
           port: Number(sycmPort || 9222),
@@ -384,12 +388,25 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
             message: `生意参谋 ${seedIndex + 1}/${querySeeds.length} · ${query}：${sycmProgressMessage(message)}`
           })
         });
+        const researched = effectiveSource === 'inspiration'
+          ? await researchRoot(query, { dataDir, researchScopeId, cycleId, queryContext }, extract)
+          : { response: await extract() };
+        if (researched.skipped) {
+          rootResults.push({ ...seed, result: researched.state === 'running' ? 'failed' : 'cooling', status: researched.state,
+            error: researched.state === 'running' ? '该词根已有任务查询中，请等待原任务完成后继续' : '该词根本月已查询', nextEligibleAt: researched.nextEligibleAt });
+          continue;
+        }
+        const sycmRes = researched.response;
+        if (sycmRes?.ok === false || !Array.isArray(sycmRes?.data)) throw Object.assign(new Error(sycmRes?.error || '生意参谋返回无效查询结果'), { status: sycmRes?.status });
         const items = sycmRes.data || [];
         const recommendedCategory = sycmRecommendedCategory(sycmRes) || String(seed.category || '').trim();
         rootResults.push({
           ...seed,
           result: items.length > 0 ? 'success' : 'empty',
           candidateCount: items.length,
+          completedAt: researched.cycle?.completedAt,
+          reused: researched.reused || false,
+          comparison: researched.cycle?.comparison,
           recommendedCategory,
           categorySource: sycmRecommendedCategory(sycmRes) ? 'sycm' : (recommendedCategory ? 'inspiration' : '')
         });
@@ -407,22 +424,19 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
             source: effectiveSource,
             inspirationId: seed.inspirationId || '',
             inspiration: seed.inspiration || null,
+            provenance: seed.provenance || [],
+            sycmEvidence: {
+              keyword: item.keyword, root: query, mode: sycmMode,
+              period: queryContext.period, compareType: queryContext.compareType,
+              collectedAt: researched.cycle?.completedAt || new Date().toISOString(),
+              maxPages: queryContext.maxPages, researchScopeId, raw: item
+            },
             relationReason: seed.relationReason || '',
             rootScore: seed.rootScore || null,
             familyKey: seed.familyKey || '',
             recommendedCategory,
             categorySource: sycmRecommendedCategory(sycmRes) ? 'sycm' : (recommendedCategory ? 'inspiration' : ''),
-            sycmData: {
-              searchPopularity: parseSearchPop(item.searchPopularity),
-              clickRate: parsePercentOrNumber(item.clickRate),
-              clickPopularity: parseSearchPop(item.clickPopularity),
-              demandSupplyRatio: parsePercentOrNumber(item.demandSupplyRatio),
-              payConversionRate: parsePercentOrNumber(item.payConversionRate || item.conversionRate),
-              conversionRate: parsePercentOrNumber(item.conversionRate || item.payConversionRate),
-              buyerCount: parseSearchPop(item.buyerCount || item.payBuyerCount),
-              onlineProductCount: parseSearchPop(item.onlineProductCount || item.productCount || item.competitionCount),
-              trend: parsePercentOrNumber(item.trend || item.trendRate || item.searchTrend)
-            }
+            sycmData: normalizeSycmMetrics(item)
           });
         }
       } catch (err) {
@@ -434,6 +448,7 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
           manualAction: err.details || err.manualAction || null
         });
         console.error(`❌ 查询词根 "${query}" 失败:`, err.message);
+        if (effectiveSource === 'inspiration') break;
       }
       reportProgress({
         stage: 'sycm-expand',
@@ -443,6 +458,17 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
       });
     }
     if (rootResults.length > 0 && recordRootHistory) recordRootQueries(rootResults, { dataDir });
+    if (inspirationDiscovery) {
+      inspirationDiscovery.roots = inspirationDiscovery.roots.map(row => {
+        const result = rootResults.find(item => item.root === row.rootKeyword);
+        if (!result) return row;
+        return { ...row, queryResult: result.result, queryError: result.error || '', comparison: result.comparison,
+          research: result.completedAt ? {
+            state: 'cooling', lastCompletedAt: result.completedAt,
+            nextEligibleAt: new Date(Date.parse(result.completedAt) + ROOT_RESEARCH_COOLDOWN_MS).toISOString()
+          } : row.research };
+      });
+    }
     if (rootResults.length > 0 && recordSeedFeedback && effectiveSource !== 'inspiration') {
       applySeedFeedback(rootResults.map(root => ({
         root: root.root,
@@ -487,7 +513,7 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
       : Math.max(0, Math.min(100, scoredItem.localScore + aiBoost + sycmBoost));
     const nextAction = scoredItem.nextAction === 'reject'
       ? 'reject'
-      : localScore >= 62 ? 'sycm_verify' : 'observe';
+      : localScore >= (screening?.localThreshold ?? 62) ? 'sycm_verify' : 'observe';
     const candidate = {
       date,
       keyword: scoredItem.keyword,
@@ -522,6 +548,8 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
       recommendedCategory: item.recommendedCategory || '',
       categorySource: item.categorySource || '',
       sycmData: item.sycmData || null,
+      sycmEvidence: item.sycmEvidence || null,
+      provenance: item.provenance || [],
       nextCommands: buildNextCommands(scoredItem.keyword)
     };
     return {
@@ -530,7 +558,7 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
     };
   });
 
-  const threshold = thresholdForMode(mode);
+  const threshold = screening?.localThreshold ?? thresholdForMode(mode);
   const clustered = clusterBySignature(scored)
     .sort((a, b) => b.localScore - a.localScore || String(a.seed).localeCompare(String(b.seed), 'zh-CN') || String(a.keyword).localeCompare(String(b.keyword), 'zh-CN'));
 
@@ -548,8 +576,8 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
   let prechecked = ranked;
   if (sycmPrecheck && ranked.length > 0) {
     const needPrecheck = ranked.filter(item => !item.sycmData);
-    const alreadyPassed = ranked.filter(item => !!item.sycmData && item.sycmData.searchPopularity >= minSearchPopularity);
-    const alreadyFiltered = ranked.filter(item => !!item.sycmData && item.sycmData.searchPopularity < minSearchPopularity);
+    const alreadyPassed = ranked.filter(item => !!item.sycmData && (item.marketMetrics?.needsReview || item.sycmData.searchPopularity >= minSearchPopularity));
+    const alreadyFiltered = ranked.filter(item => !!item.sycmData && !alreadyPassed.includes(item));
 
     if (needPrecheck.length > 0) {
       const pcResult = await precheckCandidates(needPrecheck, { minSearchPopularity });
@@ -727,6 +755,14 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
       seedReplenishment: seedReplenishment ? seedReplenishment.summary : null
     },
     candidates,
+    screeningRows: scored.map(item => ({
+      ...item,
+      screeningReason: item.nextAction === 'reject' ? 'local_rejected'
+        : item.gateStatus === 'rejected' ? 'market_rejected'
+          : item.localScore < threshold ? 'local_below_threshold'
+            : !candidates.some(candidate => candidate.keyword === item.keyword) ? 'dedupe_history_or_quota'
+              : 'selected'
+    })),
     inspiration: inspirationDiscovery
   };
   if (precheckStats) result.precheckStats = precheckStats;

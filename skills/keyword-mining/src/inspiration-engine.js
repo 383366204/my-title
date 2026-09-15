@@ -1,16 +1,16 @@
 const { buildHistoryKeys } = require('../../../core/history-record');
 const { selectDiverseCandidates, historySignals } = require('./diversity-selector');
-const { collectInspirations, seededNumber } = (() => {
-  const sources = require('./inspiration-sources');
-  return {
-    ...sources,
-    seededNumber: seed => parseInt(sources.stableHash(seed).slice(0, 12), 16) / 0xffffffffffff
-  };
-})();
+const { collectInspirations, stableHash } = require('./inspiration-sources');
 const { assessInspiration, assessRootCandidate } = require('./inspiration-guard');
 const { productizeInspirations } = require('./inspiration-productizer');
+const { rootResearchStatus, normalizeResearchRoot } = require('./root-research-store');
+const { collectDimensionInspirations } = require('./dimension-catalog');
 
-const DEFAULT_SOURCE_QUOTAS = { news: 3, dictionary: 2, calendar: 1, trend: 1 };
+const DEFAULT_SOURCE_QUOTAS = { user_input: 1, news: 2, knowledge_base: 3, dictionary: 1, calendar: 1, trend: 1 };
+
+function seededNumber(seed) {
+  return parseInt(stableHash(seed).slice(0, 12), 16) / 0xffffffffffff;
+}
 
 function ageDays(record, now) {
   const timestamp = Date.parse(record?.lastSeenAt || '');
@@ -125,8 +125,8 @@ async function discoverInspirationRoots({
   date = new Date().toISOString().slice(0, 10),
   runAttempt = 0,
   rootLimit = 8,
-  rootCooldownDays = 14,
-  familyCooldownDays = 7,
+  rootCooldownDays = 30,
+  familyCooldownDays = 0,
   minRootScore = 60,
   sourceQuotas = DEFAULT_SOURCE_QUOTAS,
   history = null,
@@ -136,7 +136,12 @@ async function discoverInspirationRoots({
   newsFeedUrls,
   dictionaryWords,
   trendItems = [],
-  fetcher
+  fetcher,
+  dataDir,
+  researchScopeId = 'default',
+  enabledDimensions,
+  customInputs,
+  now = Date.now()
 } = {}) {
   const collected = await collectInspirations({
     date,
@@ -147,17 +152,28 @@ async function discoverInspirationRoots({
     trendItems,
     fetcher
   });
-  const inspirations = collected.inspirations.map(item => {
+  const inspirations = [...collected.inspirations, ...collectDimensionInspirations({ date, runAttempt, enabledDimensions, customInputs })].map(item => {
     const guard = assessInspiration(item);
     return { ...item, ...guard, status: guard.ok ? 'safe' : 'rejected' };
   });
   const safeInspirations = inspirations.filter(item => item.ok);
   const productized = await productizeInspirations(safeInspirations, { llmClient, useLLM });
-  const grounded = productized.roots.map(row => assessRootCandidate(row, { maxSeeds: 0 }));
-  const now = `${date}T12:00:00.000Z`;
+  const merged = new Map();
+  for (const row of productized.roots) {
+    const key = normalizeResearchRoot(row.rootKeyword);
+    const previous = merged.get(key);
+    const provenance = { inspirationId: row.inspirationId, inspiration: row.inspiration, relationReason: row.relationReason };
+    if (previous) previous.provenance.push(provenance);
+    else merged.set(key, { ...row, provenance: [provenance] });
+  }
+  const grounded = [...merged.values()].map(row => assessRootCandidate(row, { maxSeeds: 0 }));
   const cooled = grounded.map(candidate => {
     if (candidate.rejectReason) return candidate;
-    const cooldown = applyCooldown(candidate, history || {}, { now, rootCooldownDays, familyCooldownDays });
+    const research = dataDir ? rootResearchStatus(candidate.rootKeyword, { dataDir, researchScopeId, now }) : null;
+    const cooldown = research
+      ? { ok: research.state !== 'cooling', reason: research.state === 'cooling' ? 'root_cooldown' : '' }
+      : applyCooldown(candidate, history || {}, { now: `${date}T12:00:00.000Z`, rootCooldownDays, familyCooldownDays });
+    candidate = { ...candidate, research: research && { state: research.state, lastCompletedAt: research.lastCompletedAt, nextEligibleAt: research.nextEligibleAt } };
     if (!cooldown.ok) return { ...candidate, status: 'rejected', rejectReason: cooldown.reason, cooldown };
     const score = rootPreScore(candidate, history, { date, runAttempt });
     return {
@@ -217,6 +233,7 @@ async function discoverInspirationRoots({
       }, {}),
       rejectionCounts,
       feedErrors: collected.errors,
+      newsStatus: collected.stats.news > 0 ? 'available' : collected.errors.length > 0 ? 'unavailable' : 'empty_or_unconfigured',
       productizer: productized.meta
     }
   };

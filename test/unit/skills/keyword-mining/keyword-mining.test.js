@@ -716,13 +716,14 @@ describe('keyword-mining', () => {
       }]
     });
 
-    assert.deepStrictEqual(metrics, {
-      searchPopularity: 128,
-      demandSupplyRatio: 1.8,
-      clickRate: 12.5,
-      conversionRate: 2.1,
-      buyerCount: 36
-    });
+    assert.strictEqual(metrics.searchPopularity, 128);
+    assert.strictEqual(metrics.demandSupplyRatio, 1.8);
+    assert.strictEqual(metrics.clickRate, 0.125);
+    assert.strictEqual(metrics.conversionRate, 0.021);
+    assert.strictEqual(metrics.buyerCount, 36);
+    assert.strictEqual(metrics.metrics.clickRate.raw, '12.5%');
+    assert.strictEqual(metrics.metrics.clickRate.unit, 'ratio');
+    assert.strictEqual(metrics.metricParserVersion, 'sycm-metrics-v1');
   });
 
   test('mineKeywords applies diversity limits and next commands', async () => {

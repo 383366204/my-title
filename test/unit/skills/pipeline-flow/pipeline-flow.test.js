@@ -616,8 +616,10 @@ describe('pipeline-flow', () => {
 
   test('dynamic mining stops on the mine node when Chrome cannot query SYCM', async () => {
     const dataDir = tempDataDir();
+    const keywordDataDir = path.join(dataDir, 'keyword-mining');
     const result = await flowMine({
       dataDir,
+      keywordDataDir,
       discoveryMode: 'inspiration',
       source: 'inspiration',
       date: '2026-08-02',
@@ -643,6 +645,7 @@ describe('pipeline-flow', () => {
 
     const retried = await flowMine({
       dataDir,
+      keywordDataDir,
       runId: result.runId,
       discoveryMode: 'inspiration',
       source: 'inspiration',
@@ -659,7 +662,7 @@ describe('pipeline-flow', () => {
       })
     });
     assert.equal(retried.status, 'mined');
-    assert.equal(getRun({ dataDir, runId: result.runId }).run.discovery.attempt, 2);
+    assert.equal(getRun({ dataDir, runId: result.runId }).run.discovery.attempt, 1);
   });
 
   test('hybrid discovery falls back to the legacy seed path only when inspiration returns no candidates', async () => {

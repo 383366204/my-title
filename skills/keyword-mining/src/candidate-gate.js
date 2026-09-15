@@ -1,34 +1,22 @@
+const { parseSycmMetric, normalizeSycmMetrics, compareMetricThreshold } = require('../../sycm-research/src/metric-parser');
+
+/** @param {unknown} value 原始搜索人气。 @returns {number|null} 保守下界或不可解析。 */
 function parseSearchPopularity(value) {
-  if (typeof value === 'number') return value;
-  if (!value) return 0;
-  const match = String(value).replace(/,/g, '').match(/(\d+)/);
-  return match ? parseInt(match[1], 10) : 0;
+  return parseSycmMetric(value, { unit: 'count' }).value;
 }
 
+/** @param {unknown} value 原始数值。 @returns {number|null} 保守下界或不可解析。 */
 function parseMetricNumber(value) {
-  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
-  if (!value) return 0;
-  const matches = String(value).replace(/,/g, '').match(/-?\d+(?:\.\d+)?/g);
-  if (!matches) return 0;
-  const nums = matches.map(Number).filter(Number.isFinite);
-  return nums.length ? Math.max(...nums) : 0;
+  return parseSycmMetric(value).value;
 }
 
-function metricValue(data, names) {
-  for (const name of names) {
-    if (data && data[name] != null) return data[name];
-  }
-  return 0;
-}
-
+/** @param {object} sycmData 原始或标准化指标。 @param {object} [options] 阈值。 @returns {object} 市场证据评估。 */
 function evaluateMarketMetrics(sycmData, { minSearchPopularity = 50 } = {}) {
-  const searchPopularity = parseSearchPopularity(sycmData.searchPopularity);
-  const demandSupplyRatio = parseMetricNumber(sycmData.demandSupplyRatio);
-  const clickRate = parseMetricNumber(metricValue(sycmData, ['clickRate', 'clickRatio']));
-  const conversionRate = parseMetricNumber(metricValue(sycmData, ['conversionRate', 'payConversionRate', 'payConversion']));
-  const buyerCount = parseMetricNumber(metricValue(sycmData, ['buyerCount', 'payBuyerCount', 'payBuyers']));
-  const onlineProductCount = parseMetricNumber(metricValue(sycmData, ['onlineProductCount', '商品数', 'productCount', 'competitionCount']));
-  const trend = parseMetricNumber(metricValue(sycmData, ['trend', 'trendRate', 'searchTrend', 'growthRate']));
+  const normalized = normalizeSycmMetrics(sycmData);
+  const { searchPopularity, demandSupplyRatio, buyerCount, onlineProductCount, trend, metrics } = normalized;
+  // 旧综合公式和展示使用百分点，标准化证据始终保留比率。
+  const clickRate = normalized.clickRate == null ? null : normalized.clickRate * 100;
+  const conversionRate = normalized.conversionRate == null ? null : normalized.conversionRate * 100;
   const breakdown = {
     demand: Math.min(30, demandSupplyRatio * 15),
     search: Math.min(25, searchPopularity / 20),
@@ -47,9 +35,10 @@ function evaluateMarketMetrics(sycmData, { minSearchPopularity = 50 } = {}) {
   else missing.push('转化率不足');
   if (buyerCount >= 1) evidence.push('买家数达标');
   else missing.push('支付买家数不足');
-  if (!searchPopularity) missing.push('缺少搜索人气');
-  const availableMetrics = [searchPopularity, demandSupplyRatio, clickRate, conversionRate, buyerCount]
-    .filter(value => Number(value) > 0).length;
+  const popularityState = compareMetricThreshold(metrics.searchPopularity, minSearchPopularity);
+  if (popularityState === 'review') missing.push('搜索人气缺失、含糊或区间跨越门槛');
+  const availableMetrics = ['searchPopularity', 'demandSupplyRatio', 'clickRate', 'conversionRate', 'buyerCount']
+    .filter(key => ['exact', 'range'].includes(metrics[key].status)).length;
   const confidence = availableMetrics >= 4 ? 'high' : availableMetrics >= 2 ? 'medium' : 'low';
   return {
     searchPopularity,
@@ -64,7 +53,10 @@ function evaluateMarketMetrics(sycmData, { minSearchPopularity = 50 } = {}) {
     evidence,
     missing,
     confidence,
-    passed: searchPopularity >= minSearchPopularity && evidence.length > 0 && score >= 45
+    metrics,
+    metricParserVersion: normalized.metricParserVersion,
+    needsReview: popularityState === 'review',
+    passed: popularityState === 'passed' && evidence.length > 0 && score >= 45
   };
 }
 
@@ -106,7 +98,7 @@ function gateCandidate(candidate, { minSearchPopularity = 50 } = {}) {
   }
 
   if (candidate.sycmData) {
-    const market = evaluateMarketMetrics(candidate.sycmData, { minSearchPopularity });
+    const market = evaluateMarketMetrics(candidate.sycmEvidence?.raw || candidate.sycmData, { minSearchPopularity });
     if (market.passed) {
       return {
         gateStatus: 'verified',
@@ -117,7 +109,7 @@ function gateCandidate(candidate, { minSearchPopularity = 50 } = {}) {
         marketMetrics: market
       };
     }
-    if (market.searchPopularity >= minSearchPopularity) {
+    if (market.needsReview || market.searchPopularity >= minSearchPopularity) {
       return {
         gateStatus: 'review',
         canDistribute: false,

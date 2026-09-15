@@ -24,24 +24,33 @@ function tokenizeTitle(value) {
   }
 }
 
+/** @param {object[]} products 榜单商品。 @param {number} [limit] 词数上限。 @returns {object[]} 去重商品与店铺覆盖统计。 */
 function topKeywords(products, limit = 20) {
   const counts = new Map();
-  for (const product of products) {
+  for (const product of uniqueProducts(products)) {
     const unique = new Set(tokenizeTitle(product.title));
-    for (const word of unique) counts.set(word, (counts.get(word) || 0) + 1);
+    for (const word of unique) {
+      const entry = counts.get(word) || { productCount: 0, shops: new Set(), sources: [] };
+      entry.productCount += 1;
+      if (product.shopKey) entry.shops.add(product.shopKey);
+      entry.sources.push({ shopKey: product.shopKey || '', itemId: product.itemId || '', title: product.title, productUrl: product.productUrl || '' });
+      counts.set(word, entry);
+    }
   }
   return [...counts.entries()]
-    .filter(([, count]) => count >= 2)
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'zh-CN'))
+    .filter(([, entry]) => entry.productCount >= 2)
+    .sort((a, b) => b[1].shops.size - a[1].shops.size || b[1].productCount - a[1].productCount || a[0].localeCompare(b[0], 'zh-CN'))
     .slice(0, limit)
-    .map(([keyword, productCount]) => ({ keyword, productCount }));
+    .map(([keyword, entry]) => ({ keyword, productCount: entry.productCount, shopCount: entry.shops.size, sources: entry.sources }));
 }
 
+/** @param {object} product 新品样本。 @param {Set<string>} hotTitles 同店商品身份集合。 @param {number} maxPayment 同店样本付款上限。 @returns {object} 样本内参考分与身份状态。 */
 function potentialForNewProduct(product, hotTitles, maxPayment) {
   const payment = Math.max(0, Number(product.paymentLowerBound) || 0);
   const paymentSignal = maxPayment > 0 ? Math.log1p(payment) / Math.log1p(maxPayment) : 0;
   const rankSignal = Math.max(0, 1 - (Math.max(1, Number(product.rank) || 1) - 1) / 20);
-  const hotOverlap = hotTitles.has(normalizedTitle(product.title));
+  const identity = productIdentity(product);
+  const hotOverlap = Boolean(identity && hotTitles.has(identity));
   const score = Math.round((paymentSignal * 55 + rankSignal * 25 + (hotOverlap ? 20 : 0)) * 10) / 10;
   const level = score >= 70 ? '重点关注' : score >= 45 ? '持续观察' : '新品试款';
   const reasons = [
@@ -49,11 +58,30 @@ function potentialForNewProduct(product, hotTitles, maxPayment) {
     product.paymentText || '暂无付款信号',
     hotOverlap ? '同时进入销量榜' : ''
   ].filter(Boolean);
-  return { score, level, reasons, hotOverlap };
+  return { score, level, reasons, hotOverlap, identityStatus: product.itemId ? 'confirmed' : 'provisional', scoreScope: 'shop_sample' };
 }
 
 function productIdentity(product = {}) {
-  return `${product.shopKey || ''}:${product.itemId || normalizedTitle(product.title)}`;
+  if (!product.shopKey) return null;
+  const value = product.itemId || normalizedTitle(product.title);
+  return value ? JSON.stringify([String(product.shopKey), product.itemId ? 'id' : 'title', String(value)]) : null;
+}
+
+function uniqueProducts(products) {
+  const seen = new Set();
+  return products.filter(product => {
+    const key = productIdentity(product);
+    if (!key) return true;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function paymentValue(value) {
+  if (value == null || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : null;
 }
 
 /**
@@ -68,17 +96,18 @@ function compareCompetitorSnapshots(current = {}, previous = {}, metadata = {}) 
   const currentNew = current.newProducts || [];
   const previousHot = previous.hotProducts || [];
   const previousNew = previous.newProducts || [];
-  const priorHot = new Map(previousHot.map(item => [productIdentity(item), item]));
-  const priorNew = new Map(previousNew.map(item => [productIdentity(item), item]));
-  const currentHotKeys = new Set(currentHot.map(productIdentity));
-  const currentNewKeys = new Set(currentNew.map(productIdentity));
+  const priorHot = new Map(previousHot.map(item => [productIdentity(item), item]).filter(([key]) => key));
+  const priorNew = new Map(previousNew.map(item => [productIdentity(item), item]).filter(([key]) => key));
+  const currentHotKeys = new Set(currentHot.map(productIdentity).filter(Boolean));
+  const currentNewKeys = new Set(currentNew.map(productIdentity).filter(Boolean));
   const paymentChanges = [];
   for (const [sortType, rows, baseline] of [['hot', currentHot, priorHot], ['new', currentNew, priorNew]]) {
     for (const item of rows) {
       const prior = baseline.get(productIdentity(item));
       if (!prior) continue;
-      const currentPayment = Number(item.paymentLowerBound) || 0;
-      const previousPayment = Number(prior.paymentLowerBound) || 0;
+      const currentPayment = paymentValue(item.paymentLowerBound);
+      const previousPayment = paymentValue(prior.paymentLowerBound);
+      if (currentPayment == null || previousPayment == null) continue;
       if (currentPayment === previousPayment) continue;
       paymentChanges.push({
         shopKey: item.shopKey,
@@ -113,12 +142,17 @@ function compareCompetitorSnapshots(current = {}, previous = {}, metadata = {}) 
  * @returns {object} Analysis document.
  */
 function analyzeCompetitorData(shops = [], hotProducts = [], newProducts = []) {
+  hotProducts = uniqueProducts(hotProducts);
+  newProducts = uniqueProducts(newProducts);
   const allProducts = [...hotProducts, ...newProducts];
-  const hotTitles = new Set(hotProducts.map(item => normalizedTitle(item.title)));
-  const maxNewPayment = Math.max(0, ...newProducts.map(item => Number(item.paymentLowerBound) || 0));
+  const hotTitles = new Set(hotProducts.map(productIdentity).filter(Boolean));
+  const shopMaxPayment = new Map();
+  for (const product of newProducts) {
+    shopMaxPayment.set(product.shopKey, Math.max(shopMaxPayment.get(product.shopKey) || 0, paymentValue(product.paymentLowerBound) || 0));
+  }
   const analyzedNew = newProducts.map(product => ({
     ...product,
-    potential: potentialForNewProduct(product, hotTitles, maxNewPayment)
+    potential: potentialForNewProduct(product, hotTitles, shopMaxPayment.get(product.shopKey) || 0)
   }));
   const shopSummaries = shops.map(shop => {
     const hot = hotProducts.filter(item => item.shopKey === shop.shopKey);
@@ -137,7 +171,7 @@ function analyzeCompetitorData(shops = [], hotProducts = [], newProducts = []) {
     };
   });
   return {
-    version: 1,
+    version: 2,
     generatedAt: new Date().toISOString(),
     evidenceNotice: '付款人数为淘宝页面展示的累计区间或下限，不等同于30天销量；新品仅代表店铺新品排序，不代表精确上架日期。',
     totals: {

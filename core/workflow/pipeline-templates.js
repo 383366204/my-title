@@ -55,15 +55,18 @@ function workflowNodes(mode = 'daily') {
       }
     : {
         label: '开始',
-        description: '从新闻、字典和趋势动态发现商品词根',
+        description: '结合时事、季节和多维需求发现商品词根',
         mine: 50,
         discoveryMode: 'inspiration',
         source: 'inspiration',
         rootMode: 'auto',
         rootLimit: 8,
-        rootCooldownDays: 14,
-        familyCooldownDays: 7,
-        inspirationSycmPages: 1,
+        rootCooldownDays: 30,
+        familyCooldownDays: 0,
+        enabledDimensions: ['persona', 'profession', 'hobby', 'scene', 'problem'],
+        customInputs: {},
+        inspirationSycmPages: 3,
+        candidateScreening: 'balanced',
         inspirationUseLLM: true,
         verify: 20,
         generate: 10,
@@ -291,7 +294,7 @@ function listProductionWorkflowTemplates() {
       entryLabel: '入口：动态灵感',
       scenarioLabel: '适合：每天自动发现新机会',
       flowSummary: '流程：灵感选词 → 人工筛词 → 生意参谋校验 → 货源选品 → 标题生成 → 导出复核',
-      modeHint: '从新闻、字典、日历和趋势动态发现词根，不要求预先维护种子池。'
+      modeHint: '结合新闻、季节、人群、职业、爱好和场景需求发现词根；成功查询后 30 天可再次研究。'
     }),
     template('exact-keyword-v1', '精确关键词选品流水线', 'keyword', '按用户给定关键词生成铺货清单', {
       entryLabel: '入口：手动关键词',

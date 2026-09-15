@@ -784,6 +784,20 @@
   grid-column: 1 / -1;
 }
 
+.discovery-dimension-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 6px;
+}
+
+.start-configuration-panel .discovery-dimension-toggle input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  margin: 0;
+}
+
 .start-configuration-number {
   max-width: 220px;
 }

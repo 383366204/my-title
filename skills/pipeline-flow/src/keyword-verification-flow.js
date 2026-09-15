@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const { applySeedFeedback } = require('../../keyword-mining/src/seed-feedback');
+const { researchPolicy } = require('../../keyword-mining/src/research-policy');
 const { extractSycmData } = require('../../sycm-research/src/sycm-cdp-extractor');
 const { scoreKeywordOpportunity } = require('./opportunity-scoring');
 const { appendOpportunity } = require('./opportunity-store');
@@ -19,13 +20,15 @@ const {
 function canReuseCandidateSycmEvidence(candidate = {}, options = {}) {
   if (!candidate.sycmData || typeof candidate.sycmData !== 'object' || Array.isArray(candidate.sycmData)) return false;
   if (!['inspiration', 'sycm_root_expansion'].includes(String(candidate.source || ''))) return false;
-  // 灵感模式的数据由同一次挖词步骤直接取得，旧记录没有独立证据时间，保持原有复用行为。
-  if (candidate.source === 'inspiration') return true;
   const evidence = candidate.sycmEvidence || {};
   if (String(evidence.keyword || '') !== String(candidate.keyword || '')) return false;
+  if (options.period && evidence.period !== options.period) return false;
+  if (options.compareType && evidence.compareType !== options.compareType) return false;
   const collectedAt = Date.parse(evidence.collectedAt || candidate.checkedAt || candidate.date || '');
   const maxAgeMs = Math.max(1, Number(options.sycmEvidenceMaxAgeHours || 24)) * 60 * 60 * 1000;
-  return Number.isFinite(collectedAt) && Date.now() - collectedAt <= maxAgeMs;
+  const age = Date.now() - collectedAt;
+  if (options.researchScopeId && evidence.researchScopeId !== options.researchScopeId) return false;
+  return Number.isFinite(collectedAt) && age >= 0 && age <= maxAgeMs;
 }
 
 /**
@@ -63,21 +66,24 @@ async function flowVerify(options = {}) {
       const cachedData = reuseCandidateMetrics
         ? [{ keyword: candidate.keyword, ...candidate.sycmData }]
         : [];
+      const requestedMode = options.candidateScreening ? researchPolicy(options.candidateScreening).verificationMode : 'blue';
+      // 热搜证据不能因命中缓存而升级为高置信度蓝海数据。
+      const cachedMode = options.candidateScreening && candidate.sycmEvidence?.mode === 'hot' ? 'hot' : requestedMode;
       const sycmAttempt = reuseCandidateMetrics
         ? {
             result: { keyword: candidate.keyword, data: cachedData },
             data: cachedData,
-            sycmScore: scoreSycmRows(cachedData, { mode: 'blue' }),
+            sycmScore: scoreSycmRows(cachedData, { mode: cachedMode }),
             verifyMode: candidate.source === 'sycm_root_expansion' ? 'root_expansion_cached' : 'inspiration_cached',
             fallbackUsed: false,
             fallbackReason: '',
             attempts: [{
               mode: 'inspiration_cached',
               totalCount: cachedData.length,
-              passed: scoreSycmRows(cachedData, { mode: 'blue' }).passed
+              passed: scoreSycmRows(cachedData, { mode: cachedMode }).passed
             }]
           }
-        : await fetchSycmWithFallback(candidate.keyword, { ...options, sycmExtractor });
+        : await fetchSycmWithFallback(candidate.keyword, { ...options, ...(options.candidateScreening ? { verificationMode: requestedMode } : {}), sycmExtractor });
       const data = sycmAttempt.data;
       const sycmScore = sycmAttempt.sycmScore;
       const row = {
