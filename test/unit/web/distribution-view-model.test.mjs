@@ -6,6 +6,8 @@ import {
   distributionRowUrl,
   distributionRowCategory,
   buildDistributionText,
+  distributionCopyFormat,
+  distributionCopyIssues,
   labelExportValue,
   labelDistributionBlocker,
   labelExportStatus,
@@ -54,6 +56,23 @@ describe('distribution-view-model', () => {
   });
 
   describe('buildDistributionText', () => {
+    test('supports all formats without trailing separators and preserves order', () => {
+      const rows = [{ url: 'https://1688.com/1', title: '标题1', category: '家居' }, { url: 'https://1688.com/2', title: '标题2', category: '日用' }];
+      assert.equal(buildDistributionText(rows, 'title'), 'https://1688.com/1$$标题1\nhttps://1688.com/2$$标题2');
+      assert.equal(buildDistributionText(rows, 'url'), 'https://1688.com/1\nhttps://1688.com/2');
+      assert.equal(buildDistributionText(rows, 'invalid'), buildDistributionText(rows));
+      assert.equal(distributionCopyFormat(null).value, 'full');
+    });
+
+    test('validates only selected fields and identifies affected rows', () => {
+      const rows = [{ url: 'https://1688.com/1', title: '', category: '-' }];
+      assert.deepEqual(distributionCopyIssues(rows, 'url'), []);
+      assert.deepEqual(distributionCopyIssues(rows, 'title')[0].fields, ['缺少标题']);
+      assert.deepEqual(distributionCopyIssues(rows, 'full')[0].fields, ['缺少标题', '缺少类目']);
+      assert.equal(distributionCopyIssues([{ title: '标题' }], 'url')[0].index, 1);
+      assert.ok(distributionCopyIssues([{ url: 'x', title: 'a$$b' }], 'title').length);
+      assert.ok(distributionCopyIssues([{ url: 'x', title: 'a\nb' }], 'title').length);
+    });
     test('builds text formatted with url$$title$$category', () => {
       const rows = [
         { url: 'https://1688.com/1', title: '商品标题1', category: '家居' },

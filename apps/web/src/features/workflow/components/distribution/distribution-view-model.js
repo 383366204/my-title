@@ -109,17 +109,46 @@ export function distributionRowCategory(row = {}) {
     || '';
 }
 
+export const DISTRIBUTION_COPY_FORMATS = [
+  { value: 'full', label: '链接$$标题$$类目', fields: 3 },
+  { value: 'title', label: '链接$$标题', fields: 2 },
+  { value: 'url', label: '链接', fields: 1 }
+];
+
+/** @param {string} value 保存的格式。 @returns {object} 有效格式或默认格式。 */
+export function distributionCopyFormat(value) {
+  return DISTRIBUTION_COPY_FORMATS.find(format => format.value === value) || DISTRIBUTION_COPY_FORMATS[0];
+}
+
+/** @param {object[]} rows 待复制商品。 @param {string} format 格式。 @returns {object[]} 缺失或不能安全分隔的字段。 */
+export function distributionCopyIssues(rows = [], format = 'full') {
+  const count = distributionCopyFormat(format).fields;
+  return rows.flatMap((row, index) => {
+    const values = [distributionRowUrl(row), row.title, distributionRowCategory(row)];
+    const names = ['链接', '标题', '类目'];
+    const fields = values.slice(0, count).flatMap((value, field) => {
+      const text = String(value ?? '').trim();
+      if (!text || text === '-') return [`缺少${names[field]}`];
+      if (/[\r\n]/.test(text) || text.includes('$$')) return [`${names[field]}包含换行或分隔符`];
+      return [];
+    });
+    return fields.length ? [{ index: index + 1, title: row.title || distributionRowUrl(row) || '未命名商品', fields }] : [];
+  });
+}
+
 /**
- * Build batch distribution text formatted as URL$$title$$category.
- * @param {Array<object>} [rows=[]] List of distribution rows.
- * @returns {string} Formatted distribution text block.
+ * 按所选格式输出文本，默认三字段保留自动铺货协议。
+ * @param {object[]} [rows] 已选商品。
+ * @param {string} [format] full/title/url。
+ * @returns {string} 每商品一行的文本。
  */
-export function buildDistributionText(rows = []) {
+export function buildDistributionText(rows = [], format = 'full') {
+  const count = distributionCopyFormat(format).fields;
   return (rows || [])
     .map((row) => {
       const url = distributionRowUrl(row);
       const category = distributionRowCategory(row);
-      return [url, row.title || '', category && category !== '-' ? category : ''].join('$$');
+      return [url, row.title || '', category && category !== '-' ? category : ''].slice(0, count).join('$$');
     })
     .filter((line) => line.replace(/\$/g, '').trim())
     .join('\n');
