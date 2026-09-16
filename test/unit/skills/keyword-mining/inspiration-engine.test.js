@@ -119,7 +119,8 @@ describe('inspiration discovery', () => {
       }
     });
     assert.equal(result.seedsUsed, 0);
-    assert.equal(calls.length, 2);
+    assert.equal(calls.length, 4);
+    assert.deepEqual(calls.map(call => call.options.mode), ['hot', 'blue', 'hot', 'blue']);
     assert.ok(calls.every(call => call.options.maxPages === 1));
     assert.ok(result.candidates.length > 0);
     assert.ok(result.candidates.every(item => item.source === 'inspiration'));

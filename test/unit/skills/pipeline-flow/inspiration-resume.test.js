@@ -30,7 +30,8 @@ test('partial mining resumes its saved roots and does not requery completed root
     sycmExtractor: async keyword => { retryCalls.push(keyword); return response(keyword); }
   });
   assert.equal(resumed.ok, true);
-  assert.deepEqual(retryCalls, [calls[1]]);
+  assert.equal(retryCalls.length, 3);
+  assert.equal(retryCalls[0], calls[1]);
   assert.equal(getRun({ dataDir, runId: first.runId }).run.discovery.attempt, 1);
   assert.equal(resumed.stats.rootQueries.rows[0].reused, true);
 });
@@ -56,11 +57,11 @@ test('nonempty SYCM results filtered by mining retain diagnostics instead of cla
   });
   const { run } = getRun({ dataDir, runId: result.runId });
   assert.equal(result.ok, false);
-  assert.match(run.discovery.blockerReason, /已返回 1 行数据/);
+  assert.match(run.discovery.blockerReason, /已返回 2 行数据/);
   assert.doesNotMatch(run.discovery.blockerReason, /没有查询到可用/);
   const diagnostics = JSON.parse(fs.readFileSync(run.discovery.files.miningDiagnostics, 'utf8'));
-  assert.equal(diagnostics.summary.rawRows, 1);
-  assert.equal(diagnostics.rows.length, 1);
+  assert.equal(diagnostics.summary.rawRows, 2);
+  assert.equal(diagnostics.rows.length, 2);
   assert.equal(diagnostics.rows[0].sycmEvidence.raw.searchPopularity, '0 ~ 10');
   assert.equal(diagnostics.rows[0].sycmData.metrics.searchPopularity.upper, 10);
 });

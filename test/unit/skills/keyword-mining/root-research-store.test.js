@@ -65,3 +65,16 @@ test('legacy completed queries also honor the monthly cooldown', t => {
   assert.equal(rootResearchStatus('茶托', { dataDir, now }).state, 'cooling');
   assert.equal(rootResearchStatus('茶杯', { dataDir, now }).state, 'new');
 });
+
+test('contextual research queries both modes and reuses each without extending cooldown', async t => {
+  const dataDir = directory(t);
+  const base = { dataDir, cycleId: 'one', contextual: true };
+  let calls = 0;
+  const extract = async () => { calls++; return { data: [] }; };
+  const hot = await researchRoot('脚垫', { ...base, queryContext: { mode: 'hot', maxPages: 3 } }, extract);
+  await researchRoot('脚垫', { ...base, queryContext: { mode: 'blue', maxPages: 3 } }, extract);
+  const reused = await researchRoot('脚垫', { ...base, cycleId: 'two', queryContext: { mode: 'hot', maxPages: 3 } }, extract);
+  assert.equal(calls, 2);
+  assert.equal(reused.reused, true);
+  assert.equal(reused.cycle.completedAt, hot.cycle.completedAt);
+});

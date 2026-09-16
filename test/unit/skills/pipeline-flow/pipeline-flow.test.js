@@ -587,10 +587,11 @@ describe('pipeline-flow', () => {
       }
     });
 
-    assert.equal(rootQueries.length, 2);
-    assert.equal(rootQueries.every(call => call.options.maxPages === 1), true);
+    assert.equal(rootQueries.length, 4);
+    assert.equal(rootQueries.every(call => call.options.maxPages === 3), true);
+    assert.deepEqual(rootQueries.map(call => call.options.mode), ['hot', 'blue', 'hot', 'blue']);
     assert.ok(progress.some(event => event.stage === 'sycm-query-detail'
-      && /生意参谋 1\/2/.test(event.message)
+      && /生意参谋 1\/4/.test(event.message)
       && /加载数据表格 2\/8/.test(event.message)));
     assert.ok(readJsonl(mined.inspiration ? path.join(mined.runDir, 'inspirations.jsonl') : '').length > 0);
     assert.ok(readJsonl(path.join(mined.runDir, 'root-candidates.jsonl')).length > 0);

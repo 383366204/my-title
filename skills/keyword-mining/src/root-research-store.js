@@ -99,8 +99,14 @@ async function researchRoot(root, options, extract) {
     const cycles = readCycles(file);
     const prior = cycles.find(row => row.cycleId === cycleId && JSON.stringify(row.queryContext) === JSON.stringify(queryContext));
     if (prior) return { response: prior.response, cycle: prior, reused: true };
+    const contextual = options.contextual === true;
+    const matching = cycles.filter(row => JSON.stringify(row.queryContext) === JSON.stringify(queryContext));
+    const lastMatching = matching.at(-1);
+    if (contextual && lastMatching && now() - Date.parse(lastMatching.completedAt) < ROOT_RESEARCH_COOLDOWN_MS) {
+      return { response: lastMatching.response, cycle: lastMatching, reused: true };
+    }
     const status = rootResearchStatus(root, { dataDir, researchScopeId, now: now() });
-    if (status.state === 'cooling') return { skipped: true, ...status };
+    if (!contextual && status.state === 'cooling') return { skipped: true, ...status };
     const response = await extract();
     if (response?.ok === false || !Array.isArray(response?.data) || response?.stepIncomplete) {
       const error = new Error(response?.error || response?.message || '生意参谋查询未完整完成');
@@ -108,7 +114,7 @@ async function researchRoot(root, options, extract) {
       error.details = response?.manualAction;
       throw error;
     }
-    const previousWords = new Set((cycles.at(-1)?.response?.data || []).map(row => row.keyword).filter(Boolean));
+    const previousWords = new Set(((contextual ? lastMatching : cycles.at(-1))?.response?.data || []).map(row => row.keyword).filter(Boolean));
     const words = [...new Set(response.data.map(row => row.keyword).filter(Boolean))];
     const cycle = {
       cycleId, root, researchScopeId, queryContext,

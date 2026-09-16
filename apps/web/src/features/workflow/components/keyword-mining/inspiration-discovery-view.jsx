@@ -82,6 +82,18 @@ export const InspirationDiscoveryView = ({ artifactState }) => {
                 {item.hypothesis && <small>{Object.values(item.hypothesis).filter(Boolean).join(' → ')}</small>}
                 {item.research && <small>{RESEARCH_LABELS[item.research.state] || item.research.state}{item.research.lastCompletedAt && ` · 上次查询 ${new Date(item.research.lastCompletedAt).toLocaleString('zh-CN')}`}{item.research.nextEligibleAt && ` · 下次可查 ${new Date(item.research.nextEligibleAt).toLocaleString('zh-CN')}`}</small>}
                 {item.queryError && <small>查询未完成：{item.queryError}</small>}
+                {item.queryTasks?.length > 0 && (
+                  <details>
+                    <summary>查询明细 · {item.queryTasks.length} 项</summary>
+                    {item.queryTasks.map((task, index) => (
+                      <small key={`${task.keyword}-${task.mode}-${index}`}>
+                        {task.keyword} · {task.mode === 'blue' ? '蓝海词' : '热词'} ·
+                        {task.status === 'success' ? ` ${task.count} 条` : task.status === 'empty' ? ' 无结果' : task.status === 'failed' ? ' 未完成' : ' 冷却中'}
+                        {task.reused ? ' · 已复用缓存' : ''}{task.error ? ` · ${task.error}` : ''}
+                      </small>
+                    ))}
+                  </details>
+                )}
                 {item.comparison && <small>本轮新增关联词 {item.comparison.newKeywords.length} 个 · 已有结果更新 {item.comparison.retainedKeywords.length} 个</small>}
                 {item.provenance?.length > 1 && <small>关联需求：{item.provenance.map(row => row.inspiration?.inspirationWord).filter(Boolean).join('、')}</small>}
               </div>

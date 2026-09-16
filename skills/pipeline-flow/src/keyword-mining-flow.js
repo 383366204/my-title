@@ -124,7 +124,7 @@ async function flowMine(options = {}) {
     diversityHistory,
     allowHistoryFallback: options.allowHistoryFallback === true,
     sycmExtractor: options.sycmExtractor,
-    sycmMaxPages: options.inspirationSycmPages ?? options.sycmMaxPages ?? 1,
+    sycmMaxPages: options.inspirationSycmPages ?? options.sycmMaxPages ?? 3,
     sycmPort: options.port || 9222,
     date: options.date,
     runAttempt: options.runAttempt ?? `${run.runId}:${discoveryAttempt}`,
@@ -193,6 +193,7 @@ async function flowMine(options = {}) {
     attempt: discoveryAttempt,
     stats: result.inspiration.stats,
     miningDiagnostics,
+    queryPlan: result.inspiration.queryPlan || [],
     files: {
       miningDiagnostics: diagnosticsFile,
       inspirations: run.files.inspirations,

@@ -19,6 +19,7 @@ const { researchPolicy } = require('./research-policy');
 const { researchRoot, discoverySnapshot, ROOT_RESEARCH_COOLDOWN_MS } = require('./root-research-store');
 const { randomUUID } = require('crypto');
 const { normalizeSycmMetrics } = require('../../sycm-research/src/metric-parser');
+const { buildRootQueryPlan } = require('./root-query-plan');
 
 const CANDIDATES_FILE = 'candidates.jsonl';
 const MINING_PROGRESS_TOTAL = 6;
@@ -44,10 +45,10 @@ function writeCandidates(candidates, dataDir) {
 function clusterBySignature(items) {
   const groups = new Map();
   for (const item of items) {
-    const key = item.signature || item.keyword;
+    const key = item.sycmEvidence ? `sycm:${normalizeKeyword(item.keyword)}` : item.signature || item.keyword;
     const existing = groups.get(key);
     if (!existing) {
-      groups.set(key, { ...item, cluster: [item.keyword], clusterSize: 1 });
+      groups.set(key, { ...item, sycmEvidenceRows: item.sycmEvidence ? [item.sycmEvidence] : [], cluster: [item.keyword], clusterSize: 1 });
       continue;
     }
     existing.cluster = [...new Set([...(existing.cluster || []), item.keyword])];
@@ -56,6 +57,8 @@ function clusterBySignature(items) {
     const provenance = [...new Map([...(existing.provenance || []), ...(item.provenance || [])].map(row => [row.inspirationId, row])).values()];
     existing.sourceRoots = sourceRoots;
     existing.provenance = provenance;
+    const sycmEvidenceRows = [...(existing.sycmEvidenceRows || []), ...(item.sycmEvidence ? [item.sycmEvidence] : [])];
+    existing.sycmEvidenceRows = sycmEvidenceRows;
     const better = item.localScore > existing.localScore
       || (item.localScore === existing.localScore && item.keyword.length > existing.keyword.length);
     if (better) {
@@ -63,6 +66,7 @@ function clusterBySignature(items) {
         ...item,
         sourceRoots,
         provenance,
+        sycmEvidenceRows,
         cluster: existing.cluster,
         clusterSize: existing.cluster.length
       });
@@ -345,7 +349,7 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
   let sycmExpanded = [];
   if (effectiveSource === 'sycm_hot' || effectiveSource === 'sycm_blue' || effectiveSource === 'inspiration') {
     const isBlue = effectiveSource === 'sycm_blue';
-    const sycmMode = isBlue ? 'blue' : 'hot';
+    const defaultSycmMode = isBlue ? 'blue' : 'hot';
     const roots = effectiveSource === 'inspiration'
       ? inspirationDiscovery.selectedRoots.map(item => ({
           ...item,
@@ -356,10 +360,13 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
       : rootMode === 'seed'
         ? expandableSeeds.map(seed => ({ root: seed.keyword, originalKeyword: seed.keyword, category: seed.category || '' }))
         : selectShortRoots(expandableSeeds, { dataDir, limit: rootLimit, cooldownDays: rootCooldownDays });
-    const querySeeds = roots;
-    console.log(`🔌 开始生意参谋关联词挖掘模式: ${sycmMode}，查询 ${querySeeds.length} 个词根...`);
+    const querySeeds = effectiveSource === 'inspiration' ? buildRootQueryPlan(roots) : roots;
+    if (inspirationDiscovery) inspirationDiscovery.queryPlan = querySeeds.map(({ root, queryMode, querySources }) => ({ keyword: root, mode: queryMode, pages: Math.max(1, Number(sycmMaxPages || 3)), sources: querySources }));
+    console.log(`🔌 开始生意参谋关联词挖掘，查询 ${querySeeds.length} 个任务...`);
     for (let seedIndex = 0; seedIndex < querySeeds.length; seedIndex++) {
       const seed = querySeeds[seedIndex];
+      const sycmMode = seed.queryMode || defaultSycmMode;
+      const maxPages = Math.max(1, Number(sycmMaxPages || (effectiveSource === 'inspiration' ? 3 : 1)));
       const query = seed.root || seed.keyword;
       if (shouldStop()) {
         rootResults.push({ ...seed, result: 'failed', status: 'paused', error: '已暂停，继续时接着处理剩余词根' });
@@ -370,26 +377,30 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
           stage: 'sycm-expand',
           current: seedIndex,
           total: querySeeds.length,
-          message: `查询生意参谋关联词：${query}`
+          message: `查询 ${seedIndex + 1}/${querySeeds.length}：${query} · ${sycmMode === 'hot' ? '热词' : '蓝海词'} · 最多 ${maxPages} 页`
         });
         console.log(`🔍 正在查询词根 "${query}" 的生意参谋关联词...`);
         const extractor = sycmExtractor || require('../../sycm-research/src/sycm-cdp-extractor').extractSycmData;
-        const queryContext = { mode: sycmMode, period: '7d', compareType: 'cycle', maxPages: Math.max(1, Number(sycmMaxPages || 1)), port: Number(sycmPort || 9222) };
+        const filterConditions = sycmMode === 'blue'
+          ? require('../../sycm-research/src/sycm-cdp-extractor').DEFAULT_FILTER_CONDITIONS : null;
+        const queryContext = { mode: sycmMode, period: '7d', compareType: 'cycle', maxPages, filterConditions };
         const extract = () => extractor(query, {
           shouldStop,
           ...(effectiveSource === 'inspiration' ? { guardCache: false } : {}),
           mode: sycmMode,
-          maxPages: Math.max(1, Number(sycmMaxPages || 1)),
+          filterConditions,
+          pageFilters: { compareType: queryContext.compareType, timePeriod: queryContext.period },
+          maxPages,
           port: Number(sycmPort || 9222),
           onProgress: (message) => reportProgress({
             stage: 'sycm-query-detail',
             current: seedIndex,
             total: querySeeds.length,
-            message: `生意参谋 ${seedIndex + 1}/${querySeeds.length} · ${query}：${sycmProgressMessage(message)}`
+            message: `生意参谋 ${seedIndex + 1}/${querySeeds.length} · ${query} · ${sycmMode === 'hot' ? '热词' : '蓝海词'}：${sycmProgressMessage(message)}`
           })
         });
         const researched = effectiveSource === 'inspiration'
-          ? await researchRoot(query, { dataDir, researchScopeId, cycleId, queryContext }, extract)
+          ? await researchRoot(query, { dataDir, researchScopeId, cycleId, queryContext, contextual: true }, extract)
           : { response: await extract() };
         if (researched.skipped) {
           rootResults.push({ ...seed, result: researched.state === 'running' ? 'failed' : 'cooling', status: researched.state,
@@ -426,7 +437,7 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
             inspiration: seed.inspiration || null,
             provenance: seed.provenance || [],
             sycmEvidence: {
-              keyword: item.keyword, root: query, mode: sycmMode,
+              keyword: item.keyword, root: query, mode: sycmMode, querySources: seed.querySources || [],
               period: queryContext.period, compareType: queryContext.compareType,
               collectedAt: researched.cycle?.completedAt || new Date().toISOString(),
               maxPages: queryContext.maxPages, researchScopeId, raw: item
@@ -460,9 +471,10 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
     if (rootResults.length > 0 && recordRootHistory) recordRootQueries(rootResults, { dataDir });
     if (inspirationDiscovery) {
       inspirationDiscovery.roots = inspirationDiscovery.roots.map(row => {
-        const result = rootResults.find(item => item.root === row.rootKeyword);
+        const related = rootResults.filter(item => item.originalKeyword === row.rootKeyword || item.querySources?.some(source => source.originalKeyword === row.rootKeyword));
+        const result = related.find(item => item.result === 'failed') || related[0];
         if (!result) return row;
-        return { ...row, queryResult: result.result, queryError: result.error || '', comparison: result.comparison,
+        return { ...row, queryTasks: related.map(item => ({ keyword: item.root, mode: item.queryMode, status: item.result, count: item.candidateCount || 0, error: item.error || '', reused: item.reused || false })), queryResult: result.result, queryError: result.error || '', comparison: result.comparison,
           research: result.completedAt ? {
             state: 'cooling', lastCompletedAt: result.completedAt,
             nextEligibleAt: new Date(Date.parse(result.completedAt) + ROOT_RESEARCH_COOLDOWN_MS).toISOString()
