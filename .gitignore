@@ -28,6 +28,7 @@ Thumbs.db
 npm-debug.log*
 
 # Runtime data
+data/keyword-mining/seeds.json
 output/
 data/pipeline/
 data/workflow/

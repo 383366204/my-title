@@ -91,6 +91,14 @@ Web UI 只有一个主操作入口：React 流水线画布。当前提供每日�
 
 真实每日流程的数据源是 `skills/pipeline-flow` 写入的 `data/pipeline/runs/<runId>/` 文件。浏览器 IndexedDB 只作为本机操作历史，不是后端 canonical 状态。
 
+### 种子词数据
+
+`data/keyword-mining/seeds.example.json` 是纳入 Git 的初始词库，不包含历史使用统计。首次读取种子池时，如果同目录下没有 `seeds.json`，系统会从模板初始化。已有文件（包括空词库和暂停状态）不会被模板覆盖。
+
+实际 `data/keyword-mining/seeds.json` 是本地运行数据，已排除版本管理，请单独备份。自定义数据目录仅在该目录提供 `seeds.example.json` 时自动初始化，否则保持空种子池。纯灵感模式不依赖默认种子模板。
+
+旧安装更新到停止跟踪该文件的提交前，应先备份自己的 `seeds.json`；Git 更新可能移除旧版本跟踪的文件。更新后可恢复备份，避免重新初始化丢失历史状态。
+
 开发模式：
 
 ```bash

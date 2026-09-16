@@ -1,0 +1,12 @@
+[
+  { "keyword": "收纳盒", "category": "家居", "priority": 5, "source": "template", "type": "expand", "status": "active" },
+  { "keyword": "厨房置物架", "category": "家居", "priority": 5, "source": "template", "type": "expand", "status": "active" },
+  { "keyword": "小夜灯", "category": "家居", "priority": 5, "source": "template", "type": "expand", "status": "active" },
+  { "keyword": "封口夹", "category": "厨房工具", "priority": 5, "source": "template", "type": "expand", "status": "active" },
+  { "keyword": "眼镜盒", "category": "日用小件", "priority": 5, "source": "template", "type": "expand", "status": "active" },
+  { "keyword": "手机挂绳", "category": "数码配件", "priority": 5, "source": "template", "type": "expand", "status": "active" },
+  { "keyword": "修正带", "category": "文具", "priority": 5, "source": "template", "type": "expand", "status": "active" },
+  { "keyword": "瑜伽垫", "category": "健身瑜伽", "priority": 5, "source": "template", "type": "expand", "status": "active" },
+  { "keyword": "弹力带", "category": "健身瑜伽", "priority": 5, "source": "template", "type": "expand", "status": "active" },
+  { "keyword": "发夹", "category": "发饰", "priority": 5, "source": "template", "type": "expand", "status": "active" }
+]

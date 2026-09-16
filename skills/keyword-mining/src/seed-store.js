@@ -39,7 +39,23 @@ function eventsPath(dataDir = DEFAULT_DATA_DIR) {
 function loadSeeds(dataDir = DEFAULT_DATA_DIR) {
   ensureDir(dataDir);
   const file = seedsPath(dataDir);
-  if (!fs.existsSync(file)) return [];
+  if (!fs.existsSync(file)) {
+    const template = path.join(dataDir, 'seeds.example.json');
+    let initial;
+    try {
+      initial = JSON.parse(fs.readFileSync(template, 'utf8'));
+    } catch (error) {
+      if (error.code === 'ENOENT') return [];
+      throw error;
+    }
+    if (!Array.isArray(initial)) throw new Error('种子模板必须是数组');
+    // 只初始化不存在的文件；其他进程已创建时保留其数据。
+    try {
+      fs.writeFileSync(file, JSON.stringify(initial, null, 2) + '\n', { flag: 'wx' });
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+    }
+  }
   const raw = fs.readFileSync(file, 'utf8');
   if (!raw.trim()) return [];
   const parsed = JSON.parse(raw);
