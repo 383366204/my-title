@@ -1,0 +1,55 @@
+import { useId, useRef } from 'react';
+import { Check, ChevronDown, Copy } from 'lucide-react';
+import { DISTRIBUTION_COPY_FORMATS } from './distribution-view-model.js';
+
+/**
+ * @param {object} props Copy action and selected format.
+ * @returns {import('react').JSX.Element} Split copy button with a format menu.
+ */
+export function DistributionCopyButton({ label, primary = false, disabled, onCopy, format, onFormatChange }) {
+  const id = useId();
+  const menu = useRef(null);
+  const trigger = useRef(null);
+  const openMenu = () => {
+    if (menu.current.matches(':popover-open')) {
+      menu.current.hidePopover();
+      return;
+    }
+    const rect = trigger.current.getBoundingClientRect();
+    const width = Math.min(240, window.innerWidth - 24);
+    Object.assign(menu.current.style, {
+      width: `${width}px`,
+      left: `${Math.max(12, Math.min(rect.right - width, window.innerWidth - width - 12))}px`,
+      top: `${Math.max(12, Math.min(rect.bottom + 6, window.innerHeight - 150))}px`
+    });
+    menu.current.showPopover();
+    menu.current.querySelector('[aria-checked="true"]')?.focus();
+  };
+  const moveFocus = event => {
+    const items = [...menu.current.querySelectorAll('[role="menuitemradio"]')];
+    const index = items.indexOf(document.activeElement);
+    const next = { ArrowDown: (index + 1) % items.length, ArrowUp: (index + items.length - 1) % items.length, Home: 0, End: items.length - 1 }[event.key];
+    if (next !== undefined) { event.preventDefault(); items[next].focus(); }
+  };
+  const buttonClass = primary ? 'node-primary-button' : 'node-secondary-button';
+  return (
+    <div className="distribution-copy-split">
+      <button type="button" className={buttonClass} disabled={disabled} onClick={onCopy} title={`当前格式：${format.label}`}>
+        <Copy size={13} /> {label}
+      </button>
+      <button ref={trigger} type="button" className={`${buttonClass} distribution-copy-toggle`} aria-label="铺货复制格式"
+        title={`铺货复制格式：${format.label}`} aria-haspopup="menu" aria-controls={id} aria-expanded="false" onClick={openMenu}>
+        <ChevronDown size={14} />
+      </button>
+      <div ref={menu} id={id} popover="auto" role="menu" aria-label="铺货复制格式" className="distribution-copy-menu"
+        onKeyDown={moveFocus} onToggle={event => trigger.current?.setAttribute('aria-expanded', String(event.newState === 'open'))}>
+        {DISTRIBUTION_COPY_FORMATS.map(option => (
+          <button key={option.value} type="button" role="menuitemradio" aria-checked={format.value === option.value}
+            onClick={() => { onFormatChange(option.value); menu.current.hidePopover(); trigger.current.focus(); }}>
+            <Check size={14} style={{ visibility: format.value === option.value ? 'visible' : 'hidden' }} />{option.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}

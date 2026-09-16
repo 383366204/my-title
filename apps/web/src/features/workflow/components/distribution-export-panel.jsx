@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import {
   Check,
   ChevronRight,
-  Copy,
   FileText,
   Play,
   RefreshCw,
@@ -12,7 +11,9 @@ import {
 import { checkDistribution as checkDistributionRequest } from '../../../api/distribution-api.js';
 import { useDistributionJob } from '../hooks/use-distribution-job.js';
 import { DistributionRow } from './distribution/distribution-row.jsx';
-import { labelDistributionBlocker } from './distribution/distribution-view-model.js';
+import { labelDistributionBlocker, buildDistributionText, distributionCopyFormat, distributionCopyIssues } from './distribution/distribution-view-model.js';
+import { DistributionCopyButton } from './distribution/distribution-copy-button.jsx';
+import { usePersistentMap } from '../hooks/use-persistent-map.js';
 import { ExecutionPanel } from './distribution/execution-panel.jsx';
 import { useDistributionExportData } from './distribution/use-distribution-export-data.js';
 
@@ -48,9 +49,8 @@ export const DistributionExportPanel = ({
     removedRows,
     pendingBlockedRows,
     copyTextValue,
-    manualIncompleteCount,
     manualMissingCategoryCount,
-    canManualCopy,
+    canManualCopy: canRecordManualComplete,
     markRemoved,
     markIncluded,
     updateRowEdit,
@@ -65,6 +65,22 @@ export const DistributionExportPanel = ({
   const [distributionCheck, setDistributionCheck] = useState({ status: 'idle', result: null, error: '' });
   const [manualCopiedText, setManualCopiedText] = useState('');
   const [manualCompleteStatus, setManualCompleteStatus] = useState({ status: 'idle', message: '' });
+  const [copyPreference, setCopyPreference] = usePersistentMap('ecom.distributionCopyFormat');
+  const copyFormat = distributionCopyFormat(copyPreference.format);
+  const manualText = buildDistributionText(activeRows, copyFormat.value);
+  const copyIssues = distributionCopyIssues(activeRows, copyFormat.value);
+  const canManualCopy = Boolean(currentRunId) && activeRows.length > 0 && copyIssues.length === 0;
+  const copyIdentity = JSON.stringify([currentRunId, copyFormat.value, manualText, copyTextValue]);
+  const changeCopyFormat = format => {
+    setCopyPreference({ format });
+    setManualCompleteStatus({ status: 'idle', message: '' });
+  };
+  const copyValidation = copyIssues.length > 0 && (
+    <div className="distribution-modal-feedback blocked" role="alert">
+      当前格式有 {copyIssues.length} 条商品需要补充或修正：
+      {copyIssues.map(issue => <div key={issue.index}>第 {issue.index} 条「{issue.title}」：{issue.fields.join('、')}</div>)}
+    </div>
+  );
 
   const {
     job: distributionJob,
@@ -81,7 +97,7 @@ export const DistributionExportPanel = ({
     onJobChange: onDistributionJobChange
   });
 
-  const manualCopyCurrent = Boolean(copyTextValue) && manualCopiedText === copyTextValue;
+  const manualCopyCurrent = Boolean(manualText) && manualCopiedText === copyIdentity;
 
   useEffect(() => {
     setDistributionCheck({ status: 'idle', result: null, error: '' });
@@ -120,19 +136,20 @@ export const DistributionExportPanel = ({
   const copyManualDistribution = async () => {
     if (!canManualCopy) return;
     try {
-      await onCopyText(copyTextValue);
-      setManualCopiedText(copyTextValue);
+      await onCopyText(manualText);
+      setManualCopiedText(copyIdentity);
       setManualCompleteStatus({
         status: 'copied',
-        message: `已复制 ${activeRows.length} 条人工铺货清单${manualMissingCategoryCount > 0 ? `，其中 ${manualMissingCategoryCount} 条类目为空` : ''}。完成外部铺货后，再点击“标记人工铺货完成”。`
+        message: `已复制 ${activeRows.length} 条：${copyFormat.label}。完成外部铺货后，再点击“标记人工铺货完成”。`
       });
     } catch (error) {
+      setManualCopiedText('');
       setManualCompleteStatus({ status: 'error', message: `复制失败：${error.message}` });
     }
   };
 
   const confirmManualDistributionComplete = async () => {
-    if (!manualCopyCurrent || !currentRunId || manualCompleteStatus.status === 'completing') return;
+    if (!manualCopyCurrent || !canRecordManualComplete || !currentRunId || manualCompleteStatus.status === 'completing') return;
     const categoryReminder = manualMissingCategoryCount > 0
       ? `其中 ${manualMissingCategoryCount} 条类目为空，请确认你已在人工铺货时选择了正确类目。\n\n`
       : '';
@@ -162,10 +179,8 @@ export const DistributionExportPanel = ({
   const previewPanelContent = (
     <>
       <div className="export-preview-actions">
-        <button type="button" className="node-primary-button" disabled={!canManualCopy} onClick={copyManualDistribution}>
-          <Copy size={13} /> 复制铺货内容
-        </button>
-        <button type="button" className="node-secondary-button success" disabled={!manualCopyCurrent || manualCompleteStatus.status === 'completing' || distributionJob?.status === 'submitting'} onClick={confirmManualDistributionComplete}>
+        <DistributionCopyButton label="复制铺货内容" primary disabled={!canManualCopy} onCopy={copyManualDistribution} format={copyFormat} onFormatChange={changeCopyFormat} />
+        <button type="button" className="node-secondary-button success" disabled={!manualCopyCurrent || !canRecordManualComplete || manualCompleteStatus.status === 'completing' || distributionJob?.status === 'submitting'} onClick={confirmManualDistributionComplete}>
           {manualCompleteStatus.status === 'completing' ? <RefreshCw size={13} className="animate-spin" /> : <Check size={13} />}
           {manualCompleteStatus.status === 'completing' ? '正在确认' : '标记人工铺货完成'}
         </button>
@@ -178,11 +193,10 @@ export const DistributionExportPanel = ({
         </button>
       </div>
       <div className="export-preview-status">
-        <p className="distribution-confirm-warning">人工铺货请先复制“链接$$标题$$类目”，完成外部铺货后再标记完成；自动铺货会使用当前 Chrome 登录态。</p>
-        {manualIncompleteCount > 0 && <div className="distribution-modal-feedback blocked">有 {manualIncompleteCount} 条缺少链接或标题，请在下方补充后再复制。</div>}
-        {manualMissingCategoryCount > 0 && <div className="distribution-modal-feedback checking">有 {manualMissingCategoryCount} 条历史清单没有类目，复制内容会保留第三段为空。可在下方补充，或在人工铺货时选择正确类目。</div>}
+        {copyValidation}
+        {!canRecordManualComplete && activeRows.length > 0 && <div className="distribution-modal-feedback checking">标记人工铺货完成前，清单仍需补齐链接和标题。</div>}
         {manualCopiedText && !manualCopyCurrent && <div className="distribution-modal-feedback blocked">清单已经修改，请重新复制最新内容后再确认完成。</div>}
-        {manualCompleteStatus.message && manualCopyCurrent && <div className={`distribution-modal-feedback ${manualCompleteStatus.status === 'error' ? 'blocked' : 'checking'}`}>{manualCompleteStatus.message}</div>}
+        {manualCompleteStatus.message && (manualCopyCurrent || manualCompleteStatus.status === 'error') && <div role="status" className={`distribution-modal-feedback ${manualCompleteStatus.status === 'error' ? 'blocked' : 'checking'}`}>{manualCompleteStatus.message}</div>}
         {distributionCheck.status === 'loading' && (
           <div className="distribution-modal-feedback checking">
             <RefreshCw size={13} className="animate-spin" /> 正在检查清单、Chrome 调试端口和登录状态，请稍候...
@@ -292,21 +306,18 @@ export const DistributionExportPanel = ({
           <div>
             <span>人工铺货</span>
             <strong>复制清单后手动铺货</strong>
-            <p>复制为“链接$$标题$$类目”，在外部工具完成铺货后手动确认流程完成。</p>
           </div>
           <div className="distribution-method-actions">
-            <button type="button" className="node-secondary-button" disabled={!canManualCopy} onClick={copyManualDistribution}>
-              <Copy size={13} /> 人工复制铺货
-            </button>
-            <button type="button" className="node-secondary-button success" disabled={!manualCopyCurrent || manualCompleteStatus.status === 'completing' || distributionJob?.status === 'submitting'} onClick={confirmManualDistributionComplete}>
+            <DistributionCopyButton label="人工复制铺货" disabled={!canManualCopy} onCopy={copyManualDistribution} format={copyFormat} onFormatChange={changeCopyFormat} />
+            <button type="button" className="node-secondary-button success" disabled={!manualCopyCurrent || !canRecordManualComplete || manualCompleteStatus.status === 'completing' || distributionJob?.status === 'submitting'} onClick={confirmManualDistributionComplete}>
               {manualCompleteStatus.status === 'completing' ? <RefreshCw size={13} className="animate-spin" /> : <Check size={13} />}
               {manualCompleteStatus.status === 'completing' ? '正在确认' : '标记人工铺货完成'}
             </button>
           </div>
-          {manualIncompleteCount > 0 && <small className="distribution-method-warning">有 {manualIncompleteCount} 条缺少链接或标题，请补充后再复制。</small>}
-          {manualMissingCategoryCount > 0 && <small className="distribution-method-warning">有 {manualMissingCategoryCount} 条类目为空，复制时第三段会留空，请在人工铺货时选择正确类目。</small>}
+          {copyValidation}
+          {!canRecordManualComplete && activeRows.length > 0 && <small className="distribution-method-warning">标记人工铺货完成前，清单仍需补齐链接和标题。</small>}
           {manualCopiedText && !manualCopyCurrent && <small className="distribution-method-warning">清单已经修改，请重新复制最新内容后再确认完成。</small>}
-          {manualCompleteStatus.message && manualCopyCurrent && <small className={`distribution-method-feedback ${manualCompleteStatus.status}`}>{manualCompleteStatus.message}</small>}
+          {manualCompleteStatus.message && (manualCopyCurrent || manualCompleteStatus.status === 'error') && <small role="status" className={`distribution-method-feedback ${manualCompleteStatus.status}`}>{manualCompleteStatus.message}</small>}
           {manualCompleteStatus.status === 'error' && distributionSubmitError && <small className="distribution-method-feedback error">{distributionSubmitError}</small>}
         </article>
         <article className="distribution-method-card automatic">
