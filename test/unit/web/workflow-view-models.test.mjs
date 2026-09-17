@@ -473,7 +473,7 @@ test('getWorkflowAction recommends the next business action', () => {
 test('getWorkflowTemplateView explains daily and exact keyword differences', () => {
   assert.deepEqual(getWorkflowTemplateView({
     id: 'daily-selection-v1',
-    name: '每日蓝海选品流水线',
+    name: 'AI灵感词选品',
     mode: 'daily'
   }), {
     entryLabel: '入口：动态灵感',
@@ -1107,7 +1107,7 @@ test('getUnifiedWorkflowHistoryItem normalizes pipeline and workflow runs for on
     runId: '2026-07-06-005614',
     status: 'blocked',
     workflow: { id: 'daily-selection-v1', mode: 'daily', nodes: [{ id: 'start', data: { label: '开始' } }] }
-  }).title, '每日蓝海选品流水线');
+  }).title, 'AI灵感词选品');
 
   assert.equal(getUnifiedWorkflowHistoryItem({
     runId: '2026-07-06-005614',

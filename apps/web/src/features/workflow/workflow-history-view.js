@@ -24,7 +24,7 @@ export function inferRunTitle(run = {}) {
   if (explicit) return explicit;
   const workflowId = String(run.workflow?.id || run.templateId || '').toLowerCase();
   const workflowMode = String(run.workflow?.mode || run.mode || '').toLowerCase();
-  if (workflowId === 'daily-selection-v1' || workflowMode === 'daily') return '每日蓝海选品流水线';
+  if (workflowId === 'daily-selection-v1' || workflowMode === 'daily') return 'AI灵感词选品';
   if (workflowId === 'exact-keyword-v1' || workflowMode === 'keyword') return '精确关键词选品流水线';
   if (workflowId === 'root-keyword-selection-v1' || workflowMode === 'root-keyword') return '词根拓词选品流水线';
   if (workflowId === 'sycm-order-sheet-v1' || workflowMode === 'order-sheet') return '制作刷单表格流水线';

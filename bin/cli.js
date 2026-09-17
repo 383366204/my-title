@@ -1028,7 +1028,7 @@ program
 
 const flowCommand = program
   .command('flow')
-  .description('每日蓝海选品流水线：选词 → 生意参谋校验 → 货源选品 → 标题生成 → 导出铺货清单');
+  .description('AI灵感词选品：选词 → 生意参谋校验 → 货源选品 → 标题生成 → 导出铺货清单');
 
 flowCommand
   .command('daily')

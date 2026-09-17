@@ -290,7 +290,7 @@ function template(id, name, mode, description, meta = {}) {
  */
 function listProductionWorkflowTemplates() {
   return [
-    template('daily-selection-v1', '每日蓝海选品流水线', 'daily', '选词、验真、生成标题并导出铺货清单', {
+    template('daily-selection-v1', 'AI灵感词选品', 'daily', '选词、验真、生成标题并导出铺货清单', {
       entryLabel: '入口：动态灵感',
       scenarioLabel: '适合：每天自动发现新机会',
       flowSummary: '流程：灵感选词 → 人工筛词 → 生意参谋校验 → 货源选品 → 标题生成 → 导出复核',
