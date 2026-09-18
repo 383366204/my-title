@@ -29,7 +29,7 @@ function resolveOpportunityDir(options = {}) {
  */
 function isGenerationEligibleKeyword(row = {}) {
   const decision = row.keywordOpportunity && row.keywordOpportunity.decision;
-  return !decision || decision === 'continue' || row.autoFallbackEligible === true;
+  return !decision || decision === 'continue' || row.autoFallbackEligible === true || row.keywordOpportunity?.manualApproval?.approved === true;
 }
 
 /**

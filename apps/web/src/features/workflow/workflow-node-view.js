@@ -283,7 +283,7 @@ export function getWorkflowResultSummaryView(nodeId, state = {}) {
   if (manualProductInput) titles.select = '商品资料获取结果';
   const hints = {
     mine: '候选词及其灵感来源在下方预览，完整链路保存在运行产物中。',
-    keywordReview: '人工确认后的关键词会保存到 reviewed-candidates.jsonl，只有通过项会进入生意参谋校验。',
+    keywordReview: '保留与筛除结果会保存到运行记录，只有人工确认保留的词会进入后续流程。',
     verify: '验真通过词在下方结果列表中预览，完整内容保存在 verified-keywords.jsonl。',
     select: '已选货源会按商品信息和机会分展示，完整内容保存在 selected-products.jsonl。',
     generate: '每条标题记录会关联已选货源；完整内容保存在 generated-products.jsonl。',

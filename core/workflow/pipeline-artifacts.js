@@ -8,6 +8,7 @@ const readTextPreview = require('../pipeline-run-summary').readTextPreview;
 const DEFAULT_ORDER_GROUP_SIZE = require('../../skills/order-sheet/src/order-groups').DEFAULT_ORDER_GROUP_SIZE;
 const autoGroupOrderProducts = require('../../skills/order-sheet/src/order-groups').autoGroupOrderProducts;
 const { WORKFLOW_NODE_IDS, ARTIFACT_BY_NODE } = require('./pipeline-definition-common');
+const { scoreRootReviewCandidate } = require('../../skills/pipeline-flow/src/root-opportunity-review');
 
 /**
  * 读取 workflow 节点对应的 pipeline artifact。
@@ -107,6 +108,12 @@ function readWorkflowNodeArtifact(runIdOrOptions, nodeId, options = {}) {
       };
     }
     if (normalized.nodeId === WORKFLOW_NODE_IDS.keywordReview) {
+      if (summary.options?.mode === 'root-keyword') {
+        const saved = readArtifactJsonl(file, normalized.limit);
+        const rows = saved.length && saved.every(row => row.combinedOpportunityReview)
+          ? saved : readArtifactJsonl(summary.files?.candidates, normalized.limit).map(scoreRootReviewCandidate);
+        return { runId: summary.runId, nodeId: normalized.nodeId, file, type: 'jsonl', rows, combinedOpportunityReview: true };
+      }
       if (summary.options?.mode === 'manual') {
         const selectedFile = summary.files?.selectedProducts;
         const selectedRows = readArtifactJsonl(selectedFile, normalized.limit);

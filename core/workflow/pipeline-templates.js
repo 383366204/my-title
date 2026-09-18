@@ -184,8 +184,7 @@ if (mode === 'watermark-removal') {
     return withSteps(positionNodes([
       { id: WORKFLOW_NODE_IDS.start, type: 'production-start', data: startData },
       { id: WORKFLOW_NODE_IDS.mine, type: 'pipeline-mine', data: { label: '生意参谋拓词', description: '按安全节奏逐个查询词根并持续保存结果', discoveryMode: 'user_roots' } },
-      { id: WORKFLOW_NODE_IDS.keywordReview, type: 'pipeline-keyword-review', data: { label: '人工筛词', description: '按词根、市场数据和机会分筛选候选词' } },
-      { id: WORKFLOW_NODE_IDS.verify, type: 'pipeline-verify', data: { label: '关键词机会确认', description: '复用新鲜数据，只补查缺失或过期指标' } },
+      { id: WORKFLOW_NODE_IDS.keywordReview, type: 'pipeline-keyword-review', data: { label: '关键词机会复核', description: '查看机会评分并人工筛词，未通过项可确认风险后放行' } },
       { id: WORKFLOW_NODE_IDS.select, type: 'pipeline-select', data: { label: '货源选品', description: '为确认后的关键词搜索并勾选1688货源' } },
       { id: WORKFLOW_NODE_IDS.generate, type: 'pipeline-generate', data: { label: '标题生成', description: '基于关键词和已选货源生成铺货标题' } },
       { id: WORKFLOW_NODE_IDS.export, type: 'pipeline-export', data: { label: '铺货复核', description: '确认标题、类目和待铺货商品' } },
@@ -258,7 +257,10 @@ function workflowEdges(mode = 'daily') {
         [WORKFLOW_NODE_IDS.generate, WORKFLOW_NODE_IDS.export],
         [WORKFLOW_NODE_IDS.export, WORKFLOW_NODE_IDS.end]
       ];
-  return pairs.map(([source, target]) => ({
+  const effectivePairs = mode === 'root-keyword' ? pairs
+    .filter(([source]) => source !== WORKFLOW_NODE_IDS.verify)
+    .map(([source, target]) => [source, target === WORKFLOW_NODE_IDS.verify ? WORKFLOW_NODE_IDS.select : target]) : pairs;
+  return effectivePairs.map(([source, target]) => ({
     id: `${source}-${target}`,
     source,
     target,
@@ -305,7 +307,7 @@ function listProductionWorkflowTemplates() {
     template('root-keyword-selection-v1', '词根拓词选品流水线', 'root-keyword', '输入词根，通过生意参谋拓词后进入选品和铺货', {
       entryLabel: '入口：手动词根',
       scenarioLabel: '适合：从短词根持续拓展选品机会',
-      flowSummary: '流程：录入词根 → 分时拓词 → 人工筛词 → 机会确认 → 货源选品 → 标题生成 → 铺货复核',
+      flowSummary: '流程：录入词根 → 分时拓词 → 关键词机会复核 → 货源选品 → 标题生成 → 铺货复核',
       modeHint: '词根和候选词不设业务数量上限；系统按安全间隔串行查询，并可暂停后继续。'
     }),
     template('manual-selection-v2', '1688链接智能铺货流水线', 'manual', '输入1688链接，自动查词、生成标题并准备铺货', {

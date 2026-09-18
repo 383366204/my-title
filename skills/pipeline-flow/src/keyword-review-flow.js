@@ -3,6 +3,7 @@
 const fs = require('fs');
 const { appendJsonl, getRun, readJsonl, setRunStageMetrics, writeRun } = require('./run-store');
 const { buildFlowCommand, flowResponse } = require('./flow-context');
+const { reviewRootOpportunities } = require('./root-opportunity-review');
 
 function normalizeKeywordReviewDecision(row = {}, decision = 'approved', reason = '') {
   return {
@@ -21,6 +22,7 @@ function normalizeKeywordReviewDecision(row = {}, decision = 'approved', reason 
  */
 function flowReviewCandidates(options = {}) {
   const { runDir, run } = getRun(options);
+  if (run.options?.mode === 'root-keyword') return reviewRootOpportunities(options);
   const candidates = readJsonl(run.files.candidates);
   const manualKeywords = [...new Set((Array.isArray(options.manualKeywords) ? options.manualKeywords : [])
     .map(item => String(item || '').trim())

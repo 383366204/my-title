@@ -374,10 +374,10 @@ describe('pipeline runtime runner', () => {
     const runtime = readRuntimeState({ dataDir, runId: 'root_keyword_runtime' });
     assert.deepEqual(calls, ['mine', 'keywordReview']);
     assert.equal(result.runtimeStatus, 'blocked');
-    assert.deepEqual(runtime.steps, ['mine', 'keywordReview', 'verify', 'select', 'generate', 'export']);
+    assert.deepEqual(runtime.steps, ['mine', 'keywordReview', 'select', 'generate', 'export']);
     assert.equal(runtime.progress.mine.status, 'completed');
     assert.equal(runtime.progress.keywordReview.status, 'completed');
-    assert.equal(runtime.progress.verify.status, 'idle');
+    assert.equal(runtime.progress.verify, undefined);
   });
 
   it('prepares every exact keyword before verification', async () => {
