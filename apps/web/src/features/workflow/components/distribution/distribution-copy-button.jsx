@@ -6,17 +6,19 @@ import { DISTRIBUTION_COPY_FORMATS } from './distribution-view-model.js';
  * @param {object} props Copy action and selected format.
  * @returns {import('react').JSX.Element} Split copy button with a format menu.
  */
-export function DistributionCopyButton({ label, primary = false, disabled, onCopy, format, onFormatChange }) {
+export function DistributionCopyButton({ label, primary = false, disabled, onCopy, format, onFormatChange, successMessage }) {
   const id = useId();
   const menu = useRef(null);
   const trigger = useRef(null);
+  const group = useRef(null);
+  const successDialog = useRef(null);
   const openMenu = () => {
     if (menu.current.matches(':popover-open')) {
       menu.current.hidePopover();
       return;
     }
-    const rect = trigger.current.getBoundingClientRect();
-    const width = Math.min(240, window.innerWidth - 24);
+    const rect = group.current.getBoundingClientRect();
+    const width = Math.min(rect.width, window.innerWidth - 24);
     Object.assign(menu.current.style, {
       width: `${width}px`,
       left: `${Math.max(12, Math.min(rect.right - width, window.innerWidth - width - 12))}px`,
@@ -33,8 +35,11 @@ export function DistributionCopyButton({ label, primary = false, disabled, onCop
   };
   const buttonClass = primary ? 'node-primary-button' : 'node-secondary-button';
   return (
-    <div className="distribution-copy-split">
-      <button type="button" className={buttonClass} disabled={disabled} onClick={onCopy} title={`当前格式：${format.label}`}>
+    <div ref={group} className="distribution-copy-split">
+      <button type="button" className={buttonClass} disabled={disabled} onClick={async () => {
+        const copied = await onCopy();
+        if (copied && successDialog.current && !successDialog.current.open) successDialog.current.showModal();
+      }} title={`当前格式：${format.label}`}>
         <Copy size={13} /> {label}
       </button>
       <button ref={trigger} type="button" className={`${buttonClass} distribution-copy-toggle`} aria-label="铺货复制格式"
@@ -46,10 +51,15 @@ export function DistributionCopyButton({ label, primary = false, disabled, onCop
         {DISTRIBUTION_COPY_FORMATS.map(option => (
           <button key={option.value} type="button" role="menuitemradio" aria-checked={format.value === option.value}
             onClick={() => { onFormatChange(option.value); menu.current.hidePopover(); trigger.current.focus(); }}>
-            <Check size={14} style={{ visibility: format.value === option.value ? 'visible' : 'hidden' }} />{option.label}
+            {option.label}
           </button>
         ))}
       </div>
+      <dialog ref={successDialog} className="distribution-copy-success" aria-label="复制成功" onCancel={event => event.stopPropagation()}>
+        <h3><Check size={18} />复制成功</h3>
+        <p>{successMessage || `已复制铺货内容，格式：${format.label}`}</p>
+        <button type="button" className="node-primary-button" autoFocus onClick={() => successDialog.current.close()}>知道了</button>
+      </dialog>
     </div>
   );
 }
