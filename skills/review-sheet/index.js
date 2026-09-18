@@ -4,17 +4,11 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const ExcelJS = require('exceljs');
-const { getLLMProviderInfo } = require('../../core/llm');
+const axios = require('axios');
+const { createLLMClient, getLLMProviderInfo } = require('../../core/llm');
+const { parseJsonFromLLM } = require('../../core/llm-utils');
 const { isEmbeddableImage, sniffImageFormat } = require('../../core/image-format');
 const { addThumbnailImage, hardenDrawingAnchors, pixelsToColumnWidth } = require('../../core/excel-image');
-const {
-  factualFallbackReview,
-  llmReviews,
-  mentionsTitle,
-  normalizeExperienceNotes
-} = require('./src/review-generator');
-const { assessReviewQuality } = require('./src/review-similarity');
-const { readReviewHistory, recordReviewHistory } = require('./src/review-history-store');
 const {
   DEFAULT_FLOW_DIR,
   appendJsonl,
@@ -40,7 +34,6 @@ const HEADER_ALIASES = {
   buyerPhone: ['买家手机号', '手机号', '手机号码'],
   orderNumber: ['订单号', '订单编号'],
   orderNote: ['下单备注', '备注'],
-  experienceNotes: ['真实体验', '体验要点', '评价要点', '实际体验', '使用感受'],
   correspondingFile: ['对应文件', '评价文件', '素材文件']
 };
 
@@ -197,7 +190,6 @@ async function parseReviewSourceWorkbook(buffer, options = {}) {
         title,
         productUrl: String(titleCell.hyperlink || '').trim(),
         orderNote: header.columns.orderNote ? cellText(sheet.getCell(rowNumber, header.columns.orderNote)) : '',
-        experienceNotes: header.columns.experienceNotes ? cellText(sheet.getCell(rowNumber, header.columns.experienceNotes)) : '',
         correspondingFile: header.columns.correspondingFile ? cellText(sheet.getCell(rowNumber, header.columns.correspondingFile)) : '',
         sourceSheet: sheet.name,
         sourceRow: rowNumber
@@ -596,13 +588,51 @@ function titleFreeReview(index) {
  * @param {string} [options.dataDir] Pipeline data directory.
  * @returns {Promise<object>} Draft generation result.
  */
+/**
+ * 判断评价是否复述了商品标题（整段引用或截取前缀都算）。
+ * @param {string} text 评价内容
+ * @param {string} title 商品标题
+ * @returns {boolean} true 表示引用了标题
+ */
+function mentionsTitle(text, title) {
+  const review = String(text || '').replace(/\s+/g, '');
+  const subject = String(title || '').replace(/\s+/g, '');
+  if (!review || subject.length < 10) return false;
+  if (review.includes(subject)) return true;
+  return review.includes(subject.slice(0, 12));
+}
+
+async function llmReviews(products, options = {}) {
+  const llmInfo = getLLMProviderInfo({ provider: options.llmProvider });
+  if (!llmInfo.configured || options.useAI === false) return null;
+  const client = createLLMClient({ provider: options.llmProvider });
+  const titles = products.map((product, index) => `${index + 1}. ${product.title}`).join('\n');
+  const request = typeof options.request === 'function' ? options.request : axios.post;
+  const response = await request(
+    `${client.apiBase}/chat/completions`,
+    client._buildChatPayload({
+      messages: [
+        { role: 'system', content: '你负责为已购买商品生成自然、克制、互不重复的中文评价。不要使用绝对化宣传，不虚构物流速度、材质或功效。严禁复述或引用商品标题原文，包括加引号、截取片段或把关键词串进句子里；请改用「东西」「宝贝」「这款」「卖家」「店家」等自然指代。只返回 JSON 数组，数组长度必须和商品数相同。格式：["评价1","评价2"]。' },
+        { role: 'user', content: `评价语气：${options.reviewTone || '自然真实'}\n每条约 ${Number(options.reviewLength || 35)} 字。\n下面这些标题只用于理解商品品类，不要出现在评价里：\n${titles}` }
+      ],
+      temperature: 0.7
+    }),
+    {
+      headers: { Authorization: `Bearer ${client.apiKey}`, 'Content-Type': 'application/json' },
+      timeout: client._longTimeout || 60000
+    }
+  );
+  const parsed = parseJsonFromLLM(response.data?.choices?.[0]?.message?.content || '');
+  if (!Array.isArray(parsed) || parsed.length !== products.length) throw new Error('评价生成数量与商品数量不一致');
+  return parsed.map(value => String(value || '').trim());
+}
+
 async function generateReviewDrafts(options = {}) {
   const context = getRun({ dataDir: options.dataDir || DEFAULT_FLOW_DIR, runId: options.runId });
   const files = ensureReviewRunFiles(context.run, context.runDir);
   const source = JSON.parse(fs.readFileSync(files.reviewGroups, 'utf8'));
   const products = source.groups.flatMap(group => group.products.map(product => ({ ...product, groupId: group.id })));
   const generated = new Array(products.length).fill(null);
-  const origins = new Array(products.length).fill('missing_experience');
   const replaced = new Array(products.length).fill(false);
   let degraded = false;
   let titleEchoFixed = 0;
@@ -610,86 +640,59 @@ async function generateReviewDrafts(options = {}) {
   for (let start = 0; start < products.length; start += batchSize) {
     const batch = products.slice(start, start + batchSize);
     try {
-      const batchReviews = await llmReviews(batch, {
-        ...options,
-        // 大于 20 条时把前面批次的结果带给模型，减少跨批次句式复用。
-        avoidReviews: generated.filter(Boolean)
-      });
+      const batchReviews = await llmReviews(batch, options);
       if (!batchReviews) {
         if (options.useAI !== false) degraded = true;
         continue;
       }
       batchReviews.forEach((review, offset) => {
         const index = start + offset;
-        const notes = normalizeExperienceNotes(batch[offset].experienceNotes);
         const text = String(review || '').trim();
-        if (!notes) return;
-        // 模型仍然复述标题时不采纳该条，只退回用户填写的真实体验。
+        // 模型仍然复述标题时不采纳该条，换成无标题模板并标记，供人工复核时留意
         if (!text || mentionsTitle(text, batch[offset].title)) {
-          generated[index] = factualFallbackReview(notes, options.reviewLength);
-          origins[index] = 'experience';
+          generated[index] = titleFreeReview(index);
           replaced[index] = true;
           titleEchoFixed += 1;
           return;
         }
         generated[index] = text;
-        origins[index] = 'llm';
       });
     } catch (_error) {
       degraded = true;
     }
   }
-  const drafts = products.map((product, index) => {
-    const experienceNotes = normalizeExperienceNotes(product.experienceNotes);
-    const reviewContent = generated[index] || factualFallbackReview(experienceNotes, options.reviewLength);
-    return {
-      id: product.id,
-      groupId: product.groupId,
-      title: product.title,
-      sourceSheet: product.sourceSheet,
-      sourceRow: product.sourceRow,
-      experienceNotes,
-      reviewContent,
-      correspondingFile: product.correspondingFile || '',
-      origin: replaced[index]
-        ? 'replaced'
-        : generated[index]
-          ? origins[index]
-          : experienceNotes
-            ? 'experience'
-            : 'missing_experience',
-      generationAttempts: generated[index] ? 1 : 0,
-      status: 'pending_review'
-    };
-  });
-  const quality = assessReviewQuality(drafts, {
-    runId: context.runId,
-    history: readReviewHistory({ dataDir: options.dataDir || DEFAULT_FLOW_DIR })
-  });
   fs.writeFileSync(files.reviewDrafts, '', 'utf8');
-  appendJsonl(files.reviewDrafts, quality.rows);
+  const drafts = products.map((product, index) => ({
+    id: product.id,
+    groupId: product.groupId,
+    title: product.title,
+    sourceSheet: product.sourceSheet,
+    sourceRow: product.sourceRow,
+    reviewContent: generated[index] || titleFreeReview(index),
+    correspondingFile: product.correspondingFile || '',
+    origin: replaced[index] ? 'replaced' : (generated[index] ? 'llm' : 'template'),
+    status: 'pending_review'
+  }));
+  appendJsonl(files.reviewDrafts, drafts);
   context.run.status = 'needs_review';
   context.run.requiresUserAction = true;
   context.run.mustReview = true;
-  context.run.counts.reviewDrafts = quality.rows.length;
+  context.run.counts.reviewDrafts = drafts.length;
   context.run.reviewGeneration = {
     degraded,
     titleEchoFixed,
-    provider: getLLMProviderInfo({ provider: options.llmProvider }).provider,
-    qualitySummary: quality.summary
+    provider: getLLMProviderInfo({ provider: options.llmProvider }).provider
   };
   writeRun(context.runDir, context.run);
   return {
     runId: context.runId,
     runDir: context.runDir,
     status: 'needs_review',
-    count: quality.rows.length,
+    count: drafts.length,
     degraded,
-    titleEchoFixed,
-    qualitySummary: quality.summary
+    titleEchoFixed
   };
 }
-
 /**
  * Apply user edits and approve all review drafts.
  * @param {object} [options] Confirmation options.
@@ -698,6 +701,34 @@ async function generateReviewDrafts(options = {}) {
  * @param {string} [options.dataDir] Pipeline data directory.
  * @returns {object} Confirmation result.
  */
+function confirmReviewDrafts({ dataDir = DEFAULT_FLOW_DIR, runId, reviews = [] } = {}) {
+  const context = getRun({ dataDir, runId });
+  const files = ensureReviewRunFiles(context.run, context.runDir);
+  const edits = new Map((Array.isArray(reviews) ? reviews : []).map(row => [String(row.id || ''), row]));
+  const manifest = readReviewAssetManifest(files.reviewAssets);
+  const drafts = readJsonl(files.reviewDrafts).map(row => {
+    const edit = edits.get(row.id) || {};
+    const reviewContent = String(edit.reviewContent ?? row.reviewContent ?? '').trim().slice(0, 500);
+    if (!reviewContent) throw new Error(`商品“${row.title}”缺少评价内容`);
+    const attachments = Array.isArray(manifest.items[row.id]) ? manifest.items[row.id] : [];
+    // 对应文件不再人工填写：刷单表原值优先，其次用上传配图的文件名自动顶上
+    const correspondingFile = (String(row.correspondingFile || '').trim() || attachments.map(item => item.name).join('、')).slice(0, 200);
+    return {
+      ...row,
+      reviewContent,
+      correspondingFile,
+      attachments: attachments.map(item => item.file),
+      status: 'approved'
+    };
+  });
+  fs.writeFileSync(files.reviewDrafts, '', 'utf8');
+  appendJsonl(files.reviewDrafts, drafts);
+  context.run.status = 'review_approved';
+  context.run.requiresUserAction = false;
+  context.run.mustReview = false;
+  writeRun(context.runDir, context.run);
+  return { count: drafts.length, drafts };
+}
 /**
  * 保存用户对评价草稿的临时修改（自动缓存），不推进流水线状态。
  * 关闭窗口后重新打开时，面板从 review-drafts.jsonl 读回的就是这里落盘的内容。
@@ -727,185 +758,14 @@ function saveReviewDrafts({ dataDir = DEFAULT_FLOW_DIR, runId, reviews = [] } = 
       && String(edit.reviewContent ?? '') !== String(row.reviewContent ?? '');
     return {
       ...row,
-      experienceNotes: Object.prototype.hasOwnProperty.call(edit, 'experienceNotes')
-        ? normalizeExperienceNotes(edit.experienceNotes)
-        : normalizeExperienceNotes(row.experienceNotes),
       reviewContent: String(edit.reviewContent ?? row.reviewContent ?? '').slice(0, 500),
-      correspondingFile: String(edit.correspondingFile ?? row.correspondingFile ?? '').trim().slice(0, 200),
       origin: reviewChanged ? 'manual' : row.origin,
       editedAt: savedAt
     };
   });
-  const quality = assessReviewQuality(drafts, {
-    runId,
-    history: readReviewHistory({ dataDir })
-  });
-  fs.writeFileSync(files.reviewDrafts, '', 'utf8');
-  appendJsonl(files.reviewDrafts, quality.rows);
-  context.run.reviewGeneration = {
-    ...(context.run.reviewGeneration || {}),
-    qualitySummary: quality.summary
-  };
-  writeRun(context.runDir, context.run);
-  return {
-    count: quality.rows.length,
-    savedCount,
-    savedAt,
-    qualityById: quality.qualityById,
-    qualitySummary: quality.summary
-  };
-}
-
-/**
- * 重新计算评价质量，不改变流水线状态。
- * @param {object} options 检测选项。
- * @returns {object} 质量摘要与逐条结果。
- */
-function checkReviewDrafts({ dataDir = DEFAULT_FLOW_DIR, runId } = {}) {
-  const context = getRun({ dataDir, runId });
-  if (['review_approved', 'workflow_complete'].includes(String(context.run.status || ''))) {
-    const error = new Error('评价已经确认，不能再次检查旧草稿。');
-    error.code = 'REVIEW_DRAFT_LOCKED';
-    throw error;
-  }
-  const files = ensureReviewRunFiles(context.run, context.runDir);
-  const quality = assessReviewQuality(readJsonl(files.reviewDrafts), {
-    runId,
-    history: readReviewHistory({ dataDir })
-  });
-  fs.writeFileSync(files.reviewDrafts, '', 'utf8');
-  appendJsonl(files.reviewDrafts, quality.rows);
-  context.run.reviewGeneration = { ...(context.run.reviewGeneration || {}), qualitySummary: quality.summary };
-  writeRun(context.runDir, context.run);
-  return {
-    count: quality.rows.length,
-    rows: quality.rows,
-    qualityById: quality.qualityById,
-    qualitySummary: quality.summary
-  };
-}
-
-/**
- * 仅根据真实体验要点重新整理指定评价。
- * @param {object} options 重整选项。
- * @returns {Promise<object>} 新草稿与质量结果。
- */
-async function rewriteReviewDrafts({ dataDir = DEFAULT_FLOW_DIR, runId, ids = [], ...options } = {}) {
-  const context = getRun({ dataDir, runId });
-  if (['review_approved', 'workflow_complete'].includes(String(context.run.status || ''))) {
-    const error = new Error('评价已经确认，不能再次整理。');
-    error.code = 'REVIEW_DRAFT_LOCKED';
-    throw error;
-  }
-  const files = ensureReviewRunFiles(context.run, context.runDir);
-  const rows = readJsonl(files.reviewDrafts);
-  const wanted = new Set((Array.isArray(ids) ? ids : []).map(String));
-  const targets = rows.filter(row => wanted.has(String(row.id)) && normalizeExperienceNotes(row.experienceNotes));
-  if (targets.length === 0) throw new Error('没有可整理的评价，请先填写真实体验要点。');
-
-  let generated = null;
-  let degraded = false;
-  try {
-    generated = await llmReviews(targets, {
-      ...context.run.options,
-      ...options,
-      avoidReviews: rows.filter(row => !wanted.has(String(row.id))).map(row => row.reviewContent)
-    });
-  } catch (_error) {
-    degraded = true;
-  }
-  // LLM 请求期间用户可能已确认或修改草稿，落盘前必须重新读取状态和最新内容。
-  const latestContext = getRun({ dataDir, runId });
-  if (['review_approved', 'workflow_complete'].includes(String(latestContext.run.status || ''))) {
-    const error = new Error('评价已经确认，已丢弃迟到的整理结果。');
-    error.code = 'REVIEW_DRAFT_LOCKED';
-    throw error;
-  }
-  const latestFiles = ensureReviewRunFiles(latestContext.run, latestContext.runDir);
-  const latestRows = readJsonl(latestFiles.reviewDrafts);
-  const generatedAt = new Date().toISOString();
-  const replacements = new Map(targets.map((row, index) => {
-    const text = String(generated?.[index] || '').trim();
-    const usable = text && !mentionsTitle(text, row.title);
-    return [String(row.id), {
-      sourceExperienceNotes: normalizeExperienceNotes(row.experienceNotes),
-      reviewContent: usable
-        ? text
-        : factualFallbackReview(row.experienceNotes, options.reviewLength || context.run.options?.reviewLength),
-      origin: usable ? 'llm' : 'experience',
-      generationAttempts: Number(row.generationAttempts || 0) + 1,
-      generatedAt
-    }];
-  }));
-  const quality = assessReviewQuality(latestRows.map(row => {
-    const replacement = replacements.get(String(row.id));
-    if (!replacement) return row;
-    // 体验要点在请求期间被改过时保留用户的最新输入，不套用基于旧事实生成的内容。
-    if (normalizeExperienceNotes(row.experienceNotes) !== replacement.sourceExperienceNotes) return row;
-    const { sourceExperienceNotes: _sourceExperienceNotes, ...generatedFields } = replacement;
-    return { ...row, ...generatedFields };
-  }), {
-    runId,
-    history: readReviewHistory({ dataDir })
-  });
-  fs.writeFileSync(latestFiles.reviewDrafts, '', 'utf8');
-  appendJsonl(latestFiles.reviewDrafts, quality.rows);
-  latestContext.run.reviewGeneration = {
-    ...(latestContext.run.reviewGeneration || {}),
-    degraded: latestContext.run.reviewGeneration?.degraded === true || degraded,
-    qualitySummary: quality.summary
-  };
-  writeRun(latestContext.runDir, latestContext.run);
-  return {
-    count: targets.length,
-    rows: quality.rows,
-    qualityById: quality.qualityById,
-    qualitySummary: quality.summary,
-    degraded
-  };
-}
-
-function confirmReviewDrafts({ dataDir = DEFAULT_FLOW_DIR, runId, reviews = [] } = {}) {
-  const context = getRun({ dataDir, runId });
-  const files = ensureReviewRunFiles(context.run, context.runDir);
-  const edits = new Map((Array.isArray(reviews) ? reviews : []).map(row => [String(row.id || ''), row]));
-  const manifest = readReviewAssetManifest(files.reviewAssets);
-  const pending = readJsonl(files.reviewDrafts).map(row => {
-    const edit = edits.get(row.id) || {};
-    const reviewContent = String(edit.reviewContent ?? row.reviewContent ?? '').trim().slice(0, 500);
-    const attachments = Array.isArray(manifest.items[row.id]) ? manifest.items[row.id] : [];
-    const typed = String(edit.correspondingFile ?? row.correspondingFile ?? '').trim();
-    // 人工没填对应文件时，自动用上传的配图文件名顶上
-    const correspondingFile = (typed || attachments.map(item => item.name).join('、')).slice(0, 200);
-    return {
-      ...row,
-      experienceNotes: Object.prototype.hasOwnProperty.call(edit, 'experienceNotes')
-        ? normalizeExperienceNotes(edit.experienceNotes)
-        : normalizeExperienceNotes(row.experienceNotes),
-      reviewContent,
-      correspondingFile,
-      attachments: attachments.map(item => item.file),
-      origin: Object.prototype.hasOwnProperty.call(edit, 'reviewContent') && reviewContent !== String(row.reviewContent || '').trim()
-        ? 'manual'
-        : row.origin
-    };
-  });
-  const quality = assessReviewQuality(pending, { runId, history: readReviewHistory({ dataDir }) });
-  if (quality.summary.missing > 0) {
-    throw new Error(`还有 ${quality.summary.missing} 条评价未填写，请补充真实体验或手动填写评价。`);
-  }
-  if (quality.summary.blocked > 0) {
-    throw new Error(`有 ${quality.summary.blocked} 条评价在本表内高度重复，请修改或重新整理后再生成表格。`);
-  }
-  const drafts = quality.rows.map(row => ({ ...row, status: 'approved' }));
   fs.writeFileSync(files.reviewDrafts, '', 'utf8');
   appendJsonl(files.reviewDrafts, drafts);
-  context.run.status = 'review_approved';
-  context.run.requiresUserAction = false;
-  context.run.mustReview = false;
-  context.run.reviewGeneration = { ...(context.run.reviewGeneration || {}), qualitySummary: quality.summary };
-  writeRun(context.runDir, context.run);
-  return { count: drafts.length, drafts, qualitySummary: quality.summary };
+  return { count: drafts.length, savedCount, savedAt };
 }
 
 function thinBorder() {
@@ -1040,11 +900,6 @@ async function buildReviewSheet(options = {}) {
   context.run.counts.orderSheetRows = drafts.length;
   context.run.counts.orderSheetImages = imageCount;
   context.run.options = { ...(context.run.options || {}), mode: 'review-sheet', sheetType: 'review', includeSpacerRow: options.includeSpacerRow !== false };
-  context.run.reviewHistory = recordReviewHistory({
-    dataDir: options.dataDir || DEFAULT_FLOW_DIR,
-    runId: context.runId,
-    rows: drafts
-  });
   writeRun(context.runDir, context.run);
   return {
     runId: context.runId,
@@ -1064,18 +919,17 @@ module.exports = {
   REQUIRED_GROUP_FIELDS,
   addReviewAttachment,
   buildReviewSheet,
-  checkReviewDrafts,
   confirmReviewDrafts,
   generateReviewDrafts,
   saveReviewDrafts,
   importReviewSource,
   listReviewAttachments,
+  mentionsTitle,
   normalizeReviewGroupSize,
   parseReviewSourceWorkbook,
   readReviewAttachment,
   readReviewSourceUpload,
   removeReviewAttachment,
-  rewriteReviewDrafts,
   regroupReviewSourceUpload,
   saveReviewSourceUpload,
   titleFreeReview

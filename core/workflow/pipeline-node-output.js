@@ -106,14 +106,9 @@ function outputForNode(id, summary) {
     };
   }
   if (id === WORKFLOW_NODE_IDS.generateReviews) {
-    const quality = summary.reviewGeneration?.qualitySummary || {};
-    const missing = Number(quality.missing || 0);
     return {
       count: Number(counts.reviewDrafts || 0),
       degraded: summary.reviewGeneration?.degraded === true,
-      missing,
-      blocked: Math.max(0, Number(quality.blocked || 0) - missing),
-      warning: Number(quality.warning || 0),
       file: summary.files?.reviewDrafts || ''
     };
   }

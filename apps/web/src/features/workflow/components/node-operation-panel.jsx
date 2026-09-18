@@ -67,11 +67,7 @@ const NODE_PANEL_COPY = {
     title: '铺货清单与人工复核',
     description: '自动可铺货项和被系统拦截项在这里统一查看、加入、移除和复制。'
   },
-  'review-drafts': {
-    title: '真实体验整理',
-    description: '填写实际体验、整理文案并检查重复，确认后生成评价表。'
-  },
-  'order-sheet-products': {
+    'order-sheet-products': {
     title: '商品资料操作台',
     description: '核对指定商品的标题、购买规格、店铺和下单金额，资料齐全后继续生成 Excel。'
   },
@@ -173,15 +169,18 @@ export const NodeOperationPanel = ({
     ? { title: '商品资料获取结果', description: '逐条查看1688商品标题、主图、类目和获取失败原因。' }
     : NODE_PANEL_COPY[kind];
   const resultHint = nodeResultHint(kind);
-  if (!copy) return <ArtifactPanel state={artifactState} />;
+  // 评价复核面板自带标题和说明，操作台头部重复且无信息量，直接省略
+  if (!copy && kind !== 'review-drafts') return <ArtifactPanel state={artifactState} />;
 
   return (
     <div className="node-operation-panel">
-      <div className="node-operation-panel-head">
-        <h3>{copy.title}</h3>
-        <p>{copy.description}</p>
-        {resultHint && <p className="node-result-hint">{resultHint}</p>}
-      </div>
+      {copy && (
+        <div className="node-operation-panel-head">
+          <h3>{copy.title}</h3>
+          <p>{copy.description}</p>
+          {resultHint && <p className="node-result-hint">{resultHint}</p>}
+        </div>
+      )}
       <NodeResultSummaryCard nodeId={selectedNode?.id} state={selectedNode?.data || {}} />
       {kind === 'keyword-mining' && (
         <KeywordMiningOperationPanel
