@@ -303,7 +303,7 @@ describe('workflow pipeline adapter', () => {
             WORKFLOW_NODE_IDS.export,
             WORKFLOW_NODE_IDS.end
           ];
-      assert.deepEqual(nodes.map(node => node.id), expectedIds);
+      assert.deepEqual(nodes.map(node => node.id), template.mode === 'root-keyword' ? expectedIds.filter(id => id !== WORKFLOW_NODE_IDS.verify) : expectedIds);
       assert.equal(uniquePositions.size, nodes.length, 'template nodes should not share the same canvas position');
       assert.ok(maxY - minY <= 80, `template ${template.id} should read as a single horizontal pipeline`);
       assert.ok(maxX - minX <= 1820, `template ${template.id} should not keep legacy wide spacing`);

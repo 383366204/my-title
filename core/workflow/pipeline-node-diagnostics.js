@@ -198,11 +198,11 @@ function summaryInterventionForNode(summary, nodeId) {
     if (status === 'awaiting_keyword_review') {
       return {
         blocker: 'keyword_review_required',
-        actionHint: '请先人工筛选候选词。确认后的关键词才会进入生意参谋校验，避免浪费平台请求。',
+        actionHint: summary.options?.mode === 'root-keyword' ? '请查看机会评分并选择保留的词，未通过项可人工确认风险后放行。' : '请先人工筛选候选词。确认后的关键词才会进入生意参谋校验，避免浪费平台请求。',
         nextRecommendedAction: {
           action: 'confirm-keyword-review',
           label: '确认筛词结果',
-          description: '将当前保留的候选词写入人工筛词产物，然后继续生意参谋校验。'
+          description: summary.options?.mode === 'root-keyword' ? '确认保留的词和人工放行记录，然后继续货源选品。' : '将当前保留的候选词写入人工筛词产物，然后继续生意参谋校验。'
         }
       };
     }

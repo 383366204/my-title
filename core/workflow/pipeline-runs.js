@@ -15,16 +15,27 @@ const { readRuntimeForSummary, buildNodeStates } = require('./pipeline-node-stat
  */
 function pipelineSummaryToWorkflowRun(summary, options = {}) {
   if (!summary) return null;
-  const runtime = summary.runtime || readRuntimeForSummary(summary, options.dataDir);
+  let runtime = summary.runtime || readRuntimeForSummary(summary, options.dataDir);
+  const rootMode = summary.options?.mode === 'root-keyword';
+  if (rootMode && runtime?.activeStep === 'verify') {
+    runtime = { ...runtime, activeStep: 'keywordReview', progress: { ...runtime.progress, keywordReview: { ...runtime.progress?.verify, status: 'blocked', message: '请复核机会评分，可人工选择未通过的词继续选品' } } };
+    summary = { ...summary, status: 'awaiting_keyword_review', counts: { ...summary.counts,
+      keywordReviewApproved: 0, keywordReviewRejected: 0, keywordReviewPending: summary.counts?.candidates || 0 } };
+  }
   const summaryWithRuntime = {
     ...summary,
     runtime
   };
   const workflowTemplate = templateForSummary(summary);
   const workflowSnapshot = readWorkflowDefinition({ dataDir: options.dataDir, runId: summary.runId });
-  const workflow = workflowSnapshot || (workflowTemplate
+  let workflow = workflowSnapshot || (workflowTemplate
     ? { id: workflowTemplate.id, mode: workflowTemplate.mode, ...workflowTemplate.workflow }
     : null);
+  if (rootMode && workflow?.nodes?.some(node => node.id === 'verify')) {
+    workflow = { ...workflow, nodes: workflowTemplate.workflow.nodes.map(node => ({ ...node,
+      data: { ...workflowSnapshot?.nodes?.find(old => old.id === node.id)?.data, ...node.data,
+        ...(node.id === 'start' ? workflowSnapshot?.nodes?.find(old => old.id === 'start')?.data : {}) } })), edges: workflowTemplate.workflow.edges };
+  }
   return {
     runId: summary.runId,
     status: runtime?.status || summary.status || 'unknown',

@@ -1,6 +1,13 @@
+import { lazy, Suspense, useRef, useState } from 'react';
+import { ListTree } from 'lucide-react';
+import { previewCategoryRoots } from '../category-root-utils.js';
 import { parseCompetitorShareInputs, parseExactKeywords, parseOrderSheetManualItems, parseRootKeywords } from '../workflow-launch-params.js';
 
 import { DiscoveryDimensionFields } from './keyword-mining/discovery-dimension-fields.jsx';
+
+const CategoryRootPicker = lazy(() => import('./category-root-picker.jsx')
+  .then(module => ({ default: module.CategoryRootPicker }))
+  .catch(() => ({ default: ({ onCancel }) => <div role="alert">类目加载失败，请刷新页面后重试。<button type="button" className="node-secondary-button" onClick={onCancel}>返回词根输入</button></div> })));
 
 const DAILY_START_FIELDS = [
   { key: 'mine', label: '候选词上限', min: 1, max: 200 },
@@ -42,6 +49,9 @@ const ORDER_SHEET_SORT_OPTIONS = [
 ];
 
 export function StartConfigurationPanel({ mode, modeHint, node, onDone, onUpdateField, readOnly = false }) {
+  const [categoryOpen, setCategoryOpen] = useState(false);
+  const [categoryMessage, setCategoryMessage] = useState('');
+  const categoryTrigger = useRef(null);
   if (!node) return <div className="artifact-empty">启动节点不存在。</div>;
   const data = node.data || {};
 
@@ -136,6 +146,18 @@ export function StartConfigurationPanel({ mode, modeHint, node, onDone, onUpdate
     const roots = parseRootKeywords(rootsText);
     const rawRootCount = String(rootsText || '').split(/[\r\n,，;；、]+/).map((item) => item.trim()).filter(Boolean).length;
     const duplicateCount = Math.max(0, rawRootCount - roots.length);
+    const closeCategories = () => {
+      setCategoryOpen(false);
+      requestAnimationFrame(() => categoryTrigger.current?.focus());
+    };
+    if (categoryOpen && !readOnly) return <Suspense fallback={<div role="status">正在加载类目…<button type="button" onClick={closeCategories}>返回</button></div>}>
+      <CategoryRootPicker rootsText={rootsText} onCancel={closeCategories} onAdd={selected => {
+        const result = previewCategoryRoots(rootsText, selected);
+        if (result.added.length) onUpdateField(node.id, 'rootsText', result.text);
+        setCategoryMessage(`新增 ${result.added.length} 个词根，${result.duplicateCount} 个重复词根未添加。`);
+        closeCategories();
+      }} />
+    </Suspense>;
     const riskProfile = data.sycmRiskProfile || 'standard';
     const updateSeconds = (field, value, fallback) => {
       onUpdateField(node.id, field, Math.max(0, Number.parseInt(value, 10) || fallback) * 1000);
@@ -149,6 +171,8 @@ export function StartConfigurationPanel({ mode, modeHint, node, onDone, onUpdate
         <fieldset className="sheet-config-fields" disabled={readOnly}>
           <section className="sheet-config-section">
             <h3>词根来源</h3>
+            <button ref={categoryTrigger} type="button" className="node-secondary-button" onClick={() => setCategoryOpen(true)}><ListTree size={14} />类目词</button>
+            {categoryMessage && <p role="status">{categoryMessage}</p>}
             <label className="node-field">
               <span>词根 <b>{roots.length} 个</b></span>
               <textarea

@@ -36,7 +36,7 @@ const {
 
 const DEFAULT_STEPS = ['mine', 'keywordReview', 'verify', 'select', 'generate', 'export'];
 const KEYWORD_STEPS = ['start', 'verify', 'select', 'generate', 'export'];
-const ROOT_KEYWORD_STEPS = ['mine', 'keywordReview', 'verify', 'select', 'generate', 'export'];
+const ROOT_KEYWORD_STEPS = ['mine', 'keywordReview', 'select', 'generate', 'export'];
 const MANUAL_STEPS = ['start', 'select', 'verify', 'generate', 'export'];
 const ORDER_SHEET_STEPS = ['collectRank', 'confirmProducts', 'generateSheet'];
 const REVIEW_SHEET_STEPS = ['importSheet', 'generateReviews', 'generateSheet'];
@@ -352,7 +352,7 @@ async function runPipelineRuntime(options = {}) {
     : null;
   const params = options.params == null ? (existingRuntime?.params || {}) : options.params;
   const mode = options.mode || existingRuntime?.mode || 'daily';
-  const steps = options.steps || (
+  const configuredSteps = options.steps || (
     mode === 'keyword'
       ? KEYWORD_STEPS
       : mode === 'root-keyword'
@@ -367,8 +367,10 @@ async function runPipelineRuntime(options = {}) {
             ? COMPETITOR_ANALYSIS_STEPS
           : DEFAULT_STEPS
   );
+  const steps = mode === 'root-keyword' ? configuredSteps.filter(step => step !== 'verify') : configuredSteps;
   const stepFns = injectedStepFns || createDefaultStepFns({ dataDir, runId, params, mode });
-  const startStep = options.retryStep || options.resumeFromStep || existingRuntime?.activeStep || steps[0];
+  const requestedStart = options.retryStep || options.resumeFromStep || existingRuntime?.activeStep || steps[0];
+  const startStep = mode === 'root-keyword' && requestedStart === 'verify' ? 'keywordReview' : requestedStart;
   const startIndex = Math.max(0, steps.indexOf(startStep));
   const stepsToRun = steps.slice(startIndex);
 
@@ -392,6 +394,7 @@ async function runPipelineRuntime(options = {}) {
         nextRecommendedAction: null,
         error: null,
         mode,
+        steps,
         params,
         progress
       }

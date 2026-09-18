@@ -11,6 +11,7 @@ export const KeywordReviewOperationPanel = ({
   canRetryMine
 }) => {
   const candidates = artifactItems(artifactState);
+  const combined = artifactState.artifact?.combinedOpportunityReview === true || candidates.some(row => row.combinedOpportunityReview);
   const [decisions, setDecisions] = useState({});
   const [filter, setFilter] = useState('all');
   const [query, setQuery] = useState('');
@@ -25,14 +26,26 @@ export const KeywordReviewOperationPanel = ({
   }))].map((item, index) => {
     const keyword = candidateKeyword(item);
     const key = `${keyword || 'candidate'}-${index}`;
-    const persistedDecision = item.reviewStatus === 'rejected' ? 'rejected' : 'approved';
+    const persistedDecision = item.reviewStatus === 'approved' ? 'approved' : item.reviewStatus === 'rejected' || (combined && !item.reviewRecommended) ? 'rejected' : 'approved';
     return {
       ...item,
       keyword,
       key,
       reviewDecision: decisions[key] || persistedDecision
     };
-  }), [candidates, decisions, manualKeywords]);
+  }), [candidates, decisions, manualKeywords, combined]);
+  const [confirming, setConfirming] = useState(false);
+  const [riskConfirmation, setRiskConfirmation] = useState(false);
+  const riskyCount = candidateRows.filter(row => row.reviewDecision === 'approved' && !row.reviewRecommended).length;
+  const submitSelection = async () => {
+    setConfirming(true);
+    try { await onConfirmKeywordReview(candidateRows, manualKeywords); } finally { setConfirming(false); setRiskConfirmation(false); }
+  };
+  const confirmSelection = () => {
+    if (combined && riskyCount) setRiskConfirmation(true);
+    else return submitSelection();
+  };
+  useEffect(() => setRiskConfirmation(false), [decisions, manualKeywords]);
   const approvedCount = candidateRows.filter((item) => item.reviewDecision === 'approved').length;
   const rejectedCount = candidateRows.filter((item) => item.reviewDecision === 'rejected').length;
   const visibleRows = useMemo(() => candidateRows.filter((item) => {
@@ -64,7 +77,7 @@ export const KeywordReviewOperationPanel = ({
     <div className="node-embedded-workbench">
       <section className="node-workbench-section">
         <div className="node-workbench-head">
-          <strong>候选词筛选</strong>
+          <strong>{combined ? '关键词机会复核' : '候选词筛选'}</strong>
           <span>保留 {approvedCount} 个 · 筛除 {rejectedCount} 个</span>
         </div>
         <div className="keyword-review-manual-input">
@@ -110,6 +123,11 @@ export const KeywordReviewOperationPanel = ({
                 <strong>{item.keyword || '未命名候选词'}</strong>
                 <span>{item.root || item.seed ? `词根：${item.root || item.seed}` : ''} {item.source ? `· 来源：${item.source}` : ''}</span>
                 <span>{item.reason || item.gateReason || item.tier || '人工判断是否进入生意参谋'}</span>
+                {combined && <>
+                  <span>验真分：{item.sycmScore?.score ?? '暂无'} · 机会分：{item.keywordOpportunity?.score ?? '暂无'} · {item.reviewRecommended ? '建议保留' : '需人工判断'}</span>
+                  <span>{!item.sycmData ? '缺少生意参谋指标' : item.sycmScore?.passed ? '验真条件已通过' : '验真条件未通过或指标不明确'}{item.keywordOpportunity?.breakdown?.gapToContinue > 0 ? `；机会分距推荐门槛还差 ${item.keywordOpportunity.breakdown.gapToContinue} 分` : ''}</span>
+                  {item.keywordOpportunity?.manualApproval?.approved && <span>已人工放行，原评分仅作参考</span>}
+                </>}
                 {(item.marketMetrics?.missing?.length > 0 || item.marketMetrics?.breakdown) && (
                   <details className="keyword-review-detail">
                     <summary>查看评分依据</summary>
@@ -129,7 +147,7 @@ export const KeywordReviewOperationPanel = ({
                   className={`node-secondary-button success ${item.reviewDecision === 'approved' ? 'active' : ''}`}
                   onClick={() => setDecision(item.key, 'approved')}
                 >
-                  <Check size={13} /> 保留
+                  <Check size={13} /> {combined && !item.reviewRecommended ? '人工放行' : '保留'}
                 </button>
                 <button
                   type="button"
@@ -149,14 +167,22 @@ export const KeywordReviewOperationPanel = ({
           </button>
         )}
         <div className="node-product-actions">
-          <button type="button" className="node-primary-button" onClick={() => onConfirmKeywordReview(candidateRows, manualKeywords)} disabled={!canConfirm || candidateRows.length === 0}>
-            <CheckCircle2 size={14} /> 确认筛词结果
+          <button type="button" className="node-primary-button" onClick={confirmSelection} disabled={confirming || !canConfirm || candidateRows.length === 0}>
+            <CheckCircle2 size={14} /> {confirming ? '正在确认' : combined ? '确认选词结果' : '确认筛词结果'}
           </button>
           <button type="button" className="node-secondary-button" onClick={onRetryMine} disabled={!canRetryMine}>
             <RefreshCw size={13} /> 返回挖词重跑
           </button>
         </div>
-        <p className="node-workbench-note">确认后，只有“保留”的关键词会进入生意参谋校验；“筛除”的关键词会写入记录但不继续请求平台。</p>
+        {riskConfirmation && <section className="node-workbench-section" role="alertdialog" aria-label="确认人工放行">
+          <strong>确认人工放行 {riskyCount} 个关键词？</strong>
+          <p>这些词未通过自动推荐或缺少指标。原评分和风险记录会保留，放行后可以继续货源选品。</p>
+          <div className="node-product-actions">
+            <button type="button" className="node-secondary-button" disabled={confirming} onClick={() => setRiskConfirmation(false)}>返回调整</button>
+            <button type="button" className="node-primary-button" disabled={confirming || !canConfirm} onClick={submitSelection}>确认人工放行</button>
+          </div>
+        </section>}
+        <p className="node-workbench-note">{combined ? '确认保留的词将进入货源选品；人工放行不改变原评分，也不跳过商品、标题和铺货类目的检查。' : '确认后，只有“保留”的关键词会进入生意参谋校验；“筛除”的关键词会写入记录但不继续请求平台。'}</p>
       </section>
     </div>
   );
