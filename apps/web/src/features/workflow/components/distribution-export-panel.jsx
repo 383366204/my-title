@@ -142,9 +142,11 @@ export const DistributionExportPanel = ({
         status: 'copied',
         message: `已复制 ${activeRows.length} 条：${copyFormat.label}。完成外部铺货后，再点击“标记人工铺货完成”。`
       });
+      return true;
     } catch (error) {
       setManualCopiedText('');
       setManualCompleteStatus({ status: 'error', message: `复制失败：${error.message}` });
+      return false;
     }
   };
 
@@ -179,7 +181,7 @@ export const DistributionExportPanel = ({
   const previewPanelContent = (
     <>
       <div className="export-preview-actions">
-        <DistributionCopyButton label="复制铺货内容" primary disabled={!canManualCopy} onCopy={copyManualDistribution} format={copyFormat} onFormatChange={changeCopyFormat} />
+        <DistributionCopyButton label="复制铺货内容" primary disabled={!canManualCopy} onCopy={copyManualDistribution} format={copyFormat} onFormatChange={changeCopyFormat} successMessage={`已复制 ${activeRows.length} 条铺货内容，格式：${copyFormat.label}`} />
         <button type="button" className="node-secondary-button success" disabled={!manualCopyCurrent || !canRecordManualComplete || manualCompleteStatus.status === 'completing' || distributionJob?.status === 'submitting'} onClick={confirmManualDistributionComplete}>
           {manualCompleteStatus.status === 'completing' ? <RefreshCw size={13} className="animate-spin" /> : <Check size={13} />}
           {manualCompleteStatus.status === 'completing' ? '正在确认' : '标记人工铺货完成'}
@@ -196,7 +198,7 @@ export const DistributionExportPanel = ({
         {copyValidation}
         {!canRecordManualComplete && activeRows.length > 0 && <div className="distribution-modal-feedback checking">标记人工铺货完成前，清单仍需补齐链接和标题。</div>}
         {manualCopiedText && !manualCopyCurrent && <div className="distribution-modal-feedback blocked">清单已经修改，请重新复制最新内容后再确认完成。</div>}
-        {manualCompleteStatus.message && (manualCopyCurrent || manualCompleteStatus.status === 'error') && <div role="status" className={`distribution-modal-feedback ${manualCompleteStatus.status === 'error' ? 'blocked' : 'checking'}`}>{manualCompleteStatus.message}</div>}
+        {manualCompleteStatus.status !== 'copied' && manualCompleteStatus.message && (manualCopyCurrent || manualCompleteStatus.status === 'error') && <div role="status" className={`distribution-modal-feedback ${manualCompleteStatus.status === 'error' ? 'blocked' : 'checking'}`}>{manualCompleteStatus.message}</div>}
         {distributionCheck.status === 'loading' && (
           <div className="distribution-modal-feedback checking">
             <RefreshCw size={13} className="animate-spin" /> 正在检查清单、Chrome 调试端口和登录状态，请稍候...
@@ -308,7 +310,7 @@ export const DistributionExportPanel = ({
             <strong>复制清单后手动铺货</strong>
           </div>
           <div className="distribution-method-actions">
-            <DistributionCopyButton label="人工复制铺货" disabled={!canManualCopy} onCopy={copyManualDistribution} format={copyFormat} onFormatChange={changeCopyFormat} />
+            <DistributionCopyButton label="人工复制铺货" disabled={!canManualCopy} onCopy={copyManualDistribution} format={copyFormat} onFormatChange={changeCopyFormat} successMessage={`已复制 ${activeRows.length} 条铺货内容，格式：${copyFormat.label}`} />
             <button type="button" className="node-secondary-button success" disabled={!manualCopyCurrent || !canRecordManualComplete || manualCompleteStatus.status === 'completing' || distributionJob?.status === 'submitting'} onClick={confirmManualDistributionComplete}>
               {manualCompleteStatus.status === 'completing' ? <RefreshCw size={13} className="animate-spin" /> : <Check size={13} />}
               {manualCompleteStatus.status === 'completing' ? '正在确认' : '标记人工铺货完成'}
@@ -317,7 +319,7 @@ export const DistributionExportPanel = ({
           {copyValidation}
           {!canRecordManualComplete && activeRows.length > 0 && <small className="distribution-method-warning">标记人工铺货完成前，清单仍需补齐链接和标题。</small>}
           {manualCopiedText && !manualCopyCurrent && <small className="distribution-method-warning">清单已经修改，请重新复制最新内容后再确认完成。</small>}
-          {manualCompleteStatus.message && (manualCopyCurrent || manualCompleteStatus.status === 'error') && <small role="status" className={`distribution-method-feedback ${manualCompleteStatus.status}`}>{manualCompleteStatus.message}</small>}
+          {manualCompleteStatus.status !== 'copied' && manualCompleteStatus.message && (manualCopyCurrent || manualCompleteStatus.status === 'error') && <small role="status" className={`distribution-method-feedback ${manualCompleteStatus.status}`}>{manualCompleteStatus.message}</small>}
           {manualCompleteStatus.status === 'error' && distributionSubmitError && <small className="distribution-method-feedback error">{distributionSubmitError}</small>}
         </article>
         <article className="distribution-method-card automatic">

@@ -59,6 +59,17 @@ try {
   };
   const assertFormat = async format => assert.equal(await select.first().getAttribute('title'), `铺货复制格式：${labels[format]}`);
   const copy = page.getByRole('button', { name: '复制铺货内容', exact: true });
+  const dismissSuccess = async () => {
+    const dialog = page.getByRole('dialog', { name: '复制成功', exact: true });
+    await dialog.waitFor();
+    assert.ok(await dialog.evaluate(element => {
+      const box = element.getBoundingClientRect();
+      return Math.abs(box.left + box.width / 2 - innerWidth / 2) < 2
+        && Math.abs(box.top + box.height / 2 - innerHeight / 2) < 2;
+    }));
+    assert.match(await dialog.innerText(), /已复制 \d+ 条铺货内容/);
+    await dialog.getByRole('button', { name: '知道了' }).click();
+  };
   try { await copy.waitFor(); } catch (error) { console.error(await page.locator('body').innerText()); throw error; }
   await assertFormat('full');
   await select.click();
@@ -68,11 +79,12 @@ try {
   assert.equal(await page.getByRole('menu').isVisible(), false);
   await select.click();
   await copy.click();
+  await dismissSuccess();
   assert.equal(await page.getByRole('menu').isVisible(), false);
   for (const format of ['full', 'title', 'url']) {
     await selectFormat(format);
     await copy.click();
-    await page.getByRole('status').filter({ hasText: '已复制 2 条' }).waitFor();
+    await dismissSuccess();
     const result = await page.evaluate(() => window.copied.at(-1));
     const fields = { full: 3, title: 2, url: 1 }[format];
     assert.equal(result.split('\n').length, 2);
@@ -80,10 +92,12 @@ try {
   }
   await page.getByRole('button', { name: '移除', exact: true }).first().click();
   await copy.click();
+  await dismissSuccess();
   assert.equal(await page.evaluate(() => window.copied.at(-1)), 'https://detail.1688.com/offer/2.html');
   await page.getByRole('button', { name: '恢复全部', exact: true }).click();
   await page.getByRole('textbox', { name: '铺货标题', exact: true }).first().fill('');
   await copy.click();
+  await dismissSuccess();
   assert.equal(await page.getByRole('button', { name: '标记人工铺货完成' }).isDisabled(), true);
   await selectFormat('title');
   assert.equal(await copy.isDisabled(), true);
@@ -96,15 +110,18 @@ try {
   await page.evaluate(() => { window.failCopy = true; });
   await copy.click();
   await page.getByRole('status').filter({ hasText: '复制失败：剪贴板拒绝访问' }).waitFor();
+  assert.equal(await page.getByRole('dialog', { name: '复制成功', exact: true }).isVisible(), false);
   await page.evaluate(() => { window.failCopy = false; window.renderPanel(true, 'https://detail.1688.com/offer/1.html$$标题一$$'); });
   await selectFormat('full');
   await page.getByRole('alert').filter({ hasText: '缺少类目' }).waitFor();
   assert.equal(await copy.isDisabled(), true);
   await selectFormat('url');
   await copy.click();
+  await dismissSuccess();
   assert.equal(await page.evaluate(() => window.copied.at(-1)), 'https://detail.1688.com/offer/1.html');
   await page.evaluate(() => window.renderPanel(false));
   await page.getByRole('button', { name: '人工复制铺货', exact: true }).click();
+  await dismissSuccess();
   await assertFormat('url');
   await page.getByRole('button', { name: '检查自动铺货环境', exact: true }).click();
   await page.waitForFunction(() => document.body.textContent.includes('检查未通过'));
@@ -121,6 +138,10 @@ try {
     await copy.waitFor();
     assert.ok(await select.evaluate(element => { const box = element.getBoundingClientRect(); return box.left >= 0 && box.right <= innerWidth; }));
     await select.click();
+    const menuWidth = await page.getByRole('menu').evaluate(element => element.getBoundingClientRect().width);
+    assert.equal(await page.getByRole('menu').locator('svg').count(), 0);
+    const buttonWidth = await page.locator('.distribution-copy-split').evaluate(element => element.getBoundingClientRect().width);
+    assert.ok(Math.abs(menuWidth - buttonWidth) < 1);
     assert.ok(await page.getByRole('menu').evaluate(element => { const box = element.getBoundingClientRect(); return box.left >= 0 && box.right <= innerWidth && box.bottom <= innerHeight; }));
     await page.screenshot({ path: '/tmp/distribution-copy-qa/' + width + '.png', fullPage: true });
     await page.keyboard.press('Escape');

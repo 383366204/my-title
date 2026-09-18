@@ -776,7 +776,30 @@
   color: inherit;
   font-size: 12px;
   cursor: pointer;
+  overflow-wrap: anywhere;
+  text-align: left;
 }
+
+.distribution-copy-success {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  height: fit-content;
+  max-height: calc(100dvh - 40px);
+  overflow: auto;
+  width: min(360px, calc(100vw - 40px));
+  box-sizing: border-box;
+  padding: 20px;
+  border: 1px solid #475569;
+  border-radius: 8px;
+  background: #111827;
+  color: #f1f5f9;
+  box-shadow: 0 16px 48px #0008;
+}
+.distribution-copy-success::backdrop { background: #0008; }
+.distribution-copy-success h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; font-size: 16px; }
+.distribution-copy-success h3 svg { color: #4ade80; }
+.distribution-copy-success p { font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; margin: 0 0 18px; }
 
 .distribution-copy-menu button:hover,
 .distribution-copy-menu button[aria-checked="true"] {
