@@ -10,6 +10,7 @@ import { NodeOperationPanel } from './node-operation-panel.jsx';
 import { ReviewSourceUploadPanel } from './review-source-upload-panel.jsx';
 import { SheetConfigurationPanel } from './sheet-configuration-panel.jsx';
 import { StartConfigurationPanel } from './start-configuration-panel.jsx';
+import { SelectionSourcePanel } from './selection-source-panel.jsx';
 import { WatermarkStudioPanel } from './watermark-studio-panel.jsx';
 
 const OVERLAY_COPY = {
@@ -56,6 +57,7 @@ export function WorkflowOverlayManager({
   onRetryNode,
   onSaveManualInput,
   onUpdateNodeData,
+  onSaveNodeFields,
   updateDistributionNodeJob
 }) {
   if (!activeOverlay) return null;
@@ -67,6 +69,13 @@ export function WorkflowOverlayManager({
   const scopedArtifactState = awaitingArtifact
     ? { status: 'loading', nodeId: node?.id || null, artifact: null, error: '' }
     : artifactState;
+
+  if (activeOverlay.type === WORKFLOW_OVERLAYS.START_CONFIG && node?.data?.selectionMode) {
+    return <WorkflowOverlayShell label="选词来源" onClose={onClose} wide>
+      <SelectionSourcePanel key={`${currentRunId || 'draft'}:${activeTemplateMode}`} node={node}
+        readOnly={Boolean(currentRunId)} onSave={onSaveNodeFields} onClose={onClose} />
+    </WorkflowOverlayShell>;
+  }
 
   if (activeOverlay.type === WORKFLOW_OVERLAYS.START_CONFIG && activeTemplateMode === 'manual') {
     const startNode = node || nodes.find((item) => item.id === 'start');

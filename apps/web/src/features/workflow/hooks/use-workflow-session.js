@@ -4,6 +4,7 @@ import { getWorkflowRun } from '../../../api/workflow-api.js';
 import { getWorkflowRunActiveNodeId } from '../workflow-history-view.js';
 import { runtimeNodeFields } from './use-workflow-runtime.js';
 import { nodeTypes } from '../workflow-node-types.js';
+import { selectionModeTemplate } from '../selection-modes.js';
 import { ACTIVE_RUN_STATUSES, getCanvasNodeState, getTemplateMode, normalizeCanvasNode, normalizeWorkflowForCanvas, resetWorkflowNodeData } from '../workflow-data.js';
 
 /**
@@ -38,6 +39,7 @@ export function useWorkflowSession({
 }) {
   const initialTemplateLoadedRef = useRef(false);
   const historyRequestRef = useRef(0);
+  const selectionDraftsRef = useRef({});
   const loadTemplate = (template) => {
     historyRequestRef.current++;
     disconnectRunEvents();
@@ -67,6 +69,16 @@ export function useWorkflowSession({
     setLogs([]);
     closeOverlay();
     setArtifactState({ status: 'empty', nodeId: null, artifact: null, error: '' });
+  };
+
+  const switchSelectionMode = (mode) => {
+    if (currentRunId || isRunActive || mode === activeTemplateMode) return;
+    const template = templates.find(item => item.id === 'selection-v1');
+    const start = nodes.find(node => node.id === 'start');
+    const nextTemplate = selectionModeTemplate(template, mode, selectionDraftsRef.current[mode]);
+    if (!nextTemplate) return;
+    selectionDraftsRef.current[activeTemplateMode] = resetWorkflowNodeData(start?.data || {});
+    loadTemplate(nextTemplate);
   };
 
 
@@ -219,5 +231,5 @@ export function useWorkflowSession({
   }, [templates]);
 
   useEffect(() => () => { historyRequestRef.current++; }, []);
-  return { loadTemplate, prepareNewRunFromHistory, repeatWorkflow, loadHistoryRun, deleteHistoryRun };
+  return { loadTemplate, switchSelectionMode, prepareNewRunFromHistory, repeatWorkflow, loadHistoryRun, deleteHistoryRun };
 }

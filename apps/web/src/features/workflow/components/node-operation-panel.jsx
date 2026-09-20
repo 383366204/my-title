@@ -106,6 +106,7 @@ export const NodeOperationPanel = ({
   artifactState,
   currentRunId,
   manualMode,
+  selectionMode,
   seedWorkbench = {},
   titleWorkbench = {},
   reviewActions = {},
@@ -145,6 +146,7 @@ export const NodeOperationPanel = ({
 
   const {
     onConfirmKeywordReview,
+    onQueryKeywords,
     onConfirmProductReview
   } = reviewActions;
 
@@ -164,9 +166,9 @@ export const NodeOperationPanel = ({
   const kind = getWorkflowNodePanelKind(selectedNode?.id);
   const selectedStatus = String(selectedNode?.data?.status || selectedNode?.data?.state || '').toLowerCase();
   const canConfirmOrderSheetProducts = Boolean(currentRunId)
-    && ['blocked', 'paused', 'waiting_manual', 'manual_action_required'].includes(selectedStatus);
+    && ['blocked', 'paused', 'waiting_manual', 'manual_action_required', 'waiting_confirmation', 'awaiting_keyword_review'].includes(selectedStatus);
   const copy = kind === 'keyword-review' && artifactState.artifact?.combinedOpportunityReview
-    ? { title: '关键词机会复核', description: '综合机会评分与人工选择，确认保留的词用于货源选品。' }
+    ? { title: '关键词确认', description: '综合机会评分与人工选择，确认保留的词用于货源选品。' }
     : kind === 'product-select' && manualMode
     ? { title: '商品资料获取结果', description: '逐条查看1688商品标题、主图、类目和获取失败原因。' }
     : NODE_PANEL_COPY[kind];
@@ -236,11 +238,14 @@ export const NodeOperationPanel = ({
         />
       ) : kind === 'keyword-review' && (
         <KeywordReviewOperationPanel
+          key={currentRunId}
           artifactState={artifactState}
           onConfirmKeywordReview={onConfirmKeywordReview}
-          onRetryMine={() => onRetryNode?.('mine')}
+          onQueryKeywords={onQueryKeywords}
+          onRetryMine={() => onRetryNode?.(selectionMode === 'keyword' ? 'verify' : 'mine')}
+          retryLabel={selectionMode === 'keyword' ? '重试关键词校验' : '重试拓词查询'}
           canConfirm={canConfirmOrderSheetProducts}
-          canRetryMine={Boolean(currentRunId)}
+          canRetryMine={canConfirmOrderSheetProducts}
         />
       )}
       {kind === 'product-select' && !manualMode && (

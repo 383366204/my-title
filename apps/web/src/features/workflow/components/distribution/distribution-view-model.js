@@ -50,6 +50,7 @@ export const DISTRIBUTION_BLOCKER_LABELS = {
   empty_input: '铺货清单为空',
   login_expired: '铺货工具登录已过期',
   browser_cdp_unavailable: 'Chrome 调试连接不可用',
+  target_shop_unavailable: '目标店铺不可用，请核对店铺配置、登录账号和授权',
   distribution_quota_exhausted: '铺货平台剩余额度为 0',
   recent_duplicate_batch: '近期已提交过相同批次'
 };

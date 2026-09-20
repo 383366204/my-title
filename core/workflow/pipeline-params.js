@@ -5,7 +5,7 @@ const normalizeRootKeywords = require('../root-keywords').normalizeRootKeywords;
 const parseManualItems = require('../../skills/order-sheet/src/manual-items').parseManualItems;
 const DEFAULT_ORDER_GROUP_SIZE = require('../../skills/order-sheet/src/order-groups').DEFAULT_ORDER_GROUP_SIZE;
 const { WORKFLOW_NODE_IDS, localIsoDate } = require('./pipeline-definition-common');
-const { listProductionWorkflowTemplates } = require('./pipeline-templates');
+const { listProductionWorkflowVariants } = require('./pipeline-templates');
 const { DEFAULT_DIMENSIONS } = require('../../skills/keyword-mining/src/dimension-catalog');
 
 function clampInt(value, fallback, min, max) {
@@ -141,7 +141,7 @@ function sanitizeWorkflowParams(mode, raw = {}) {
       pages: clampInt(raw.pages, 1, 1, 5),
       minBlueRows: clampInt(raw.minBlueRows, 1, 0, 50),
       fallbackHot: sanitizeBool(raw.fallbackHot, true),
-      autoApproveKeywords: sanitizeBool(raw.autoApproveKeywords, true),
+      autoApproveKeywords: false,
       autoExpandVerify: sanitizeBool(raw.autoExpandVerify, true),
       verifyReserve: clampInt(raw.verifyReserve, 8, 0, 30),
       autoAllowReviewKeywords: sanitizeBool(raw.autoAllowReviewKeywords, true),
@@ -186,7 +186,8 @@ function sanitizeWorkflowParams(mode, raw = {}) {
       roots: normalizedRoots.roots,
       rootsText: normalizedRoots.roots.join('\n'),
       duplicateRoots: normalizedRoots.duplicates,
-      sycmMode: String(raw.sycmMode || 'hot') === 'blue' ? 'blue' : 'hot',
+      sycmMode: ['hot', 'blue'].includes(raw.sycmMode) ? raw.sycmMode : 'both',
+      pages: clampInt(raw.pages, 3, 1, 10),
       period: ['7d', '30d', 'day', 'week', 'month'].includes(String(raw.period || '')) ? String(raw.period) : '7d',
       compareType: String(raw.compareType || '') === 'yearSync' ? 'yearSync' : 'cycle',
       sycmRiskProfile: riskProfile,
@@ -202,7 +203,7 @@ function sanitizeWorkflowParams(mode, raw = {}) {
         ? clampInt(raw.sycmMaxBatchCooldownMs, 600000, minCooldown, 7200000)
         : presets.maxCooldown,
       sycmMaxRetries: clampInt(raw.sycmMaxRetries, 2, 0, 5),
-      sycmMaxPages: 9999,
+      sycmMaxPages: clampInt(raw.pages, 3, 1, 10),
       productsPerKeyword: clampInt(raw.productsPerKeyword, 12, 1, 50),
       length: clampInt(raw.length, 60, 30, 80),
       port: clampInt(raw.port, 9222, 1, 65535),
@@ -398,7 +399,8 @@ function workflowSignature(workflow) {
 function findProductionTemplateForWorkflow(workflow) {
   const signature = workflowSignature(workflow);
   if (!signature) return null;
-  return listProductionWorkflowTemplates().find(item => workflowSignature(item.workflow) === signature) || null;
+  const mode = workflow.nodes?.find(node => node.id === 'start')?.data?.selectionMode;
+  return listProductionWorkflowVariants().find(item => (!mode || item.mode === mode) && workflowSignature(item.workflow) === signature) || null;
 }
 
 /**
@@ -418,15 +420,15 @@ function validateProductionWorkflow(workflow, options = {}) {
     };
   }
 
-  const templates = listProductionWorkflowTemplates();
+  const templates = listProductionWorkflowVariants();
   const requestedTemplateId = typeof options === 'string'
     ? options
     : String(options?.templateId || '').trim();
   const requestedMode = typeof options === 'object'
-    ? String(options?.mode || '').trim()
+    ? String(options?.mode || graph.nodes.find(node => node.id === 'start')?.data?.selectionMode || '').trim()
     : '';
   const requestedTemplate = requestedTemplateId
-    ? templates.find(item => item.id === requestedTemplateId)
+    ? templates.find(item => item.id === requestedTemplateId && (!requestedMode || item.mode === requestedMode))
     : requestedMode
       ? templates.find(item => item.mode === requestedMode)
       : null;
@@ -441,7 +443,8 @@ function validateProductionWorkflow(workflow, options = {}) {
   }
 
   if (requestedTemplate) {
-    if (workflowSignature(graph) === workflowSignature(requestedTemplate.workflow)) {
+    const nodeMode = graph.nodes.find(node => node.id === 'start')?.data?.selectionMode;
+    if ((!nodeMode || nodeMode === requestedTemplate.mode) && workflowSignature(graph) === workflowSignature(requestedTemplate.workflow)) {
       return { ok: true, errors: [], production: true, templateId: requestedTemplate.id };
     }
     return {
@@ -492,14 +495,15 @@ function extractWorkflowRoots(workflow) {
  * @returns {{mode:string, params:object}} 启动模式与参数。
  */
 function resolveProductionWorkflowLaunch(body = {}) {
-  const templates = listProductionWorkflowTemplates();
+  const templates = listProductionWorkflowVariants();
   let template = null;
   const workflow = body.workflow && typeof body.workflow === 'object' ? body.workflow : null;
   const templateId = body.templateId || body.template_id || workflow?.id;
   const hasExplicitMode = Object.prototype.hasOwnProperty.call(body, 'mode') || Object.prototype.hasOwnProperty.call(workflow || {}, 'mode');
   const hasExplicitTemplate = Boolean(templateId);
   if (templateId) {
-    template = templates.find(item => item.id === templateId);
+    const requestedMode = body.mode || workflow?.mode || workflow?.nodes?.find(node => node.id === 'start')?.data?.selectionMode;
+    template = templates.find(item => item.id === templateId && (!requestedMode || item.mode === requestedMode));
     if (!template) throw new Error(`未知 workflow template: ${templateId}`);
   }
   if (!template && workflow) template = findProductionTemplateForWorkflow(workflow);
@@ -545,7 +549,7 @@ function resolveProductionWorkflowLaunch(body = {}) {
  * @returns {object} Workflow definition snapshot.
  */
 function resolveProductionWorkflowDefinition(body = {}, launch = resolveProductionWorkflowLaunch(body)) {
-  const templates = listProductionWorkflowTemplates();
+  const templates = listProductionWorkflowVariants();
   const submitted = normalizeWorkflowGraph(body.workflow);
   let template = null;
 
@@ -553,13 +557,13 @@ function resolveProductionWorkflowDefinition(body = {}, launch = resolveProducti
     const requestedTemplateId = body.templateId || body.template_id;
     const validation = validateProductionWorkflow(submitted, {
       templateId: requestedTemplateId,
-      mode: requestedTemplateId ? '' : launch.mode
+      mode: launch.mode
     });
     if (!validation.ok) throw new Error(validation.errors[0]?.message || '工作流定义无效');
-    template = templates.find(item => item.id === validation.templateId) || null;
+    template = templates.find(item => item.id === validation.templateId && item.mode === launch.mode) || null;
   } else {
     const requestedTemplateId = body.templateId || body.template_id;
-    template = templates.find(item => item.id === requestedTemplateId)
+    template = templates.find(item => item.id === requestedTemplateId && item.mode === launch.mode)
       || templates.find(item => item.mode === launch.mode)
       || null;
   }

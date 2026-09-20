@@ -1,0 +1,6 @@
+[
+  { "value": "sequential-average", "label": "顺序平均分配" },
+  { "value": "random-average", "label": "随机平均分配" },
+  { "value": "random", "label": "随机分配" },
+  { "value": "repeat", "label": "重复分配" }
+]

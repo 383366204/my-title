@@ -108,7 +108,7 @@ function readWorkflowNodeArtifact(runIdOrOptions, nodeId, options = {}) {
       };
     }
     if (normalized.nodeId === WORKFLOW_NODE_IDS.keywordReview) {
-      if (summary.options?.mode === 'root-keyword') {
+      if (summary.options?.combinedOpportunityReview || summary.options?.mode === 'root-keyword') {
         const saved = readArtifactJsonl(file, normalized.limit);
         const rows = saved.length && saved.every(row => row.combinedOpportunityReview)
           ? saved : readArtifactJsonl(summary.files?.candidates, normalized.limit).map(scoreRootReviewCandidate);

@@ -301,6 +301,16 @@ function summaryInterventionForNode(summary, nodeId) {
     const manualMode = summary.runtime?.mode === 'manual' || summary.options?.mode === 'manual';
     const evaluatedCount = Number(summary.counts?.productsEvaluated || summary.funnel?.select?.input || 0);
     const rejectedCount = Number(summary.counts?.productRejected || summary.funnel?.select?.rejected || 0);
+    const searchFailure = (summary.previews?.selectedProducts || []).find(row => row?.status === 'select_failed');
+    if (searchFailure && evaluatedCount === 0) {
+      return {
+        blocker: 'product_search_failed',
+        actionHint: `货源查询失败，尚未取得商品标题或类目：${searchFailure.error || '上游请求失败'}。失败记录不是商品，请稍后重试。`,
+        platform: searchFailure.failureStage === 'extract' ? 'llm' : '1688',
+        platformStatus: 'product_search_failed',
+        nextRecommendedAction: { action: 'retry-node', label: '重试货源查询', description: '恢复查询服务后重新获取真实商品资料。' }
+      };
+    }
     const detailFailure = manualMode
       ? (summary.previews?.selectedProducts || []).find(row => row?.status === 'enrich_failed')
       : null;

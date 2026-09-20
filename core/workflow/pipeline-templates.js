@@ -19,11 +19,13 @@ function workflowNodes(mode = 'daily') {
   );
   const startData = mode === 'root-keyword'
     ? {
+        selectionMode: 'root-keyword',
         label: '录入词根',
         description: '批量输入词根并配置安全查询节奏',
         rootsText: '',
         roots: [],
-        sycmMode: 'hot',
+        sycmMode: 'both',
+        pages: 3,
         period: '7d',
         compareType: 'cycle',
         sycmRiskProfile: 'standard',
@@ -44,6 +46,7 @@ function workflowNodes(mode = 'daily') {
       ]
     : mode === 'keyword'
     ? {
+        selectionMode: 'keyword',
         label: '开始',
         description: '批量输入精确关键词并启动',
         keyword: '',
@@ -54,6 +57,7 @@ function workflowNodes(mode = 'daily') {
         pages: 1
       }
     : {
+        selectionMode: 'daily',
         label: '开始',
         description: '结合时事、季节和多维需求发现商品词根',
         mine: 50,
@@ -68,9 +72,8 @@ function workflowNodes(mode = 'daily') {
         inspirationSycmPages: 3,
         candidateScreening: 'balanced',
         inspirationUseLLM: true,
-        verify: 20,
-        generate: 10,
         select: 10,
+        generate: 10,
         export: 20,
         productsPerKeyword: 12,
         length: 60,
@@ -174,17 +177,18 @@ if (mode === 'watermark-removal') {
     return withSteps(positionNodes([
       { id: WORKFLOW_NODE_IDS.start, type: 'production-start', data: startData },
       { id: WORKFLOW_NODE_IDS.verify, type: 'pipeline-verify', data: { label: '生意参谋校验', description: '验证搜索人气和供需' } },
+      { id: WORKFLOW_NODE_IDS.keywordReview, type: 'pipeline-keyword-review', data: { label: '关键词确认', description: '查看机会评分并人工筛词，未通过项可确认风险后放行' } },
       { id: WORKFLOW_NODE_IDS.select, type: 'pipeline-select', data: { label: '货源选品', description: '搜索1688货源并评分筛选' } },
       { id: WORKFLOW_NODE_IDS.generate, type: 'pipeline-generate', data: { label: '标题生成', description: '基于已选货源生成铺货标题' } },
       { id: WORKFLOW_NODE_IDS.export, type: 'pipeline-export', data: { label: '铺货复核', description: '确认清单、风险和人工加入项' } },
       { id: WORKFLOW_NODE_IDS.end, type: 'production-end', data: { label: '完成', description: '查看结果和批次记录' } }
-    ], { startX: 190 }));
+    ], { startX: 60, stepX: 260 }));
   }
   if (mode === 'root-keyword') {
     return withSteps(positionNodes([
       { id: WORKFLOW_NODE_IDS.start, type: 'production-start', data: startData },
       { id: WORKFLOW_NODE_IDS.mine, type: 'pipeline-mine', data: { label: '生意参谋拓词', description: '按安全节奏逐个查询词根并持续保存结果', discoveryMode: 'user_roots' } },
-      { id: WORKFLOW_NODE_IDS.keywordReview, type: 'pipeline-keyword-review', data: { label: '关键词机会复核', description: '查看机会评分并人工筛词，未通过项可确认风险后放行' } },
+      { id: WORKFLOW_NODE_IDS.keywordReview, type: 'pipeline-keyword-review', data: { label: '关键词确认', description: '查看机会评分并人工筛词，未通过项可确认风险后放行' } },
       { id: WORKFLOW_NODE_IDS.select, type: 'pipeline-select', data: { label: '货源选品', description: '为确认后的关键词搜索并勾选1688货源' } },
       { id: WORKFLOW_NODE_IDS.generate, type: 'pipeline-generate', data: { label: '标题生成', description: '基于关键词和已选货源生成铺货标题' } },
       { id: WORKFLOW_NODE_IDS.export, type: 'pipeline-export', data: { label: '铺货复核', description: '确认标题、类目和待铺货商品' } },
@@ -193,14 +197,13 @@ if (mode === 'watermark-removal') {
   }
   return withSteps(positionNodes([
     { id: WORKFLOW_NODE_IDS.start, type: 'production-start', data: startData },
-    { id: WORKFLOW_NODE_IDS.mine, type: 'pipeline-mine', data: { label: '灵感选词', description: '收集灵感、生成商品词根并查询关联词', discoveryMode: 'inspiration' } },
-    { id: WORKFLOW_NODE_IDS.keywordReview, type: 'pipeline-keyword-review', data: { label: '人工筛词', description: '人工筛除不适合验真的候选词' } },
-    { id: WORKFLOW_NODE_IDS.verify, type: 'pipeline-verify', data: { label: '生意参谋校验', description: '验证搜索人气和供需' } },
+    { id: WORKFLOW_NODE_IDS.mine, type: 'pipeline-mine', data: { label: '灵感选词与拓词', description: '收集灵感、生成商品词根并查询关联词', discoveryMode: 'inspiration' } },
+    { id: WORKFLOW_NODE_IDS.keywordReview, type: 'pipeline-keyword-review', data: { label: '关键词确认', description: '查看机会评分并人工筛词，未通过项可确认风险后放行' } },
     { id: WORKFLOW_NODE_IDS.select, type: 'pipeline-select', data: { label: '货源选品', description: '搜索1688货源并评分筛选' } },
     { id: WORKFLOW_NODE_IDS.generate, type: 'pipeline-generate', data: { label: '标题生成', description: '基于已选货源生成铺货标题' } },
     { id: WORKFLOW_NODE_IDS.export, type: 'pipeline-export', data: { label: '铺货复核', description: '确认清单、风险和人工加入项' } },
     { id: WORKFLOW_NODE_IDS.end, type: 'production-end', data: { label: '完成', description: '查看结果和批次记录' } }
-  ]));
+  ], { startX: 60, stepX: 260 }));
 }
 
 function workflowEdges(mode = 'daily') {
@@ -235,7 +238,8 @@ function workflowEdges(mode = 'daily') {
     : mode === 'keyword'
     ? [
         [WORKFLOW_NODE_IDS.start, WORKFLOW_NODE_IDS.verify],
-        [WORKFLOW_NODE_IDS.verify, WORKFLOW_NODE_IDS.select],
+        [WORKFLOW_NODE_IDS.verify, WORKFLOW_NODE_IDS.keywordReview],
+        [WORKFLOW_NODE_IDS.keywordReview, WORKFLOW_NODE_IDS.select],
         [WORKFLOW_NODE_IDS.select, WORKFLOW_NODE_IDS.generate],
         [WORKFLOW_NODE_IDS.generate, WORKFLOW_NODE_IDS.export],
         [WORKFLOW_NODE_IDS.export, WORKFLOW_NODE_IDS.end]
@@ -251,16 +255,12 @@ function workflowEdges(mode = 'daily') {
       : [
         [WORKFLOW_NODE_IDS.start, WORKFLOW_NODE_IDS.mine],
         [WORKFLOW_NODE_IDS.mine, WORKFLOW_NODE_IDS.keywordReview],
-        [WORKFLOW_NODE_IDS.keywordReview, WORKFLOW_NODE_IDS.verify],
-        [WORKFLOW_NODE_IDS.verify, WORKFLOW_NODE_IDS.select],
+        [WORKFLOW_NODE_IDS.keywordReview, WORKFLOW_NODE_IDS.select],
         [WORKFLOW_NODE_IDS.select, WORKFLOW_NODE_IDS.generate],
         [WORKFLOW_NODE_IDS.generate, WORKFLOW_NODE_IDS.export],
         [WORKFLOW_NODE_IDS.export, WORKFLOW_NODE_IDS.end]
       ];
-  const effectivePairs = mode === 'root-keyword' ? pairs
-    .filter(([source]) => source !== WORKFLOW_NODE_IDS.verify)
-    .map(([source, target]) => [source, target === WORKFLOW_NODE_IDS.verify ? WORKFLOW_NODE_IDS.select : target]) : pairs;
-  return effectivePairs.map(([source, target]) => ({
+  return pairs.map(([source, target]) => ({
     id: `${source}-${target}`,
     source,
     target,
@@ -286,43 +286,70 @@ function template(id, name, mode, description, meta = {}) {
   };
 }
 
+function buildSelectionModes() {
+  return [
+    {
+      mode: 'daily',
+      label: 'AI选词',
+      workflow: {
+        nodes: workflowNodes('daily'),
+        edges: workflowEdges('daily')
+      }
+    },
+    {
+      mode: 'keyword',
+      label: '精确关键词',
+      workflow: {
+        nodes: workflowNodes('keyword'),
+        edges: workflowEdges('keyword')
+      }
+    },
+    {
+      mode: 'root-keyword',
+      label: '词根拓词',
+      workflow: {
+        nodes: workflowNodes('root-keyword'),
+        edges: workflowEdges('root-keyword')
+      }
+    }
+  ];
+}
+
 /**
  * 列出真实 pipeline 对应的固定工作流模板。
  * @returns {Array<object>} 模板列表。
  */
 function listProductionWorkflowTemplates() {
   return [
-    template('daily-selection-v1', 'AI灵感词选品', 'daily', '选词、验真、生成标题并导出铺货清单', {
-      entryLabel: '入口：动态灵感',
-      scenarioLabel: '适合：每天自动发现新机会',
-      flowSummary: '流程：灵感选词 → 人工筛词 → 生意参谋校验 → 货源选品 → 标题生成 → 导出复核',
-      modeHint: '结合新闻、季节、人群、职业、爱好和场景需求发现词根；成功查询后 30 天可再次研究。'
-    }),
-    template('exact-keyword-v1', '精确关键词选品流水线', 'keyword', '按用户给定关键词生成铺货清单', {
-      entryLabel: '入口：手动关键词',
-      scenarioLabel: '适合：批量验证明确目标词',
-      flowSummary: '流程：批量输入关键词 → 跳过挖词 → 生意参谋校验 → 货源选品 → 标题生成 → 导出复核',
-      modeHint: '每行输入一个关键词，系统会逐词验真、选品和生成标题。'
-    }),
-    template('root-keyword-selection-v1', '词根拓词选品流水线', 'root-keyword', '输入词根，通过生意参谋拓词后进入选品和铺货', {
-      entryLabel: '入口：手动词根',
-      scenarioLabel: '适合：从短词根持续拓展选品机会',
-      flowSummary: '流程：录入词根 → 分时拓词 → 关键词机会复核 → 货源选品 → 标题生成 → 铺货复核',
-      modeHint: '词根和候选词不设业务数量上限；系统按安全间隔串行查询，并可暂停后继续。'
-    }),
+    {
+      id: 'selection-v1',
+      name: '选品铺货',
+      mode: 'daily',
+      description: '选词、验真、生成标题并导出铺货清单',
+      entryLabel: '入口：选词与货源铺货',
+      scenarioLabel: '适合：灵感找词、精准拓词与批量铺货',
+      flowSummary: '流程：选词/验真 → 机会人工复核 → 货源选品 → 标题生成 → 铺货复核',
+      modeHint: '支持 AI选词、精确关键词与词根拓词三种模式，可直接在开始节点切换。',
+      production: true,
+      selectionModes: buildSelectionModes(),
+      workflow: {
+        nodes: workflowNodes('daily'),
+        edges: workflowEdges('daily')
+      }
+    },
     template('manual-selection-v2', '1688链接智能铺货流水线', 'manual', '输入1688链接，自动查词、生成标题并准备铺货', {
       entryLabel: '入口：1688链接（关键词可选）',
       scenarioLabel: '适合：已经确定货源',
       flowSummary: '流程：录入链接 → 获取商品与候选词 → 生意参谋验真 → MiniMax生成标题 → 铺货复核',
       modeHint: '支持1688商品链接和手机分享口令；填写关键词时会优先验证人工词。'
     }),
-template('batch-watermark-v1', '批量去水印流水线', 'watermark-removal', '批量去除商品图片水印并打包下载', {
+    template('batch-watermark-v1', '批量去水印流水线', 'watermark-removal', '批量去除商品图片水印并打包下载', {
       entryLabel: '入口：本地图片或文件夹',
       scenarioLabel: '适合：上架前批量清理图片水印',
       flowSummary: '流程：选择图片 → 自动/手动识别水印 → 批量修复 → 预览对比 → 打包下载',
       modeHint: '图片全程在本机浏览器内处理，不会上传服务器；同一水印框可一键应用到整批图片。'
     }),
-        template('sycm-order-sheet-v1', '制作刷单表格流水线', 'order-sheet', '从商品排行或指定商品生成 Excel', {
+    template('sycm-order-sheet-v1', '制作刷单表格流水线', 'order-sheet', '从商品排行或指定商品生成 Excel', {
       entryLabel: '入口：商品排行或指定商品',
       scenarioLabel: '适合：制作动销刷单表',
       flowSummary: '流程：选择商品来源 → 获取商品资料 → 确认商品与编组 → 生成 Excel',
@@ -397,6 +424,9 @@ function directInputManualWorkflowTemplate() {
 function templateForSummary(summary) {
   const options = summary.options || {};
   const mode = summary.runtime?.mode || summary.options?.mode || (options.keyword || summary.exactKeyword ? 'keyword' : 'daily');
+  if (['daily', 'keyword', 'root-keyword'].includes(mode)) {
+    return listProductionWorkflowVariants().find(item => item.id === 'selection-v1' && item.mode === mode);
+  }
   const manualVersion = Number(options.workflowVersion || 1);
   if (mode === 'manual' && manualVersion < 2) {
     return { id: 'manual-selection-v1', mode: 'manual', workflow: legacyManualWorkflowTemplate() };
@@ -404,11 +434,7 @@ function templateForSummary(summary) {
   if (mode === 'manual' && manualVersion === 2) {
     return { id: 'manual-selection-v1', mode: 'manual', workflow: directInputManualWorkflowTemplate() };
   }
-  const id = mode === 'keyword'
-    ? 'exact-keyword-v1'
-    : mode === 'root-keyword'
-      ? 'root-keyword-selection-v1'
-    : mode === 'manual'
+  const id = mode === 'manual'
       ? 'manual-selection-v2'
       : mode === 'order-sheet'
         ? 'sycm-order-sheet-v1'
@@ -416,8 +442,18 @@ function templateForSummary(summary) {
           ? 'uploaded-review-sheet-v1'
           : mode === 'competitor-analysis'
             ? 'competitor-analysis-v1'
-        : 'daily-selection-v1';
+        : 'selection-v1';
   return listProductionWorkflowTemplates().find(item => item.id === id);
 }
 
-module.exports = { listProductionWorkflowTemplates, templateForSummary };
+/**
+ * 展开可执行模式，供图校验使用；模板入口仍然只有一个。
+ * @param {void} unused 无输入。
+ * @returns {Array<object>} 带明确模式的执行图。
+ */
+function listProductionWorkflowVariants() {
+  return listProductionWorkflowTemplates().flatMap(item => item.selectionModes
+    ? item.selectionModes.map(variant => ({ ...item, ...variant })) : [item]);
+}
+
+module.exports = { listProductionWorkflowTemplates, listProductionWorkflowVariants, templateForSummary };

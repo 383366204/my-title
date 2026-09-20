@@ -258,6 +258,7 @@ function flowReviewProducts(options = {}) {
     return flowResponse({ ok: true, runId: run.runId, status: run.status, products: rows, blockers: ['product_review_required'], runDir });
   }
   const selected = rows
+    .filter(row => !['select_failed', 'enrich_failed'].includes(row.status) && identity(row))
     .filter(row => (
       options.approveAll === true
         ? row.status === 'selected'
@@ -271,6 +272,7 @@ function flowReviewProducts(options = {}) {
       selectionDecision: 'manual_approved',
       selectedAt: new Date().toISOString()
     }));
+  if (!selected.length && !manualProducts.length) throw new Error('未选中有效货源。查询失败记录不是商品，请先重试货源查询。');
   for (const raw of manualProducts) {
     const url = String(raw.url || raw.productUrl || '').trim();
     const title = String(raw.title || raw.sourceTitle || '').trim();

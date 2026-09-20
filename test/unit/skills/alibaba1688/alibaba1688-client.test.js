@@ -144,3 +144,27 @@ test('1688 rate limiter can persist request window across instances', async () =
 
   _resetInstance();
 });
+
+test('1688 defaults to direct transport without changing global axios proxy settings', async () => {
+  const previous = process.env.ALI1688_PROXY_MODE;
+  const globalProxy = axios.defaults.proxy;
+  let config;
+  axios.post = async (_url, _body, options) => {
+    config = options;
+    return { data: { success: true, model: { data: {} } } };
+  };
+  try {
+    delete process.env.ALI1688_PROXY_MODE;
+    await new Alibaba1688Client(AK).searchOffers('test');
+    assert.equal(config.proxy, false);
+    assert.equal(axios.defaults.proxy, globalProxy);
+    _resetInstance();
+    resetPlatformAccessState();
+    process.env.ALI1688_PROXY_MODE = 'system';
+    await new Alibaba1688Client(AK).searchOffers('test');
+    assert.equal(Object.hasOwn(config, 'proxy'), false);
+  } finally {
+    if (previous === undefined) delete process.env.ALI1688_PROXY_MODE;
+    else process.env.ALI1688_PROXY_MODE = previous;
+  }
+});

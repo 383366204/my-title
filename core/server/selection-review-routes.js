@@ -27,23 +27,25 @@ function registerSelectionReviewRoutes(app, deps) {
       if (previousRuntime && ['running', 'retrying', 'resuming'].includes(previousRuntime.status)) {
         return res.status(409).json({ ok: false, error: '节点正在运行，请等待完成或暂停后再确认。' });
       }
-      if (previousRuntime?.mode === 'root-keyword' && !['keywordReview', 'verify'].includes(previousRuntime.activeStep)) {
+      const selectionMode = ['daily', 'keyword', 'root-keyword'].includes(previousRuntime?.mode);
+      if (selectionMode && previousRuntime.activeStep !== 'keywordReview') {
         return res.status(409).json({ ok: false, error: '当前已进入后续步骤，请先重跑关键词机会复核节点再修改选词。' });
       }
       const result = flowReviewCandidates({
         runId,
+        combinedOpportunityReview: selectionMode,
         approvedKeywords: Array.isArray(req.body?.approvedKeywords) ? req.body.approvedKeywords : [],
         rejectedKeywords: Array.isArray(req.body?.rejectedKeywords) ? req.body.rejectedKeywords : [],
         manualKeywords: Array.isArray(req.body?.manualKeywords) ? req.body.manualKeywords : [],
         approveAll: req.body?.approveAll === true
       });
       const runtime = readRuntimeState({ runId });
-      if (runtime?.mode === 'root-keyword' && result.status === 'keyword_review_empty') {
+      if (selectionMode && result.status === 'keyword_review_empty') {
         updateRuntimeState({ runId, patch: { status: 'blocked', activeStep: 'keywordReview',
           progress: { keywordReview: { status: 'blocked', current: 0, total: result.reviewed.length, percent: 100, message: '未保留关键词，请重新选择或返回拓词' } } } });
       }
       if (runtime && result.status === 'keywords_reviewed') {
-        const needsVerification = runtime.mode !== 'root-keyword' && runtime.steps?.includes('verify');
+        const needsVerification = !selectionMode && runtime.steps?.includes('verify');
         const nextStep = needsVerification ? 'verify' : 'select';
         updateRuntimeState({
           runId,

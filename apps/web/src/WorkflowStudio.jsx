@@ -186,7 +186,7 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
   const activeTemplate = useMemo(() => (
     templates.find((template) => template.id === activeTemplateId) || templates[0] || null
   ), [templates, activeTemplateId]);
-  const activeTemplateView = useMemo(() => getWorkflowTemplateView(activeTemplate || { mode: activeTemplateMode }), [activeTemplate, activeTemplateMode]);
+  const activeTemplateView = useMemo(() => getWorkflowTemplateView({ ...activeTemplate, mode: activeTemplateMode }), [activeTemplate, activeTemplateMode]);
   const canCancelRun = Boolean(currentRunId) && isRunActive;
   const canPauseRun = Boolean(currentRunId) && isRunActive;
   const selectedNodeLabel = selectedNode?.data?.label || selectedNode?.id || '未选择节点';
@@ -224,7 +224,7 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
     return [];
   }, [artifactState, nodes, verifiedArtifactRows]);
 
-  const { loadTemplate, prepareNewRunFromHistory, repeatWorkflow, loadHistoryRun, deleteHistoryRun } = useWorkflowSession({
+  const { loadTemplate, switchSelectionMode, prepareNewRunFromHistory, repeatWorkflow, loadHistoryRun, deleteHistoryRun } = useWorkflowSession({
     nodes,
     edges,
     templates,
@@ -252,6 +252,11 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
 
   // 修改节点配置参数
   const updateNodeData = (nodeId, field, value) => {
+    if (nodeId === 'start' && field === 'selectionMode') {
+      switchSelectionMode(value);
+      return;
+    }
+    if (currentRunId && nodeId === 'start' && activeTemplateId === 'selection-v1') return;
     if (currentRunId && nodeId === 'start' && ['dateMode', 'pages'].includes(field)) {
       prepareNewRunFromHistory({ nodeId, fields: { [field]: value } });
       return;
@@ -273,6 +278,11 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
   };
 
   const updateNodeFields = (nodeId, fields) => {
+    if (currentRunId && nodeId === 'start' && activeTemplateId === 'selection-v1') return;
+    if (!currentRunId && nodeId === 'start' && activeTemplateId === 'selection-v1') {
+      fields = { ...fields, status: 'idle', error: null, blocker: null };
+      setRunStatus('idle');
+    }
     setNodes((currentNodes) => currentNodes.map((node) => (
       node.id === nodeId ? { ...node, data: { ...node.data, ...fields } } : node
     )));
@@ -311,6 +321,10 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
   }, [closeOverlay, currentRunId, fetchHistoryRuns, setLogs, setNodes]);
 
   const handleNodeAction = async (action, nodeId) => {
+    if (action === 'launch-selection') {
+      if (!currentRunId) return handleRunWorkflow();
+      return;
+    }
     const targetNodeId = nodeId || selectedNodeId;
     const route = getWorkflowActionRoute(action);
     if (targetNodeId) setSelectedNodeId(targetNodeId);
@@ -366,7 +380,7 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
     await runWorkflowOperation('retry-node', nodeId);
   };
 
-  const { confirmReviewDrafts, confirmOrderSheetProducts, confirmKeywordReview, confirmProductReview, confirmingReviews, confirmingOrderSheetProducts } = useWorkflowConfirmations({
+  const { confirmReviewDrafts, confirmOrderSheetProducts, confirmKeywordReview, queryKeywords, confirmProductReview, confirmingReviews, confirmingOrderSheetProducts } = useWorkflowConfirmations({
     currentRunId,
     activeTemplateMode,
     setLogs,
@@ -384,6 +398,7 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
     artifactState,
     currentRunId,
     manualMode: activeTemplateMode === 'manual',
+    selectionMode: activeTemplateMode,
     seedWorkbench: {
       seedRows,
       seedDraft,
@@ -415,6 +430,7 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
     },
     reviewActions: {
       onConfirmKeywordReview: confirmKeywordReview,
+      onQueryKeywords: queryKeywords,
       onConfirmProductReview: confirmProductReview
     },
     runtimeActions: {
@@ -511,6 +527,7 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
           }]);
         }}
         onUpdateNodeData={updateNodeData}
+        onSaveNodeFields={updateNodeFields}
         updateDistributionNodeJob={updateDistributionNodeJob}
       />
       <WorkflowConsole logs={logs} onClear={() => setLogs([])} />

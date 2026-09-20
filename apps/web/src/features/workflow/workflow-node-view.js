@@ -429,8 +429,17 @@ export function getWorkflowNodePanelKind(nodeId) {
 export function getWorkflowTemplateView(template = {}) {
   const mode = String(template.mode || template.workflow?.mode || '').toLowerCase();
   const id = String(template.id || '').toLowerCase();
-  const isKeyword = mode === 'keyword' || id === 'exact-keyword-v1';
-  const isRootKeyword = mode === 'root-keyword' || id === 'root-keyword-selection-v1';
+  const isKeyword = mode === 'keyword';
+  const isRootKeyword = mode === 'root-keyword';
+  if (id === 'selection-v1') {
+    const label = isKeyword ? '精确关键词' : isRootKeyword ? '词根拓词' : 'AI选词';
+    return {
+      entryLabel: `选词模式：${label}`,
+      scenarioLabel: isKeyword ? '验证明确目标词' : isRootKeyword ? '从词根或类目发现关联词' : '从需求与时事发现商品词',
+      flowSummary: `${label} → 关键词确认 → 货源选品 → 标题生成 → 铺货复核`,
+      modeHint: label
+    };
+  }
   const isManual = mode === 'manual' || ['manual-selection-v1', 'manual-selection-v2'].includes(id);
   const isOrderSheet = mode === 'order-sheet' || id === 'sycm-order-sheet-v1';
   const isCompetitor = mode === 'competitor-analysis' || id === 'competitor-analysis-v1';

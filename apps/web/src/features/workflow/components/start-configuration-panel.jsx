@@ -114,10 +114,11 @@ export function StartConfigurationPanel({ mode, modeHint, node, onDone, onUpdate
       <div className="start-configuration-panel">
         <p className="start-configuration-hint">{modeHint}</p>
         <label className="node-field">
-          <span>精确关键词 <b className={keywords.length > 20 ? 'is-invalid' : ''}>{keywords.length}/20</b></span>
+          <span>精确关键词 <b>{keywords.length} 个</b></span>
           <textarea
             className="node-field-textarea"
             rows="9"
+            disabled={readOnly}
             value={keywordText}
             onChange={(event) => onUpdateField(node.id, 'keywordsText', event.target.value)}
             placeholder={'每行输入一个关键词，例如：\n纯银项链女\n桌面收纳盒\n宠物磨牙玩具'}
@@ -128,6 +129,7 @@ export function StartConfigurationPanel({ mode, modeHint, node, onDone, onUpdate
           <span>标题长度</span>
           <input
             type="number"
+            disabled={readOnly}
             min="30"
             max="80"
             value={data.length ?? 60}
@@ -190,15 +192,21 @@ export function StartConfigurationPanel({ mode, modeHint, node, onDone, onUpdate
             </div>
           </section>
 
-          <section className="sheet-config-section">
+          <details className="sheet-config-section selection-advanced">
+            <summary>高级设置</summary>
             <h3>生意参谋查询</h3>
             <div className="start-configuration-grid">
               <label className="node-field">
                 <span>拓词方式</span>
-                <select value={data.sycmMode || 'hot'} onChange={(event) => onUpdateField(node.id, 'sycmMode', event.target.value)}>
+                <select value={data.sycmMode || 'both'} onChange={(event) => onUpdateField(node.id, 'sycmMode', event.target.value)}>
+                  <option value="both">热词与蓝海词</option>
                   <option value="hot">热搜关联词</option>
                   <option value="blue">蓝海关联词</option>
                 </select>
+              </label>
+              <label className="node-field">
+                <span>每种查询页数</span>
+                <input type="number" min="1" max="10" value={data.pages ?? 3} onChange={event => onUpdateField(node.id, 'pages', Math.min(10, Math.max(1, Number(event.target.value) || 3)))} />
               </label>
               <label className="node-field">
                 <span>数据周期</span>
@@ -236,15 +244,12 @@ export function StartConfigurationPanel({ mode, modeHint, node, onDone, onUpdate
               </div>
             )}
             <p className="node-workbench-note">查询始终单并发执行。页面关闭、暂停或平台阻塞后，会从未完成词根继续。</p>
-          </section>
-
-          <section className="sheet-config-section">
             <h3>后续生成</h3>
             <div className="start-configuration-grid">
               <label className="node-field"><span>标题长度</span><input type="number" min="30" max="80" value={data.length ?? 60} onChange={(event) => onUpdateField(node.id, 'length', Number.parseInt(event.target.value, 10) || 60)} /></label>
               <label className="node-field"><span>每词货源参考数</span><input type="number" min="1" max="50" value={data.productsPerKeyword ?? 12} onChange={(event) => onUpdateField(node.id, 'productsPerKeyword', Number.parseInt(event.target.value, 10) || 12)} /></label>
             </div>
-          </section>
+          </details>
         </fieldset>
         <div className="start-configuration-actions">
           <button type="button" className="node-primary-button" onClick={onDone}>{readOnly ? '关闭' : '完成配置'}</button>
@@ -422,9 +427,12 @@ export function StartConfigurationPanel({ mode, modeHint, node, onDone, onUpdate
   return (
     <div className="start-configuration-panel">
       <p className="start-configuration-hint">{modeHint}</p>
+      {data.discoveryMode !== 'seed' && <DiscoveryDimensionFields node={node} onUpdateField={onUpdateField} readOnly={readOnly} />}
+      <details className="selection-advanced">
+      <summary>高级设置</summary>
       <div className="start-configuration-grid">
         {DAILY_START_OPTIONS.filter((field) => (
-          !field.seedOnly || ['seed', 'hybrid'].includes(data.discoveryMode)
+          (!data.selectionMode || !['discoveryMode', 'source', 'rootMode', 'autoAllowReviewKeywords'].includes(field.key)) && (!field.seedOnly || ['seed', 'hybrid'].includes(data.discoveryMode))
         )).map((field) => (
           <label className="node-field start-configuration-wide" key={field.key}>
             <span>{field.label}</span>
@@ -438,8 +446,7 @@ export function StartConfigurationPanel({ mode, modeHint, node, onDone, onUpdate
             </select>
           </label>
         ))}
-        {data.discoveryMode !== 'seed' && <DiscoveryDimensionFields node={node} onUpdateField={onUpdateField} readOnly={readOnly} />}
-        {DAILY_START_FIELDS.filter(field => data.discoveryMode === 'seed' || !['rootCooldownDays', 'familyCooldownDays'].includes(field.key)).map((field) => (
+        {DAILY_START_FIELDS.filter(field => (!data.selectionMode || !['verify', 'verifyReserve', 'pages', 'select', 'generate', 'export'].includes(field.key)) && (data.discoveryMode === 'seed' || !['rootCooldownDays', 'familyCooldownDays'].includes(field.key))).map((field) => (
           <label className="node-field" key={field.key}>
             <span>{field.label}</span>
             <input
@@ -453,6 +460,7 @@ export function StartConfigurationPanel({ mode, modeHint, node, onDone, onUpdate
           </label>
         ))}
       </div>
+      </details>
       <div className="start-configuration-actions">
         <button type="button" className="node-primary-button" onClick={onDone}>完成配置</button>
       </div>

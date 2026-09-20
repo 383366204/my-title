@@ -7,7 +7,8 @@ const { getRun, readJsonl, appendJsonl, writeRun, setRunStageMetrics } = require
 
 /** @param {object} row Candidate with collected SYCM evidence. @returns {object} Advisory scores; never promotes failed evidence. */
 function scoreRootReviewCandidate(row) {
-  const data = row.sycmData && !Array.isArray(row.sycmData) ? [{ ...row.sycmData, keyword: row.keyword }] : [];
+  const data = Array.isArray(row.sycmData) ? row.sycmData.filter(item => item.keyword === row.keyword)
+    : row.sycmData ? [{ ...row.sycmData, keyword: row.keyword }] : [];
   const mode = row.sycmEvidence?.mode === 'hot' ? 'hot' : 'blue';
   const sycmScore = scoreSycmRows(data, { mode });
   const keywordOpportunity = scoreKeywordOpportunity({ ...row, sycmScore, sycmData: data });
@@ -42,6 +43,7 @@ function reviewRootOpportunities(options = {}) {
   fs.writeFileSync(run.files.verifiedKeywords, '');
   appendJsonl(run.files.verifiedKeywords, approved);
   run.counts.candidates = scored.length;
+  run.options = { ...run.options, combinedOpportunityReview: true };
   run.counts.keywordReviewApproved = approved.length;
   run.counts.keywordReviewRejected = rejected.length;
   run.counts.keywordReviewPending = explicit ? 0 : scored.length;

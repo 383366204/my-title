@@ -6,9 +6,11 @@ import { artifactItems, candidateKeyword } from '../workflow-data.js';
 export const KeywordReviewOperationPanel = ({
   artifactState,
   onConfirmKeywordReview,
+  onQueryKeywords,
   onRetryMine,
   canConfirm,
-  canRetryMine
+  canRetryMine,
+  retryLabel = '重试查询'
 }) => {
   const candidates = artifactItems(artifactState);
   const combined = artifactState.artifact?.combinedOpportunityReview === true || candidates.some(row => row.combinedOpportunityReview);
@@ -25,8 +27,9 @@ export const KeywordReviewOperationPanel = ({
     manualInput: true
   }))].map((item, index) => {
     const keyword = candidateKeyword(item);
-    const key = `${keyword || 'candidate'}-${index}`;
-    const persistedDecision = item.reviewStatus === 'approved' ? 'approved' : item.reviewStatus === 'rejected' || (combined && !item.reviewRecommended) ? 'rejected' : 'approved';
+    const key = keyword || `candidate-${index}`;
+    const persistedDecision = item.reviewStatus === 'approved' ? 'approved' : item.reviewStatus === 'rejected' ? 'rejected'
+      : item.reviewDraft || (combined && !item.reviewRecommended ? 'rejected' : 'approved');
     return {
       ...item,
       keyword,
@@ -53,12 +56,13 @@ export const KeywordReviewOperationPanel = ({
     if (query.trim() && !text.includes(query.trim().toLowerCase())) return false;
     const marketScore = Number(item.marketScore ?? item.marketMetrics?.score ?? 0);
     const missing = Array.isArray(item.marketMetrics?.missing) ? item.marketMetrics.missing : [];
-    if (filter === 'recommended') return marketScore >= 60 || Number(item.localScore || 0) >= 70;
+    if (filter === 'recommended') return combined ? item.reviewRecommended === true : marketScore >= 60 || Number(item.localScore || 0) >= 70;
+    if (filter === 'pending') return !item.reviewRecommended && item.reviewStatus !== 'rejected';
     if (filter === 'missing') return missing.length > 0 || !item.sycmData;
     if (filter === 'high-confidence') return item.marketMetrics?.confidence === 'high' || item.confidence === 'high';
     if (filter === 'rejected') return item.reviewDecision === 'rejected';
     return true;
-  }), [candidateRows, filter, query]);
+  }), [candidateRows, filter, query, combined]);
   useEffect(() => setVisibleLimit(50), [filter, query]);
   const setAllDecisions = (decision) => {
     setDecisions(Object.fromEntries(candidateRows.map((item) => [item.key, decision])));
@@ -69,16 +73,24 @@ export const KeywordReviewOperationPanel = ({
   const addManualKeywords = () => {
     const incoming = manualKeywordDraft.split(/\r?\n|[,，]/).map((item) => item.trim()).filter(Boolean);
     if (incoming.length === 0) return;
-    setManualKeywords((current) => [...new Set([...current, ...incoming])]);
+    const existing = new Set(candidates.map(candidateKeyword));
+    setManualKeywords((current) => [...new Set([...current, ...incoming])].filter(word => !existing.has(word)));
     setManualKeywordDraft('');
+  };
+  const querySupplement = async () => {
+    const keywords = [...new Set([...manualKeywords, ...manualKeywordDraft.split(/\r?\n|[,，]/).map(word => word.trim()).filter(Boolean)])];
+    setConfirming(true);
+    try {
+      await onQueryKeywords({ keywords, decisions: Object.fromEntries(candidateRows.map(row => [row.key, row.reviewDecision])) });
+    } finally { setConfirming(false); }
   };
 
   return (
     <div className="node-embedded-workbench">
       <section className="node-workbench-section">
         <div className="node-workbench-head">
-          <strong>{combined ? '关键词机会复核' : '候选词筛选'}</strong>
-          <span>保留 {approvedCount} 个 · 筛除 {rejectedCount} 个</span>
+          <strong>{combined ? '关键词确认' : '候选词筛选'}</strong>
+          <span>已选 {approvedCount} / 共 {candidateRows.length} 个 · 排除 {rejectedCount} 个</span>
         </div>
         <div className="keyword-review-manual-input">
           <input
@@ -88,10 +100,15 @@ export const KeywordReviewOperationPanel = ({
             onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addManualKeywords(); } }}
             placeholder="输入关键词后加入候选，可用逗号分隔"
             aria-label="手动输入关键词"
+            disabled={!canConfirm || confirming}
           />
-          <button type="button" className="node-secondary-button" onClick={addManualKeywords} disabled={!manualKeywordDraft.trim()}>
+          <button type="button" className="node-secondary-button" onClick={addManualKeywords} disabled={!canConfirm || confirming || !manualKeywordDraft.trim()}>
             <Plus size={13} /> 加入候选词
           </button>
+          {combined && onQueryKeywords && <button type="button" className="node-secondary-button" onClick={querySupplement}
+            disabled={!canConfirm || confirming || (!manualKeywordDraft.trim() && !manualKeywords.length)}>
+            <RefreshCw size={13} /> 查询补充词
+          </button>}
         </div>
         {manualKeywords.length > 0 && (
           <div className="node-chip-list keyword-review-manual-list">
@@ -103,15 +120,20 @@ export const KeywordReviewOperationPanel = ({
             <input className="keyword-review-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索关键词或词根" aria-label="搜索候选关键词" />
             <select className="keyword-review-filter" value={filter} onChange={(event) => setFilter(event.target.value)} aria-label="筛选候选词">
               <option value="all">全部候选词</option>
-              <option value="recommended">优先推荐</option>
+              <option value="recommended">推荐采用</option>
+              {combined && <option value="pending">待人工判断</option>}
               <option value="high-confidence">高置信度</option>
               <option value="missing">有缺失指标</option>
               <option value="rejected">已筛除</option>
             </select>
-            <button type="button" className="node-secondary-button success" onClick={() => setAllDecisions('approved')}>
+            {combined && <button type="button" className="node-secondary-button success" disabled={!canConfirm || confirming}
+              onClick={() => setDecisions(Object.fromEntries(candidateRows.map(item => [item.key, item.reviewRecommended ? 'approved' : 'rejected'])))}>
+              <Check size={13} /> 选择推荐项
+            </button>}
+            <button type="button" className="node-secondary-button success" disabled={!canConfirm || confirming} onClick={() => setAllDecisions('approved')}>
               <Check size={13} /> 全部保留
             </button>
-            <button type="button" className="node-secondary-button danger" onClick={() => setAllDecisions('rejected')}>
+            <button type="button" className="node-secondary-button danger" disabled={!canConfirm || confirming} onClick={() => setAllDecisions('rejected')}>
               <X size={13} /> 全部筛除
             </button>
           </div>
@@ -119,10 +141,12 @@ export const KeywordReviewOperationPanel = ({
         <div className="node-candidate-list">
           {visibleRows.slice(0, visibleLimit).map((item) => (
             <div className={`node-candidate-row keyword-review-row ${item.reviewDecision === 'rejected' ? 'is-rejected' : 'is-approved'}`} key={item.key}>
+              <input type="checkbox" aria-label={`采用 ${item.keyword}`} checked={item.reviewDecision === 'approved'} disabled={!canConfirm || confirming}
+                onChange={event => setDecision(item.key, event.target.checked ? 'approved' : 'rejected')} />
               <div>
                 <strong>{item.keyword || '未命名候选词'}</strong>
                 <span>{item.root || item.seed ? `词根：${item.root || item.seed}` : ''} {item.source ? `· 来源：${item.source}` : ''}</span>
-                <span>{item.reason || item.gateReason || item.tier || '人工判断是否进入生意参谋'}</span>
+                <span>{item.reason || item.gateReason || item.tier || '人工判断是否用于选品'}</span>
                 {combined && <>
                   <span>验真分：{item.sycmScore?.score ?? '暂无'} · 机会分：{item.keywordOpportunity?.score ?? '暂无'} · {item.reviewRecommended ? '建议保留' : '需人工判断'}</span>
                   <span>{!item.sycmData ? '缺少生意参谋指标' : item.sycmScore?.passed ? '验真条件已通过' : '验真条件未通过或指标不明确'}{item.keywordOpportunity?.breakdown?.gapToContinue > 0 ? `；机会分距推荐门槛还差 ${item.keywordOpportunity.breakdown.gapToContinue} 分` : ''}</span>
@@ -146,6 +170,7 @@ export const KeywordReviewOperationPanel = ({
                   type="button"
                   className={`node-secondary-button success ${item.reviewDecision === 'approved' ? 'active' : ''}`}
                   onClick={() => setDecision(item.key, 'approved')}
+                  disabled={!canConfirm || confirming}
                 >
                   <Check size={13} /> {combined && !item.reviewRecommended ? '人工放行' : '保留'}
                 </button>
@@ -153,6 +178,7 @@ export const KeywordReviewOperationPanel = ({
                   type="button"
                   className={`node-secondary-button danger ${item.reviewDecision === 'rejected' ? 'active' : ''}`}
                   onClick={() => setDecision(item.key, 'rejected')}
+                  disabled={!canConfirm || confirming}
                 >
                   <X size={13} /> 筛除
                 </button>
@@ -167,11 +193,11 @@ export const KeywordReviewOperationPanel = ({
           </button>
         )}
         <div className="node-product-actions">
-          <button type="button" className="node-primary-button" onClick={confirmSelection} disabled={confirming || !canConfirm || candidateRows.length === 0}>
-            <CheckCircle2 size={14} /> {confirming ? '正在确认' : combined ? '确认选词结果' : '确认筛词结果'}
+          <button type="button" className="node-primary-button" onClick={confirmSelection} disabled={confirming || !canConfirm || approvedCount === 0}>
+            <CheckCircle2 size={14} /> {confirming ? '正在确认' : combined ? `确认 ${approvedCount} 个词并继续` : '确认筛词结果'}
           </button>
           <button type="button" className="node-secondary-button" onClick={onRetryMine} disabled={!canRetryMine}>
-            <RefreshCw size={13} /> 返回挖词重跑
+            <RefreshCw size={13} /> {retryLabel}
           </button>
         </div>
         {riskConfirmation && <section className="node-workbench-section" role="alertdialog" aria-label="确认人工放行">

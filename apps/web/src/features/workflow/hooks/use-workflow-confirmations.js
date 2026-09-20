@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { confirmKeywordReview as confirmKeywordReviewRequest, confirmProductReview as confirmProductReviewRequest, confirmOrderSheetProducts as confirmOrderSheetProductsRequest, confirmReviewSheet, getWorkflowArtifact } from '../../../api/workflow-api.js';
 import { candidateKeyword } from '../workflow-data.js';
+import { querySupplementKeywords } from '../../../api/workflow-api.js';
 import { useWorkflowRequestScope } from './use-workflow-request-scope.js';
 
 /**
@@ -93,15 +94,17 @@ export function useWorkflowConfirmations({ currentRunId, activeTemplateMode, set
         .filter((row) => row.reviewDecision === 'rejected')
         .map((row) => candidateKeyword(row))
         .filter(Boolean);
-      await confirmKeywordReviewRequest(currentRunId, { approvedKeywords, rejectedKeywords, manualKeywords });
+      const response = await confirmKeywordReviewRequest(currentRunId, { approvedKeywords, rejectedKeywords, manualKeywords });
       if (!ticket.isCurrent()) return false;
       setLogs((prev) => [...prev, {
         timestamp: new Date().toISOString(),
         level: 'info',
         message: `人工筛词完成，保留 ${approvedKeywords.length} 个，筛除 ${rejectedKeywords.length} 个关键词。`
       }]);
-      if (activeTemplateMode === 'manual') {
+      if (response.result?.status === 'keywords_reviewed') {
+        closeOverlay();
         await runWorkflowOperation('resume');
+        return ticket.isCurrent();
       } else {
         await loadHistoryRun(currentRunId);
       }
@@ -158,5 +161,24 @@ export function useWorkflowConfirmations({ currentRunId, activeTemplateMode, set
   };
 
 
-  return { confirmReviewDrafts, confirmOrderSheetProducts, confirmKeywordReview, confirmProductReview, confirmingReviews, confirmingOrderSheetProducts };
+  const queryKeywords = async (input) => {
+    const ticket = beginConfirmation('keywords-query');
+    if (!ticket) return false;
+    try {
+      await querySupplementKeywords(currentRunId, input);
+      if (!ticket.isCurrent()) return false;
+      setRunStatus('resuming');
+      closeOverlay();
+      listenToRunEvents(currentRunId);
+      await reloadRun(currentRunId, { preserveLogs: true });
+      return ticket.isCurrent();
+    } catch (error) {
+      if (ticket.isCurrent()) alert(`补充词查询失败：${error.message}`);
+      return false;
+    } finally {
+      finishConfirmation(ticket);
+    }
+  };
+
+  return { confirmReviewDrafts, confirmOrderSheetProducts, confirmKeywordReview, queryKeywords, confirmProductReview, confirmingReviews, confirmingOrderSheetProducts };
 }

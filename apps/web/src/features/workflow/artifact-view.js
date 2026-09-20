@@ -202,6 +202,9 @@ function businessMetrics(row = {}, nodeId = '') {
 }
 
 function businessDescription(row = {}, nodeId = '') {
+  if (nodeId === 'select' && row.status === 'select_failed') {
+    return `货源查询失败，未取得商品资料：${row.error || '未知错误'}`;
+  }
   if (nodeId === 'select' && row.enrichError) {
     return `获取失败：${row.enrichError}`;
   }

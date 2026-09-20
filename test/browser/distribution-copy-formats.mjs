@@ -12,6 +12,7 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { DistributionExportPanel } from '/src/features/workflow/components/distribution-export-panel.jsx';
 import '/src/App.css';
+import '/src/index.css';
 window.copied = []; window.failCopy = false;
 const app = createRoot(document.getElementById('root'));
 window.renderPanel = (directPreview = true, text = 'https://detail.1688.com/offer/1.html$$标题一$$家居\\nhttps://detail.1688.com/offer/2.html$$标题二$$日用') => {
@@ -48,6 +49,7 @@ try {
     const request = route.request();
     if (!new URL(request.url()).pathname.startsWith('/api/')) return route.continue();
     requests.push({ url: request.url(), method: request.method(), body: request.postDataJSON() });
+    if (request.url().endsWith('/api/distribution/shops')) return route.fulfill({ json: { ok: true, data: [{ id: 'fixture-shop', name: '测试店', platformShopName: '平台测试店', port: 9222, enabled: true, isDefault: true }] } });
     return route.fulfill({ json: request.url().endsWith('/check') ? { canSubmit: false, blockers: [] } : { ok: true, data: {} } });
   });
   await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/__copy`);
@@ -123,10 +125,10 @@ try {
   await page.getByRole('button', { name: '人工复制铺货', exact: true }).click();
   await dismissSuccess();
   await assertFormat('url');
-  await page.getByRole('button', { name: '检查自动铺货环境', exact: true }).click();
-  await page.waitForFunction(() => document.body.textContent.includes('检查未通过'));
+  await page.getByRole('button', { name: '选择店铺并检查', exact: true }).click();
+  await page.getByRole('button', { name: '确认并开始自动铺货', exact: true }).click();
+  await page.waitForFunction(() => document.body.textContent.includes('暂时无法开始自动铺货'));
   assert.ok(requests.find(row => row.url.endsWith('/check')).body.input.includes('$$标题一$$家居'));
-  await page.getByRole('button', { name: '查看并确认清单', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: '导出清单预览' });
   await selectFormat('title', dialog);
   await assertFormat('title');

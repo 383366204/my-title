@@ -1,4 +1,5 @@
 'use strict';
+const { prepareKeywordSupplement } = require('../../skills/pipeline-flow/src/keyword-supplement');
 
 /**
  * 注册控制路由；共享占用与运行能力由应用注入，保留请求时动态取 runner。
@@ -13,6 +14,7 @@ function registerWorkflowControlRoutes(app, {
   requestRuntimeCancel,
   readRuntimeState,
   getPipelineRuntimeRunner,
+  prepareSupplement = prepareKeywordSupplement,
   parsePositiveNumber,
   getSycmChromeAvailabilityChecker,
   recoverSycmAccessAfterChrome,
@@ -33,6 +35,29 @@ function registerWorkflowControlRoutes(app, {
   originalLog,
   originalError
 }) {
+  app.post('/api/workflows/runs/:runId/keywords/query', (req, res) => {
+    const runId = req.params.runId;
+    if (!isValidWorkflowRunIdParam(runId)) return res.status(400).json({ ok: false, error: '无效的运行 ID。' });
+    const runtime = readRuntimeState({ runId });
+    if (!runtime || !['daily', 'keyword', 'root-keyword'].includes(runtime.mode)
+      || runtime.activeStep !== 'keywordReview' || !['blocked', 'paused', 'needs_review'].includes(runtime.status)) {
+      return res.status(409).json({ ok: false, error: '请在关键词确认节点暂停时补充查询。' });
+    }
+    const runState = workbench.tryAcquire({ runId, mode: 'keyword-supplement' });
+    if (!runState) return res.status(409).json({ ok: false, error: '已有工作流正在运行。' });
+    try {
+      const keywords = prepareSupplement({ runId, keywords: req.body?.keywords, decisions: req.body?.decisions });
+      const params = { ...runtime.params, reviewQueryKeywords: keywords };
+      const promise = workbench.runReserved(runState, () => getPipelineRuntimeRunner()({ runId, mode: runtime.mode, params,
+        preserveRuntime: true, resumeFromStep: 'keywordReview', steps: runtime.steps }));
+      promise.catch(error => originalError(`[Keyword Supplement] ${runId}: ${error.message}`));
+      return res.json({ ok: true, data: { runId, count: keywords.length, status: 'started' } });
+    } catch (error) {
+      return res.status(400).json({ ok: false, error: error.message });
+    } finally {
+      if (!runState.promise) workbench.release(runState);
+    }
+  });
   app.post('/api/workflows/validate', (req, res) => {
     try {
       const body = req.body || {};

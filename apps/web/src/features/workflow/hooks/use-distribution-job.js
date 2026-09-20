@@ -56,19 +56,19 @@ export function useDistributionJob({ initialJobId = '', notifyCompletedOnRestore
     return () => { cancelled = true; window.clearInterval(timer); };
   }, [job?.jobId, job?.status, setJob]);
 
-  const submit = useCallback(async ({ input, runId }) => {
+  const submit = useCallback(async ({ input, runId, shopId, shopRevision, shopIds, shopRevisions, distributionMode }) => {
     setError('');
     try {
-      const nextJob = await submitDistribution({ input, confirm: true, runId });
+      const nextJob = await submitDistribution({ input, confirm: true, runId, shopId, shopRevision, shopIds, shopRevisions, distributionMode });
       setJob(nextJob);
       return nextJob;
     } catch (submitError) { setError(submitError.message); return null; }
   }, [setJob]);
 
-  const completeManual = useCallback(async ({ input, runId }) => {
+  const completeManual = useCallback(async ({ input, runId, shopId, shopRevision, shopIds, shopRevisions, distributionMode }) => {
     setError('');
     try {
-      const nextJob = await completeManualDistribution({ input, runId, confirm: true });
+      const nextJob = await completeManualDistribution({ input, runId, shopId, shopRevision, shopIds, shopRevisions, distributionMode, confirm: true });
       setJob(nextJob);
       return nextJob;
     } catch (completeError) {
@@ -83,9 +83,9 @@ export function useDistributionJob({ initialJobId = '', notifyCompletedOnRestore
     catch (controlError) { setError(controlError.message); return null; }
   }, [job?.jobId, setJob]);
 
-  const startChrome = useCallback(async () => {
+  const startChrome = useCallback(async (input = {}) => {
     setChromeStarting(true); setError(''); setChromeMessage('');
-    try { const result = await startDistributionChrome(); setChromeMessage(result.userMessage || '铺货 Chrome 已启动。'); }
+    try { const result = await startDistributionChrome(input); setChromeMessage(result.userMessage || '铺货 Chrome 已启动。'); }
     catch (startError) { setError(startError.message); }
     finally { setChromeStarting(false); }
   }, []);

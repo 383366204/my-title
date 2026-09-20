@@ -12,10 +12,12 @@ test('normalizeExactKeywords accepts common delimiters and removes duplicates', 
   ]);
 });
 
-test('normalizeExactKeywords keeps phrases intact and limits batch size', () => {
+test('normalizeExactKeywords keeps phrases intact and allows arbitrary batch size without max', () => {
   assert.deepEqual(normalizeExactKeywords(['纯银 项链', '桌面 收纳盒']), ['纯银 项链', '桌面 收纳盒']);
+  const moreThanTwenty = Array.from({ length: 25 }, (_, index) => `关键词${index + 1}`);
+  assert.equal(normalizeExactKeywords(moreThanTwenty).length, 25);
   assert.throws(
-    () => normalizeExactKeywords(Array.from({ length: 21 }, (_, index) => `关键词${index + 1}`)),
+    () => normalizeExactKeywords(moreThanTwenty, { max: 20 }),
     /最多输入 20 个/
   );
 });
