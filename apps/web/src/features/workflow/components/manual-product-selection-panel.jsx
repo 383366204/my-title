@@ -2,9 +2,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { Check, RefreshCw } from 'lucide-react';
 
 import { artifactItems } from '../workflow-data.js';
+import { productSelectionView } from '../product-selection-view.js';
 
 export const ManualProductSelectionPanel = ({ artifactState, currentRunId, onConfirm, onRetry, canRetry = false }) => {
-  const rows = useMemo(() => artifactItems(artifactState), [artifactState]);
+  const { products: rows, failures } = useMemo(() => productSelectionView(artifactItems(artifactState)), [artifactState]);
   const [selected, setSelected] = useState({});
   const [manual, setManual] = useState({ url: '', title: '', category: '', keyword: '' });
   const [directUrls, setDirectUrls] = useState('');
@@ -20,7 +21,7 @@ export const ManualProductSelectionPanel = ({ artifactState, currentRunId, onCon
   const rowKey = (row, index) => `${row.url || row.product?.['产品链接'] || row.product?.url || index}`;
   const toggle = (key) => setSelected((current) => ({ ...current, [key]: !current[key] }));
   const submit = async () => {
-    const approvedProductIds = rows.filter((row, index) => selected[rowKey(row, index)]).map((row, index) => rowKey(row, index));
+    const approvedProductIds = rows.map(rowKey).filter(key => selected[key]);
     const defaultKeyword = manual.keyword.trim() || rows.find((row) => row.keyword)?.keyword || '';
     const directProducts = directUrls
       .split(/\r?\n|[,，]/)
@@ -44,7 +45,7 @@ export const ManualProductSelectionPanel = ({ artifactState, currentRunId, onCon
       <section className="node-workbench-section">
         <div className="node-workbench-head">
           <strong>勾选 1688 货源</strong>
-          <span>{rows.filter((row, index) => selected[rowKey(row, index)]).length} 个已选</span>
+          <span>{rows.filter((row, index) => selected[rowKey(row, index)]).length} 个已选 / {rows.length} 个商品</span>
         </div>
         <div className="node-product-list">
           {rows.map((row, index) => {
@@ -57,14 +58,19 @@ export const ManualProductSelectionPanel = ({ artifactState, currentRunId, onCon
                 <input type="checkbox" checked={Boolean(selected[key])} onChange={() => toggle(key)} />
                 <div>
                   <strong>{title}</strong>
-                  <span>{row.keyword || '手动货源'} · {row.recommendedCategory || product.category || '未设置类目'}</span>
+                  <span>{row.keyword || '手动货源'} · {row.recommendedCategory || '类目未获取，铺货前需补充'}</span>
                   <small>{url}</small>
                 </div>
               </label>
             );
           })}
-          {rows.length === 0 && <div className="artifact-empty">暂无 1688 搜索结果，请手动添加商品。</div>}
+          {rows.length === 0 && <div className="artifact-empty">{failures.length ? '货源查询失败，尚未取得商品。下方是失败原因，不是商品清单。' : '暂无 1688 搜索结果，请手动添加商品。'}</div>}
         </div>
+        {failures.length > 0 && <section className="artifact-error" aria-label="货源查询失败">
+          <strong>{failures.length} 条查询或资料读取失败</strong>
+          {failures.map((row, index) => <p key={`${row.keyword}-${index}`}>{row.keyword || '商品资料'}：{row.error}</p>)}
+          <button type="button" className="node-secondary-button" disabled={!canRetry} onClick={onRetry}><RefreshCw size={13} />重试货源查询</button>
+        </section>}
       </section>
       <section className="node-workbench-section">
         <div className="node-workbench-head"><strong>直接粘贴 1688 链接</strong><span>一行一个</span></div>

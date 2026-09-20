@@ -105,7 +105,7 @@ function validateGeneratedRow(row, context = {}) {
   if (row.verifyMode === 'hot' && Number(context.hotUsed || 0) >= Number(context.hotExportLimit || DEFAULT_HOT_EXPORT_LIMIT)) {
     reasons.push('hot_export_limit');
   }
-  if (row.keywordOpportunity && row.keywordOpportunity.decision && row.keywordOpportunity.decision !== 'continue') {
+  if (row.keywordOpportunity && row.keywordOpportunity.decision && row.keywordOpportunity.decision !== 'continue' && row.keywordOpportunity.manualApproval?.approved !== true) {
     reasons.push(`legacy_keyword_opportunity_${row.keywordOpportunity.decision}`);
   }
   const humanSelected = context.manualMode === true || row.manualSelectionStatus === 'approved';

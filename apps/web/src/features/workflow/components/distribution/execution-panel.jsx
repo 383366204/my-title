@@ -1,4 +1,5 @@
 import { Clock, RefreshCw, Square } from 'lucide-react';
+import distributionModes from '../../../../../../../core/distribution-modes.json';
 
 /**
  * Component to render active distribution job progress and execution controls.
@@ -32,13 +33,35 @@ export function ExecutionPanel({
               : '铺货结果';
 
   const isBlockedStyle = distributionJob.status === 'failed' || distributionJob.status === 'completed_with_issues';
+  const confirmation = distributionJob.confirmationCheck?.confirmation;
+  const successIds = new Set(confirmation?.foundOfferIds || []);
+  const issueIds = new Set(confirmation?.issueOfferIds || []);
+  const resultRows = confirmation ? (distributionJob.items || []).map(item => ({
+    ...item,
+    status: issueIds.has(item.offerId) ? '失败' : successIds.has(item.offerId) ? '成功' : '待确认',
+    details: (confirmation.byShop || []).flatMap(shop => {
+      const result = shop.perOfferId?.[item.offerId];
+      return result && result.status !== 'unknown' ? [{
+        shopName: shop.shopName,
+        label: ({ success: '成功', failed: '失败', copying: '复制中', skipped: '已跳过', cancelled: '已取消', stopped: '已停止' })[result.status] || '待确认',
+        reason: result.reason || '',
+        failed: ['failed', 'skipped', 'stopped', 'cancelled'].includes(result.status)
+      }] : [];
+    })
+  })) : [];
+  const completedCount = confirmation ? resultRows.filter(row => row.status === '成功').length : distributionJob.completed || 0;
+  const failedCount = confirmation ? resultRows.filter(row => row.status === '失败').length : distributionJob.failed || 0;
 
   return (
     <section className={`distribution-execution-panel ${isBlockedStyle ? 'blocked' : ''}`}>
       <div className="distribution-execution-head">
         <div>
           <strong>{statusTitle}</strong>
-          <span>{distributionJob.completed || 0} / {distributionJob.total || activeRowsCount} 个商品已处理</span>
+          {(distributionJob.targetShops || (distributionJob.shop ? [distributionJob.shop] : [])).map(shop => <span key={shop.id || shop.platformShopName}>店铺：{shop.name} · {shop.platformShopName}</span>)}
+          {distributionJob.distributionMode && <span>商品分配方式：{distributionModes.find(mode => mode.value === distributionJob.distributionMode)?.label || distributionJob.distributionMode}</span>}
+          <span role="status" className="distribution-result-summary">
+            <span className="distribution-result-success">成功 {completedCount}</span> · <span className="distribution-result-failed">失败 {failedCount}</span> · <span className="distribution-result-pending">待确认 {Math.max(0, (distributionJob.total || activeRowsCount) - completedCount - failedCount)}</span>
+          </span>
         </div>
         {distributionJob.status === 'submitting' && (
           <div className="distribution-execution-actions">
@@ -59,16 +82,28 @@ export function ExecutionPanel({
         )}
       </div>
       <div className="distribution-progress-track">
-        <span style={{ width: `${Math.min(100, Math.round(((distributionJob.completed || 0) / Math.max(1, distributionJob.total || 1)) * 100))}%` }} />
+        <span style={{ width: `${Math.min(100, Math.round((completedCount / Math.max(1, distributionJob.total || 1)) * 100))}%` }} />
       </div>
       <p>第 {distributionJob.progress?.batchIndex || 0} / {distributionJob.progress?.batchTotal || 0} 批 · {distributionJob.progress?.phase || '等待状态更新'}</p>
       {distributionJob.error && <p className="distribution-error-text">{distributionJob.error}</p>}
       {distributionJob.confirmationError && <p className="distribution-error-text">结果核对失败：{distributionJob.confirmationError}</p>}
       {distributionSubmitError && <p className="distribution-error-text">{distributionSubmitError}</p>}
-      {Array.isArray(distributionJob.results) && distributionJob.results.some(row => row.status && row.status !== 'confirmed' && !row.skipped) && (
+      {confirmation && <div className="distribution-confirmation-results" aria-label="铺货核对明细">
+        {resultRows.map(row => <div key={row.offerId} className={`distribution-confirmation-row distribution-result-${row.status === '成功' ? 'success' : row.status === '失败' ? 'failed' : 'pending'}`}>
+          <div className="distribution-confirmation-heading">
+            <strong><span className="distribution-result-label">{row.status}</span> · {row.title || '商品'}</strong>
+            <span className="distribution-confirmation-id">ID：{row.offerId}</span>
+          </div>
+          {row.details.map(detail => <div key={detail.shopName}>
+            <p>{detail.shopName}：{detail.label}</p>
+            {detail.failed && <p className="distribution-confirmation-reason">失败原因：{detail.reason || '历史记录未保存具体原因，请点击“重新核对铺货结果”获取；若仍未返回，请查看平台复制日志。'}</p>}
+          </div>)}
+        </div>)}
+      </div>}
+      {!confirmation && Array.isArray(distributionJob.results) && distributionJob.results.some(row => row.status && row.status !== 'confirmed' && !row.skipped) && (
         <p className="distribution-error-text">存在未确认成功的批次，请查看结果后再处理，不会自动重复提交。</p>
       )}
-      {Array.isArray(distributionJob.results) && distributionJob.results.length > 0 && (
+      {!confirmation && Array.isArray(distributionJob.results) && distributionJob.results.length > 0 && (
         <div className="distribution-batch-results">
           {distributionJob.results.map((batch) => (
             <span key={`${batch.batchIndex}-${batch.batchHash || batch.status}`} className={batch.status === 'confirmed' ? 'success' : 'failed'}>

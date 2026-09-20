@@ -283,7 +283,7 @@ export function getWorkflowResultSummaryView(nodeId, state = {}) {
   if (manualProductInput) titles.select = '商品资料获取结果';
   const hints = {
     mine: '候选词及其灵感来源在下方预览，完整链路保存在运行产物中。',
-    keywordReview: '人工确认后的关键词会保存到 reviewed-candidates.jsonl，只有通过项会进入生意参谋校验。',
+    keywordReview: '保留与筛除结果会保存到运行记录，只有人工确认保留的词会进入后续流程。',
     verify: '验真通过词在下方结果列表中预览，完整内容保存在 verified-keywords.jsonl。',
     select: '已选货源会按商品信息和机会分展示，完整内容保存在 selected-products.jsonl。',
     generate: '每条标题记录会关联已选货源；完整内容保存在 generated-products.jsonl。',
@@ -429,8 +429,17 @@ export function getWorkflowNodePanelKind(nodeId) {
 export function getWorkflowTemplateView(template = {}) {
   const mode = String(template.mode || template.workflow?.mode || '').toLowerCase();
   const id = String(template.id || '').toLowerCase();
-  const isKeyword = mode === 'keyword' || id === 'exact-keyword-v1';
-  const isRootKeyword = mode === 'root-keyword' || id === 'root-keyword-selection-v1';
+  const isKeyword = mode === 'keyword';
+  const isRootKeyword = mode === 'root-keyword';
+  if (id === 'selection-v1') {
+    const label = isKeyword ? '精确关键词' : isRootKeyword ? '词根拓词' : 'AI选词';
+    return {
+      entryLabel: `选词模式：${label}`,
+      scenarioLabel: isKeyword ? '验证明确目标词' : isRootKeyword ? '从词根或类目发现关联词' : '从需求与时事发现商品词',
+      flowSummary: `${label} → 关键词确认 → 货源选品 → 标题生成 → 铺货复核`,
+      modeHint: label
+    };
+  }
   const isManual = mode === 'manual' || ['manual-selection-v1', 'manual-selection-v2'].includes(id);
   const isOrderSheet = mode === 'order-sheet' || id === 'sycm-order-sheet-v1';
   const isCompetitor = mode === 'competitor-analysis' || id === 'competitor-analysis-v1';

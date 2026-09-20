@@ -54,6 +54,7 @@ export function useWorkflowLaunch(options = {}) {
     runStatus = 'idle',
     setCurrentRunId = () => {},
     setLogs = () => {},
+    setNodes = () => {},
     setRunStatus = () => {}
   } = options || {};
   const launchingRef = useRef(false);
@@ -61,12 +62,18 @@ export function useWorkflowLaunch(options = {}) {
   const launchWorkflow = useCallback(async ({ workflowNodes = nodes, workflowEdges = edges } = {}) => {
     if (runStatus === 'running' || launchingRef.current) return false;
     launchingRef.current = true;
+    const showInputError = (message) => {
+      if (activeTemplateId !== 'selection-v1') return;
+      setNodes(current => current.map(node => node.id === 'start'
+        ? { ...node, data: { ...node.data, status: 'blocked', error: message } } : node));
+    };
 
     try {
       setLogs([]);
       setRunStatus('pending');
       const launchBlocker = getWorkflowLaunchBlocker(activeTemplateMode, workflowNodes);
       if (launchBlocker) {
+        showInputError(launchBlocker.error);
         setRunStatus(launchBlocker.status);
         setLogs(launchBlocker.logs);
         setCurrentRunId(null);
@@ -86,6 +93,7 @@ export function useWorkflowLaunch(options = {}) {
         const errors = validationPayload.data?.errors || [{ message: validationPayload.error || '工作流校验失败' }];
         const typeOnlyErrors = errors.filter((error) => String(error.code || error.message || '').toLowerCase().includes('type'));
         if (typeOnlyErrors.length !== errors.length || !activeTemplateId) {
+          showInputError(errors.map(error => error.message).join('；'));
           setRunStatus('failed');
           setLogs(errors.map((error) => ({
             timestamp: new Date().toISOString(),
@@ -124,6 +132,7 @@ export function useWorkflowLaunch(options = {}) {
       }
       return true;
     } catch (error) {
+      showInputError(error.message);
       alert(`启动请求失败: ${error.message}`);
       setRunStatus('failed');
       return false;
@@ -140,6 +149,7 @@ export function useWorkflowLaunch(options = {}) {
     runStatus,
     setCurrentRunId,
     setLogs,
+    setNodes,
     setRunStatus
   ]);
 

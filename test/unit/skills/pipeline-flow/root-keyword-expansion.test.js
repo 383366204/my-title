@@ -16,12 +16,14 @@ function tempDataDir() {
 test('root expansion persists every root and merges candidate source roots', async () => {
   const dataDir = tempDataDir();
   const calls = [];
+  const configs = [];
   const result = await flowExpandRootKeywords({
     dataDir,
     runId: 'root_expand',
     rootsText: '杯垫\n胡桃木\n杯垫',
-    sycmExtractor: async root => {
+    sycmExtractor: async (root, config) => {
       calls.push(root);
+      configs.push(config);
       return {
         data: [{ keyword: '胡桃木杯垫', searchPopularity: 1200, demandSupplyRatio: 2.4, conversionRate: '3%' }],
         categoryAnalysis: { recommendation: { recommended: { category: '家居用品 > 杯垫' } } }
@@ -29,13 +31,40 @@ test('root expansion persists every root and merges candidate source roots', asy
     }
   });
 
-  assert.deepEqual(calls, ['杯垫', '胡桃木']);
+  assert.deepEqual(calls, ['杯垫', '杯垫', '胡桃木', '胡桃木']);
+  assert.deepEqual(configs.map(c => c.mode), ['hot', 'blue', 'hot', 'blue']);
+  assert.ok(configs.every(c => c.maxPages === 3));
   assert.equal(result.status, 'mined');
   assert.equal(result.candidates.length, 1);
   assert.deepEqual(result.candidates[0].sourceRoots, ['杯垫', '胡桃木']);
   const runDir = path.join(dataDir, 'runs', 'root_expand');
   const queue = JSON.parse(fs.readFileSync(path.join(runDir, 'root-query-queue.json'), 'utf8'));
-  assert.deepEqual(queue.items.map(item => item.status), ['completed', 'completed']);
+  assert.deepEqual(queue.items.map(item => item.status), ['completed', 'completed', 'completed', 'completed']);
+});
+
+test('root expansion with explicit hot mode queries only hot mode', async () => {
+  const dataDir = tempDataDir();
+  const calls = [];
+  const configs = [];
+  const result = await flowExpandRootKeywords({
+    dataDir,
+    runId: 'root_expand_hot',
+    rootsText: '杯垫\n胡桃木',
+    sycmMode: 'hot',
+    sycmExtractor: async (root, config) => {
+      calls.push(root);
+      configs.push(config);
+      return {
+        data: [{ keyword: `${root}热词`, searchPopularity: 1000, demandSupplyRatio: 2 }]
+      };
+    }
+  });
+
+  assert.deepEqual(calls, ['杯垫', '胡桃木']);
+  assert.deepEqual(configs.map(c => c.mode), ['hot', 'hot']);
+  assert.ok(configs.every(c => c.maxPages === 3));
+  assert.equal(result.status, 'mined');
+  assert.equal(result.candidates.length, 2);
 });
 
 test('root expansion resumes after a platform blocker without repeating completed roots', async () => {
@@ -45,8 +74,8 @@ test('root expansion resumes after a platform blocker without repeating complete
     dataDir,
     runId: 'root_resume',
     roots: ['收纳', '露营'],
-    sycmExtractor: async root => {
-      firstCalls.push(root);
+    sycmExtractor: async (root, config) => {
+      firstCalls.push(`${root}:${config.mode}`);
       if (root === '露营') {
         const error = new Error('生意参谋登录态已失效');
         error.status = 'login_required';
@@ -57,21 +86,21 @@ test('root expansion resumes after a platform blocker without repeating complete
     }
   });
   assert.equal(first.status, 'mining_manual_action_required');
-  assert.deepEqual(firstCalls, ['收纳', '露营']);
+  assert.deepEqual(firstCalls, ['收纳:hot', '收纳:blue', '露营:hot']);
 
   const secondCalls = [];
   const second = await flowExpandRootKeywords({
     dataDir,
     runId: 'root_resume',
     roots: ['收纳', '露营'],
-    sycmExtractor: async root => {
-      secondCalls.push(root);
+    sycmExtractor: async (root, config) => {
+      secondCalls.push(`${root}:${config.mode}`);
       return { data: [{ keyword: '户外露营灯', searchPopularity: 900, demandSupplyRatio: 1.8 }] };
     }
   });
 
   assert.equal(second.status, 'mined');
-  assert.deepEqual(secondCalls, ['露营']);
+  assert.deepEqual(secondCalls, ['露营:hot', '露营:blue']);
   assert.equal(second.candidates.length, 2);
 });
 

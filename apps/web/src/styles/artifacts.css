@@ -21,7 +21,8 @@
 }
 
 .export-preview-modal {
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto auto minmax(120px, 1fr);
+  overflow-y: auto;
 }
 
 .export-preview-status {
@@ -37,11 +38,44 @@
 
 .export-preview-direct {
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto auto minmax(120px, 1fr);
+  overflow-y: auto;
   gap: 12px;
   height: 100%;
   min-height: 0;
 }
+
+.distribution-shop-picker { min-width: 0; padding: 10px 0; border-bottom: 1px solid #334155; }
+.distribution-result-success { --result-color: #86efac; }
+.distribution-result-failed { --result-color: #fca5a5; }
+.distribution-result-pending { --result-color: #fcd34d; }
+.distribution-execution-panel .distribution-execution-head .distribution-result-summary > span { display: inline; color: var(--result-color); }
+.distribution-confirmation-row { padding: 8px 12px; margin-top: 8px; border-left: 3px solid var(--result-color); border-bottom: 1px solid #475569; overflow-wrap: anywhere; }
+.distribution-confirmation-row .distribution-result-label { color: var(--result-color); }
+.distribution-confirmation-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; }
+.distribution-confirmation-id { font-size: 12px; color: #cbd5e1; white-space: nowrap; }
+.distribution-execution-panel .distribution-confirmation-reason { color: #fca5a5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.distribution-shop-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.distribution-shop-toolbar > label { flex: 1 1 240px; min-width: 0; }
+.distribution-shop-picker label { display: grid; gap: 6px; color: #e2e8f0; font-size: 12px; }
+.distribution-shop-picker strong { overflow-wrap: anywhere; }
+.distribution-shop-picker input:not([type="checkbox"]):not([type="radio"]), .distribution-shop-picker select {
+  min-width: 0; width: 100%; box-sizing: border-box; padding: 8px; color: #f8fafc; background: #0b1220; border: 1px solid #475569; border-radius: 4px;
+}
+.distribution-shop-picker small { display: block; color: #94a3b8; margin-top: 6px; overflow-wrap: anywhere; }
+.distribution-shop-list { max-height: 180px; overflow-y: auto; margin: 8px 0; }
+.distribution-shop-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; }
+.distribution-shop-row > label { flex: 1; min-width: 0; }
+.distribution-shop-row span { overflow-wrap: anywhere; min-width: 0; }
+.distribution-shop-picker .distribution-choice { display: flex; align-items: center; gap: 8px; }
+.distribution-choice input[type="checkbox"], .distribution-choice input[type="radio"] { width: 16px; height: 16px; flex: 0 0 16px; margin: 0; padding: 0; accent-color: #22c55e; }
+.distribution-mode-options { display: flex; flex-wrap: wrap; gap: 12px 20px; margin: 12px 0 0; border: 0; padding: 0; min-width: 0; }
+.distribution-mode-options legend { margin-bottom: 8px; font-size: 12px; color: #e2e8f0; }
+.distribution-shop-form { display: grid; gap: 12px; margin-top: 12px; }
+.distribution-shop-form fieldset { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 0; border: 0; min-width: 0; }
+.distribution-shop-form .distribution-shop-toggle { display: flex; align-items: center; justify-content: flex-start; white-space: nowrap; }
+.distribution-shop-form .distribution-shop-toggle input[type="checkbox"] { flex: 0 0 16px; width: 16px; height: 16px; margin: 0; padding: 0; }
+@media (max-width: 600px) { .distribution-shop-form fieldset { grid-template-columns: minmax(0, 1fr); } }
 
 .export-preview-direct-summary {
   align-items: center;

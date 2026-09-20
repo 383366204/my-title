@@ -9,6 +9,7 @@ const { flowMine } = require('../src/keyword-mining-flow');
 const { flowExpandRootKeywords } = require('../src/root-keyword-expansion-flow');
 const { flowReviewCandidates } = require('../src/keyword-review-flow');
 const { flowVerify } = require('../src/keyword-verification-flow');
+const { verifyExactSelectionKeywords } = require('../src/exact-keyword-verification');
 const { flowSelectProducts } = require('../src/product-selection-flow');
 const { flowGenerate } = require('../src/title-generation-flow');
 const { flowExport } = require('../src/export-flow');
@@ -34,9 +35,9 @@ const {
   appendRuntimeEvent
 } = require('./store');
 
-const DEFAULT_STEPS = ['mine', 'keywordReview', 'verify', 'select', 'generate', 'export'];
-const KEYWORD_STEPS = ['start', 'verify', 'select', 'generate', 'export'];
-const ROOT_KEYWORD_STEPS = ['mine', 'keywordReview', 'verify', 'select', 'generate', 'export'];
+const DEFAULT_STEPS = ['mine', 'keywordReview', 'select', 'generate', 'export'];
+const KEYWORD_STEPS = ['start', 'verify', 'keywordReview', 'select', 'generate', 'export'];
+const ROOT_KEYWORD_STEPS = ['mine', 'keywordReview', 'select', 'generate', 'export'];
 const MANUAL_STEPS = ['start', 'select', 'verify', 'generate', 'export'];
 const ORDER_SHEET_STEPS = ['collectRank', 'confirmProducts', 'generateSheet'];
 const REVIEW_SHEET_STEPS = ['importSheet', 'generateReviews', 'generateSheet'];
@@ -143,6 +144,7 @@ function createReporter({ dataDir, getRunId, step }) {
 function createDefaultStepFns({ dataDir, runId, params, mode = 'daily' }) {
   const keywordMode = mode === 'keyword';
   const rootKeywordMode = mode === 'root-keyword';
+  const selectionMode = ['daily', 'keyword', 'root-keyword'].includes(mode);
   const manualMode = mode === 'manual';
   const exactKeywords = keywordMode
     ? normalizeExactKeywords(Array.isArray(params.keywords) && params.keywords.length > 0 ? params.keywords : params.keyword)
@@ -152,9 +154,9 @@ function createDefaultStepFns({ dataDir, runId, params, mode = 'daily' }) {
   const mineLimit = params.mine || params.limit || 50;
   const unlimited = Number.MAX_SAFE_INTEGER;
   const verifyLimit = rootKeywordMode ? unlimited : (keywordMode ? keywordCount : (params.verify || 20));
-  const selectLimit = rootKeywordMode ? unlimited : (keywordMode ? keywordCount : (params.select || params.generate || 10));
-  const generateLimit = rootKeywordMode ? unlimited : (manualMode ? manualProductCount : (keywordMode ? keywordCount : (params.generate || 10)));
-  const exportLimit = rootKeywordMode ? unlimited : (manualMode ? Math.max(manualProductCount, Number(params.export || 0)) : (params.export || 20));
+  const selectLimit = selectionMode ? unlimited : (params.select || params.generate || 10);
+  const generateLimit = selectionMode ? unlimited : (manualMode ? manualProductCount : (params.generate || 10));
+  const exportLimit = selectionMode ? unlimited : (manualMode ? Math.max(manualProductCount, Number(params.export || 0)) : (params.export || 20));
   const recordSeedFeedback = mode === 'daily'
     ? params.recordSeedFeedback !== false
     : params.recordSeedFeedback === true;
@@ -204,6 +206,7 @@ function createDefaultStepFns({ dataDir, runId, params, mode = 'daily' }) {
       });
     },
     verify: async ({ reportProgress }) => {
+      if (keywordMode) return verifyExactSelectionKeywords({ ...params, dataDir, runId, onProgress: reportProgress, shouldStop });
       reportProgress({ current: 0, total: verifyLimit, message: '开始验真' });
       if (manualMode) {
         return flowVerifyManualProducts({ ...params, dataDir, runId, limit: verifyLimit, onProgress: reportProgress });
@@ -211,12 +214,20 @@ function createDefaultStepFns({ dataDir, runId, params, mode = 'daily' }) {
       return flowVerify({ ...params, dataDir, runId, limit: verifyLimit, recordSeedFeedback, onProgress: reportProgress });
     },
     keywordReview: async ({ reportProgress }) => {
+      if (params.reviewQueryKeywords?.length) {
+        const queried = await verifyExactSelectionKeywords({ ...params, dataDir, runId, onlyKeywords: params.reviewQueryKeywords, shouldStop, onProgress: reportProgress });
+        if (queried.stepIncomplete) return queried;
+      }
       reportProgress({ current: 0, total: mineLimit, message: '等待人工筛词' });
       return flowReviewCandidates({
         ...params,
         dataDir,
         runId,
-        approveAll: mode === 'daily' && params.autoApproveKeywords !== false
+        combinedOpportunityReview: selectionMode,
+        approvedKeywords: undefined,
+        rejectedKeywords: undefined,
+        manualKeywords: undefined,
+        approveAll: false
       });
     },
     select: async ({ reportProgress }) => {
@@ -225,8 +236,7 @@ function createDefaultStepFns({ dataDir, runId, params, mode = 'daily' }) {
         reportProgress({ current: 0, total, message: '开始获取商品资料' });
         return flowEnrichManualProducts({ ...params, dataDir, runId, onProgress: reportProgress });
       }
-      reportProgress({ current: 0, total: selectLimit, message: '开始货源选品' });
-      const result = await flowSelectProducts({ ...params, dataDir, runId, limit: selectLimit, manualMode, recordSeedFeedback });
+      const result = await flowSelectProducts({ ...params, dataDir, runId, limit: selectLimit, manualMode, recordSeedFeedback, onProgress: reportProgress });
       return result;
     },
     generate: async ({ reportProgress }) => {
@@ -352,7 +362,7 @@ async function runPipelineRuntime(options = {}) {
     : null;
   const params = options.params == null ? (existingRuntime?.params || {}) : options.params;
   const mode = options.mode || existingRuntime?.mode || 'daily';
-  const steps = options.steps || (
+  const configuredSteps = options.steps || (
     mode === 'keyword'
       ? KEYWORD_STEPS
       : mode === 'root-keyword'
@@ -367,8 +377,11 @@ async function runPipelineRuntime(options = {}) {
             ? COMPETITOR_ANALYSIS_STEPS
           : DEFAULT_STEPS
   );
+  const steps = configuredSteps;
   const stepFns = injectedStepFns || createDefaultStepFns({ dataDir, runId, params, mode });
-  const startStep = options.retryStep || options.resumeFromStep || existingRuntime?.activeStep || steps[0];
+  const requestedStart = options.retryStep || options.resumeFromStep || existingRuntime?.activeStep || steps[0];
+  const startStep = requestedStart;
+  if (!steps.includes(startStep)) throw new Error(`当前模式不包含步骤 ${startStep}，请新建运行。`);
   const startIndex = Math.max(0, steps.indexOf(startStep));
   const stepsToRun = steps.slice(startIndex);
 
@@ -392,6 +405,7 @@ async function runPipelineRuntime(options = {}) {
         nextRecommendedAction: null,
         error: null,
         mode,
+        steps,
         params,
         progress
       }

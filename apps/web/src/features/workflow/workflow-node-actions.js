@@ -166,8 +166,8 @@ if (normalizedNodeId === 'start' && stateDetails.watermarkStudio === true) {
   if (normalizedNodeId === 'enrichcompetitors' && Number(stateDetails.output?.failed || 0) > 0 && normalizedState === 'completed') {
     return { label: '重试失败链接', action: 'retry-node', tone: 'warn' };
   }
-  if (normalizedNodeId === 'keywordreview' && ['needs_review', 'waiting_confirmation', 'awaiting_keyword_review', 'blocked'].includes(normalizedState)) {
-    return { label: '输入/筛词', action: 'keyword-review', tone: 'warn' };
+  if (normalizedNodeId === 'keywordreview' && ['needs_review', 'waiting_confirmation', 'awaiting_keyword_review', 'waiting_manual', 'paused', 'blocked'].includes(normalizedState)) {
+    return { label: '筛选关键词', action: 'keyword-review', tone: 'warn' };
   }
   if (normalizedNodeId === 'select' && ['awaiting_product_review', 'needs_review', 'waiting_confirmation'].includes(normalizedState)) {
     return { label: '勾选货源', action: 'product-review', tone: 'warn' };
@@ -236,7 +236,8 @@ export function getWorkflowBlockerActions(nodeId, state = {}) {
   const productDetailsBlocked = nodeId === 'collectRank' && (
     blocker === 'order_sheet_product_details_required' || platformStatus === 'product_details_required'
   );
-  const chromeBlocked = ['mine', 'verify', 'collectRank'].includes(nodeId) && (
+  const chromeBlocked = ['mine', 'verify', 'keywordReview', 'collectRank'].includes(nodeId) && (
+    platformStatus.includes('chrome_unavailable') ||
     blocker.includes('browser_cdp_unavailable') ||
     blocker.includes('cdp_unavailable') ||
     platformStatus.includes('cdp_unavailable') ||
@@ -275,7 +276,7 @@ export function getWorkflowBlockerActions(nodeId, state = {}) {
     }
     actions.push({
       action: 'retry-node',
-      label: productDetailChromeBlocked ? '重试获取商品资料' : nodeId === 'collectRank' ? '重试采集' : nodeId === 'mine' ? '继续拓词' : '重跑验真',
+      label: productDetailChromeBlocked ? '重试获取商品资料' : nodeId === 'collectRank' ? '重试采集' : nodeId === 'mine' ? '继续拓词' : nodeId === 'keywordReview' ? '继续补充词查询' : '重跑验真',
       description: productDetailChromeBlocked
         ? 'Chrome 就绪并登录淘宝后，重新读取全部指定商品的标题、价格和规格。'
         : nodeId === 'collectRank'

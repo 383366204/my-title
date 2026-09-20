@@ -315,6 +315,11 @@ describe('pipeline runtime runner', () => {
           reportProgress({ current: 1, total: 1, message: '验真完成' });
           return { status: 'verified' };
         },
+        keywordReview: async ({ reportProgress }) => {
+          calls.push('keywordReview');
+          reportProgress({ current: 1, total: 1, message: '复核完成' });
+          return { status: 'keywords_reviewed' };
+        },
         select: async ({ reportProgress }) => {
           calls.push('select');
           reportProgress({ current: 1, total: 1, message: '选品完成' });
@@ -337,13 +342,14 @@ describe('pipeline runtime runner', () => {
       }
     });
 
-    assert.deepEqual(calls, ['start:纯银项链', 'verify', 'select', 'generate', 'export:3']);
+    assert.deepEqual(calls, ['start:纯银项链', 'verify', 'keywordReview', 'select', 'generate', 'export:3']);
     assert.equal(result.runtimeStatus, 'completed');
     const runtime = readRuntimeState({ dataDir, runId: result.runId });
     assert.equal(runtime.mode, 'keyword');
-    assert.deepEqual(runtime.steps, ['start', 'verify', 'select', 'generate', 'export']);
+    assert.deepEqual(runtime.steps, ['start', 'verify', 'keywordReview', 'select', 'generate', 'export']);
     assert.equal(runtime.progress.start.status, 'completed');
     assert.equal(runtime.progress.verify.status, 'completed');
+    assert.equal(runtime.progress.keywordReview.status, 'completed');
     assert.equal(runtime.progress.select.status, 'completed');
     assert.equal(runtime.progress.generate.status, 'completed');
     assert.equal(runtime.progress.export.status, 'completed');
@@ -374,10 +380,10 @@ describe('pipeline runtime runner', () => {
     const runtime = readRuntimeState({ dataDir, runId: 'root_keyword_runtime' });
     assert.deepEqual(calls, ['mine', 'keywordReview']);
     assert.equal(result.runtimeStatus, 'blocked');
-    assert.deepEqual(runtime.steps, ['mine', 'keywordReview', 'verify', 'select', 'generate', 'export']);
+    assert.deepEqual(runtime.steps, ['mine', 'keywordReview', 'select', 'generate', 'export']);
     assert.equal(runtime.progress.mine.status, 'completed');
     assert.equal(runtime.progress.keywordReview.status, 'completed');
-    assert.equal(runtime.progress.verify.status, 'idle');
+    assert.equal(runtime.progress.verify, undefined);
   });
 
   it('prepares every exact keyword before verification', async () => {

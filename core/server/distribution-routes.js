@@ -1,4 +1,6 @@
 'use strict';
+const { createDistributionShopStore } = require('../distribution-shops');
+const { distributionMode, distributionTargetKey, distributionTargets } = require('../distribution-targets');
 
 /**
  * 注册铺货预检、提交、人工确认及任务控制接口。
@@ -11,6 +13,33 @@ function registerDistributionRoutes(app, deps) {
   let submissionPreparing = false;
   const { jobs, parseItems, checkDistributionReadiness, parsePositiveNumber, createRunId, distributeProducts, summarizePipelineRun, originalError } = deps;
   const { activeDistributionJobs, readDistributionJob, writeDistributionJob, updateDistributionJob, recheckDistributionJob, syncCompletedDistributionWorkflow } = jobs;
+  const shops = deps.shops || createDistributionShopStore();
+  const resolveSelection = body => {
+    const ids = body?.shopIds ?? (body?.shopId ? [body.shopId] : []);
+    const invalid = message => { throw Object.assign(new Error(message), { code: 'INVALID_SHOP' }); };
+    if (!Array.isArray(ids) || !ids.length || ids.some(id => typeof id !== 'string') || new Set(ids).size !== ids.length) invalid('请至少选择一个目标店铺，且不能重复选择。');
+    const targetShops = ids.map(id => {
+      const shop = shops.get(id);
+      const revision = body?.shopRevisions?.[id] || (id === body?.shopId ? body.shopRevision : null);
+      if (revision && revision !== shop.revision) invalid('店铺配置已修改，请刷新清单并重新确认目标店铺。');
+      return shop;
+    });
+    if (new Set(targetShops.map(shop => shop.port)).size !== 1) invalid('多店铺必须在同一个 Chrome 调试端口中登录，请调整店铺配置。');
+    if (new Set(targetShops.map(shop => shop.platformShopName)).size !== targetShops.length) invalid('不能重复选择同一个平台店铺。');
+    return { targetShops, shop: targetShops.length === 1 ? targetShops[0] : null, port: targetShops[0].port, distributionMode: distributionMode(body?.distributionMode).value };
+  };
+  app.get('/api/distribution/shops', (_req, res) => {
+    try { res.json({ ok: true, data: shops.list() }); }
+    catch (error) { res.status(500).json({ ok: false, error: error.message }); }
+  });
+  app.post('/api/distribution/shops', (req, res) => {
+    try { res.json({ ok: true, data: shops.save(req.body) }); }
+    catch (error) { res.status(400).json({ ok: false, error: error.message }); }
+  });
+  app.delete('/api/distribution/shops/:shopId', (req, res) => {
+    try { shops.remove(req.params.shopId); res.json({ ok: true, data: {} }); }
+    catch (error) { res.status(400).json({ ok: false, error: error.message }); }
+  });
 
   app.post('/api/distribution/check', async (req, res) => {
     try {
@@ -18,15 +47,16 @@ function registerDistributionRoutes(app, deps) {
       if (!input) {
         return res.status(400).json({ ok: false, error: '铺货清单为空，请先保留或加入至少 1 个商品。' });
       }
+      const selection = resolveSelection(req.body);
       const result = await checkDistributionReadiness({
+        ...selection,
         input,
         batchSize: parsePositiveNumber(req.body?.batchSize, 20),
-        port: parsePositiveNumber(req.body?.port, process.env.BROWSER_CDP_PORT || process.env.CHROME_DEBUG_PORT || 9222),
         skipBrowser: req.body?.skipBrowser === true
       });
       return res.json({ ok: true, data: result });
     } catch (err) {
-      const status = err && err.code === 'INVALID_ITEM' ? 400 : 500;
+      const status = ['INVALID_ITEM', 'INVALID_SHOP'].includes(err?.code) ? 400 : 500;
       return res.status(status).json({ ok: false, error: err.message });
     }
   });
@@ -52,18 +82,25 @@ function registerDistributionRoutes(app, deps) {
 
       submissionPreparing = true;
       ownsPreparation = true;
+      const selection = resolveSelection(req.body);
+      const jobId = `${req.body?.runId || createRunId()}-distribution`;
+      const previous = readDistributionJob(jobId);
+      if (previous && distributionTargets(previous).length && distributionTargetKey(previous) !== distributionTargetKey(selection)) {
+        return res.status(409).json({ ok: false, error: '此运行已有铺货记录，不能切换目标店铺或商品分配方式。请新建运行。' });
+      }
+      if (previous?.status === 'completed') return res.status(409).json({ ok: false, error: '此运行已经铺货完成，请勿重复提交。' });
       const readiness = await checkDistributionReadiness({
+        ...selection,
         input,
         batchSize: parsePositiveNumber(req.body?.batchSize, 20),
-        port: parsePositiveNumber(req.body?.port, process.env.BROWSER_CDP_PORT || process.env.CHROME_DEBUG_PORT || 9222)
       });
       if (!readiness.canSubmit) {
         return res.status(409).json({ ok: false, error: '铺货环境检查未通过。', data: readiness });
       }
 
-      const jobId = `${req.body?.runId || createRunId()}-distribution`;
       const job = writeDistributionJob({
         jobId,
+        ...selection,
         workflowRunId: req.body?.runId || '',
         status: 'submitting',
         requestedAction: null,
@@ -81,8 +118,8 @@ function registerDistributionRoutes(app, deps) {
 
       Promise.resolve().then(() => distributeProducts({
         input,
+        ...selection,
         batchSize: job.batchSize,
-        port: parsePositiveNumber(req.body?.port, process.env.BROWSER_CDP_PORT || process.env.CHROME_DEBUG_PORT || 9222),
         onProgress: async (event) => {
           const results = event.results || [];
           updateDistributionJob(jobId, {
@@ -126,9 +163,9 @@ function registerDistributionRoutes(app, deps) {
         activeDistributionJobs.delete(jobId);
       });
 
-      return res.json({ ok: true, data: { jobId, status: 'submitting', total: items.length } });
+      return res.json({ ok: true, data: { jobId, status: 'submitting', total: items.length, ...selection } });
     } catch (err) {
-      const status = err && err.code === 'INVALID_ITEM' ? 400 : 500;
+      const status = ['INVALID_ITEM', 'INVALID_SHOP'].includes(err?.code) ? 400 : 500;
       return res.status(status).json({ ok: false, error: err.message });
     } finally {
       if (ownsPreparation) submissionPreparing = false;
@@ -182,6 +219,7 @@ function registerDistributionRoutes(app, deps) {
       const job = writeDistributionJob({
         jobId,
         workflowRunId,
+        ...(req.body?.shopIds?.length || req.body?.shopId ? resolveSelection(req.body) : { targetShops: distributionTargets(existingJob || {}) }),
         mode: 'manual',
         status: 'completed',
         requestedAction: null,
@@ -207,7 +245,7 @@ function registerDistributionRoutes(app, deps) {
       syncCompletedDistributionWorkflow(job);
       return res.json({ ok: true, data: job });
     } catch (err) {
-      const status = err && err.code === 'INVALID_ITEM' ? 400 : /未找到|不存在/.test(String(err?.message || '')) ? 404 : 500;
+      const status = ['INVALID_ITEM', 'INVALID_SHOP'].includes(err?.code) ? 400 : /未找到|不存在/.test(String(err?.message || '')) ? 404 : 500;
       return res.status(status).json({ ok: false, error: err.message });
     }
   });

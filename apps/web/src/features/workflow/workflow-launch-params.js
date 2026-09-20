@@ -305,18 +305,6 @@ export function getWorkflowLaunchBlocker(mode, nodes = []) {
   }
   if (mode !== 'keyword') return null;
   const keywords = parseExactKeywords(params.keywordsText ?? params.keywords ?? params.keyword);
-  if (keywords.length > 20) {
-    const message = '一次最多输入 20 个关键词';
-    return {
-      status: 'blocked',
-      error: message,
-      logs: [{
-        timestamp: new Date().toISOString(),
-        level: 'error',
-        message: `[keywords_limit_exceeded] ${message}`
-      }]
-    };
-  }
   if (keywords.length > 0) return null;
   const message = '关键词不能为空';
   return {

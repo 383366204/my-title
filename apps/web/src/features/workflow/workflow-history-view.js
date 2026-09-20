@@ -1,4 +1,5 @@
 import { labelWorkflowNodeStatus } from "./workflow-node-view.js";
+import { SELECTION_MODES, selectionSourceSummary } from './selection-modes.js';
 
 export function getWorkflowRunActiveNodeId(run = {}) {
   const priority = ['blocked', 'failed', 'retryable', 'waiting_manual', 'paused', 'needs_review', 'waiting_confirmation', 'running', 'resuming', 'retrying'];
@@ -24,9 +25,7 @@ export function inferRunTitle(run = {}) {
   if (explicit) return explicit;
   const workflowId = String(run.workflow?.id || run.templateId || '').toLowerCase();
   const workflowMode = String(run.workflow?.mode || run.mode || '').toLowerCase();
-  if (workflowId === 'daily-selection-v1' || workflowMode === 'daily') return 'AI灵感词选品';
-  if (workflowId === 'exact-keyword-v1' || workflowMode === 'keyword') return '精确关键词选品流水线';
-  if (workflowId === 'root-keyword-selection-v1' || workflowMode === 'root-keyword') return '词根拓词选品流水线';
+  if (SELECTION_MODES.some(item => item.mode === workflowMode)) return '选品铺货';
   if (workflowId === 'sycm-order-sheet-v1' || workflowMode === 'order-sheet') return '制作刷单表格流水线';
   if (workflowId === 'competitor-analysis-v1' || workflowMode === 'competitor-analysis') return '同行分析流水线';
   const nodes = Array.isArray(run.workflow?.nodes) ? run.workflow.nodes : [];
@@ -159,10 +158,13 @@ export function getPipelineMonitorNodeStatus(stage = {}, summary = null) {
 }
 
 export function getUnifiedWorkflowHistoryItem(run = {}) {
+  const mode = run.workflow?.mode || run.mode || run.options?.mode;
+  const selection = SELECTION_MODES.find(item => item.mode === mode);
+  const startData = run.workflow?.nodes?.find(node => node.id === 'start')?.data || run.params || run.options || {};
   return {
     runId: run.runId || run.id || '',
     title: inferRunTitle(run),
-    subtitle: labelUnifiedRunStage(run),
+    subtitle: selection ? `${selection.label} · ${selectionSourceSummary({ ...startData, selectionMode: mode })}` : labelUnifiedRunStage(run),
     statusLabel: labelUnifiedRunStatus(run.status),
     visualState: getUnifiedRunVisualState(run),
     updatedAt: run.updatedAt || run.startedAt || run.createdAt || ''

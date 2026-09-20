@@ -198,11 +198,11 @@ function summaryInterventionForNode(summary, nodeId) {
     if (status === 'awaiting_keyword_review') {
       return {
         blocker: 'keyword_review_required',
-        actionHint: '请先人工筛选候选词。确认后的关键词才会进入生意参谋校验，避免浪费平台请求。',
+        actionHint: summary.options?.mode === 'root-keyword' ? '请查看机会评分并选择保留的词，未通过项可人工确认风险后放行。' : '请先人工筛选候选词。确认后的关键词才会进入生意参谋校验，避免浪费平台请求。',
         nextRecommendedAction: {
           action: 'confirm-keyword-review',
           label: '确认筛词结果',
-          description: '将当前保留的候选词写入人工筛词产物，然后继续生意参谋校验。'
+          description: summary.options?.mode === 'root-keyword' ? '确认保留的词和人工放行记录，然后继续货源选品。' : '将当前保留的候选词写入人工筛词产物，然后继续生意参谋校验。'
         }
       };
     }
@@ -301,6 +301,16 @@ function summaryInterventionForNode(summary, nodeId) {
     const manualMode = summary.runtime?.mode === 'manual' || summary.options?.mode === 'manual';
     const evaluatedCount = Number(summary.counts?.productsEvaluated || summary.funnel?.select?.input || 0);
     const rejectedCount = Number(summary.counts?.productRejected || summary.funnel?.select?.rejected || 0);
+    const searchFailure = (summary.previews?.selectedProducts || []).find(row => row?.status === 'select_failed');
+    if (searchFailure && evaluatedCount === 0) {
+      return {
+        blocker: 'product_search_failed',
+        actionHint: `货源查询失败，尚未取得商品标题或类目：${searchFailure.error || '上游请求失败'}。失败记录不是商品，请稍后重试。`,
+        platform: searchFailure.failureStage === 'extract' ? 'llm' : '1688',
+        platformStatus: 'product_search_failed',
+        nextRecommendedAction: { action: 'retry-node', label: '重试货源查询', description: '恢复查询服务后重新获取真实商品资料。' }
+      };
+    }
     const detailFailure = manualMode
       ? (summary.previews?.selectedProducts || []).find(row => row?.status === 'enrich_failed')
       : null;

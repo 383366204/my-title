@@ -46,6 +46,10 @@ async function fixture() {
     getPipelineRuntimeRunner: () => input => { calls.push(input); return app.locals.pipelineRuntimeRunner(input); },
     originalLog() {}, originalError() {},
     readRuntimeState: ({ runId }) => states.get(runId) || null,
+    prepareSupplement: input => {
+      if (!input.keywords?.length) throw new Error('请输入关键词');
+      return input.keywords;
+    },
     appendRunCandidates: async () => ({ added: 0 }),
     requestRuntimePause: () => ({ action: 'pause' }),
     requestRuntimeCancel: () => ({ action: 'cancel' }),
@@ -213,3 +217,26 @@ for (const action of ['resume', 'retry-node']) {
     } finally { running.resolve({}); await request?.catch(() => {}); await f.close(); }
   });
 }
+
+test('supplement query requires the review step and shares runtime occupancy', async () => {
+  const f = await fixture();
+  const running = deferred();
+  const route = '/api/workflows/runs/existing/keywords/query';
+  try {
+    assert.equal((await f.post(route, { keywords: ['杯垫'] })).status, 409);
+    f.states.set('existing', { mode: 'keyword', status: 'blocked', activeStep: 'keywordReview', steps: ['verify', 'keywordReview', 'select'], params: { port: 9222 } });
+    assert.equal((await f.post(route, {})).status, 400);
+    assert.equal(f.workbench.current, null);
+    f.app.locals.pipelineRuntimeRunner = () => running.promise;
+    assert.equal((await f.post(route, { keywords: ['杯垫'] })).status, 200);
+    assert.equal(f.calls.at(-1).resumeFromStep, 'keywordReview');
+    assert.deepEqual(f.calls.at(-1).params.reviewQueryKeywords, ['杯垫']);
+    assert.equal(f.calls.at(-1).params.port, 9222);
+    assert.equal((await f.post(route, { keywords: ['茶杯'] })).status, 409);
+    assert.equal((await f.post('/api/workflows/run')).status, 409);
+    running.resolve({ status: 'awaiting_keyword_review' });
+    await running.promise;
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(f.workbench.current, null);
+  } finally { running.resolve({}); await f.close(); }
+});

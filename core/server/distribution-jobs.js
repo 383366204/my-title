@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { distributionTargets } = require('../distribution-targets');
 
 /**
  * 创建服务实例内的铺货任务存储与终态同步服务。
@@ -52,12 +53,18 @@ function createDistributionJobs({ jobDir, getConfirmationReader, summarizePipeli
       progress: { ...(job.progress || {}), phase: 'checking_confirmation' }
     });
     try {
-      const confirmationCheck = await reader({ input });
+      const confirmationCheck = await reader({ input, shop: job.shop, targetShops: distributionTargets(job), distributionMode: job.distributionMode, port: job.port || job.shop?.port });
       const completed = confirmationCheck?.ok === true && confirmationCheck?.status === 'confirmed';
+      const confirmation = confirmationCheck?.confirmation;
+      const successIds = new Set(confirmation?.foundOfferIds || []);
+      const failedIds = new Set(confirmation?.issueOfferIds || []);
+      const completedCount = completed ? Number(job.total || 0) : (job.items || []).filter(item => successIds.has(item.offerId) && !failedIds.has(item.offerId)).length;
+      const failedCount = completed ? 0 : (job.items || []).filter(item => failedIds.has(item.offerId)).length;
       const next = updateDistributionJob(job.jobId, {
         status: completed ? 'completed' : 'completed_with_issues',
-        completed: completed ? Number(job.total || 0) : Number(job.completed || 0),
-        failed: completed ? 0 : Number(job.failed || 0),
+        completed: completedCount,
+        failed: failedCount,
+        pending: Math.max(0, Number(job.total || 0) - completedCount - failedCount),
         confirmationCheck,
         confirmationError: '',
         progress: { ...(job.progress || {}), phase: completed ? 'completed' : 'completed_with_issues' }
@@ -86,7 +93,7 @@ function createDistributionJobs({ jobDir, getConfirmationReader, summarizePipeli
     if (currentSummary?.status === 'workflow_complete' && currentRuntime?.status === 'completed') return;
     markRunDistributionComplete({
       runId: job.workflowRunId,
-      distributionResult: { ...(job.result || {}), method: job.mode || job.result?.method || 'automatic' }
+      distributionResult: { ...(job.result || {}), shop: job.shop || null, targetShops: distributionTargets(job), distributionMode: job.distributionMode, method: job.mode || job.result?.method || 'automatic' }
     });
     const runtime = currentRuntime || readRuntimeState({ runId: job.workflowRunId });
     if (!runtime) return;

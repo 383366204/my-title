@@ -10,13 +10,13 @@ const MAX_EXACT_KEYWORDS = 20;
  * @returns {string[]} Ordered, deduplicated keywords.
  */
 function normalizeExactKeywords(input, options = {}) {
-  const max = Number(options.max || MAX_EXACT_KEYWORDS);
+  const max = Number(options.max || 0);
   const values = (Array.isArray(input) ? input : [input])
     .flatMap(value => String(value || '').split(/[\r\n,，;；、]+/))
     .map(value => value.trim())
     .filter(Boolean);
   const keywords = [...new Set(values)];
-  if (keywords.length > max) {
+  if (max > 0 && keywords.length > max) {
     throw new Error(`精确关键词最多输入 ${max} 个`);
   }
   return keywords;

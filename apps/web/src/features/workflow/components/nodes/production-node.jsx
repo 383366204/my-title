@@ -4,6 +4,7 @@ import { Download, RefreshCw, Settings2 } from 'lucide-react';
 import { getWorkflowBlockerActions, getWorkflowRuntimeActions } from '../../workflow-node-actions.js';
 import { getWorkflowNodeViewModel } from '../../workflow-node-view.js';
 import { labelPipelineStatus } from '../../../../pipeline-labels.js';
+import { SelectionStartControls } from './selection-start-controls.jsx';
 import {
   WorkflowBlockerCallout,
   WorkflowNodeActionChip,
@@ -273,6 +274,7 @@ export const ProductionNode = ({ id, data }) => {
       }}
       onClick={data.onSelect}
       onKeyDown={(event) => {
+        if (event.target !== event.currentTarget) return;
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
           data.onSelect?.();
@@ -287,7 +289,8 @@ export const ProductionNode = ({ id, data }) => {
       </div>
       <div className="production-node-title">{label}</div>
       {data.description && <div className="production-node-description">{data.description}</div>}
-      {view.configSummary && <div className="workflow-node-config-summary">{view.configSummary}</div>}
+      {view.configSummary && !data.selectionMode && <div className="workflow-node-config-summary">{view.configSummary}</div>}
+      {id === 'start' && data.selectionMode && <SelectionStartControls data={data} />}
 
       <WorkflowProgressStrip view={view} />
       <WorkflowNodeOutputSummary view={view} />
@@ -300,6 +303,7 @@ export const ProductionNode = ({ id, data }) => {
       {!['artifact', 'inspect'].includes(view.primaryAction.action)
         && !(id === 'generateSheet' && data.sheetConfig === true)
         && !(id === 'start' && data.orderSheetConfig === true)
+        && !(id === 'start' && data.selectionMode)
         && <WorkflowNodeActionChip view={view} onAction={data.onAction} />}
       <WorkflowNodeSecondaryActions nodeId={id} data={data} />
       <WorkflowNodeArtifactButton data={data} />

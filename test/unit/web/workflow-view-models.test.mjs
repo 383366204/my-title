@@ -138,10 +138,10 @@ test('exact keyword input parses batches and launch params preserve all words', 
   assert.equal(getWorkflowLaunchBlocker('keyword', nodes), null);
 });
 
-test('exact keyword input blocks empty and oversized batches', () => {
+test('exact keyword input blocks empty but accepts larger batches', () => {
   assert.match(getWorkflowLaunchBlocker('keyword', [{ id: 'start', data: { keywordsText: '' } }]).error, /不能为空/);
   const keywordsText = Array.from({ length: 21 }, (_, index) => `关键词${index + 1}`).join('\n');
-  assert.match(getWorkflowLaunchBlocker('keyword', [{ id: 'start', data: { keywordsText } }]).error, /最多输入 20 个/);
+  assert.equal(getWorkflowLaunchBlocker('keyword', [{ id: 'start', data: { keywordsText } }]), null);
 });
 
 test('root keyword input preserves large batches and exposes the safe-query summary', () => {
@@ -572,7 +572,7 @@ test('getWorkflowNodeAction maps review and terminal states to node actions', ()
     tone: 'warn'
   });
   assert.deepEqual(getWorkflowNodeAction('keywordReview', 'awaiting_keyword_review'), {
-    label: '输入/筛词',
+    label: '筛选关键词',
     action: 'keyword-review',
     tone: 'warn'
   });
@@ -1107,7 +1107,7 @@ test('getUnifiedWorkflowHistoryItem normalizes pipeline and workflow runs for on
     runId: '2026-07-06-005614',
     status: 'blocked',
     workflow: { id: 'daily-selection-v1', mode: 'daily', nodes: [{ id: 'start', data: { label: '开始' } }] }
-  }).title, 'AI灵感词选品');
+  }).title, '选品铺货');
 
   assert.equal(getUnifiedWorkflowHistoryItem({
     runId: '2026-07-06-005614',

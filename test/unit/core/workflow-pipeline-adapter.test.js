@@ -7,7 +7,7 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert');
 
 const { WORKFLOW_NODE_IDS } = require('../../../core/workflow/pipeline-definition-common');
-const { listProductionWorkflowTemplates } = require('../../../core/workflow/pipeline-templates');
+const { listProductionWorkflowTemplates, listProductionWorkflowVariants } = require('../../../core/workflow/pipeline-templates');
 const {
   sanitizeWorkflowParams,
   buildPipelineCliArgs,
@@ -64,22 +64,22 @@ describe('workflow pipeline adapter', () => {
       end: 'end'
     });
 
-    const templates = listProductionWorkflowTemplates();
+    const templates = listProductionWorkflowVariants();
 
-    assert.deepEqual(templates.map(template => template.id), ['daily-selection-v1', 'exact-keyword-v1', 'root-keyword-selection-v1', 'manual-selection-v2', 'batch-watermark-v1', 'sycm-order-sheet-v1', 'uploaded-review-sheet-v1', 'competitor-analysis-v1']);
-    assert.deepEqual(templates.map(template => template.entryLabel), ['入口：动态灵感', '入口：手动关键词', '入口：手动词根', '入口：1688链接（关键词可选）', '入口：本地图片或文件夹', '入口：商品排行或指定商品', '入口：已执行的刷单表', '入口：同行分享链接']);
-    const rootTemplate = templates.find(template => template.id === 'root-keyword-selection-v1');
+    assert.deepEqual(templates.map(template => template.id), ['selection-v1', 'selection-v1', 'selection-v1', 'manual-selection-v2', 'batch-watermark-v1', 'sycm-order-sheet-v1', 'uploaded-review-sheet-v1', 'competitor-analysis-v1']);
+    assert.deepEqual(templates.map(template => template.entryLabel), ['入口：选词与货源铺货', '入口：选词与货源铺货', '入口：选词与货源铺货', '入口：1688链接（关键词可选）', '入口：本地图片或文件夹', '入口：商品排行或指定商品', '入口：已执行的刷单表', '入口：同行分享链接']);
+    const rootTemplate = templates.find(template => template.mode === 'root-keyword');
     const manualTemplate = templates.find(template => template.id === 'manual-selection-v2');
     const orderTemplate = templates.find(template => template.id === 'sycm-order-sheet-v1');
     const reviewTemplate = templates.find(template => template.id === 'uploaded-review-sheet-v1');
     const competitorTemplate = templates.find(template => template.id === 'competitor-analysis-v1');
-    assert.match(templates[0].scenarioLabel, /每天自动发现/);
-    assert.match(templates[1].scenarioLabel, /明确目标词/);
-    assert.match(templates[0].flowSummary, /灵感选词/);
-    assert.match(templates[1].flowSummary, /跳过挖词/);
-    assert.match(templates[0].modeHint, /人群、职业、爱好/);
-    assert.match(templates[1].modeHint, /逐词验真/);
-    assert.match(rootTemplate.flowSummary, /分时拓词/);
+    assert.equal(listProductionWorkflowTemplates().filter(item => item.id === 'selection-v1').length, 1);
+    assert.equal(templates[1].mode, 'keyword');
+    assert.match(templates[0].flowSummary, /机会人工复核/);
+    assert.equal(templates[1].workflow.nodes.some(node => node.id === 'mine'), false);
+    assert.match(templates[0].modeHint, /AI选词/);
+    assert.match(templates[1].modeHint, /精确关键词/);
+    assert.equal(rootTemplate.workflow.nodes.find(node => node.id === 'start').data.selectionMode, 'root-keyword');
     assert.match(manualTemplate.flowSummary, /录入链接/);
     assert.match(manualTemplate.flowSummary, /生意参谋验真/);
     assert.match(orderTemplate.flowSummary, /获取商品资料/);
@@ -131,10 +131,10 @@ describe('workflow pipeline adapter', () => {
       'rootLimit',
       'rootMode',
       'select',
+      'selectionMode',
       'source',
       'stepIndex',
-      'stepTotal',
-      'verify'
+      'stepTotal'
     ]);
     assert.equal(keywordStart.data.keyword, '');
     assert.equal(keywordStart.data.keywordsText, '');
@@ -147,7 +147,6 @@ describe('workflow pipeline adapter', () => {
       WORKFLOW_NODE_IDS.start,
       WORKFLOW_NODE_IDS.mine,
       WORKFLOW_NODE_IDS.keywordReview,
-      WORKFLOW_NODE_IDS.verify,
       WORKFLOW_NODE_IDS.select,
       WORKFLOW_NODE_IDS.generate,
       WORKFLOW_NODE_IDS.export,
@@ -156,8 +155,7 @@ describe('workflow pipeline adapter', () => {
     assert.deepEqual(templates[0].workflow.edges.map(edge => `${edge.source}->${edge.target}`), [
       'start->mine',
       'mine->keywordReview',
-      'keywordReview->verify',
-      'verify->select',
+      'keywordReview->select',
       'select->generate',
       'generate->export',
       'export->end'
@@ -166,6 +164,7 @@ describe('workflow pipeline adapter', () => {
     assert.deepEqual(templates[1].workflow.nodes.map(node => node.id), [
       WORKFLOW_NODE_IDS.start,
       WORKFLOW_NODE_IDS.verify,
+      WORKFLOW_NODE_IDS.keywordReview,
       WORKFLOW_NODE_IDS.select,
       WORKFLOW_NODE_IDS.generate,
       WORKFLOW_NODE_IDS.export,
@@ -173,7 +172,8 @@ describe('workflow pipeline adapter', () => {
     ]);
     assert.deepEqual(templates[1].workflow.edges.map(edge => `${edge.source}->${edge.target}`), [
       'start->verify',
-      'verify->select',
+      'verify->keywordReview',
+      'keywordReview->select',
       'select->generate',
       'generate->export',
       'export->end'
@@ -228,7 +228,7 @@ describe('workflow pipeline adapter', () => {
   });
 
   it('keeps production workflow template nodes compact and ordered for canvas fit', () => {
-    const templates = listProductionWorkflowTemplates();
+    const templates = listProductionWorkflowVariants();
 
     for (const template of templates) {
       const nodes = template.workflow.nodes;
@@ -279,6 +279,7 @@ describe('workflow pipeline adapter', () => {
         ? [
             WORKFLOW_NODE_IDS.start,
             WORKFLOW_NODE_IDS.verify,
+            WORKFLOW_NODE_IDS.keywordReview,
             WORKFLOW_NODE_IDS.select,
             WORKFLOW_NODE_IDS.generate,
             WORKFLOW_NODE_IDS.export,
@@ -297,13 +298,12 @@ describe('workflow pipeline adapter', () => {
             WORKFLOW_NODE_IDS.start,
             WORKFLOW_NODE_IDS.mine,
             WORKFLOW_NODE_IDS.keywordReview,
-            WORKFLOW_NODE_IDS.verify,
             WORKFLOW_NODE_IDS.select,
             WORKFLOW_NODE_IDS.generate,
             WORKFLOW_NODE_IDS.export,
             WORKFLOW_NODE_IDS.end
           ];
-      assert.deepEqual(nodes.map(node => node.id), expectedIds);
+      assert.deepEqual(nodes.map(node => node.id), template.mode === 'root-keyword' ? expectedIds.filter(id => id !== WORKFLOW_NODE_IDS.verify) : expectedIds);
       assert.equal(uniquePositions.size, nodes.length, 'template nodes should not share the same canvas position');
       assert.ok(maxY - minY <= 80, `template ${template.id} should read as a single horizontal pipeline`);
       assert.ok(maxX - minX <= 1820, `template ${template.id} should not keep legacy wide spacing`);
@@ -331,21 +331,21 @@ describe('workflow pipeline adapter', () => {
   });
 
   it('validates production workflow graphs without the legacy node registry', () => {
-    const templates = listProductionWorkflowTemplates();
+    const templates = listProductionWorkflowVariants();
     const [template, keywordTemplate] = templates;
-    const rootKeywordTemplate = templates.find(item => item.id === 'root-keyword-selection-v1');
+    const rootKeywordTemplate = templates.find(item => item.mode === 'root-keyword');
 
     assert.deepEqual(validateProductionWorkflow(template.workflow), {
       ok: true,
       errors: [],
       production: true,
-      templateId: 'daily-selection-v1'
+      templateId: 'selection-v1'
     });
     assert.deepEqual(validateProductionWorkflow(keywordTemplate.workflow), {
       ok: true,
       errors: [],
       production: true,
-      templateId: 'exact-keyword-v1'
+      templateId: 'selection-v1'
     });
     assert.deepEqual(validateProductionWorkflow(rootKeywordTemplate.workflow, {
       templateId: rootKeywordTemplate.id,
@@ -354,7 +354,7 @@ describe('workflow pipeline adapter', () => {
       ok: true,
       errors: [],
       production: true,
-      templateId: 'root-keyword-selection-v1'
+      templateId: 'selection-v1'
     });
 
     const invalid = validateProductionWorkflow({
@@ -367,9 +367,9 @@ describe('workflow pipeline adapter', () => {
   });
 
   it('resolves legacy workflow launch from template or keyword-bearing nodes', () => {
-    const templates = listProductionWorkflowTemplates();
+    const templates = listProductionWorkflowVariants();
     assert.deepEqual(resolveProductionWorkflowLaunch({
-      templateId: 'daily-selection-v1',
+      templateId: 'selection-v1',
       params: { mine: 3 }
     }), {
       mode: 'daily',
@@ -479,7 +479,7 @@ describe('workflow pipeline adapter', () => {
       pages: 5,
       minBlueRows: 0,
       fallbackHot: false,
-      autoApproveKeywords: true,
+      autoApproveKeywords: false,
       autoExpandVerify: true,
       verifyReserve: 8,
       autoAllowReviewKeywords: true,
@@ -532,7 +532,7 @@ describe('workflow pipeline adapter', () => {
     assert.equal(rootParams.sycmMaxIntervalMs, 180_000);
     assert.equal(rootParams.sycmBatchSize, 8);
     assert.equal(rootParams.sycmMinBatchCooldownMs, 600_000);
-    assert.equal(rootParams.sycmMaxPages, 9999);
+    assert.equal(rootParams.sycmMaxPages, 3);
     assert.throws(() => sanitizeWorkflowParams('root-keyword', { rootsText: '  ' }), /词根不能为空/);
     assert.deepEqual(sanitizeWorkflowParams('competitor-analysis', {
       competitorText: '  https://m.tb.cn/h.example  ',
@@ -874,7 +874,7 @@ describe('workflow pipeline adapter', () => {
 
     assert.equal(run.runId, 'review_run');
     assert.equal(run.status, 'needs_review');
-    assert.equal(run.workflow.id, 'daily-selection-v1');
+    assert.equal(run.workflow.id, 'selection-v1');
     assert.equal(run.requiresUserAction, true);
     assert.deepEqual(run.policy, { version: 2, productGate: 'strict' });
     assert.deepEqual(run.funnel.export, { input: 2, passed: 1, review: 1 });
@@ -1445,7 +1445,7 @@ describe('workflow pipeline adapter', () => {
   });
 
   it('resolves a validated workflow snapshot and rejects template mismatches', () => {
-    const templates = listProductionWorkflowTemplates();
+    const templates = listProductionWorkflowVariants();
     const daily = templates.find(item => item.mode === 'daily');
     const launch = resolveProductionWorkflowLaunch({
       templateId: daily.id,
@@ -1462,7 +1462,7 @@ describe('workflow pipeline adapter', () => {
     assert.equal(definition.mode, 'daily');
     assert.deepEqual(definition.nodes, daily.workflow.nodes);
 
-    const rootKeyword = templates.find(item => item.id === 'root-keyword-selection-v1');
+    const rootKeyword = templates.find(item => item.mode === 'root-keyword');
     const rootLaunch = resolveProductionWorkflowLaunch({
       templateId: rootKeyword.id,
       mode: rootKeyword.mode,
@@ -1476,9 +1476,9 @@ describe('workflow pipeline adapter', () => {
     assert.equal(rootDefinition.mode, 'root-keyword');
 
     assert.throws(() => resolveProductionWorkflowDefinition({
-      templateId: 'exact-keyword-v1',
+      templateId: 'selection-v1',
       workflow: daily.workflow
-    }, launch), /工作流定义与所选模板不一致/);
+    }, { ...launch, mode: 'keyword' }), /工作流定义与所选模板不一致/);
   });
 
   it('rejects unsafe workflow run ids for snapshots and events', () => {

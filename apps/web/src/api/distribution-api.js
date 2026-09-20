@@ -7,4 +7,7 @@ export const submitDistribution = (input) => requestJson('/api/distribution/subm
 export const completeManualDistribution = (input) => requestJson('/api/distribution/manual-complete', { method: 'POST', body: input });
 export const getDistributionRun = (jobId) => requestJson(distributionRunPath(jobId));
 export const controlDistributionRun = (jobId, action) => requestJson(`${distributionRunPath(jobId)}/${action}`, { method: 'POST' });
-export const startDistributionChrome = () => requestJson('/api/distribution/chrome/start', { method: 'POST', body: {} });
+export const startDistributionChrome = (input = {}) => requestJson('/api/distribution/chrome/start', { method: 'POST', body: input });
+export const listDistributionShops = () => requestJson('/api/distribution/shops');
+export const saveDistributionShop = input => requestJson('/api/distribution/shops', { method: 'POST', body: input });
+export const deleteDistributionShop = id => requestJson(`/api/distribution/shops/${encodeURIComponent(id)}`, { method: 'DELETE' });

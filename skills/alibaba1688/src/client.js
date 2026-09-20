@@ -195,7 +195,9 @@ class Alibaba1688Client {
 
         const response = await axios.post(url, body, {
           headers: signHeaders,
-          timeout
+          timeout,
+          // 国内接口默认直连，避免继承为其他服务设置的失效本地代理。
+          ...(process.env.ALI1688_PROXY_MODE === 'system' ? {} : { proxy: false })
         });
 
         if (!response.data || response.data.success !== true) {

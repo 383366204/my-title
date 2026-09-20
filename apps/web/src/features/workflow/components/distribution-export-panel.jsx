@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Check,
   ChevronRight,
@@ -16,6 +16,7 @@ import { DistributionCopyButton } from './distribution/distribution-copy-button.
 import { usePersistentMap } from '../hooks/use-persistent-map.js';
 import { ExecutionPanel } from './distribution/execution-panel.jsx';
 import { useDistributionExportData } from './distribution/use-distribution-export-data.js';
+import { DistributionShopPicker } from './distribution/shop-picker.jsx';
 
 /**
  * Component to render distribution export panel with manual copy and automatic submission workflow.
@@ -62,6 +63,10 @@ export const DistributionExportPanel = ({
   });
 
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [selectedShops, setSelectedShops] = useState(null);
+  const [selectedMode, setSelectedMode] = useState('random-average');
+  const [editingShop, setEditingShop] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [distributionCheck, setDistributionCheck] = useState({ status: 'idle', result: null, error: '' });
   const [manualCopiedText, setManualCopiedText] = useState('');
   const [manualCompleteStatus, setManualCompleteStatus] = useState({ status: 'idle', message: '' });
@@ -70,7 +75,6 @@ export const DistributionExportPanel = ({
   const manualText = buildDistributionText(activeRows, copyFormat.value);
   const copyIssues = distributionCopyIssues(activeRows, copyFormat.value);
   const canManualCopy = Boolean(currentRunId) && activeRows.length > 0 && copyIssues.length === 0;
-  const copyIdentity = JSON.stringify([currentRunId, copyFormat.value, manualText, copyTextValue]);
   const changeCopyFormat = format => {
     setCopyPreference({ format });
     setManualCompleteStatus({ status: 'idle', message: '' });
@@ -97,20 +101,32 @@ export const DistributionExportPanel = ({
     onJobChange: onDistributionJobChange
   });
 
+  const lockedShops = useMemo(() => distributionJob?.targetShops || (distributionJob?.shop ? [distributionJob.shop] : null), [distributionJob?.targetShops, distributionJob?.shop]);
+  const targetShops = lockedShops || selectedShops || [];
+  const distributionMode = distributionJob?.distributionMode || selectedMode;
+  const selection = { shopIds: targetShops.map(shop => shop.id), shopRevisions: Object.fromEntries(targetShops.map(shop => [shop.id, shop.revision])), distributionMode };
+  const selectionIdentity = JSON.stringify(selection);
+  const copyIdentity = JSON.stringify([currentRunId, copyFormat.value, manualText, copyTextValue, selectionIdentity]);
   const manualCopyCurrent = Boolean(manualText) && manualCopiedText === copyIdentity;
+  const targetsValid = targetShops.length > 0 && targetShops.every(shop => shop.enabled) && new Set(targetShops.map(shop => shop.port)).size === 1;
+  const shopBusy = submitting || distributionCheck.status === 'loading' || ['submitting', 'checking_confirmation'].includes(distributionJob?.status);
 
   useEffect(() => {
     setDistributionCheck({ status: 'idle', result: null, error: '' });
-  }, [copyTextValue]);
+  }, [copyTextValue, selectionIdentity]);
 
   const checkDistribution = async () => {
+    if (editingShop || !targetsValid) {
+      setDistributionCheck({ status: 'error', result: null, error: '请选择同一 Chrome 调试端口下的已启用店铺。' });
+      return null;
+    }
     if (!copyTextValue) {
       setDistributionCheck({ status: 'error', result: null, error: '当前清单为空，请先保留或加入至少 1 个商品。' });
       return null;
     }
     setDistributionCheck({ status: 'loading', result: null, error: '' });
     try {
-      const payload = await checkDistributionRequest({ input: copyTextValue });
+      const payload = await checkDistributionRequest({ input: copyTextValue, ...selection });
       setDistributionCheck({ status: 'ready', result: payload, error: '' });
       return payload;
     } catch (error) {
@@ -121,16 +137,17 @@ export const DistributionExportPanel = ({
 
   const submitDistribution = async (checkResult = distributionCheck.result) => {
     if (!copyTextValue || !checkResult?.canSubmit) return;
-    const job = await submitDistributionJob({ input: copyTextValue, runId: currentRunId || '' });
+    const job = await submitDistributionJob({ input: copyTextValue, runId: currentRunId || '', ...selection });
     if (job) setPreviewOpen(false);
   };
 
   const confirmAndSubmitDistribution = async () => {
-    if (!copyTextValue || distributionJob?.status === 'submitting') return;
-    const checkResult = distributionCheck.result?.canSubmit
-      ? distributionCheck.result
-      : await checkDistribution();
-    if (checkResult?.canSubmit) await submitDistribution(checkResult);
+    if (!copyTextValue || editingShop || shopBusy || distributionJob?.status === 'completed') return;
+    setSubmitting(true);
+    try {
+      const checkResult = await checkDistribution();
+      if (checkResult?.canSubmit) await submitDistribution(checkResult);
+    } finally { setSubmitting(false); }
   };
 
   const copyManualDistribution = async () => {
@@ -142,9 +159,11 @@ export const DistributionExportPanel = ({
         status: 'copied',
         message: `已复制 ${activeRows.length} 条：${copyFormat.label}。完成外部铺货后，再点击“标记人工铺货完成”。`
       });
+      return true;
     } catch (error) {
       setManualCopiedText('');
       setManualCompleteStatus({ status: 'error', message: `复制失败：${error.message}` });
+      return false;
     }
   };
 
@@ -153,10 +172,10 @@ export const DistributionExportPanel = ({
     const categoryReminder = manualMissingCategoryCount > 0
       ? `其中 ${manualMissingCategoryCount} 条类目为空，请确认你已在人工铺货时选择了正确类目。\n\n`
       : '';
-    const confirmed = window.confirm(`${categoryReminder}确认已经按照刚复制的清单，手动完成 ${activeRows.length} 个商品的铺货？确认后本次流水线将进入完成状态。`);
+    const confirmed = window.confirm(`${categoryReminder}确认已经按照刚复制的清单，${targetShops.length ? `在「${targetShops.map(shop => shop.name).join('、')}」` : ''}手动完成 ${activeRows.length} 个商品的铺货？确认后本次流水线将进入完成状态。`);
     if (!confirmed) return;
     setManualCompleteStatus({ status: 'completing', message: '正在记录人工铺货结果...' });
-    const job = await completeManualDistributionJob({ input: copyTextValue, runId: currentRunId });
+    const job = await completeManualDistributionJob({ input: copyTextValue, runId: currentRunId, ...selection });
     if (job) {
       setManualCompleteStatus({ status: 'completed', message: '人工铺货已确认，流水线正在进入完成节点。' });
       setPreviewOpen(false);
@@ -167,7 +186,7 @@ export const DistributionExportPanel = ({
   };
 
   const startDistributionChrome = async () => {
-    await startDistributionChromeJob();
+    await startDistributionChromeJob({ port: targetShops[0]?.port });
   };
 
   const distributionNeedsChrome = distributionCheck.result?.blockers?.includes('browser_cdp_unavailable');
@@ -178,8 +197,9 @@ export const DistributionExportPanel = ({
 
   const previewPanelContent = (
     <>
+      <DistributionShopPicker key={currentRunId || 'new'} value={selectedShops} onChange={setSelectedShops} onEditingChange={setEditingShop} disabled={shopBusy} lockedShops={lockedShops} mode={distributionMode} onModeChange={setSelectedMode} />
       <div className="export-preview-actions">
-        <DistributionCopyButton label="复制铺货内容" primary disabled={!canManualCopy} onCopy={copyManualDistribution} format={copyFormat} onFormatChange={changeCopyFormat} />
+        <DistributionCopyButton label="复制铺货内容" primary disabled={!canManualCopy} onCopy={copyManualDistribution} format={copyFormat} onFormatChange={changeCopyFormat} successMessage={`已复制 ${activeRows.length} 条铺货内容，格式：${copyFormat.label}`} />
         <button type="button" className="node-secondary-button success" disabled={!manualCopyCurrent || !canRecordManualComplete || manualCompleteStatus.status === 'completing' || distributionJob?.status === 'submitting'} onClick={confirmManualDistributionComplete}>
           {manualCompleteStatus.status === 'completing' ? <RefreshCw size={13} className="animate-spin" /> : <Check size={13} />}
           {manualCompleteStatus.status === 'completing' ? '正在确认' : '标记人工铺货完成'}
@@ -187,16 +207,18 @@ export const DistributionExportPanel = ({
         <button type="button" className="node-secondary-button" disabled={removedRows.length === 0} onClick={resetRemoved}>
           <RefreshCw size={13} /> 恢复全部
         </button>
-        <button type="button" className="node-primary-button danger" disabled={!copyTextValue || distributionJob?.status === 'submitting' || distributionCheck.status === 'loading'} onClick={confirmAndSubmitDistribution}>
+        <button type="button" className="node-primary-button danger" disabled={!copyTextValue || editingShop || !targetsValid || shopBusy || distributionJob?.status === 'completed'} onClick={confirmAndSubmitDistribution}>
           {distributionCheck.status === 'loading' ? <RefreshCw size={13} className="animate-spin" /> : <Play size={13} />}
           {distributionCheck.status === 'loading' ? '正在检查铺货环境' : '确认并开始自动铺货'}
         </button>
       </div>
       <div className="export-preview-status">
+        {targetShops.length > 0 && !targetsValid && <div role="alert" className="distribution-modal-feedback blocked">请选择已启用且使用同一 Chrome 调试端口的店铺。</div>}
+        <ExecutionPanel distributionJob={distributionJob} activeRowsCount={activeRows.length} distributionSubmitError={distributionSubmitError} onControlJob={controlDistribution} />
         {copyValidation}
         {!canRecordManualComplete && activeRows.length > 0 && <div className="distribution-modal-feedback checking">标记人工铺货完成前，清单仍需补齐链接和标题。</div>}
         {manualCopiedText && !manualCopyCurrent && <div className="distribution-modal-feedback blocked">清单已经修改，请重新复制最新内容后再确认完成。</div>}
-        {manualCompleteStatus.message && (manualCopyCurrent || manualCompleteStatus.status === 'error') && <div role="status" className={`distribution-modal-feedback ${manualCompleteStatus.status === 'error' ? 'blocked' : 'checking'}`}>{manualCompleteStatus.message}</div>}
+        {manualCompleteStatus.status !== 'copied' && manualCompleteStatus.message && (manualCopyCurrent || manualCompleteStatus.status === 'error') && <div role="status" className={`distribution-modal-feedback ${manualCompleteStatus.status === 'error' ? 'blocked' : 'checking'}`}>{manualCompleteStatus.message}</div>}
         {distributionCheck.status === 'loading' && (
           <div className="distribution-modal-feedback checking">
             <RefreshCw size={13} className="animate-spin" /> 正在检查清单、Chrome 调试端口和登录状态，请稍候...
@@ -208,6 +230,7 @@ export const DistributionExportPanel = ({
         {distributionCheck.status === 'ready' && !distributionCheck.result?.canSubmit && (
           <div className="distribution-modal-feedback blocked">
             <strong>暂时无法开始自动铺货</strong>
+            {distributionCheck.result?.shopError && <span>{distributionCheck.result.shopError}</span>}
             {Array.isArray(distributionCheck.result?.blockers) && distributionCheck.result.blockers.length > 0
               ? <span>阻塞原因：{distributionCheck.result.blockers.map(labelDistributionBlocker).join('，')}</span>
               : <span>请检查 Chrome 登录状态、CDP 端口和清单格式。</span>}
@@ -308,7 +331,7 @@ export const DistributionExportPanel = ({
             <strong>复制清单后手动铺货</strong>
           </div>
           <div className="distribution-method-actions">
-            <DistributionCopyButton label="人工复制铺货" disabled={!canManualCopy} onCopy={copyManualDistribution} format={copyFormat} onFormatChange={changeCopyFormat} />
+            <DistributionCopyButton label="人工复制铺货" disabled={!canManualCopy} onCopy={copyManualDistribution} format={copyFormat} onFormatChange={changeCopyFormat} successMessage={`已复制 ${activeRows.length} 条铺货内容，格式：${copyFormat.label}`} />
             <button type="button" className="node-secondary-button success" disabled={!manualCopyCurrent || !canRecordManualComplete || manualCompleteStatus.status === 'completing' || distributionJob?.status === 'submitting'} onClick={confirmManualDistributionComplete}>
               {manualCompleteStatus.status === 'completing' ? <RefreshCw size={13} className="animate-spin" /> : <Check size={13} />}
               {manualCompleteStatus.status === 'completing' ? '正在确认' : '标记人工铺货完成'}
@@ -317,7 +340,7 @@ export const DistributionExportPanel = ({
           {copyValidation}
           {!canRecordManualComplete && activeRows.length > 0 && <small className="distribution-method-warning">标记人工铺货完成前，清单仍需补齐链接和标题。</small>}
           {manualCopiedText && !manualCopyCurrent && <small className="distribution-method-warning">清单已经修改，请重新复制最新内容后再确认完成。</small>}
-          {manualCompleteStatus.message && (manualCopyCurrent || manualCompleteStatus.status === 'error') && <small role="status" className={`distribution-method-feedback ${manualCompleteStatus.status}`}>{manualCompleteStatus.message}</small>}
+          {manualCompleteStatus.status !== 'copied' && manualCompleteStatus.message && (manualCopyCurrent || manualCompleteStatus.status === 'error') && <small role="status" className={`distribution-method-feedback ${manualCompleteStatus.status}`}>{manualCompleteStatus.message}</small>}
           {manualCompleteStatus.status === 'error' && distributionSubmitError && <small className="distribution-method-feedback error">{distributionSubmitError}</small>}
         </article>
         <article className="distribution-method-card automatic">
@@ -327,9 +350,9 @@ export const DistributionExportPanel = ({
             <p>先检查 Chrome、登录状态和重复批次，再在清单预览中确认提交。</p>
           </div>
           <div className="distribution-method-actions">
-            <button type="button" className="node-secondary-button" disabled={!copyTextValue || distributionCheck.status === 'loading'} onClick={checkDistribution}>
+            <button type="button" className="node-secondary-button" disabled={!copyTextValue || shopBusy} onClick={() => setPreviewOpen(true)}>
               {distributionCheck.status === 'loading' ? <RefreshCw size={13} className="animate-spin" /> : <Check size={13} />}
-              检查自动铺货环境
+              选择店铺并检查
             </button>
           </div>
         </article>

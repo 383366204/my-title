@@ -95,7 +95,7 @@ export function WorkflowCanvasWorkspace({
                     disabled={nodes.length === 0}
                     className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-bold rounded-md flex items-center gap-1.5 shadow-lg shadow-blue-900/20 transition-all"
                   >
-                    <RotateCcw size={13} /> 再次运行
+                    <RotateCcw size={13} /> {nodes.some(node => node.data?.selectionMode) ? '再选一批' : '再次运行'}
                   </button>
                 </>
               ) : (

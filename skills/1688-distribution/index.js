@@ -2,6 +2,8 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { withAgentResponseFields } = require('../../core/agent-response');
+const { ensureSelectedShop, submitSelectedShop } = require('./shop-selection');
+const { distributionTargets, distributionMode } = require('../../core/distribution-targets');
 
 const DEFAULT_CDP_PORT = 9222;
 const DEFAULT_BASE_URL = 'https://item.jnesoft.com/';
@@ -122,13 +124,39 @@ function normalizeItemsForInput(items) {
 }
 
 function createBatchHash(items, options = {}) {
+  const targets = distributionTargets(options);
+  const mode = distributionMode(options.distributionMode).value;
   const payload = JSON.stringify({
     items: items.map(item => ({ url: item.url, title: item.title || '' })),
     categories: items.map(item => item.category || ''),
-    distributionMode: options.distributionMode || DISTRIBUTION_AUTO,
-    shops: options.shops || SHOP_SELECTION_AUTO
+    distributionMode: mode === 'random-average' ? DISTRIBUTION_AUTO : mode,
+    shops: targets.length === 1 ? { name: targets[0].platformShopName } : targets.length ? targets.map(shop => shop.platformShopName).sort() : options.shops || SHOP_SELECTION_AUTO
   });
   return crypto.createHash('sha256').update(payload).digest('hex');
+}
+
+/**
+ * 平均分配时均衡批次大小，避免尾批商品少于店铺数。
+ * @param {object[]} items 铺货商品。
+ * @param {object} options 目标店铺、批大小和分配方式。
+ * @returns {object[][]} 不超过批大小的有序批次。
+ */
+function splitDistributionBatches(items, options = {}) {
+  const size = Math.max(1, parseInt(options.batchSize, 10) || 20);
+  const targets = distributionTargets(options);
+  const mode = distributionMode(options.distributionMode).value;
+  if (!items.length || targets.length < 2 || !mode.endsWith('-average')) return splitBatches(items, size);
+  const count = Math.ceil(items.length / size);
+  const smallest = Math.floor(items.length / count);
+  if (smallest < targets.length) throw Object.assign(new Error(`平均分配时每批商品数不能少于所选 ${targets.length} 家店铺，请增加商品、减少店铺或选择重复分配。`), { code: 'INVALID_ITEM' });
+  const batches = [];
+  let offset = 0;
+  for (let index = 0; index < count; index++) {
+    const length = smallest + (index < items.length % count ? 1 : 0);
+    batches.push(items.slice(offset, offset + length));
+    offset += length;
+  }
+  return batches;
 }
 
 function resolveDistributionMode({ itemCount, shopCount, preferredMode = DISTRIBUTION_AUTO } = {}) {
@@ -136,7 +164,7 @@ function resolveDistributionMode({ itemCount, shopCount, preferredMode = DISTRIB
   if (preferred === DISTRIBUTION_AUTO) {
     return DISTRIBUTION_RANDOM_AVERAGE;
   }
-  return preferred;
+  return distributionMode(preferred).value;
 }
 
 function resolveShopSelectionMode({ itemCount, shopCount, preferredShops = SHOP_SELECTION_AUTO } = {}) {
@@ -894,27 +922,38 @@ async function readShopSelectionState(client) {
   `);
 }
 
-async function selectDistributionModeAndAllShopsStable(client, { itemCount = 0, distributionMode = DISTRIBUTION_AUTO } = {}) {
+/**
+ * 按平台原文选择分配方式并核对目标店铺，不静默替换用户选择。
+ * @param {object} client 页面客户端。
+ * @param {object} options 商品数量、分配方式和目标店铺。
+ * @returns {Promise<object>} 已确认的页面选择。
+ */
+async function selectDistributionModeAndAllShopsStable(client, { itemCount = 0, distributionMode: preferredMode = DISTRIBUTION_AUTO, shop, targetShops } = {}) {
   await client.evaluate(pageHelpersExpression());
 
   let selection = await readShopSelectionState(client);
   const mode = resolveDistributionMode({
     itemCount,
     shopCount: selection.total || 0,
-    preferredMode: distributionMode
+    preferredMode
   });
   const shopMode = resolveShopSelectionMode({
     itemCount,
     shopCount: selection.total || 0,
     preferredShops: SHOP_SELECTION_AUTO
   });
-  const modeText = TXT_RANDOM_AVERAGE;
+  const modeText = distributionMode(mode).label;
   const modeClick = await client.evaluate(`window.__ecom1688.clickExact(${jsString(modeText)}, 'label,span,div,button')`);
   if (!modeClick || !modeClick.ok) {
     throw new Error(modeClick && modeClick.reason ? modeClick.reason : `Failed to select ${modeText} distribution`);
   }
   await sleep(500);
 
+  const targets = distributionTargets({ shop, targetShops });
+  if (targets.length) {
+    const selected = await ensureSelectedShop(client, targets, true);
+    return { ...selected, distributionMode: mode, distributionModeText: modeText, shopSelectionMode: 'configured', targetShops: targets };
+  }
   selection = await readShopSelectionState(client);
   if (shopMode === SHOP_SELECTION_FIRST) {
     const first = await client.evaluate(`
@@ -1082,10 +1121,12 @@ async function submitAndOpenLog(client) {
   return state;
 }
 
-async function submitAndOpenLogStable(client) {
+async function submitAndOpenLogStable(client, shop = null, modeText, onSubmitted) {
   await client.evaluate(pageHelpersExpression());
-  const submit = await client.evaluate(`window.__ecom1688.clickExact(${jsString(TXT_START_BATCH_COPY)}, 'button')`);
+  const submit = shop ? await submitSelectedShop(client, shop, modeText)
+    : await client.evaluate(`window.__ecom1688.clickExact(${jsString(TXT_START_BATCH_COPY)}, 'button')`);
   if (!submit || !submit.ok) throw new Error(submit && submit.reason ? submit.reason : 'Failed to click start batch copy');
+  if (onSubmitted) await onSubmitted();
   await sleep(5000);
   await client.evaluate(pageHelpersExpression());
   let state = await client.evaluate('window.__ecom1688.readState()');
@@ -1295,7 +1336,8 @@ async function confirmCopyRecords(client, offerIds) {
   return result;
 }
 
-async function confirmCopyRecordsStable(client, offerIds) {
+async function confirmCopyRecordsStable(client, offerIds, shop = null, mode = 'random-average') {
+  const targets = Array.isArray(shop) ? shop : shop ? [shop] : [];
   await client.evaluate(pageHelpersExpression());
   let state = await client.evaluate('window.__ecom1688.readState()');
   state = await assertOrRecoverLogin(client, state, 'before confirming copy records');
@@ -1309,6 +1351,21 @@ async function confirmCopyRecordsStable(client, offerIds) {
     (async () => {
       const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
       const offerIds = ${JSON.stringify(offerIds)};
+      const targetShops = ${JSON.stringify(targets.map(row => row.platformShopName))};
+      const records = new Map();
+      const normalize = value => String(value || '').replace(/\\s+/g, ' ').trim();
+      const recordText = () => {
+        if (!targetShops.length) return document.body ? document.body.innerText : '';
+        const texts = [];
+        for (const row of document.querySelectorAll('.el-table__row, tbody tr')) {
+          const names = targetShops.filter(name => Array.from(row.querySelectorAll('td, .cell')).some(cell => normalize(cell.innerText) === normalize(name)));
+          if (names.length !== 1) continue;
+          const text = row.innerText;
+          records.set(names[0] + '\\n' + text, { shopName: names[0], text });
+          texts.push(text);
+        }
+        return texts.join('\\n');
+      };
       const visible = el => {
         if (!el) return false;
         const r = el.getBoundingClientRect();
@@ -1334,7 +1391,7 @@ async function confirmCopyRecordsStable(client, offerIds) {
         idInput.dispatchEvent(new Event('change', { bubbles: true }));
       };
       const collectPages = async (maxPages = 8) => {
-        let allText = document.body ? document.body.innerText : '';
+        let allText = recordText();
         for (let pageTurn = 0; pageTurn < maxPages; pageTurn++) {
           const before = document.body ? document.body.innerText : '';
           const nextPageBtn = Array.from(document.querySelectorAll('a, button, span, div'))
@@ -1348,7 +1405,7 @@ async function confirmCopyRecordsStable(client, offerIds) {
           await sleep(1000);
           const after = document.body ? document.body.innerText : '';
           if (after === before || allText.includes(after.slice(0, 120))) break;
-          allText += '\\n--- PAGE BREAK ---\\n' + after;
+          allText += '\\n--- PAGE BREAK ---\\n' + recordText();
         }
         return allText;
       };
@@ -1377,6 +1434,7 @@ async function confirmCopyRecordsStable(client, offerIds) {
       return {
         ok: found.size === offerIds.length,
         text: combinedText,
+        records: Array.from(records.values()),
         perOfferId,
         preview: combinedText.slice(0, 2000),
         url: location.href
@@ -1386,6 +1444,31 @@ async function confirmCopyRecordsStable(client, offerIds) {
 
   if (!pageResult || pageResult.reason) {
     return pageResult || { ok: false, status: 'not_confirmed', reason: 'copy log confirmation failed' };
+  }
+  if (targets.length) {
+    // 多店重复分配必须每个商品在每家店均成功，其他模式要求在目标店铺之一成功。
+    const byShop = targets.map(target => ({
+      shopName: target.platformShopName,
+      perOfferId: Object.fromEntries(offerIds.map(id => {
+        const rows = (pageResult.records || []).filter(row => row.shopName === target.platformShopName && String(row.text).split(/\D+/).includes(String(id)));
+        const statuses = rows.map(row => inferOfferCopyStatus(row.text, id));
+        const status = statuses.includes('success') ? 'success' : statuses.find(value => value !== 'unknown') || 'unknown';
+        const failedRow = rows.find(row => inferOfferCopyStatus(row.text, id) === status);
+        const reason = ['failed', 'skipped', 'stopped', 'cancelled'].includes(status)
+          ? String(failedRow?.text || '').split(/复制失败|跳过复制|停止复制|取消复制/).slice(1).join(' ').split(/编辑重试|一键重试|再次复制|快速编辑/)[0].trim().slice(0, 2000)
+          : '';
+        return [id, { status, reason }];
+      }))
+    }));
+    const repeat = distributionMode(mode).value === 'repeat';
+    const successful = id => repeat
+      ? byShop.every(row => row.perOfferId[id].status === 'success')
+      : byShop.some(row => row.perOfferId[id].status === 'success');
+    const foundOfferIds = offerIds.filter(successful);
+    const missingOfferIds = offerIds.filter(id => !successful(id));
+    const issueOfferIds = missingOfferIds.filter(id => byShop.some(row => ['failed', 'skipped', 'stopped', 'cancelled'].includes(row.perOfferId[id].status)));
+    const status = !missingOfferIds.length ? 'confirmed' : issueOfferIds.length ? 'completed_with_issues' : foundOfferIds.length ? 'partial_confirmed' : 'not_confirmed';
+    return { ok: status === 'confirmed', status, foundOfferIds, missingOfferIds, issueOfferIds, byShop, preview: pageResult.preview, url: pageResult.url };
   }
   return classifyCopyRecordText(offerIds, pageResult.text, {
     preview: pageResult.preview,
@@ -1398,7 +1481,7 @@ async function distributeProducts(options = {}) {
   const input = options.inputFile ? readTextFile(options.inputFile) : options.input;
   const items = parseItems(input);
   if (items.length === 0) throw new Error('No distribution items provided');
-  const batches = splitBatches(items, options.batchSize || 20);
+  const batches = splitDistributionBatches(items, options);
   const port = parseInt(options.port || process.env.BROWSER_CDP_PORT || process.env.CHROME_DEBUG_PORT || DEFAULT_CDP_PORT, 10);
   const stateFile = options.stateFile || DEFAULT_STATE_FILE;
   const results = [];
@@ -1474,11 +1557,17 @@ async function distributeProducts(options = {}) {
       validateFilledText(filled.text, batchItems);
       const shopSelection = await selectDistributionModeAndAllShopsStable(client, {
         itemCount: batchItems.length,
+        shop: options.shop,
+        targetShops: options.targetShops,
         distributionMode: options.distributionMode || DISTRIBUTION_AUTO
       });
       await preSubmitCheckStable(client, batchItems);
-      const logState = await submitAndOpenLogStable(client);
-      const confirmation = await confirmCopyRecordsStable(client, batchItems.map(item => item.offerId));
+      const targets = distributionTargets(options);
+      if (targets.length) await ensureSelectedShop(client, targets);
+      const logState = await submitAndOpenLogStable(client, targets.length ? targets : null, shopSelection.distributionModeText, () => {
+        appendRunRecord({ batchHash, submittedAt: new Date().toISOString(), status: 'awaiting_confirmation', targetShops: targets, distributionMode: shopSelection.distributionMode, offerIds: batchItems.map(item => item.offerId) }, stateFile);
+      });
+      const confirmation = await confirmCopyRecordsStable(client, batchItems.map(item => item.offerId), targets.length ? targets : null, options.distributionMode);
       if (confirmation.status !== 'confirmed') {
         results.push({
           ok: false,
@@ -1489,6 +1578,8 @@ async function distributeProducts(options = {}) {
           batchHash,
           distributionMode: shopSelection.distributionMode,
           shopSelectionMode: shopSelection.shopSelectionMode,
+          shop: options.shop || null,
+          targetShops: targets,
           logUrl: logState.url,
           confirmation
         });
@@ -1503,6 +1594,8 @@ async function distributeProducts(options = {}) {
         status: 'submitted',
         distributionMode: shopSelection.distributionMode,
         shopSelectionMode: shopSelection.shopSelectionMode,
+        shop: options.shop || null,
+        targetShops: targets,
         logUrl: logState.url,
         confirmation
       }, stateFile);
@@ -1515,6 +1608,8 @@ async function distributeProducts(options = {}) {
         batchHash,
         distributionMode: shopSelection.distributionMode,
         shopSelectionMode: shopSelection.shopSelectionMode,
+        shop: options.shop || null,
+        targetShops: targets,
         logUrl: logState.url,
         confirmation,
         logPreview: confirmation.preview || logState.body.slice(0, 1000)
@@ -1578,7 +1673,8 @@ async function confirmDistributionLog(options = {}) {
   ));
   const shouldClose = !options.client;
   try {
-    const confirmation = await confirmCopyRecordsStable(client, offerIds);
+    const targets = distributionTargets(options);
+    const confirmation = await confirmCopyRecordsStable(client, offerIds, targets.length ? targets : null, options.distributionMode);
     const blockers = [];
     if (confirmation.missingOfferIds && confirmation.missingOfferIds.length) blockers.push('missing_offer_ids');
     if (confirmation.issueOfferIds && confirmation.issueOfferIds.length) blockers.push('copy_record_issues');
@@ -1605,7 +1701,7 @@ async function checkDistributionReadiness(options = {}) {
   const port = parseInt(options.port || process.env.BROWSER_CDP_PORT || process.env.CHROME_DEBUG_PORT || DEFAULT_CDP_PORT, 10);
   const stateFile = options.stateFile || DEFAULT_STATE_FILE;
   const items = parseItems(input);
-  const batches = splitBatches(items, options.batchSize || 20).map((batchItems, index) => {
+  const batches = splitDistributionBatches(items, options).map((batchItems, index) => {
     const batchHash = createBatchHash(batchItems, options);
     const duplicate = findRecentDuplicate(batchHash, stateFile);
     return {
@@ -1626,8 +1722,21 @@ async function checkDistributionReadiness(options = {}) {
     browser.loginRecovery = recovery;
   }
   const duplicates = batches.filter(batch => batch.duplicate);
-  const ok = items.length > 0 && browser.ok && duplicates.length === 0;
   const blockers = getReadinessBlockers({ itemCount: items.length, browser, duplicates });
+  let shopError = '';
+  const targets = distributionTargets(options);
+  if (targets.length && browser.ok && !options.skipBrowser) {
+    let client;
+    try {
+      client = await createCdpClientForTarget(await getBusinessTarget(port));
+      await ensureMultiStorePage(client, { port });
+      await ensureSelectedShop(client, targets, 'available');
+    } catch (error) {
+      shopError = error.message;
+      blockers.push('target_shop_unavailable');
+    } finally { await client?.close(); }
+  }
+  const ok = blockers.length === 0;
   return withAgentResponseFields({
     ok,
     status: ok ? 'ready' : 'blocked',
@@ -1637,6 +1746,10 @@ async function checkDistributionReadiness(options = {}) {
     batchSize: parseInt(options.batchSize, 10) || 20,
     batches,
     browser,
+    shop: options.shop || null,
+    targetShops: targets,
+    distributionMode: distributionMode(options.distributionMode).value,
+    shopError,
     blockers,
     allowedCommands: ok ? ['rerun_with_submit'] : [],
     nextActionCode: ok ? 'submit_ready' : 'fix_blockers',
@@ -1659,6 +1772,8 @@ function getReadinessBlockers({ itemCount, browser, duplicates }) {
 }
 
 module.exports = {
+  selectDistributionModeAndAllShopsStable,
+  splitDistributionBatches,
   DEFAULT_CDP_PORT,
   DEFAULT_STATE_FILE,
   parseItems,

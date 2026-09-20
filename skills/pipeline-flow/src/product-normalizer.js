@@ -20,7 +20,7 @@ function productUrl(product) {
  * @returns {string} Product title.
  */
 function productTitle(product) {
-  return product && (product['铺货标题'] || product.title || product.subject || product.generatedTitle || product.name || '');
+  return product && (product['铺货标题'] || product['链接原标题'] || product.title || product.subject || product.generatedTitle || product.name || '');
 }
 
 /**

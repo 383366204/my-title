@@ -165,7 +165,7 @@ async function flowExpandRootKeywords(options = {}) {
       mode: 'root-keyword',
       roots: normalized.roots,
       rootsText: normalized.roots.join('\n'),
-      sycmMode: options.sycmMode || 'hot',
+      sycmMode: options.sycmMode || 'both',
       period: options.period || '7d',
       compareType: options.compareType || 'cycle'
     }
@@ -181,12 +181,13 @@ async function flowExpandRootKeywords(options = {}) {
   });
 
   const previousQueue = readJson(files.queue, null);
-  const previousByRoot = new Map((previousQueue?.items || []).map(item => [item.root, item]));
+  const queryModes = ['hot', 'blue'].includes(options.sycmMode) ? [options.sycmMode] : ['hot', 'blue'];
+  const previousByRoot = new Map((previousQueue?.items || []).map(item => [`${item.root}:${item.mode}`, item]));
   const queue = {
-    version: 1,
-    items: normalized.roots.map((root, index) => {
-      const previous = previousByRoot.get(root);
-      if (!previous) return { index, root, status: 'pending', attempts: 0, candidateCount: 0 };
+    version: 2,
+    items: normalized.roots.flatMap(root => queryModes.map(mode => ({ root, mode }))).map(({ root, mode }, index) => {
+      const previous = previousByRoot.get(`${root}:${mode}`);
+      if (!previous) return { index, root, mode, status: 'pending', attempts: 0, candidateCount: 0 };
       return { ...previous, index, status: previous.status === 'running' ? 'pending' : previous.status };
     }),
     updatedAt: new Date().toISOString()
@@ -233,13 +234,14 @@ async function flowExpandRootKeywords(options = {}) {
       options.onProgress?.({
         current: completedCount,
         total: queue.items.length,
-        message: `生意参谋拓词 ${completedCount + 1}/${queue.items.length} · ${item.root}`
+        message: `生意参谋拓词 ${completedCount + 1}/${queue.items.length} · ${item.root} · ${item.mode === 'hot' ? '热词' : '蓝海词'}`
       });
 
       try {
         const result = await sycmExtractor(item.root, {
-          mode: options.sycmMode || 'hot',
-          maxPages: Number(options.sycmMaxPages || 9999),
+          mode: item.mode,
+          maxPages: Number(options.pages || options.sycmMaxPages || 3),
+          filterConditions: { searchPopularity: 0, demandSupplyRatio: 0, conversionRate: 0, buyerCount: 0, referencePrice: 0 },
           port: Number(options.port || 9222),
           pageFilters: {
             timePeriod: options.period || '7d',
@@ -258,9 +260,10 @@ async function flowExpandRootKeywords(options = {}) {
             message: `${item.root}：${String(message || '').replace(/^\[[^\]]+\]\s*/, '')}`
           })
         });
+        if (!result || result.ok === false) throw new Error(result?.error || '未取得有效的平台查询响应');
         const rows = Array.isArray(result.data) ? result.data : [];
         for (const row of rows) {
-          const candidate = buildRootCandidate(row, item.root, result, options);
+          const candidate = buildRootCandidate(row, item.root, result, { ...options, sycmMode: item.mode });
           if (!candidate) continue;
           const key = String(candidate.keyword).replace(/\s+/g, '').toLowerCase();
           candidateMap.set(key, mergeCandidate(candidateMap.get(key), candidate));
@@ -273,6 +276,7 @@ async function flowExpandRootKeywords(options = {}) {
         completedCount += 1;
         appendJsonl(files.results, {
           root: item.root,
+          mode: item.mode,
           status: 'completed',
           candidateCount: rows.length,
           recommendedCategory: recommendedCategory(result),
@@ -346,6 +350,7 @@ async function flowExpandRootKeywords(options = {}) {
           failedCount += 1;
           appendJsonl(files.results, {
             root: item.root,
+            mode: item.mode,
             status: 'failed',
             attempts: item.attempts,
             error: item.error,
@@ -369,8 +374,8 @@ async function flowExpandRootKeywords(options = {}) {
       inputRoots: normalized.roots.length + normalized.duplicates.length,
       uniqueRoots: normalized.roots.length,
       duplicateRoots: normalized.duplicates.length,
-      completedRoots: completedCount,
-      failedRoots: failedCount,
+      completedRoots: normalized.roots.filter(root => queue.items.filter(item => item.root === root).every(item => item.status === 'completed')).length,
+      failedRoots: new Set(queue.items.filter(item => item.status === 'failed').map(item => item.root)).size,
       candidates: candidateMap.size
     },
     files: { rootInput: files.input, rootQueryQueue: files.queue, rootQueryResults: files.results }

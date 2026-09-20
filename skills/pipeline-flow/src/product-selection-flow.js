@@ -9,7 +9,7 @@ const { scoreProductOpportunity } = require('./opportunity-scoring');
 const { buildPipelineDiversityHistory } = require('./diversity-history');
 const { createProductDiversityState, selectDiverseProducts } = require('./product-diversity');
 const { DEFAULT_FLOW_DIR, appendJsonl, getRun, readJsonl, setRunStageMetrics, writeRun } = require('./run-store');
-const { productImage, productPrice, productSales, productTitle, productUrl } = require('./product-normalizer');
+const { productCategory, productImage, productPrice, productSales, productTitle, productUrl } = require('./product-normalizer');
 const { DEFAULT_PRODUCTS_PER_KEYWORD } = require('./flow-constants');
 const { buildFlowCommand, flowResponse, isGenerationEligibleKeyword } = require('./flow-context');
 
@@ -53,12 +53,16 @@ async function flowSelectProducts(options = {}) {
 
   fs.writeFileSync(run.files.selectedProducts, '', 'utf8');
 
-  for (const item of selectedKeywords) {
+  options.onProgress?.({ current: 0, total: selectedKeywords.length, message: '开始查询 1688 货源' });
+  for (const [index, item] of selectedKeywords.entries()) {
+    let failureStage = 'extract';
+    options.onProgress?.({ current: index, total: selectedKeywords.length, message: `正在查询货源：${item.keyword}` });
     try {
-      const extracted = await extractKeywords('keyword', { data: item.keyword });
+      const extracted = await (options.extractKeywords || extractKeywords)('keyword', { data: item.keyword });
       const coreWord = extracted.coreWord || item.coreProduct || item.keyword;
       const modifiers = Array.isArray(extracted.modifiers) ? extracted.modifiers : [];
       const semanticGroups = extracted.semanticGroups || {};
+      failureStage = 'search';
       const products = await (options.searchProducts || searchAll)(
         coreWord,
         item.keyword,
@@ -66,6 +70,7 @@ async function flowSelectProducts(options = {}) {
         semanticGroups,
         options.searchOptions || {}
       );
+      failureStage = 'scoring';
       const scoredProducts = (Array.isArray(products) ? products : []).map(product => {
         const normalizedProduct = {
           ...product,
@@ -91,7 +96,7 @@ async function flowSelectProducts(options = {}) {
           keywordOpportunity: item.keywordOpportunity,
           sycmScore: item.sycmScore,
           sycmData: item.sycmData || [],
-          recommendedCategory: item.recommendedCategory || '',
+          recommendedCategory: productCategory(normalizedProduct, item),
           verifyMode: item.verifyMode || '',
           confidence: item.confidence || '',
           usage: item.usage || '',
@@ -164,12 +169,16 @@ async function flowSelectProducts(options = {}) {
     } catch (error) {
       selectedRows.push({
         status: 'select_failed',
+        failureStage,
+        httpStatus: Number(error.response?.status || error.status) || null,
         keyword: item.keyword,
         selectedKeyword: item.keyword,
         error: error && error.message ? error.message : String(error),
         selectedAt: new Date().toISOString()
       });
     }
+    options.onProgress?.({ current: index + 1, total: selectedKeywords.length,
+      message: `货源查询 ${index + 1}/${selectedKeywords.length}，取得 ${gateStats.input} 个商品，${selectedRows.filter(row => row.status === 'select_failed').length} 个词查询失败` });
   }
 
   appendJsonl(run.files.selectedProducts, selectedRows);
@@ -189,6 +198,7 @@ async function flowSelectProducts(options = {}) {
   run.status = selectedCount > 0 ? 'products_selected' : 'select_failed';
   run.counts.selectedProducts = selectedCount;
   run.counts.productsEvaluated = gateStats.input;
+  run.counts.productSearchFailures = selectedRows.filter(row => row.status === 'select_failed').length;
   run.counts.productGatePassed = gateStats.passed;
   run.counts.productReviewCandidates = gateStats.review;
   run.counts.productRejected = gateStats.rejected;
