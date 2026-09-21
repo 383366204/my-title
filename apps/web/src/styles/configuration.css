@@ -192,6 +192,69 @@
   color: #fcd34d;
 }
 
+/* 粘贴订单信息自动填充 */
+.review-paste-panel {
+  background: rgba(15, 23, 42, 0.56);
+  border: 1px solid rgba(71, 85, 105, 0.68);
+  border-radius: 7px;
+  padding: 10px 12px;
+}
+
+.review-paste-panel summary {
+  color: #cbd5e1;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.review-paste-panel textarea {
+  background: rgba(2, 6, 23, 0.72);
+  border: 1px solid rgba(71, 85, 105, 0.7);
+  border-radius: 6px;
+  color: #e2e8f0;
+  font-size: 12px;
+  line-height: 1.7;
+  margin-top: 8px;
+  min-height: 118px;
+  padding: 8px 10px;
+  resize: vertical;
+  width: 100%;
+}
+
+.review-paste-panel textarea:focus {
+  border-color: rgba(56, 189, 248, 0.6);
+  outline: none;
+}
+
+.review-paste-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.review-paste-actions button {
+  background: rgba(56, 189, 248, 0.14);
+  border: 1px solid rgba(56, 189, 248, 0.42);
+  border-radius: 6px;
+  color: #7dd3fc;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 6px 12px;
+}
+
+.review-paste-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.review-paste-notice {
+  background: rgba(56, 189, 248, 0.1);
+  border-radius: 5px;
+  color: #7dd3fc;
+  font-size: 11px;
+  margin-top: 8px;
+  padding: 6px 9px;
+}
 .review-autosave-hint {
   color: #94a3b8;
   font-size: 10px;

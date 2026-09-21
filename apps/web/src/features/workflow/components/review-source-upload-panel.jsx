@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { FileSpreadsheet, Upload } from 'lucide-react';
 
 import { regroupReviewSource, uploadReviewSource } from '../../../api/workflow-api.js';
+import { applyPastedOrders, parsePastedOrders } from '../review-paste-parser.js';
 import { REVIEW_GROUP_FIELDS } from '../review-group-fields.js';
 
 // 没有订单号时按这个粒度切分订单组
@@ -15,6 +16,8 @@ export function ReviewSourceUploadPanel({ node, onDone, onUpdateField, readOnly 
   const [uploading, setUploading] = useState(false);
   const [regrouping, setRegrouping] = useState(false);
   const [error, setError] = useState('');
+  const [pasteText, setPasteText] = useState('');
+  const [pasteNotice, setPasteNotice] = useState('');
 
   const updateGroups = (nextGroups) => onUpdateField(node.id, 'groups', nextGroups);
   const updateGroup = (index, field, value) => updateGroups(groups.map((group, current) => (
@@ -65,7 +68,22 @@ export function ReviewSourceUploadPanel({ node, onDone, onUpdateField, readOnly 
     }
   };
 
-  const missingCount = groups.reduce((total, group) => total + REVIEW_GROUP_FIELDS.filter(({ field, required }) => (
+  const handlePasteFill = () => {
+    setPasteNotice('');
+    const records = parsePastedOrders(pasteText);
+    if (records.length === 0) {
+      setPasteNotice('没有识别到订单信息，请确认每行都是「订单编号：xxx」这类格式');
+      return;
+    }
+    const result = applyPastedOrders(groups, records);
+    updateGroups(result.groups);
+    const parts = [];
+    if (result.summary.byOrderNumber > 0) parts.push(`按订单号匹配 ${result.summary.byOrderNumber} 单`);
+    if (result.summary.sequential > 0) parts.push(`按顺序填充 ${result.summary.sequential} 单`);
+    if (result.summary.skipped > 0) parts.push(`${result.summary.skipped} 单没有可填的分组`);
+    setPasteNotice(`识别到 ${records.length} 单${parts.length > 0 ? `：${parts.join('，')}` : ''}。只补空字段，不会覆盖已填内容。`);
+  };
+    const missingCount = groups.reduce((total, group) => total + REVIEW_GROUP_FIELDS.filter(({ field, required }) => (
     required && !String(group[field] || '').trim()
   )).length, 0);
 
@@ -95,6 +113,22 @@ export function ReviewSourceUploadPanel({ node, onDone, onUpdateField, readOnly 
           <span>{data.uploadSummary ? `${data.uploadSummary.parsedSheetCount} 个订单组 · ${data.uploadSummary.productCount} 个商品 · 每组 ${groupSize} 件` : '仅支持 .xlsx，最大 12 MB'}</span>
         </label>
         {error && <div className="artifact-error">{error}</div>}
+        {groups.length > 0 && !readOnly && (
+          <details className="review-paste-panel" open={groups.some(group => !group.buyerName || !group.buyerPhone)}>
+            <summary>粘贴订单信息自动填充旺旺、手机号和订单号</summary>
+            <textarea
+              rows="6"
+              value={pasteText}
+              onChange={(event) => setPasteText(event.target.value)}
+              placeholder={'订单编号：3316868653089013989\n买家旺旺：penguin玄珠\n收货电话：14727236390-8997\n\n可一次粘贴多单：同一字段再次出现会自动拆分成下一单'}
+            />
+            <div className="review-paste-actions">
+              <button type="button" disabled={uploading || regrouping} onClick={handlePasteFill}>识别并填充</button>
+              <button type="button" disabled={uploading || regrouping || !pasteText} onClick={() => { setPasteText(''); setPasteNotice(''); }}>清空</button>
+            </div>
+            {pasteNotice && <div className="review-paste-notice">{pasteNotice}</div>}
+          </details>
+        )}
 
         {groups.length > 0 && (
           <div className="review-source-groups">
