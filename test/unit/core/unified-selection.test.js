@@ -11,6 +11,7 @@ const { verifyExactSelectionKeywords } = require('../../../skills/pipeline-flow/
 const { flowKeywordStart } = require('../../../skills/pipeline-flow/src/flow-orchestrator');
 const { flowReviewCandidates } = require('../../../skills/pipeline-flow/src/keyword-review-flow');
 const { getRun, readJsonl } = require('../../../skills/pipeline-flow/src/run-store');
+const { summaryInterventionForNode } = require('../../../core/workflow/pipeline-node-diagnostics');
 const { flowExpandRootKeywords } = require('../../../skills/pipeline-flow/src/root-keyword-expansion-flow');
 const { prepareKeywordSupplement } = require('../../../skills/pipeline-flow/src/keyword-supplement');
 
@@ -86,6 +87,27 @@ test('platform failure stays at verification instead of silently reaching review
   } });
   assert.equal(result.status, 'manual_action_required');
   assert.match(result.manualAction.userMessage, /9222/);
+});
+
+test('exact keyword chrome failure surfaces start-sycm-chrome blocker', async t => {
+  const options = fixture(t);
+  await flowKeywordStart({ ...options, keywords: ['杯垫'] });
+  const result = await verifyExactSelectionKeywords({
+    ...options,
+    sycmExtractor: async () => { throw new Error('connect ECONNREFUSED 127.0.0.1:9222'); }
+  });
+  assert.equal(result.status, 'manual_action_required');
+  assert.equal(result.manualAction.status, 'chrome_unavailable');
+  const { run } = getRun(options);
+  const failures = readJsonl(run.files.sycmResults).filter(row => row.ok === false);
+  assert.equal(failures.length, 1);
+  assert.match(failures[0].error, /9222/);
+  const intervention = summaryInterventionForNode({
+    status: 'manual_action_required',
+    files: { sycmResults: run.files.sycmResults }
+  }, 'verify');
+  assert.equal(intervention.nextRecommendedAction.action, 'start-sycm-chrome');
+  assert.equal(intervention.platformStatus, 'chrome_unavailable');
 });
 
 test('root expansion queries hot and blue pages with correct provenance', async t => {

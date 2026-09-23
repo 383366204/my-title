@@ -55,10 +55,20 @@ async function verifyExactSelectionKeywords(options = {}) {
       const interrupted = error.code === 'PLATFORM_ACCESS_INTERRUPTED';
       run.status = interrupted ? (shouldStop() === 'cancel' ? 'cancelled' : 'paused') : 'manual_action_required';
       candidate.error = error.message;
+      const manualStatus = error.status || (/Chrome|9222|CDP|DevTools/i.test(error.message) ? 'chrome_unavailable' : 'query_failed');
+      const manualAction = { ...(error.details || {}), userMessage: error.message, status: manualStatus };
+      // 与 flowVerify 保持一致：把校验失败行写入 sycm-results，让 verify 节点诊断能识别
+      // Chrome/CDP 不可用并推荐“启动 Chrome”，否则精确关键词路径阻塞时不会显示该按钮。
+      appendJsonl(run.files.sycmResults, {
+        keyword: candidate.keyword,
+        ok: false,
+        status: manualStatus,
+        error: error.message,
+        manualAction
+      });
       save();
       return { ok: false, runId: run.runId, runDir, status: run.status, stepIncomplete: true, platform: 'sycm',
-        manualAction: { ...(error.details || {}), userMessage: error.message,
-          status: error.status || (/Chrome|9222|CDP|DevTools/i.test(error.message) ? 'chrome_unavailable' : 'query_failed') },
+        manualAction,
         blockers: [error.message] };
     }
   }
