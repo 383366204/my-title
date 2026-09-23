@@ -774,6 +774,17 @@ test('getWorkflowBlockerActions normalizes backend recommendations to executable
   assert.deepEqual(resumeActions.map((action) => action.action), ['resume']);
 });
 
+test('getWorkflowBlockerActions offers Chrome recovery when exact-keyword verify is blocked', () => {
+  const actions = getWorkflowBlockerActions('verify', {
+    status: 'blocked',
+    blocker: 'sycm_transient_failure',
+    platformStatus: 'chrome_unavailable',
+    nextRecommendedAction: { action: 'start-sycm-chrome', label: '启动 Chrome' }
+  });
+  assert.deepEqual(actions.map((action) => action.action), ['start-sycm-chrome', 'retry-node']);
+  assert.equal(actions[0].label, '启动 Chrome');
+});
+
 test('getWorkflowBlockerActions opens product detail completion without a misleading resume action', () => {
   const actions = getWorkflowBlockerActions('collectRank', {
     status: 'blocked',
