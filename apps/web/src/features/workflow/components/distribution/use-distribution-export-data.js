@@ -25,6 +25,7 @@ export function useDistributionExportData({
 }) {
   const [exportArtifactState, setExportArtifactState] = useState({ status: 'empty', artifact: null, error: '' });
   const [reviewArtifactState, setReviewArtifactState] = useState({ status: 'empty', artifact: null, error: '' });
+  const [generateArtifactState, setGenerateArtifactState] = useState({ status: 'empty', artifact: null, error: '' });
 
   const sourceIsReview = sourceNodeId === 'review';
   const exportArtifact = sourceIsReview ? exportArtifactState.artifact : artifactState?.artifact;
@@ -63,6 +64,25 @@ export function useDistributionExportData({
     };
   }, [currentRunId, sourceIsReview]);
 
+  // 读取标题生成节点产物，按货源链接建立「原 1688 标题」索引，铺货清单顶部展示用
+  useEffect(() => {
+    if (!currentRunId) {
+      setGenerateArtifactState({ status: 'empty', artifact: null, error: '' });
+      return undefined;
+    }
+    let cancelled = false;
+    setGenerateArtifactState((previous) => ({ ...previous, status: 'loading', error: '' }));
+    getWorkflowArtifact(currentRunId, 'generate')
+      .then((artifact) => {
+        if (!cancelled) setGenerateArtifactState({ status: artifact ? 'ready' : 'empty', artifact, error: '' });
+      })
+      .catch(() => {
+        if (!cancelled) setGenerateArtifactState({ status: 'empty', artifact: null, error: '' });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentRunId]);
   useEffect(() => {
     if (sourceIsReview) {
       setReviewArtifactState({ status: artifactState?.status || 'empty', artifact: artifactState?.artifact || null, error: artifactState?.error || '' });
@@ -87,10 +107,32 @@ export function useDistributionExportData({
   }, [artifactState, currentRunId, sourceIsReview]);
 
   const sourceRows = view.kind === 'business-list' ? (view.rows || []) : [];
+  const generateView = getWorkflowArtifactView(generateArtifactState.artifact, 'generate');
+  const generateRows = generateView.kind === 'business-list' ? (generateView.rows || []) : [];
+  const sourceTitleByLink = new Map(generateRows.flatMap((row) => {
+    const raw = row.raw || {};
+    const sourceTitle = String(
+      raw.sourceTitle
+      || raw.productTitle
+      || raw['链接原标题']
+      || raw.product?.['链接原标题']
+      || raw.product?.title
+      || ''
+    ).trim();
+    const link = distributionRowUrl(row) || raw.url || raw.productUrl || '';
+    return link && sourceTitle ? [[link, sourceTitle]] : [];
+  }));
   const applyEdits = (row) => ({ ...row, ...(edits[row.key] || {}) });
   const readyRows = sourceRows.map((row, index) => {
-    const key = `${distributionRowUrl(row) || row.title || 'row'}:${index}`;
-    return { ...row, key, removed: Boolean(removed[key]), fromReview: false };
+    const link = distributionRowUrl(row);
+    const key = `${link || row.title || 'row'}:${index}`;
+    return {
+      ...row,
+      key,
+      removed: Boolean(removed[key]),
+      fromReview: false,
+      sourceTitle: (link && sourceTitleByLink.get(link)) || row.sourceTitle || ''
+    };
   }).map(applyEdits);
 
   const reviewView = getWorkflowArtifactView(reviewArtifactState.artifact, 'review');

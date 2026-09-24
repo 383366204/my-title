@@ -23,6 +23,8 @@ export function DistributionRow({
   onCopyText
 }) {
   const url = distributionRowUrl(row);
+  // 顶部展示原 1688 标题；上一步产物没匹配到时回退铺货标题
+  const sourceTitle = String(row.sourceTitle || row.title || '未命名商品');
   const keyword = rowSelectedKeyword(row);
   const isPreview = variant === 'preview';
 
@@ -31,13 +33,14 @@ export function DistributionRow({
       return (
         <article className="export-preview-row blocked">
           <div>
-            <strong>{row.title}</strong>
-            <span>被拦截，未加入</span>
+            <div className="export-row-title-line">
+              <strong title={sourceTitle}>{sourceTitle}</strong>
+              <em>未加入</em>
+            </div>
             {keyword && <small className="selected-keyword-badge">选词：{keyword}</small>}
           </div>
           {row.description && <p>拦截原因：{row.description}</p>}
           {Array.isArray(row.metrics) && row.metrics.length > 0 && <p>{row.metrics.join(' · ')}</p>}
-          {url && <p>{url}</p>}
           <div className="distribution-edit-grid">
             <label>
               <span>铺货标题</span>
@@ -69,12 +72,13 @@ export function DistributionRow({
     return (
       <article className={`export-preview-row ${row.removed ? 'is-removed' : ''}`}>
         <div>
-          <strong>{row.title || '未命名铺货项'}</strong>
-          <span>{row.removed ? '已移除' : '将导出'}</span>
+          <div className="export-row-title-line">
+            <strong title={sourceTitle}>{sourceTitle}</strong>
+            <em>{row.removed ? '已移除' : '将导出'}</em>
+          </div>
           {keyword && <small className="selected-keyword-badge">选词：{keyword}</small>}
         </div>
         {Array.isArray(row.metrics) && row.metrics.length > 0 && <p>{row.metrics.join(' · ')}</p>}
-        {url && <p>{url}</p>}
         <div className="distribution-edit-grid">
           <label>
             <span>铺货标题</span>
@@ -111,11 +115,13 @@ export function DistributionRow({
       <article className="export-row blocked">
         <div className="export-row-head">
           <div>
-            <strong>{row.title}</strong>
+            <div className="export-row-title-line">
+              <strong title={sourceTitle}>{sourceTitle}</strong>
+              <em>未加入</em>
+            </div>
             <span>{row.meta}</span>
             {keyword && <small className="selected-keyword-badge">选词：{keyword}</small>}
           </div>
-          <em>未加入</em>
         </div>
         {Array.isArray(row.metrics) && row.metrics.length > 0 && (
           <div className="review-row-meta">
@@ -155,18 +161,19 @@ export function DistributionRow({
     <article className={`export-row ${row.removed ? 'is-removed' : ''}`}>
       <div className="export-row-head">
         <div>
-          <strong>{row.title || '未命名铺货项'}</strong>
+          <div className="export-row-title-line">
+            <strong title={row.title || '未命名铺货项'}>{row.title || '未命名铺货项'}</strong>
+            <em>{row.removed ? '已移除' : '将导出'}</em>
+          </div>
           {row.meta && <span>{row.meta}{row.fromReview ? ' · 人工加入' : ''}</span>}
           {keyword && <small className="selected-keyword-badge">选词：{keyword}</small>}
         </div>
-        <em>{row.removed ? '已移除' : '将导出'}</em>
       </div>
       {Array.isArray(row.metrics) && row.metrics.length > 0 && (
         <div className="review-row-meta">
           {row.metrics.map((metric) => <span key={metric}>{metric}</span>)}
         </div>
       )}
-      {url && <p className="export-row-url">{url}</p>}
       <div className="distribution-edit-grid">
         <label>
           <span>铺货标题</span>

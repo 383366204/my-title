@@ -281,6 +281,28 @@
   min-width: 0;
 }
 
+/* 标题与状态标签同行展示：标题过长省略号截断，标签固定在标题行右侧 */
+.export-row-title-line {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.export-row-title-line strong {
+  display: block;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.export-row-title-line em {
+  flex: none;
+  margin-left: auto;
+  white-space: nowrap;
+}
 .export-row-head strong,
 .export-row-head span {
   display: block;
