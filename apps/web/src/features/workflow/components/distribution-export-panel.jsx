@@ -9,14 +9,33 @@ import {
 } from 'lucide-react';
 
 import { checkDistribution as checkDistributionRequest } from '../../../api/distribution-api.js';
+import { copyCategoryContent } from '../../../api/category-api.js';
 import { useDistributionJob } from '../hooks/use-distribution-job.js';
 import { DistributionRow } from './distribution/distribution-row.jsx';
-import { labelDistributionBlocker, buildDistributionText, distributionCopyFormat, distributionCopyIssues } from './distribution/distribution-view-model.js';
+import { labelDistributionBlocker, buildDistributionText, distributionCopyFormat, distributionCopyIssues, distributionRowUrl } from './distribution/distribution-view-model.js';
 import { DistributionCopyButton } from './distribution/distribution-copy-button.jsx';
 import { usePersistentMap } from '../hooks/use-persistent-map.js';
 import { ExecutionPanel } from './distribution/execution-panel.jsx';
 import { useDistributionExportData } from './distribution/use-distribution-export-data.js';
 import { DistributionShopPicker } from './distribution/shop-picker.jsx';
+
+function CategoryToolbar({ control, rows, onRemove }) {
+  const job = control.state?.job;
+  const missing = control.state?.rows?.filter(row => !row.category) || [];
+  const activeMissing = rows.filter(row => !row.categoryRecord?.category);
+  return <div className="distribution-category-toolbar">
+    <span>待补类目 {missing.length} 件{job ? ` · 查询 ${job.completed || 0}/${job.requests?.length || 0} ${job.currentWord || ''}` : ''}</span>
+    <button type="button" className="node-secondary-button" disabled={!missing.length || control.busy || control.state?.locked || job?.status === 'running' || job?.inFlight}
+      onClick={() => control.act({ action: 'query', urls: missing.map(row => row.url) })}>补全缺失类目</button>
+    {job?.status === 'running' && <button type="button" className="node-secondary-button" disabled={control.busy} onClick={() => control.act({ action: 'pause' })}>暂停获取</button>}
+    {job?.status === 'paused' && <button type="button" className="node-secondary-button" disabled={control.busy || job.inFlight} onClick={() => control.act({ action: 'resume' })}>继续获取</button>}
+    {job?.error && <button type="button" className="node-secondary-button" disabled={control.busy || job.inFlight || control.state?.locked} onClick={control.startChrome}>启动生意参谋 Chrome</button>}
+    {activeMissing.length > 0 && <button type="button" className="node-secondary-button" onClick={() => {
+      if (window.confirm(`从当前清单移除 ${activeMissing.length} 件待补类目商品，仅保留已就绪项？`)) activeMissing.forEach(row => onRemove(row.key, true));
+    }}>仅保留类目已就绪商品</button>}
+    {(control.error || job?.error) && <span role="alert">{control.error || job.error}</span>}
+  </div>;
+}
 
 /**
  * Component to render distribution export panel with manual copy and automatic submission workflow.
@@ -42,6 +61,7 @@ export const DistributionExportPanel = ({
   onManualComplete
 }) => {
   const {
+    categoryControl,
     exportStatus,
     exportError,
     reviewArtifactState,
@@ -126,7 +146,7 @@ export const DistributionExportPanel = ({
     }
     setDistributionCheck({ status: 'loading', result: null, error: '' });
     try {
-      const payload = await checkDistributionRequest({ input: copyTextValue, ...selection });
+      const payload = await checkDistributionRequest({ input: copyTextValue, runId: currentRunId, ...selection });
       setDistributionCheck({ status: 'ready', result: payload, error: '' });
       return payload;
     } catch (error) {
@@ -153,8 +173,10 @@ export const DistributionExportPanel = ({
   const copyManualDistribution = async () => {
     if (!canManualCopy) return;
     try {
-      await onCopyText(manualText);
-      setManualCopiedText(copyIdentity);
+      const latest = await copyCategoryContent(currentRunId, { format: copyFormat.value,
+        items: activeRows.map(row => ({ url: distributionRowUrl(row), title: row.title })) });
+      await onCopyText(latest.text);
+      setManualCopiedText(latest.text === manualText ? copyIdentity : '');
       setManualCompleteStatus({
         status: 'copied',
         message: `已复制 ${activeRows.length} 条：${copyFormat.label}。完成外部铺货后，再点击“标记人工铺货完成”。`
@@ -255,6 +277,7 @@ export const DistributionExportPanel = ({
         )}
       </div>
 
+      <CategoryToolbar control={categoryControl} rows={activeRows} onRemove={markRemoved} />
       <div className="export-preview-list">
         {exportStatus === 'loading' && <div className="artifact-empty"><RefreshCw size={13} className="animate-spin" /> 正在加载铺货清单...</div>}
         {exportStatus === 'error' && <div className="artifact-error">{exportError || '铺货清单加载失败'}</div>}
@@ -299,6 +322,7 @@ export const DistributionExportPanel = ({
 
   return (
     <div className="export-workbench">
+      <CategoryToolbar control={categoryControl} rows={activeRows} onRemove={markRemoved} />
       <section className={`distribution-ready-hero ${activeRows.length > 0 ? 'has-items' : 'is-empty'}`}>
         <div className="distribution-ready-hero-copy">
           <span className="distribution-ready-eyebrow">当前要处理</span>

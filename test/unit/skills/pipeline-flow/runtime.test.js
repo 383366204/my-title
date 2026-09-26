@@ -227,6 +227,9 @@ describe('pipeline runtime runner', () => {
           model: { bizData: { title: '桌面分类收纳盒家用办公室整理', categoryName: '家居用品 > 收纳盒' } }
         }),
         keywordExtractor: async () => ({ coreWord: '收纳盒', modifiers: [] }),
+        categoryExtractor: async () => ({ categoryAnalysis: { recommendation: {
+          recommended: { category: '家居用品 > 收纳盒', clickRatio: 80, clickRate: 30 }
+        } } }),
         sycmExtractor: async keyword => ({
           keyword,
           data: [{ keyword, demandSupplyRatio: 3, searchPopularity: 200, clickRate: 45, conversionRate: 2 }]

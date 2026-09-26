@@ -144,6 +144,7 @@
 
 .distribution-edit-grid {
   display: grid;
+  min-width: 0;
   grid-template-columns: minmax(0, 1.5fr) minmax(180px, 0.7fr);
   gap: 10px;
   margin: 10px 0;
@@ -557,7 +558,7 @@
   .manual-input-row,
   .distribution-method-grid,
   .distribution-edit-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .manual-input-row.is-head {

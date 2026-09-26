@@ -89,7 +89,7 @@ Expected:
 ## Web UI Smoke
 
 ```bash
-npm run ui:react
+npm start
 ```
 
 Open:

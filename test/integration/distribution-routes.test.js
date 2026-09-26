@@ -34,6 +34,7 @@ test('multi-shop requests propagate mode, reject invalid targets and lock retry 
   const jobs = createDistributionJobs({ jobDir: dir, getConfirmationReader: () => async options => { rechecked = options; return { ok: false }; } });
   const app = express(); app.use(express.json());
   registerDistributionRoutes(app, {
+    validateDistributionCategories: () => {},
     shops, jobs, parseItems: () => [{ offerId: '123', url: 'https://detail.1688.com/offer/123.html', title: '杯垫' }],
     checkDistributionReadiness: async options => { checked = options; return { canSubmit: true }; },
     distributeProducts: async options => { submitted = options; return { ok: false, batches: [] }; },
@@ -97,6 +98,7 @@ test('distribution submission preserves confirmation, control, failures and comp
   const app = express();
   app.use(express.json());
   registerDistributionRoutes(app, {
+    validateDistributionCategories: () => {},
     jobs,
     shops,
     parseItems: input => input ? [{ offerId: '123', url: 'https://detail.1688.com/offer/123.html', title: 'fixture', category: 'fixture' }] : [],

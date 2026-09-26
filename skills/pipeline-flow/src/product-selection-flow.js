@@ -11,6 +11,7 @@ const { createProductDiversityState, selectDiverseProducts } = require('./produc
 const { DEFAULT_FLOW_DIR, appendJsonl, getRun, readJsonl, setRunStageMetrics, writeRun } = require('./run-store');
 const { productCategory, productImage, productPrice, productSales, productTitle, productUrl } = require('./product-normalizer');
 const { DEFAULT_PRODUCTS_PER_KEYWORD } = require('./flow-constants');
+const { sourceCategory } = require('./category-policy');
 const { buildFlowCommand, flowResponse, isGenerationEligibleKeyword } = require('./flow-context');
 
 /**
@@ -101,6 +102,9 @@ async function flowSelectProducts(options = {}) {
           sycmScore: item.sycmScore,
           sycmData: item.sycmData || [],
           recommendedCategory: productCategory(normalizedProduct, item),
+          source1688Category: sourceCategory({ product: normalizedProduct }),
+          sycmCategoryEvidence: item.sycmCategoryEvidence,
+          categorySelection: item.categorySelection,
           verifyMode: item.verifyMode || '',
           confidence: item.confidence || '',
           usage: item.usage || '',

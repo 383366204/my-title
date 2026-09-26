@@ -3,6 +3,7 @@ const assert = require('node:assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const evidence = (queryWord, category) => ({ source: 'sycm', queryWord, recommended: category, candidates: category ? [{ category, clickRatio: 80, clickRate: 30 }] : [] });
 const extraction = require('../../../../skills/title-gen/src/extract-core');
 // 流水线测试验证编排；关键词提取使用本地降级，避免真实模型请求。
 mock.method(extraction, 'extractKeywords', async (_mode, input) => extraction.fallbackExtract(input.data));
@@ -854,7 +855,7 @@ describe('pipeline-flow', () => {
       ],
       categoryAnalysis: {
         recommendation: {
-          recommended: { category: '宠物用品 > 狗狗玩具', score: 80 }
+          recommended: { category: '宠物用品 > 狗狗玩具', score: 80, clickRatio: 80, clickRate: 30 }
         }
       }
     });
@@ -902,7 +903,7 @@ describe('pipeline-flow', () => {
     assert.ok(fs.readFileSync(result.files.distributionReview, 'utf8').includes('Category: 宠物用品 > 狗狗玩具'));
   });
 
-  test('flowKeyword preserves the user exact keyword through selection and generation without SYCM', async () => {
+  test('flowKeyword preserves exact keywords and only fetches SYCM categories after generation', async () => {
     const dataDir = tempDataDir();
     const exactKeyword = '宝宝醒狮虎头鞋';
     const sycmCalls = [];
@@ -927,7 +928,7 @@ describe('pipeline-flow', () => {
           ],
           categoryAnalysis: {
             recommendation: {
-              recommended: { category: '母婴用品 > 婴儿鞋', score: 80 }
+              recommended: { category: '母婴用品 > 婴儿鞋', score: 80, clickRatio: 80, clickRate: 30 }
             }
           }
         };
@@ -958,7 +959,7 @@ describe('pipeline-flow', () => {
     });
 
     assert.strictEqual(result.exactKeyword, exactKeyword);
-    assert.deepStrictEqual(sycmCalls, []);
+    assert.deepStrictEqual(sycmCalls, [exactKeyword]);
     assert.deepStrictEqual(generatorCalls, [exactKeyword]);
     assert.strictEqual(result.steps.mined, 1);
     assert.strictEqual(result.steps.verified, 0);
@@ -997,7 +998,7 @@ describe('pipeline-flow', () => {
           }],
           categoryAnalysis: {
             recommendation: {
-              recommended: { category: '宠物用品 > 狗狗玩具', score: 88 }
+              recommended: { category: '宠物用品 > 狗狗玩具', score: 88, clickRatio: 80, clickRate: 30 }
             }
           }
         };
@@ -1025,7 +1026,7 @@ describe('pipeline-flow', () => {
 
     assert.deepEqual(result.exactKeywords, keywords);
     assert.equal(result.exactKeyword, keywords[0]);
-    assert.deepEqual(sycmCalls, []);
+    assert.deepEqual(sycmCalls, keywords);
     assert.deepEqual(generatorCalls, keywords);
     assert.equal(result.steps.mined, 2);
     assert.equal(result.steps.verified, 0);
@@ -1184,7 +1185,8 @@ describe('pipeline-flow', () => {
         title: '陶瓷摆件家居装饰客厅桌面花器摆设现代简约创意商品书房玄关酒柜装饰',
         recommendedCategory: '家居饰品 > 摆件类 > 装饰摆件',
         product: { categoryListName: '家居饰品 > 摆件类 > 装饰摆件' },
-        productOpportunity: { decision: 'continue', level: 'candidate', score: 72 }
+        productOpportunity: { decision: 'continue', level: 'candidate', score: 72 },
+        sycmCategoryEvidence: evidence('陶瓷摆件', '家居饰品 > 摆件类 > 装饰摆件')
       }),
       JSON.stringify({
         status: 'generated',
@@ -1193,7 +1195,8 @@ describe('pipeline-flow', () => {
         title: '陶瓷摆件桌面艺术花器小众异形家居客厅玄关装饰摆件书房酒柜装饰',
         recommendedCategory: '家居饰品 > 摆件类 > 装饰摆件',
         product: { categoryListName: '家居饰品 > 摆件类 > 装饰摆件' },
-        productOpportunity: { decision: 'review', level: 'manual_review', score: 58 }
+        productOpportunity: { decision: 'review', level: 'manual_review', score: 58 },
+        sycmCategoryEvidence: evidence('陶瓷摆件', '家居饰品 > 摆件类 > 装饰摆件')
       })
     ].join('\n') + '\n', 'utf8');
 
@@ -1221,6 +1224,7 @@ describe('pipeline-flow', () => {
       url: `https://detail.1688.com/offer/${id}.html`,
       title: `宠物玩具狗狗互动耐咬训练解闷磨牙发声弹力球室内户外陪伴用品${id}`,
       recommendedCategory: category,
+      sycmCategoryEvidence: evidence('宠物玩具', category),
       product: category ? { categoryListName: category } : {},
       productOpportunity: { decision: 'continue', level: 'candidate', score }
     });
@@ -1236,10 +1240,11 @@ describe('pipeline-flow', () => {
     const persisted = getRun({ dataDir, runId: mined.runId }).run;
 
     assert.strictEqual(exported.count, 2);
-    assert.strictEqual(exported.rejected, 2);
-    assert.strictEqual(exported.mustReview, false);
-    assert.strictEqual(exported.canSubmit, true);
-    assert.strictEqual(exported.status, 'ready_to_distribute');
+    assert.strictEqual(exported.rejected, 0);
+    assert.strictEqual(exported.reviewCandidates, 2);
+    assert.strictEqual(exported.mustReview, true);
+    assert.strictEqual(exported.canSubmit, false);
+    assert.strictEqual(exported.status, 'needs_review');
     assert.ok(batch.includes('offer/303.html'));
     assert.ok(batch.includes('offer/304.html'));
     assert.strictEqual(persisted.funnel.export.input, 4);
@@ -1271,7 +1276,7 @@ describe('pipeline-flow', () => {
     assert.ok(review.includes('不是严格蓝海词'));
   });
 
-  test('flowExport blocks short titles and category conflicts before distribution', async () => {
+  test('flowExport blocks short titles but permits different platform category names', async () => {
     const dataDir = tempDataDir();
     const mined = await flowMine({ dataDir, limit: 1 });
     const runDir = path.join(dataDir, 'runs', mined.runId);
@@ -1282,6 +1287,7 @@ describe('pipeline-flow', () => {
         keyword: '宠物玩具',
         url: 'https://detail.1688.com/offer/100.html',
         title: '宠物玩具短标题',
+        sycmCategoryEvidence: evidence('宠物玩具', '宠物用品 > 狗狗玩具'),
         recommendedCategory: '宠物用品 > 狗狗玩具',
         product: { categoryListName: '宠物用品 > 狗狗玩具' },
         verifyMode: 'blue'
@@ -1293,6 +1299,7 @@ describe('pipeline-flow', () => {
         title: '宠物玩具狗狗互动耐咬训练解闷磨牙发声弹力球室内户外陪伴用品好物',
         recommendedCategory: '宠物用品 > 狗狗玩具',
         product: { categoryListName: '服饰配件 > 戒指' },
+        sycmCategoryEvidence: evidence('宠物玩具', '宠物用品 > 狗狗玩具'),
         verifyMode: 'blue'
       })
     ].join('\n') + '\n', 'utf8');
@@ -1301,12 +1308,12 @@ describe('pipeline-flow', () => {
     const batch = fs.readFileSync(exported.file, 'utf8');
     const review = fs.readFileSync(exported.reviewFile, 'utf8');
 
-    assert.equal(exported.count, 0);
-    assert.equal(exported.rejected, 2);
-    assert.equal(exported.mustReview, true);
-    assert.equal(batch, '');
+    assert.equal(exported.count, 1);
+    assert.equal(exported.rejected, 1);
+    assert.equal(exported.mustReview, false);
+    assert.ok(batch.includes('offer/101.html'));
     assert.ok(review.includes('title_too_short'));
-    assert.ok(review.includes('category_conflict'));
+    assert.ok(!review.includes('category_conflict'));
   });
 
   test('flowExport blocks rows that have no SYCM or product category', async () => {
@@ -1335,6 +1342,7 @@ describe('pipeline-flow', () => {
 
   test('validateGeneratedRow reports category confidence', () => {
     const ok = validateGeneratedRow({
+      sycmCategoryEvidence: evidence('宠物玩具', '宠物用品 > 狗狗玩具'),
       keyword: '宠物玩具',
       url: 'https://detail.1688.com/offer/123.html',
       title: '宠物玩具狗狗互动耐咬训练解闷磨牙发声弹力球室内户外陪伴用品好物',
@@ -1342,6 +1350,7 @@ describe('pipeline-flow', () => {
       product: { categoryListName: '宠物用品 > 狗狗玩具' }
     });
     const conflict = categoryAssessment({
+      sycmCategoryEvidence: evidence('宠物玩具', '宠物用品 > 狗狗玩具'),
       title: '宠物玩具狗狗互动耐咬训练解闷磨牙发声弹力球室内户外陪伴用品好物',
       keyword: '宠物玩具',
       recommendedCategory: '宠物用品 > 狗狗玩具',
@@ -1350,7 +1359,7 @@ describe('pipeline-flow', () => {
 
     assert.equal(ok.ok, true);
     assert.equal(ok.categoryConfidence, 'high');
-    assert.equal(conflict.confidence, 'low');
+    assert.equal(conflict.confidence, 'high');
   });
 
   test('validateGeneratedRow reads the 1688 category from nested product stats', () => {
@@ -1361,8 +1370,9 @@ describe('pipeline-flow', () => {
       product: { stats: { categoryListName: '家居用品 > 收纳整理 > 收纳袋' } }
     });
 
-    assert.equal(result.ok, true);
-    assert.equal(result.categoryConfidence, 'medium');
+    assert.equal(result.ok, false);
+    assert.equal(result.categoryConfidence, 'unknown');
+    assert.ok(result.reasons.includes('missing_category'));
     assert.equal(result.productCategory, '家居用品 > 收纳整理 > 收纳袋');
   });
 

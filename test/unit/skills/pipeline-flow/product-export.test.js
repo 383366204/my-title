@@ -2,6 +2,7 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
+const evidence = (queryWord, category) => ({ source: 'sycm', queryWord, recommended: category, candidates: [{ category, clickRatio: 80, clickRate: 30 }] });
 const {
   normalizeManualOfferDetail,
   productCategory,
@@ -56,24 +57,27 @@ test('normalizes offer_detail all_info markdown keyed by offer id', () => {
   assert.equal(detail.price, '1.48元');
 });
 
-test('assesses matching and conflicting product categories', () => {
+test('uses SYCM evidence regardless of cross-platform category names', () => {
   const matched = categoryAssessment({
+    keyword: '收纳盒', sycmCategoryEvidence: evidence('收纳盒', '家居用品 > 收纳整理'),
     recommendedCategory: '家居用品 > 收纳整理',
     product: { categoryName: '收纳整理 > 收纳盒' }
   });
   const conflict = categoryAssessment({
+    keyword: '连衣裙', sycmCategoryEvidence: evidence('连衣裙', '女装 > 连衣裙'),
     recommendedCategory: '女装 > 连衣裙',
     product: { categoryName: '数码产品 > 手机配件' }
   });
 
   assert.equal(matched.confidence, 'high');
-  assert.equal(conflict.confidence, 'low');
-  assert.equal(conflict.reason, '生意参谋类目与商品类目疑似冲突');
+  assert.equal(conflict.confidence, 'high');
+  assert.equal(conflict.recommendedCategory, '女装 > 连衣裙');
 });
 
-test('keeps hot-tier limits and manual-review export classification stable', () => {
-  const title = '桌面收纳盒抽屉式办公室学生文具透明塑料杂物整理储物盒大容量';
+test('hot-source products are not blocked by legacy export quotas', () => {
+  const title = '桌面收纳盒抽屉式办公室学生文具透明塑料杂物整理储物盒大容量家用';
   const validation = validateGeneratedRow({
+    sycmCategoryEvidence: evidence('桌面收纳盒', '家居用品 > 收纳整理'),
     keyword: '桌面收纳盒',
     url: 'https://detail.1688.com/offer/123.html',
     title,
@@ -82,15 +86,45 @@ test('keeps hot-tier limits and manual-review export classification stable', () 
     product: { categoryName: '收纳整理 > 收纳盒' }
   }, { hotUsed: 2, hotExportLimit: 2 });
 
-  assert.equal(validation.ok, false);
-  assert.ok(validation.reasons.includes('hot_export_limit'));
+  assert.equal(validation.ok, true);
+  assert.deepEqual(validation.reasons, []);
+  assert.equal(classifyExportStatus(validation), 'ready');
   assert.equal(classifyExportStatus({ ok: false, reasons: ['product_opportunity_manual_review'] }), 'review_candidate');
   assert.equal(
     distributionLine({
+      keyword: '桌面收纳盒', sycmCategoryEvidence: evidence('桌面收纳盒', '家居用品 > 收纳整理'),
       url: 'https://detail.1688.com/offer/123.html',
       title,
       recommendedCategory: '家居用品 > 收纳整理'
     }),
     `https://detail.1688.com/offer/123.html$$${title}$$家居用品 > 收纳整理`
   );
+});
+
+test('exports more than two hot-source products while preserving overall limits and validation', async t => {
+  const fs = require('fs');
+  const os = require('os');
+  const path = require('path');
+  const { initRun, appendJsonl } = require('../../../../skills/pipeline-flow/src/run-store');
+  const { flowExport } = require('../../../../skills/pipeline-flow/src/export-flow');
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hot-export-'));
+  t.after(() => fs.rmSync(dataDir, { recursive: true, force: true }));
+  const { run } = initRun({ dataDir, runId: 'hot-export' });
+  const rows = Array.from({ length: 5 }, (_, index) => ({
+    status: 'generated', keyword: '桌面收纳盒', verifyMode: 'hot',
+    sycmCategoryEvidence: evidence('桌面收纳盒', '家居用品 > 收纳整理'),
+    url: `https://detail.1688.com/offer/${100 + index}.html`,
+    title: `桌面收纳盒抽屉式办公室学生文具透明塑料杂物整理储物盒大容量${index}`,
+    product: { categoryName: '收纳整理 > 收纳盒' }
+  }));
+  appendJsonl(run.files.generatedProducts, [...rows, { ...rows[0], url: 'https://detail.1688.com/offer/999.html', title: '短标题' }]);
+  const options = { dataDir, runId: run.runId, hotExportLimit: 2 };
+  const all = await flowExport(options);
+  assert.equal(all.count, 5);
+  assert.equal(all.rejected, 1);
+  assert.equal(fs.readFileSync(all.file, 'utf8').trim().split('\n').length, 5);
+  assert.ok(!fs.readFileSync(all.reviewFile, 'utf8').includes('hot_export_limit'));
+  const limited = await flowExport({ ...options, limit: 3 });
+  assert.equal(limited.count, 3);
+  assert.equal(limited.rejected, 1);
 });

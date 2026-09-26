@@ -10,6 +10,7 @@ const { appendOpportunity } = require('./opportunity-store');
 const { fetchSycmWithFallback, scoreSycmRows } = require('./sycm-verifier');
 const { appendJsonl, getRun, readJsonl, setRunStageMetrics, writeRun } = require('./run-store');
 const { sycmRecommendedCategory } = require('./product-normalizer');
+const { buildCategoryEvidence } = require('./category-policy');
 const {
   buildFlowCommand,
   flowResponse,
@@ -100,6 +101,8 @@ async function flowVerify(options = {}) {
           || candidate.recommendedCategory
           || candidate.category
           || '',
+        sycmCategoryEvidence: sycmAttempt.result?.categoryAnalysis
+          ? buildCategoryEvidence(sycmAttempt.result, candidate.keyword) : candidate.sycmCategoryEvidence,
         categorySource: sycmRecommendedCategory(sycmAttempt.result)
           ? 'sycm'
           : (candidate.categorySource || (candidate.recommendedCategory || candidate.category ? 'candidate' : '')),

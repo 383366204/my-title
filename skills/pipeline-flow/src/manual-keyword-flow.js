@@ -219,8 +219,9 @@ async function flowVerifyManualProducts(options = {}) {
       clientId: product.clientId,
       url: product.url,
       sourceTitle: product.sourceTitle || product.title || '',
-      recommendedCategory: directCategory || chosen.recommendedCategory || '',
-      categorySource: directCategory ? '1688' : (chosen.categorySource || ''),
+      source1688Category: directCategory,
+      recommendedCategory: chosen.recommendedCategory || '',
+      categorySource: chosen.categorySource || '',
       sycmRecommendedCategory: chosen.recommendedCategory || '',
       keywordStatus: chosen.fallbackUsed ? 'review_required' : 'verified',
       candidateResults: [...matchingVerified, ...rejectedRows.filter(candidate => candidateMatchesProduct(candidate, product))]
@@ -243,7 +244,10 @@ async function flowVerifyManualProducts(options = {}) {
       fallbackReason: chosen.fallbackReason || '',
       recommendedCategory: assignment.recommendedCategory,
       categorySource: assignment.categorySource,
-      sycmRecommendedCategory: assignment.sycmRecommendedCategory
+      sycmRecommendedCategory: assignment.sycmRecommendedCategory,
+      source1688Category: product.source1688Category || directCategory,
+      sycmCategoryEvidence: chosen.sycmCategoryEvidence,
+      categorySelection: product.categorySelection
     });
   }
 

@@ -141,7 +141,7 @@
 
 ## 验证入口
 
-`npm test` 覆盖 core、Web 状态、CLI 与主要工作流 API 测试；`npm run test:core-skills` 覆盖全部 skill 单元测试；`npm run test:pipeline` 可单独验证流水线；`npm run web:build` 验证生产构建。所有测试代码统一位于根目录 `test/`。
+`npm test` 覆盖 core、Web 状态、CLI 与主要工作流 API 测试；`npm run test:core-skills` 覆盖全部 skill 单元测试；`npm run test:pipeline` 可单独验证流水线；`npm run build` 验证生产构建。所有测试代码统一位于根目录 `test/`。
 
 真实平台 smoke 需要显式 ECOM_LIVE_TESTS=1。普通回归不得使用真实铺货动作来证明成功。
 

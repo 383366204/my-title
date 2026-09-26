@@ -141,7 +141,7 @@ describe('distribution-view-model', () => {
       assert.ok(result.metrics.includes('选词：数码配件'));
       assert.ok(result.metrics.includes('类目 数码'));
       assert.ok(result.metrics.includes('置信度 高'));
-      assert.equal(result.description, '缺少商品或推荐类目');
+      assert.equal(result.description, '待获取或确认生意参谋类目');
     });
   });
 });
