@@ -950,5 +950,5 @@ Spec coverage:
 
 Intentional limitations:
 
-- Cancellation is checked between steps in this first implementation. Fine-grained cancellation inside a single SYCM or GLM request needs a separate step-loop refactor after this runtime is stable.
+- Cancellation is checked between steps in this first implementation. Fine-grained cancellation inside a single SYCM or LLM request needs a separate step-loop refactor after this runtime is stable.
 - Pause/resume is not exposed until checkpoints are proven for `verify` and `generate`.

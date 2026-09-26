@@ -72,7 +72,7 @@ test('Test 1: Complete happy path', async () => {
     searchTaobaoTitles: async () => []
   });
 
-  class MockGLMClient1 {
+  class MockLLMClient1 {
     constructor(config) {}
     async selectAndGenerate({ blueOceanWord, coreWord, modifiers, peerTitles, products, maxLength }) {
       return {
@@ -89,7 +89,7 @@ test('Test 1: Complete happy path', async () => {
       };
     }
   }
-  mockModule('/mnt/d/project/my-title/core/glm-client.js', MockGLMClient1);
+  mockModule('/mnt/d/project/my-title/core/llm-client.js', MockLLMClient1);
 
   const { run } = reloadIndex();
   const res = await run('纯银项链女高级感', {
@@ -133,7 +133,7 @@ test('Test 2: Delay between searches', async () => {
 
   mockModule('/mnt/d/project/my-title/skills/title-gen/src/search-taobao.js', { searchTaobaoTitles: async () => [] });
 
-  class MockGLMClient2 {
+  class MockLLMClient2 {
     constructor(config) {}
     async selectAndGenerate({ blueOceanWord, coreWord, modifiers, peerTitles, products, maxLength }) {
       await new Promise(r => setTimeout(r, 3500));
@@ -146,7 +146,7 @@ test('Test 2: Delay between searches', async () => {
       };
     }
   }
-  mockModule('/mnt/d/project/my-title/core/glm-client.js', MockGLMClient2);
+  mockModule('/mnt/d/project/my-title/core/llm-client.js', MockLLMClient2);
 
   const { run } = reloadIndex();
   const start = Date.now();
@@ -162,13 +162,13 @@ test('Test 2: Delay between searches', async () => {
   assert.ok(elapsed >= 3500);
 });
 
-test('Test 3: GLM scoring failure falls back to rigid filtering', async () => {
+test('Test 3: LLM scoring failure falls back to rigid filtering', async () => {
   mockModule('/mnt/d/project/my-title/skills/title-gen/src/extract-core.js', {
     extractCoreAndModifiers: async (input) => ({ coreWord: '项链', modifiers: [{ word: '纯银', rigidity: 'rigid' }] })
   });
 
   mockModule('/mnt/d/project/my-title/skills/alibaba1688/src/search-1688.js', {
-    searchAll: async () => { throw new Error('GLM failure'); },
+    searchAll: async () => { throw new Error('LLM failure'); },
     searchAndFilter: async (coreWord, modifiers) => {
       return [
         { id: 'p3', title: '项链银质', url: 'https://example/p3', price: 90, stats: { last30DaysSales: 5, goodRates: 0.8, repurchaseRate: 0.2 } }
@@ -178,12 +178,12 @@ test('Test 3: GLM scoring failure falls back to rigid filtering', async () => {
 
   mockModule('/mnt/d/project/my-title/skills/title-gen/src/search-taobao.js', { searchTaobaoTitles: async () => [] });
 
-  class MockGLMClient3 {
+  class MockLLMClient3 {
     constructor(config) {}
-    async selectAndGenerate() { throw new Error('GLM failure'); }
+    async selectAndGenerate() { throw new Error('LLM failure'); }
     async generateTitles() { return ['蓝海项链 版1']; }
   }
-  mockModule('/mnt/d/project/my-title/core/glm-client.js', MockGLMClient3);
+  mockModule('/mnt/d/project/my-title/core/llm-client.js', MockLLMClient3);
 
   const { run } = reloadIndex();
   const res = await run('项链', {
@@ -209,12 +209,12 @@ test('Test 4: Taobao search failure still generates titles', async () => {
     searchTaobaoTitles: async () => { throw new Error('taobao fail'); }
   });
 
-  class MockGLMClient4 {
+  class MockLLMClient4 {
     constructor(config) {}
-    async selectAndGenerate() { throw new Error('GLM failure'); }
+    async selectAndGenerate() { throw new Error('LLM failure'); }
     async generateTitles() { return ['蓝海词']; }
   }
-  mockModule('/mnt/d/project/my-title/core/glm-client.js', MockGLMClient4);
+  mockModule('/mnt/d/project/my-title/core/llm-client.js', MockLLMClient4);
 
   const { run } = reloadIndex();
   const res = await run('项链', {
@@ -237,12 +237,12 @@ test('Test 5: Empty 1688 search results returns empty array', async () => {
 
   mockModule('/mnt/d/project/my-title/skills/title-gen/src/search-taobao.js', { searchTaobaoTitles: async () => [] });
 
-  class MockGLMClient5 {
+  class MockLLMClient5 {
     constructor(config) {}
-    async selectAndGenerate() { throw new Error('GLM failure'); }
+    async selectAndGenerate() { throw new Error('LLM failure'); }
     async generateTitles() { return []; }
   }
-  mockModule('/mnt/d/project/my-title/core/glm-client.js', MockGLMClient5);
+  mockModule('/mnt/d/project/my-title/core/llm-client.js', MockLLMClient5);
 
   const { run } = reloadIndex();
   const res = await run('项链', {});
@@ -263,7 +263,7 @@ test('Test 6: Ensure 11 fields exist in output products when there are results',
 
   mockModule('/mnt/d/project/my-title/skills/title-gen/src/search-taobao.js', { searchTaobaoTitles: async () => [] });
 
-  class MockGLMClient6 {
+  class MockLLMClient6 {
     constructor(config) {}
     async selectAndGenerate({ blueOceanWord, coreWord, modifiers, peerTitles, products, maxLength }) {
       return {
@@ -276,7 +276,7 @@ test('Test 6: Ensure 11 fields exist in output products when there are results',
     }
     async generateTitles() { return ['蓝海项链 版1']; }
   }
-  mockModule('/mnt/d/project/my-title/core/glm-client.js', MockGLMClient6);
+  mockModule('/mnt/d/project/my-title/core/llm-client.js', MockLLMClient6);
 
   const { run } = reloadIndex();
   const res = await run('necklace', {
@@ -322,7 +322,7 @@ test('run limits concurrent selectAndGenerate batches', async () => {
     url: `https://detail.1688.com/offer/${100000 + index}.html`
   }));
 
-  const glmClient = {
+  const llmClient = {
     async selectAndGenerate() {
       active += 1;
       maxActive = Math.max(maxActive, active);
@@ -343,7 +343,7 @@ test('run limits concurrent selectAndGenerate batches', async () => {
     peerTitles: ['陶瓷摆件 家用桌面装饰'],
     coreWord: '摆件',
     modifiers: [{ word: '陶瓷', type: 'rigid' }],
-    glmClient,
+    llmClient,
     llmConcurrency: 2,
     runTimeoutMs: 10000,
     silent: true
@@ -362,7 +362,7 @@ test('run applies productLimit before sending products to LLM', async () => {
     url: `https://detail.1688.com/offer/${200000 + index}.html`
   }));
 
-  const glmClient = {
+  const llmClient = {
     async selectAndGenerate({ products: batch }) {
       seenProductCount += batch.length;
       return {
@@ -384,7 +384,7 @@ test('run applies productLimit before sending products to LLM', async () => {
     peerTitles: ['陶瓷摆件 家用桌面装饰'],
     coreWord: '摆件',
     modifiers: [{ word: '陶瓷', type: 'rigid' }],
-    glmClient,
+    llmClient,
     llmConcurrency: 1,
     runTimeoutMs: 10000,
     silent: true
@@ -405,7 +405,7 @@ test('run uses configurable small LLM batch sizes', async () => {
     url: `https://detail.1688.com/offer/${300000 + index}.html`
   }));
 
-  const glmClient = {
+  const llmClient = {
     async selectAndGenerate({ products: batch }) {
       batchSizes.push(batch.length);
       return {
@@ -426,7 +426,7 @@ test('run uses configurable small LLM batch sizes', async () => {
     peerTitles: ['陶瓷摆件 家用桌面装饰'],
     coreWord: '摆件',
     modifiers: [{ word: '陶瓷', type: 'rigid' }],
-    glmClient,
+    llmClient,
     llmBatchSize: 5,
     llmConcurrency: 1,
     runTimeoutMs: 10000,
@@ -446,7 +446,7 @@ test('run marks partial LLM batch failures as degraded while returning fallback 
     stats: { last30DaysSales: 20 + index, goodRates: 0.95, repurchaseRate: 0.1 }
   }));
 
-  const glmClient = {
+  const llmClient = {
     async selectAndGenerate({ products: batch }) {
       if (batch.some(p => p.id === 'offer-partial-0')) {
         throw new Error('timeout of 60000ms exceeded');
@@ -469,7 +469,7 @@ test('run marks partial LLM batch failures as degraded while returning fallback 
     peerTitles: ['陶瓷摆件 家用桌面装饰'],
     coreWord: '摆件',
     modifiers: [{ word: '陶瓷', type: 'rigid' }],
-    glmClient,
+    llmClient,
     llmBatchSize: 3,
     llmConcurrency: 1,
     llmRetries: 0,
@@ -493,7 +493,7 @@ test('computeEffectiveRunTimeout expands when image search is enabled', () => {
 
 test('run can return non-distributable generic titles when no 1688 products exist', async () => {
   const { run } = require('../../../../skills/title-gen/src');
-  const glmClient = {
+  const llmClient = {
     async generateTitles() {
       return ['陶瓷摆件 桌面装饰家居客厅玄关创意小摆件礼品'];
     }
@@ -505,7 +505,7 @@ test('run can return non-distributable generic titles when no 1688 products exis
     allowGenericTitlesWhenNoProducts: true,
     coreWord: '摆件',
     modifiers: [{ word: '陶瓷', type: 'rigid' }],
-    glmClient,
+    llmClient,
     silent: true
   });
 

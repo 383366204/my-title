@@ -43,7 +43,7 @@ function reloadIndex() {
 
 /**
  * Test 1: Complete happy path
- * - Mock all dependencies (GLM extract, 1688 search, GLM score, taobao search, GLM generate)
+ * - Mock all dependencies (LLM extract, 1688 search, LLM score, taobao search, LLM generate)
  * - Call run("纯银项链女高级感", {format: 'both'})
  * - Verify: returns coreWord, blueOceanWord, products array with 8 fields, titles start with blue ocean keyword
  */
@@ -90,8 +90,8 @@ test('Test 1: Complete happy path', async () => {
     searchTaobaoTitles: async () => ['纯银项链女轻奢小众', 'S925银项链女高级感']
   });
 
-  // Mock glm-client.js
-  class MockGLMClient1 {
+  // Mock llm-client.js
+  class MockLLMClient1 {
     constructor(config) {}
     async selectAndGenerate({ blueOceanWord, coreWord, modifiers, peerTitles, products, maxLength }) {
       return {
@@ -108,7 +108,7 @@ test('Test 1: Complete happy path', async () => {
       };
     }
   }
-  mockModule('/mnt/d/project/my-title/core/glm-client.js', MockGLMClient1);
+  mockModule('/mnt/d/project/my-title/core/llm-client.js', MockLLMClient1);
 
   const { run } = reloadIndex();
   const result = await run('纯银项链女高级感', {
@@ -170,7 +170,7 @@ test('Test 2: Empty 1688 search results', async () => {
     searchTaobaoTitles: async () => []
   });
 
-  class MockGLMClient2 {
+  class MockLLMClient2 {
     constructor(config) {}
     async selectAndGenerate({ blueOceanWord, coreWord, modifiers, peerTitles, products, maxLength }) {
       await new Promise(r => setTimeout(r, 3500));
@@ -183,7 +183,7 @@ test('Test 2: Empty 1688 search results', async () => {
       };
     }
   }
-  mockModule('/mnt/d/project/my-title/core/glm-client.js', MockGLMClient2);
+  mockModule('/mnt/d/project/my-title/core/llm-client.js', MockLLMClient2);
 
   const { run } = reloadIndex();
   const result = await run('纯银项链', { maxLength: 60 });
@@ -197,11 +197,11 @@ test('Test 2: Empty 1688 search results', async () => {
 });
 
 /**
- * Test 3: GLM scoring failure fallback
- * - Mock GLM judgeRelevance to throw error
+ * Test 3: LLM scoring failure fallback
+ * - Mock LLM judgeRelevance to throw error
  * - Verify: still returns results using rigid modifier filtering fallback
  */
-test('Test 3: GLM scoring failure fallback', async () => {
+test('Test 3: LLM scoring failure fallback', async () => {
   mockModule('/mnt/d/project/my-title/skills/title-gen/src/extract-core.js', {
     extractCoreAndModifiers: async (input) => ({
       coreWord: '项链',
@@ -214,7 +214,7 @@ test('Test 3: GLM scoring failure fallback', async () => {
 
   // searchAll throws error, fallback to searchAndFilter
   mockModule('/mnt/d/project/my-title/skills/alibaba1688/src/search-1688.js', {
-    searchAll: async () => { throw new Error('GLM scoring API failure'); },
+    searchAll: async () => { throw new Error('LLM scoring API failure'); },
     searchAndFilter: async (coreWord, modifiers) => {
       // Fallback returns products based on rigid modifier filtering
       return [
@@ -233,12 +233,12 @@ test('Test 3: GLM scoring failure fallback', async () => {
     searchTaobaoTitles: async () => []
   });
 
-  class MockGLMClient3 {
+  class MockLLMClient3 {
     constructor(config) {}
-    async selectAndGenerate() { throw new Error('GLM failure'); }
+    async selectAndGenerate() { throw new Error('LLM failure'); }
     async generateTitles() { return ['纯银项链女款 高级感']; }
   }
-  mockModule('/mnt/d/project/my-title/core/glm-client.js', MockGLMClient3);
+  mockModule('/mnt/d/project/my-title/core/llm-client.js', MockLLMClient3);
 
   const { run } = reloadIndex();
   const result = await run('纯银项链女', {
@@ -287,9 +287,9 @@ test('Test 4: Taobao search failure', async () => {
     searchTaobaoTitles: async () => { throw new Error('Taobao search failed'); }
   });
 
-  class MockGLMClient4 {
+  class MockLLMClient4 {
     constructor(config) {}
-    async selectAndGenerate() { throw new Error('GLM failure'); }
+    async selectAndGenerate() { throw new Error('LLM failure'); }
     async generateTitles({ peerTitles }) {
       // Verify peerTitles is empty array when taobao fails
       assert.ok(Array.isArray(peerTitles));
@@ -297,7 +297,7 @@ test('Test 4: Taobao search failure', async () => {
       return ['纯银项链 女款 高级感'];
     }
   }
-  mockModule('/mnt/d/project/my-title/core/glm-client.js', MockGLMClient4);
+  mockModule('/mnt/d/project/my-title/core/llm-client.js', MockLLMClient4);
 
   const { run } = reloadIndex();
   const result = await run('纯银项链', {
@@ -320,7 +320,7 @@ test('Test 4: Taobao search failure', async () => {
  */
 test('Test 5: All external dependencies fail', async () => {
   mockModule('/mnt/d/project/my-title/skills/title-gen/src/extract-core.js', {
-    extractCoreAndModifiers: async () => { throw new Error('GLM extract failed'); }
+    extractCoreAndModifiers: async () => { throw new Error('LLM extract failed'); }
   });
 
   mockModule('/mnt/d/project/my-title/skills/alibaba1688/src/search-1688.js', {
@@ -332,12 +332,12 @@ test('Test 5: All external dependencies fail', async () => {
     searchTaobaoTitles: async () => { throw new Error('Taobao search failed'); }
   });
 
-  class MockGLMClient5 {
+  class MockLLMClient5 {
     constructor(config) {}
-    async selectAndGenerate() { throw new Error('GLM failure'); }
-    async generateTitles() { throw new Error('GLM generate failed'); }
+    async selectAndGenerate() { throw new Error('LLM failure'); }
+    async generateTitles() { throw new Error('LLM generate failed'); }
   }
-  mockModule('/mnt/d/project/my-title/core/glm-client.js', MockGLMClient5);
+  mockModule('/mnt/d/project/my-title/core/llm-client.js', MockLLMClient5);
 
   const { run } = reloadIndex();
 
@@ -384,7 +384,7 @@ test('Test 6: Format switching', async () => {
     searchTaobaoTitles: async () => []
   });
 
-  class MockGLMClient6 {
+  class MockLLMClient6 {
     constructor(config) {}
     async selectAndGenerate({ blueOceanWord, coreWord, modifiers, peerTitles, products, maxLength }) {
       return {
@@ -397,7 +397,7 @@ test('Test 6: Format switching', async () => {
     }
     async generateTitles() { return ['纯银项链 女款']; }
   }
-  mockModule('/mnt/d/project/my-title/core/glm-client.js', MockGLMClient6);
+  mockModule('/mnt/d/project/my-title/core/llm-client.js', MockLLMClient6);
 
   const { formatResult } = require('../../skills/title-gen/src/output-formatter');
 

@@ -101,7 +101,7 @@ const program = new Command();
 
 program
   .name('ecom-ai-tools')
-  .description('电商选品AI工具箱 - 关键词 → GLM提取 → 1688搜索 → 相关性过滤 → 生成淘宝标题（可参考淘宝同行标题）')
+  .description('电商选品AI工具箱 - 关键词 → LLM提取 → 1688搜索 → 相关性过滤 → 生成淘宝标题（可参考淘宝同行标题）')
   .argument('[keywords]', '用户输入关键词，如"纯银项链女高级感"')
   .option('-l, --length <number>', '标题最大长度（字符，1汉字=2字符）', '60')
   .option('-c, --count <number>', '输出候选标题数量（0=全部）', '0')
@@ -113,10 +113,10 @@ program
   .option('--sycm-auto', '自动查询生意参谋蓝海数据（需要Chrome在调试模式运行）')
   .option('--keyword-file <path>', '加载生意参谋搜索分析数据文件')
   .option('--keywords <keywords>', '批量关键词模式（逗号分隔，如 "纯银项链女,925银手链"）')
-  .option('--suggest', '自动选词模式：GLM推荐候选词 → 输出蓝海词列表')
+  .option('--suggest', '自动选词模式：LLM推荐候选词 → 输出蓝海词列表')
   .option('--strategy <type>', '选词策略：crowd(人群) | scene(场景) | season(季节) | problem(痛点) | industry(行业)', 'season')
   .option('--input <text>', '策略输入（人群/场景/痛点/行业描述，season策略可省略）')
-  .option('--max-candidates <number>', 'GLM最大候选词数量', '5')
+  .option('--max-candidates <number>', 'LLM最大候选词数量', '5')
   .option('--sycm-verify', '启用生意参谋 SYCM 验证（默认关闭）')
   .option('--run-timeout-ms <number>', '标题生成总超时毫秒数，默认 120000；弱模型可用 180000')
   .action(async (keywords, options) => {

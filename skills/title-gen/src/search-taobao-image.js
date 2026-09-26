@@ -31,7 +31,7 @@ async function _acquireLock(timeoutMs = 120000) {
  * @returns {Promise<{results: Array<{productId:string, peerTitles:string[], priceRange:{min:number,max:number}, hasMatch:boolean}>, captchaDetected: boolean}>}
  */
 async function searchPeerTitlesByImage(products, options = {}) {
-  const { coreWord, glmClient, concurrency = 2, intervalMs = 4000, jitterMs = 0, timeout = 30000, signal = null, onProgress = null, skipFlag = null, maxImageSearch = 0 } = options;
+  const { coreWord, llmClient, concurrency = 2, intervalMs = 4000, jitterMs = 0, timeout = 30000, signal = null, onProgress = null, skipFlag = null, maxImageSearch = 0 } = options;
 
   // 记录开始时间
   const startTime = Date.now();
@@ -207,7 +207,7 @@ async function searchPeerTitlesByImage(products, options = {}) {
         taobaoTitles,
         coreWord,
         options.blueOceanWord || '',
-        glmClient || null
+        llmClient || null
       );
       filteredCount = cleanedTitles.length;
       console.error(`🧹 标题清洗: ${originalCount} 条 → 过滤后 ${filteredCount} 条 → 精选 ${Math.min(filteredCount, 50)} 条`);
@@ -769,24 +769,24 @@ function selectTopTitles(titles, blueOceanWord, coreWord, maxCount = 50) {
  * @param {string[]} rawTitles - 原始标题列表
  * @param {string} coreWord - 核心词
  * @param {string} blueOceanWord - 蓝海词
- * @param {object} glmClient - GLM 客户端（可选，用于 AI 品类过滤）
+ * @param {object} llmClient - LLM 客户端（可选，用于 AI 品类过滤）
  * @returns {Promise<string[]>} 清洗后的标题列表
  */
-async function cleanPeerTitles(rawTitles, coreWord, blueOceanWord, glmClient) {
-  // 硬编码兜底排除词（当 GLM 不可用时使用）
+async function cleanPeerTitles(rawTitles, coreWord, blueOceanWord, llmClient) {
+  // 硬编码兜底排除词（当 LLM 不可用时使用）
   const fallbackExcludes = ['耳环', '耳钉', '耳饰', '手链', '手镯', '戒指', '脚链', '发饰', '胸针'];
 
   let excludeCategories = fallbackExcludes;
 
-  // 如果提供了 glmClient，尝试获取 AI 生成的品类词
-  if (glmClient && typeof glmClient.generateCategoryFilters === 'function') {
+  // 如果提供了 llmClient，尝试获取 AI 生成的品类词
+  if (llmClient && typeof llmClient.generateCategoryFilters === 'function') {
     try {
-      const filters = await glmClient.generateCategoryFilters(coreWord, blueOceanWord);
+      const filters = await llmClient.generateCategoryFilters(coreWord, blueOceanWord);
       if (filters && filters.excludeCategories) {
         excludeCategories = filters.excludeCategories;
       }
     } catch (e) {
-      console.warn('⚠️ GLM 品类过滤失败，使用兜底词表:', e.message);
+      console.warn('⚠️ LLM 品类过滤失败，使用兜底词表:', e.message);
     }
   }
 

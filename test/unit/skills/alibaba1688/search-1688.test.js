@@ -8,15 +8,15 @@ process.env.GLM_API_KEY = 'test-glm-key';
 // Load the module under test (after env vars are set)
 const { searchAll, searchAndFilter, filterRelevantProducts } = require('../../../../skills/alibaba1688/src/search-1688');
 
-// Mock GLM Client class
-class MockGLMClient {
+// Mock LLM Client class
+class MockLLMClient {
   constructor(shouldFail = false) {
     this.shouldFail = shouldFail;
   }
 
   async judgeRelevance({ blueOceanWord, coreWord, products, maxProducts }) {
     if (this.shouldFail) {
-      throw new Error('GLM API failed');
+      throw new Error('LLM API failed');
     }
     // Return scores: products with even IDs get score >=6, odd IDs get <6
     return products.map(p => ({
@@ -40,7 +40,7 @@ before(() => {
 // Test 1: searchAll executes dual search and returns merged deduped results
 test('searchAll executes dual search (coreWord + blueOceanWord), returns merged deduped results', async () => {
   assert.strictEqual(typeof searchAll, 'function', 'searchAll should be a function');
-  // Function signature: searchAll(coreWord, blueOceanWord, modifiers = [], glmClient = null)
+  // Function signature: searchAll(coreWord, blueOceanWord, modifiers = [], llmClient = null)
   // Default params mean length shows 2 (required params before first default)
   assert.ok(searchAll.length >= 2, 'searchAll should accept coreWord and blueOceanWord as required params');
 });
@@ -83,16 +83,16 @@ test('Same product ID only kept once (dedup logic)', () => {
   assert.strictEqual(merged.filter(p => p.id === '2').length, 1, 'ID 2 should appear only once');
 });
 
-// Test 4: GLM relevance scoring called (mock, score >=6 passes)
-test('GLM relevance scoring called with score >=6 threshold', async () => {
-  const mockGlmClient = new MockGLMClient();
+// Test 4: LLM relevance scoring called (mock, score >=6 passes)
+test('LLM relevance scoring called with score >=6 threshold', async () => {
+  const mockLlmClient = new MockLLMClient();
   const products = [
     { id: '1', title: 'Product 1', price: 10 },
     { id: '2', title: 'Product 2', price: 20 },
     { id: '3', title: 'Product 3', price: 30 }
   ];
   
-  const result = await mockGlmClient.judgeRelevance({
+  const result = await mockLlmClient.judgeRelevance({
     blueOceanWord: 'test',
     coreWord: 'test',
     products,
@@ -105,9 +105,9 @@ test('GLM relevance scoring called with score >=6 threshold', async () => {
   assert.ok(result.find(r => r.productId === '1').score < 6, 'Odd IDs should fail threshold');
 });
 
-// Test 5: GLM scoring failure falls back to rigid modifier filtering
-test('GLM scoring failure falls back to rigid modifier filtering', async () => {
-  const failingClient = new MockGLMClient(true);
+// Test 5: LLM scoring failure falls back to rigid modifier filtering
+test('LLM scoring failure falls back to rigid modifier filtering', async () => {
+  const failingClient = new MockLLMClient(true);
   
   try {
     await failingClient.judgeRelevance({
@@ -116,9 +116,9 @@ test('GLM scoring failure falls back to rigid modifier filtering', async () => {
       products: [{ id: '1', title: 'Test', price: 10 }],
       maxProducts: 15
     });
-    assert.fail('Expected GLM client to throw');
+    assert.fail('Expected LLM client to throw');
   } catch (error) {
-    assert.strictEqual(error.message, 'GLM API failed');
+    assert.strictEqual(error.message, 'LLM API failed');
   }
   
   // Test fallback filtering
@@ -135,7 +135,7 @@ test('GLM scoring failure falls back to rigid modifier filtering', async () => {
   
   const result = filterRelevantProducts(products, modifiers);
   
-  // Should filter by rigid modifier when GLM fails
+  // Should filter by rigid modifier when LLM fails
   assert.strictEqual(result.length, 2);
   assert.ok(result.some(p => p.title.includes('纯银')));
 });
@@ -202,7 +202,7 @@ test('searchAll returns products with score >= 40 from local scoring', async () 
   assert.strictEqual(passed.length, 1, 'Only products matching all rigid modifiers should pass');
 });
 
-test('GLM timeout falls back to filterRelevantProducts', async () => {
+test('LLM timeout falls back to filterRelevantProducts', async () => {
   const products = [
     { id: '1', title: '纯银项链女', price: '10.00' },
     { id: '2', title: '普通项链女', price: '20.00' },

@@ -2,11 +2,24 @@
 
 const { mineKeywords } = require('../../skills/keyword-mining/src/pipeline');
 const { generateTitlePipeline } = require('../../skills/title-gen/src/pipeline');
+const { getLLMProviderInfo } = require('../llm');
 
 const registry = {};
 
 function shouldUseRealNodes() {
   return process.env.ECOM_WORKFLOW_USE_REAL_NODES === '1';
+}
+
+/**
+ * 检查当前配置的 LLM provider 是否已就绪（有 API 密钥）
+ * @returns {boolean}
+ */
+function isLLMConfigured() {
+  try {
+    return getLLMProviderInfo().configured;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -59,8 +72,8 @@ registerNode('keyword-mining', {
     try {
       // The canvas MVP defaults to deterministic local output. Real nodes must be
       // explicitly enabled so opening the visual prototype cannot spend API quota.
-      if (shouldUseRealNodes() && process.env.GLM_API_KEY) {
-        context.logger.info(`[Keyword Mining] 正在调用 GLM AI 挖掘服务...`);
+      if (shouldUseRealNodes() && isLLMConfigured()) {
+        context.logger.info(`[Keyword Mining] 正在调用 LLM 挖掘服务...`);
         const result = await mineKeywords({
           count,
           source: 'local',
@@ -113,8 +126,8 @@ registerNode('title-generator', {
     context.logger.info(`[Title Generator] 开始为 "${keyword}" 生成标题，最大长度 ${maxLength}...`);
 
     try {
-      if (shouldUseRealNodes() && process.env.GLM_API_KEY) {
-        context.logger.info(`[Title Generator] 正在调用 GLM AI 生成标题管道...`);
+      if (shouldUseRealNodes() && isLLMConfigured()) {
+        context.logger.info(`[Title Generator] 正在调用 LLM 生成标题管道...`);
         // 使用简化的 mock 搜索，避免真正发起 1688 外部请求
         const result = await generateTitlePipeline(keyword, {
           maxLength,

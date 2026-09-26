@@ -8,11 +8,11 @@ const BATCH_MAX_KEYWORDS = 20;
 // 核心词搜索间隔（毫秒）
 const BATCH_SEARCH_INTERVAL = parseInt(process.env.API_BATCH_SEARCH_INTERVAL, 10) || 3000;
 
-// 默认每个关键词处理的商品数量上限（避免 GLM 生成过慢）
+// 默认每个关键词处理的商品数量上限（避免 LLM 生成过慢）
 const DEFAULT_BATCH_LIMIT = parseInt(process.env.BATCH_DEFAULT_LIMIT, 10) || 5;
 
 /**
- * 轻量级本地核心词提取（仅用于分组，不调用 GLM）
+ * 轻量级本地核心词提取（仅用于分组，不调用 LLM）
  * 取关键词中最后一个有意义的词作为临时核心词
  * @param {string} keyword - 用户输入的关键词
  * @returns {string} 临时核心词（用于分组去重）
@@ -51,7 +51,7 @@ async function batchRun(keywords, options = {}) {
     throw new Error(`批量关键词最多 ${BATCH_MAX_KEYWORDS} 个，当前 ${keywords.length} 个`);
   }
 
-  // 步骤1：轻量级核心词分组（不调用 GLM，避免与 run() 内部提取重复）
+  // 步骤1：轻量级核心词分组（不调用 LLM，避免与 run() 内部提取重复）
   const coreWordGroups = new Map(); // coreWord -> [keyword1, keyword2, ...]
 
   for (const keyword of keywords) {
@@ -96,7 +96,7 @@ async function batchRun(keywords, options = {}) {
         await new Promise(resolve => setTimeout(resolve, BATCH_SEARCH_INTERVAL + jitter));
       }
 
-      // 调用 run() 处理单个关键词（limit 控制商品数，避免 GLM 生成过慢）
+      // 调用 run() 处理单个关键词（limit 控制商品数，避免 LLM 生成过慢）
       const result = await generateTitlePipeline(keyword, {
         maxLength,
         silent,
