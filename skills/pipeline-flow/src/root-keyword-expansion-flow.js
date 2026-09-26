@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const { normalizeRootKeywords } = require('../../../core/root-keywords');
+const { buildCategoryEvidence } = require('./category-policy');
 const { extractSycmData } = require('../../sycm-research/src/sycm-cdp-extractor');
 const { normalizeSycmMetrics } = require('../../sycm-research/src/metric-parser');
 const { gateCandidate } = require('../../keyword-mining/src/candidate-gate');
@@ -86,6 +87,7 @@ function buildRootCandidate(row, root, result, options = {}) {
     root,
     sourceRoots: [root],
     source: 'sycm_root_expansion',
+    sycmCategoryEvidence: buildCategoryEvidence(result, root),
     category: recommendedCategory(result),
     recommendedCategory: recommendedCategory(result),
     categorySource: recommendedCategory(result) ? 'sycm' : '',

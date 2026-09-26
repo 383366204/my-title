@@ -1,6 +1,7 @@
 'use strict';
 const { createDistributionShopStore } = require('../distribution-shops');
 const { distributionMode, distributionTargetKey, distributionTargets } = require('../distribution-targets');
+const { validateDistributionCategories } = require('./distribution-category-validation');
 
 /**
  * 注册铺货预检、提交、人工确认及任务控制接口。
@@ -48,6 +49,7 @@ function registerDistributionRoutes(app, deps) {
         return res.status(400).json({ ok: false, error: '铺货清单为空，请先保留或加入至少 1 个商品。' });
       }
       const selection = resolveSelection(req.body);
+      if (req.body.runId) (deps.validateDistributionCategories || validateDistributionCategories)(req.body.runId, parseItems(input), { dataDir: deps.dataDir });
       const result = await checkDistributionReadiness({
         ...selection,
         input,
@@ -72,6 +74,7 @@ function registerDistributionRoutes(app, deps) {
       if (items.length === 0) {
         return res.status(400).json({ ok: false, error: '铺货清单为空。' });
       }
+      (deps.validateDistributionCategories || validateDistributionCategories)(req.body.runId, items, { dataDir: deps.dataDir });
       if (submissionPreparing) {
         return res.status(409).json({ ok: false, error: '正在检查铺货环境，请勿重复提交。' });
       }
@@ -98,6 +101,7 @@ function registerDistributionRoutes(app, deps) {
         return res.status(409).json({ ok: false, error: '铺货环境检查未通过。', data: readiness });
       }
 
+      (deps.validateDistributionCategories || validateDistributionCategories)(req.body.runId, items, { dataDir: deps.dataDir });
       const job = writeDistributionJob({
         jobId,
         ...selection,

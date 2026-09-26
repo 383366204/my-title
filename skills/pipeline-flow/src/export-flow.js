@@ -3,10 +3,9 @@
 const fs = require('fs');
 const { appendOpportunity } = require('./opportunity-store');
 const { getRun, readJsonl, setRunStageMetrics, writeRun } = require('./run-store');
+const { readCategoryState, applyCategoryState } = require('./category-state');
 const {
-  DEFAULT_HOT_EXPORT_LIMIT,
   DEFAULT_MIN_TITLE_LENGTH,
-  categoryAssessment,
   classifyExportStatus,
   distributionLine,
   validateGeneratedRow,
@@ -19,18 +18,9 @@ const {
 } = require('./flow-context');
 
 function exportPriority(row) {
-  const category = categoryAssessment(row);
-  const categoryScore = category.confidence === 'high'
-    ? 15
-    : category.confidence === 'medium'
-      ? 8
-      : category.confidence === 'low'
-        ? -15
-        : -20;
   return Number(row.productOpportunity?.score || row.opportunityScore || 0)
     + Number(row.keywordOpportunity?.score || 0) * 0.35
-    + Number(row.productDiversity?.score || row.selectedProduct?.productDiversity?.score || 0) * 0.1
-    + categoryScore;
+    + Number(row.productDiversity?.score || row.selectedProduct?.productDiversity?.score || 0) * 0.1;
 }
 
 function normalizedExportReason(reason) {
@@ -44,25 +34,25 @@ function normalizedExportReason(reason) {
  */
 async function flowExport(options = {}) {
   const { runDir, run } = getRun(options);
+  const { state: categories } = readCategoryState(options);
   const rows = readJsonl(run.files.generatedProducts)
-    .filter(row => row.status === 'generated' && row.url && row.title);
-  const limit = Number(options.limit || options.export || rows.length || 0);
+    .filter(row => row.status === 'generated' && row.url && row.title)
+    .map(row => applyCategoryState(row, categories));
+  const limit = Number(options.limit || options.export || run.exportPolicy?.limit || rows.length || 0);
+  const minTitleLength = Number(options.minTitleLength || run.exportPolicy?.minTitleLength || DEFAULT_MIN_TITLE_LENGTH);
+  run.exportPolicy = { limit, minTitleLength };
   const ranked = rows
     .map((row, index) => ({ row, index, priority: exportPriority(row) }))
     .sort((left, right) => right.priority - left.priority || left.index - right.index);
   const seenUrls = new Set();
   const seenTitles = new Set();
-  const hotExportLimit = Number(options.hotExportLimit || DEFAULT_HOT_EXPORT_LIMIT);
-  let hotUsed = 0;
   let eligibleReserveCount = 0;
   const reviewed = [];
   const readyRows = [];
   for (const item of ranked) {
     const row = item.row;
     const validation = validateGeneratedRow(row, {
-      minTitleLength: options.minTitleLength || DEFAULT_MIN_TITLE_LENGTH,
-      hotExportLimit,
-      hotUsed,
+      minTitleLength,
       seenUrls,
       seenTitles,
       manualMode: options.manualMode === true || run.options?.mode === 'manual'
@@ -81,7 +71,6 @@ async function flowExport(options = {}) {
       if (readyRows.length < limit) {
         seenUrls.add(row.url);
         seenTitles.add(row.title);
-        if (row.verifyMode === 'hot') hotUsed += 1;
         readyRows.push(exportRow);
         reviewed.push(exportRow);
       } else {

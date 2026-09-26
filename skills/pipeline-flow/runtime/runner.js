@@ -1,4 +1,5 @@
 'use strict';
+const { prepareDistributionCategories } = require('../src/category-state');
 
 const fs = require('fs');
 const path = require('path');
@@ -244,6 +245,9 @@ function createDefaultStepFns({ dataDir, runId, params, mode = 'daily' }) {
       return flowGenerate({ ...params, dataDir, runId, limit: generateLimit, manualMode, recordSeedFeedback });
     },
     export: async ({ reportProgress }) => {
+      reportProgress({ current: 0, total: 1, message: '补全生意参谋铺货类目，不进行关键词筛选' });
+      await prepareDistributionCategories({ dataDir, runId, extractor: params.categoryExtractor || params.sycmExtractor, shouldStop, onProgress: reportProgress });
+      if (shouldStop()) return { status: shouldStop() === 'cancel' ? 'cancelled' : 'paused', stepIncomplete: true, runId };
       reportProgress({ current: 0, total: exportLimit, message: '开始导出清单' });
       return flowExport({ ...params, dataDir, runId, limit: exportLimit });
     },

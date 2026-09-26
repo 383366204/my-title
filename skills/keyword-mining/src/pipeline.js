@@ -445,6 +445,7 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
               collectedAt: researched.cycle?.completedAt || new Date().toISOString(),
               maxPages: queryContext.maxPages, researchScopeId, raw: item
             },
+            sycmCategoryEvidence: require('../../pipeline-flow/src/category-policy').buildCategoryEvidence(sycmRes, query),
             relationReason: seed.relationReason || '',
             rootScore: seed.rootScore || null,
             familyKey: seed.familyKey || '',
@@ -564,6 +565,7 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
       categorySource: item.categorySource || '',
       sycmData: item.sycmData || null,
       sycmEvidence: item.sycmEvidence || null,
+      sycmCategoryEvidence: item.sycmCategoryEvidence || null,
       provenance: item.provenance || [],
       nextCommands: buildNextCommands(scoredItem.keyword)
     };

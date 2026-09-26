@@ -4,6 +4,7 @@ const fs = require('fs');
 const { extractSycmData } = require('../../sycm-research/src/sycm-cdp-extractor');
 const { getRun, readJsonl, appendJsonl, writeRun, setRunStageMetrics } = require('./run-store');
 const { sycmRecommendedCategory } = require('./product-normalizer');
+const { buildCategoryEvidence } = require('./category-policy');
 const { keywordFilterConditions } = require('./keyword-metric-filter');
 
 const keywordKey = value => String(value || '').replace(/\s+/g, '').toLowerCase();
@@ -52,6 +53,7 @@ async function verifyExactSelectionKeywords(options = {}) {
         requestedFilterConditions: filterConditions,
         filterConditions: result.filterConditions || null, filterApplied: result.filterApplied === true };
       candidate.recommendedCategory = sycmRecommendedCategory(result) || candidate.recommendedCategory || '';
+      candidate.sycmCategoryEvidence = buildCategoryEvidence(result, candidate.keyword);
       candidate.reason = exactRows.length ? '已查询原词，待人工确认机会' : '查询结果未包含原词指标，需人工判断；未使用关联词代替';
       delete candidate.error;
       appendJsonl(run.files.sycmResults, { keyword: candidate.keyword, ok: true, mode: 'hot', data: exactRows });

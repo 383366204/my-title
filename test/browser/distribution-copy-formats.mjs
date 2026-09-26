@@ -16,6 +16,7 @@ import '/src/index.css';
 window.copied = []; window.failCopy = false;
 const app = createRoot(document.getElementById('root'));
 window.renderPanel = (directPreview = true, text = 'https://detail.1688.com/offer/1.html$$标题一$$家居\\nhttps://detail.1688.com/offer/2.html$$标题二$$日用') => {
+  window.fixtureText = text;
   app.render(React.createElement(DistributionExportPanel, {
     artifactState: {status:'ready', artifact:{nodeId:'export', type:'text', text}}, currentRunId:'fixture', directPreview,
     onCopyText: async text => { if(window.failCopy) throw new Error('剪贴板拒绝访问'); window.copied.push(text); }
@@ -45,10 +46,25 @@ try {
   const requests = [];
   page.on('pageerror', error => { errors.push(error.message); console.error(error.message); });
   page.on('console', message => { if (message.type() === 'error') console.error(message.text()); });
-  await page.route('**/api/**', route => {
+  await page.route('**/api/**', async route => {
     const request = route.request();
     if (!new URL(request.url()).pathname.startsWith('/api/')) return route.continue();
     requests.push({ url: request.url(), method: request.method(), body: request.postDataJSON() });
+    if (request.url().includes('/categories')) {
+      const text = await page.evaluate(() => window.fixtureText || '');
+      const rows = text.split('\n').filter(Boolean).map(line => {
+        const [url, title, category = ''] = line.split('$$');
+        return { url, title, category, candidates: category ? [{ category }] : [] };
+      });
+      if (request.url().endsWith('/copy')) {
+        const input = request.postDataJSON();
+        return route.fulfill({ json: { ok: true, data: { text: input.items.map(item => {
+          const category = rows.find(row => row.url === item.url)?.category || '';
+          return input.format === 'url' ? item.url : `${item.url}$$${item.title}${input.format === 'full' ? '$$' + category : ''}`;
+        }).join('\n') } } });
+      }
+      return route.fulfill({ json: { ok: true, data: { version: 0, rows, job: null } } });
+    }
     if (request.url().endsWith('/api/distribution/shops')) return route.fulfill({ json: { ok: true, data: [{ id: 'fixture-shop', name: '测试店', platformShopName: '平台测试店', port: 9222, enabled: true, isDefault: true }] } });
     return route.fulfill({ json: request.url().endsWith('/check') ? { canSubmit: false, blockers: [] } : { ok: true, data: {} } });
   });
@@ -122,6 +138,7 @@ try {
   await dismissSuccess();
   assert.equal(await page.evaluate(() => window.copied.at(-1)), 'https://detail.1688.com/offer/1.html');
   await page.evaluate(() => window.renderPanel(false));
+  await page.waitForFunction(() => document.querySelector('select[aria-label="铺货类目（生意参谋）"]')?.value === '家居');
   await page.getByRole('button', { name: '人工复制铺货', exact: true }).click();
   await dismissSuccess();
   await assertFormat('url');
@@ -149,7 +166,7 @@ try {
     await page.keyboard.press('Escape');
   }
   assert.deepEqual(errors, []);
-  assert.equal(requests.filter(row => row.method === 'POST' && !row.url.endsWith('/check')).length, 0);
+  assert.equal(requests.filter(row => row.method === 'POST' && !row.url.endsWith('/check') && !row.url.endsWith('/categories/copy')).length, 0);
   console.log('PASS: copy formats, persistence, validation, failure feedback, shared entries, unchanged automatic payload, desktop/mobile.');
 } finally {
   await browser?.close();

@@ -1313,22 +1313,27 @@ function _recommendCategory(categoryData) {
     return { recommended: null, ranking: [], reason: '无类目数据' };
   }
   
-  var rows = categoryData.rows;
+  var rows = categoryData.rows.map(function(row) {
+    return Object.assign({}, row, {
+      clickRatio: Number.isFinite(Number(row.clickRatio)) ? Number(row.clickRatio) : 0,
+      clickRate: Number.isFinite(Number(row.clickRate)) ? Number(row.clickRate) : 0
+    });
+  });
   var maxClickRatio = Math.max(...rows.map(function(r) { return r.clickRatio; }));
   var maxClickRate = Math.max(...rows.map(function(r) { return r.clickRate; }));
   
   var scoredRows = rows.map(function(r) {
-    var score = (r.clickRatio / maxClickRatio) * 0.6 + (r.clickRate / maxClickRate) * 0.4;
+    var score = (maxClickRatio > 0 ? r.clickRatio / maxClickRatio : 0) * 0.6 + (maxClickRate > 0 ? r.clickRate / maxClickRate : 0) * 0.4;
     return Object.assign({}, r, { score: score });
   });
   
   var sortedRows = scoredRows.sort(function(a, b) { return b.score - a.score; });
-  var recommended = sortedRows[0];
+  var recommended = sortedRows[0].score > 0 ? sortedRows[0] : null;
   
   return {
     recommended: recommended,
     ranking: sortedRows,
-    reason: '点击人数占比' + recommended.clickRatio + '%，点击率' + recommended.clickRate + '%'
+    reason: recommended ? '点击人数占比' + recommended.clickRatio + '%，点击率' + recommended.clickRate + '%' : '类目指标不足，请人工确认'
   };
 }
 

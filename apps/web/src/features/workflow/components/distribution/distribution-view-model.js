@@ -5,7 +5,7 @@ export const EXPORT_STATUS_LABELS = {
 };
 
 export const EXPORT_REASON_LABELS = {
-  missing_category: '缺少商品或推荐类目',
+  missing_category: '待获取或确认生意参谋类目',
   keyword_opportunity_reject: '关键词机会评分未通过',
   keyword_opportunity_observe: '关键词需要观察',
   keyword_opportunity_review: '关键词需要人工复核',
@@ -98,6 +98,7 @@ export function distributionRowUrl(row = {}) {
  * @returns {string} Product category string.
  */
 export function distributionRowCategory(row = {}) {
+  if (Object.prototype.hasOwnProperty.call(row, 'categoryRecord')) return row.categoryRecord?.category || '';
   return row.category
     || row.raw?.category
     || row.raw?.recommendedCategory

@@ -4,77 +4,21 @@ const fs = require('fs');
 const path = require('path');
 const { checkBannedWords } = require('../../../core/banned-words');
 const { ensureDir } = require('./run-store');
-const { parseOfferId, productCategory } = require('./product-normalizer');
+const { parseOfferId } = require('./product-normalizer');
+const { resolveFinalCategory } = require('./category-policy');
 
 const DEFAULT_MIN_TITLE_LENGTH = 30;
-const DEFAULT_HOT_EXPORT_LIMIT = 2;
-const GENERIC_CATEGORY_TOKENS = new Set([
-  '女', '男', '儿童', '宝宝', '新款', '爆款', '礼物', '用品', '商品',
-  '饰品', '配饰', '玩具', '家居', '日用', '百货', '其他', '通用'
-]);
-
-function chineseTokens(value) {
-  return String(value || '')
-    .split(/[>\s,，/／、|｜;；:：\-—_]+/)
-    .flatMap(part => {
-      const text = part.trim();
-      if (!text) return [];
-      const matches = text.match(/[\u4e00-\u9fa5]{2,}/g) || [];
-      return matches.flatMap(token => {
-        const chunks = [token];
-        for (let i = 0; i < token.length - 1; i += 1) chunks.push(token.slice(i, i + 2));
-        return chunks;
-      });
-    })
-    .map(token => token.trim())
-    .filter(token => token.length >= 2 && !GENERIC_CATEGORY_TOKENS.has(token));
-}
-
-function hasTokenOverlap(a, b) {
-  const left = new Set(chineseTokens(a));
-  if (left.size === 0) return false;
-  return chineseTokens(b).some(token => left.has(token));
-}
 
 /**
- * Compare a SYCM category with the category reported by a product.
+ * Resolve SYCM category provenance without comparing cross-platform category names.
  * @param {object} row Generated product row.
  * @returns {object} Category confidence and reason.
  */
 function categoryAssessment(row) {
-  const recommendedCategory = String(row.recommendedCategory || '').trim();
-  const directCategory = productCategory(row.product, { recommendedCategory: '' });
-  if (recommendedCategory && directCategory) {
-    const matched = hasTokenOverlap(recommendedCategory, directCategory);
-    return {
-      confidence: matched ? 'high' : 'low',
-      recommendedCategory,
-      productCategory: directCategory,
-      reason: matched ? '生意参谋类目与商品类目有交集' : '生意参谋类目与商品类目疑似冲突'
-    };
-  }
-  if (recommendedCategory) {
-    return {
-      confidence: 'medium',
-      recommendedCategory,
-      productCategory: '',
-      reason: '仅有生意参谋推荐类目，商品类目缺失'
-    };
-  }
-  if (directCategory) {
-    return {
-      confidence: 'medium',
-      recommendedCategory: '',
-      productCategory: directCategory,
-      reason: '仅有商品类目，生意参谋推荐类目缺失'
-    };
-  }
-  return {
-    confidence: 'unknown',
-    recommendedCategory: '',
-    productCategory: '',
-    reason: '未获得类目数据'
-  };
+  const final = resolveFinalCategory(row);
+  return { confidence: final.category ? 'high' : 'unknown',
+    recommendedCategory: final.category, productCategory: final.source1688Category,
+    reason: final.category ? '铺货类目来自生意参谋；1688 类目仅供参考' : '待获取或确认生意参谋类目' };
 }
 
 /**
@@ -98,13 +42,9 @@ function validateGeneratedRow(row, context = {}) {
 
   const banned = checkBannedWords(title);
   if (!banned.valid) reasons.push(`banned_words:${banned.words.join(',')}`);
-  if (category.confidence === 'low') reasons.push('category_conflict');
   if (category.confidence === 'unknown') reasons.push('missing_category');
   if (context.seenUrls && context.seenUrls.has(url)) reasons.push('duplicate_url');
   if (context.seenTitles && context.seenTitles.has(title)) reasons.push('duplicate_title');
-  if (row.verifyMode === 'hot' && Number(context.hotUsed || 0) >= Number(context.hotExportLimit || DEFAULT_HOT_EXPORT_LIMIT)) {
-    reasons.push('hot_export_limit');
-  }
   if (row.keywordOpportunity && row.keywordOpportunity.decision && row.keywordOpportunity.decision !== 'continue' && row.keywordOpportunity.manualApproval?.approved !== true) {
     reasons.push(`legacy_keyword_opportunity_${row.keywordOpportunity.decision}`);
   }
@@ -126,6 +66,7 @@ function validateGeneratedRow(row, context = {}) {
 function isReviewableExportReason(reason) {
   const value = String(reason || '');
   return /^product_opportunity_manual_review/.test(value)
+    || value === 'missing_category'
     || /^keyword_opportunity_(observe|review)/.test(value)
     || /^legacy_keyword_opportunity_(observe|review)/.test(value);
 }
@@ -148,7 +89,7 @@ function classifyExportStatus(validation) {
  * @returns {string} Distribution line.
  */
 function distributionLine(row) {
-  const category = productCategory(row.product, row);
+  const category = resolveFinalCategory(row).category;
   return category ? `${row.url}$$${row.title}$$${category}` : `${row.url}$$${row.title}`;
 }
 
@@ -189,7 +130,7 @@ function writeDistributionReview(file, rows) {
     if (row.exportReasons && row.exportReasons.length) lines.push(`- Review Reasons: ${row.exportReasons.join(', ')}`);
     lines.push(`- URL: ${row.url}`);
     lines.push(`- Title: ${row.title}`);
-    lines.push(`- Category: ${productCategory(row.product, row) || '-'}`);
+    lines.push(`- Category: ${resolveFinalCategory(row).category || '-'}`);
     lines.push(`- Category Confidence: ${row.categoryConfidence || '-'}`);
     if (row.categoryReason) lines.push(`- Category Reason: ${row.categoryReason}`);
     lines.push(`- Verify Mode: ${row.verifyMode || (row.sycmScore && row.sycmScore.mode) || '-'}`);
@@ -229,7 +170,6 @@ function writeDistributionReview(file, rows) {
 }
 
 module.exports = {
-  DEFAULT_HOT_EXPORT_LIMIT,
   DEFAULT_MIN_TITLE_LENGTH,
   categoryAssessment,
   classifyExportStatus,

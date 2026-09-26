@@ -6,6 +6,7 @@ const { exactKeywordCandidate } = require('./candidate-helpers');
 const { DEFAULT_PRODUCTS_PER_KEYWORD } = require('./flow-constants');
 const { buildFlowCommand, flowResponse } = require('./flow-context');
 const { flowExport } = require('./export-flow');
+const { prepareDistributionCategories } = require('./category-state');
 const { flowMine } = require('./keyword-mining-flow');
 const { flowReviewCandidates } = require('./keyword-review-flow');
 const { flowVerify } = require('./keyword-verification-flow');
@@ -128,6 +129,7 @@ async function flowKeyword(options = {}) {
     });
   }
 
+  await prepareDistributionCategories({ ...options, runId, extractor: options.categoryExtractor || options.sycmExtractor });
   const exported = await flowExport({ ...options, runId, limit: options.export || 20 });
   return buildRunResponse(options, runId, runDir, {
     ...exactKeywordPayload,
@@ -252,6 +254,7 @@ async function flowDaily(options = {}) {
     });
   }
 
+  await prepareDistributionCategories({ ...options, runId: mine.runId, extractor: options.categoryExtractor || options.sycmExtractor });
   const exported = await flowExport({ ...options, runId: mine.runId, limit: options.export || 20 });
   return buildRunResponse(options, mine.runId, mine.runDir, {
     canSubmit: exported.canSubmit,

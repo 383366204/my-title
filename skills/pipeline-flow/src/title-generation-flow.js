@@ -11,6 +11,7 @@ const { appendOpportunity } = require('./opportunity-store');
 const { appendJsonl, getRun, readJsonl, setRunStageMetrics, writeRun } = require('./run-store');
 const { productTitle, productUrl } = require('./product-normalizer');
 const { DEFAULT_PRODUCTS_PER_KEYWORD } = require('./flow-constants');
+const { sourceCategory } = require('./category-policy');
 const {
   buildFlowCommand,
   flowResponse,
@@ -134,6 +135,9 @@ async function flowGenerate(options = {}) {
           status: 'generated',
           keyword: item.keyword,
           selectedKeyword: item.keyword,
+          source1688Category: sourceCategory(selectedProduct),
+          sycmCategoryEvidence: selectedProduct.sycmCategoryEvidence || item.sycmCategoryEvidence,
+          categorySelection: selectedProduct.categorySelection || item.categorySelection,
           seed: item.seed || selectedProduct.seed || '',
           root: item.root || selectedProduct.root || item.seed || item.coreProduct || '',
           familyKey: item.familyKey || selectedProduct.familyKey || item.coreProduct || '',

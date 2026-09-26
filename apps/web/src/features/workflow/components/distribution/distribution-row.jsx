@@ -1,5 +1,6 @@
 import { Check, Copy, ExternalLink, X } from 'lucide-react';
-import { distributionRowCategory, distributionRowUrl, rowSelectedKeyword } from './distribution-view-model.js';
+import { distributionRowUrl, rowSelectedKeyword } from './distribution-view-model.js';
+import { CategoryControl } from './category-control.jsx';
 
 /**
  * Component to render a single distribution row item.
@@ -46,14 +47,7 @@ export function DistributionRow({
               <span>铺货标题</span>
               <input value={row.title || ''} onChange={(event) => onUpdateEdit?.(row.key, 'title', event.target.value)} />
             </label>
-            <label>
-              <span>铺货类目</span>
-              <input
-                value={distributionRowCategory(row)}
-                onChange={(event) => onUpdateEdit?.(row.key, 'category', event.target.value)}
-                placeholder="补充类目后再加入"
-              />
-            </label>
+            <CategoryControl row={row} />
           </div>
           <div className="review-row-actions">
             <button type="button" className="node-secondary-button success" onClick={() => onMarkIncluded?.(row.key, true)}>
@@ -84,15 +78,7 @@ export function DistributionRow({
             <span>铺货标题</span>
             <input value={row.title || ''} disabled={row.removed} onChange={(event) => onUpdateEdit?.(row.key, 'title', event.target.value)} />
           </label>
-          <label>
-            <span>铺货类目</span>
-            <input
-              value={distributionRowCategory(row)}
-              disabled={row.removed}
-              onChange={(event) => onUpdateEdit?.(row.key, 'category', event.target.value)}
-              placeholder="请选择或填写类目"
-            />
-          </label>
+          <CategoryControl row={row} />
         </div>
         <div className="review-row-actions">
           <button type="button" className={`node-secondary-button ${row.removed ? 'success' : 'danger'}`} onClick={() => onMarkRemoved?.(row.key, !row.removed)}>
@@ -134,14 +120,7 @@ export function DistributionRow({
             <span>铺货标题</span>
             <input value={row.title || ''} onChange={(event) => onUpdateEdit?.(row.key, 'title', event.target.value)} />
           </label>
-          <label>
-            <span>铺货类目</span>
-            <input
-              value={distributionRowCategory(row)}
-              onChange={(event) => onUpdateEdit?.(row.key, 'category', event.target.value)}
-              placeholder="补充类目后再加入"
-            />
-          </label>
+          <CategoryControl row={row} />
         </div>
         <div className="review-row-actions">
           <button type="button" className="node-secondary-button success" onClick={() => onMarkIncluded?.(row.key, true)}>
@@ -179,15 +158,7 @@ export function DistributionRow({
           <span>铺货标题</span>
           <input value={row.title || ''} disabled={row.removed} onChange={(event) => onUpdateEdit?.(row.key, 'title', event.target.value)} />
         </label>
-        <label>
-          <span>铺货类目</span>
-          <input
-            value={distributionRowCategory(row)}
-            disabled={row.removed}
-            onChange={(event) => onUpdateEdit?.(row.key, 'category', event.target.value)}
-            placeholder="请选择或填写类目"
-          />
-        </label>
+        <CategoryControl row={row} />
       </div>
       <div className="review-row-actions">
         <button type="button" className="node-secondary-button" onClick={() => onCopyText?.(row.title || '')}>

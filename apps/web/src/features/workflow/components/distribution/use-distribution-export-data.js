@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { getWorkflowArtifact } from '../../../../api/workflow-api.js';
 import { getWorkflowArtifactView } from '../../artifact-view.js';
 import { usePersistentMap } from '../../hooks/use-persistent-map.js';
+import { useDistributionCategories } from '../../hooks/use-distribution-categories.js';
 import {
   buildDistributionText,
   distributionRowCategory,
@@ -23,14 +24,16 @@ export function useDistributionExportData({
   currentRunId,
   sourceNodeId = 'export'
 }) {
+  const categoryControl = useDistributionCategories(currentRunId);
   const [exportArtifactState, setExportArtifactState] = useState({ status: 'empty', artifact: null, error: '' });
   const [reviewArtifactState, setReviewArtifactState] = useState({ status: 'empty', artifact: null, error: '' });
   const [generateArtifactState, setGenerateArtifactState] = useState({ status: 'empty', artifact: null, error: '' });
 
   const sourceIsReview = sourceNodeId === 'review';
-  const exportArtifact = sourceIsReview ? exportArtifactState.artifact : artifactState?.artifact;
-  const exportStatus = sourceIsReview ? exportArtifactState.status : artifactState?.status;
-  const exportError = sourceIsReview ? exportArtifactState.error : artifactState?.error;
+  const useRefreshedExport = sourceIsReview || categoryControl.state?.version > 0;
+  const exportArtifact = useRefreshedExport ? exportArtifactState.artifact : artifactState?.artifact;
+  const exportStatus = useRefreshedExport ? exportArtifactState.status : artifactState?.status;
+  const exportError = useRefreshedExport ? exportArtifactState.error : artifactState?.error;
   const view = getWorkflowArtifactView(exportArtifact, 'export');
 
   const storageKey = `ecom.exportSelection.${currentRunId || artifactState?.artifact?.runId || 'draft'}`;
@@ -42,10 +45,6 @@ export function useDistributionExportData({
   const [edits, setEdits] = usePersistentMap(editStorageKey);
 
   useEffect(() => {
-    if (!sourceIsReview) {
-      setExportArtifactState({ status: 'empty', artifact: null, error: '' });
-      return;
-    }
     if (!currentRunId) {
       setExportArtifactState({ status: 'empty', artifact: null, error: '' });
       return;
@@ -62,7 +61,7 @@ export function useDistributionExportData({
     return () => {
       cancelled = true;
     };
-  }, [currentRunId, sourceIsReview]);
+  }, [currentRunId, sourceIsReview, categoryControl.state?.version]);
 
   // 读取标题生成节点产物，按货源链接建立「原 1688 标题」索引，铺货清单顶部展示用
   useEffect(() => {
@@ -84,7 +83,7 @@ export function useDistributionExportData({
     };
   }, [currentRunId]);
   useEffect(() => {
-    if (sourceIsReview) {
+    if (sourceIsReview && !(categoryControl.state?.version > 0)) {
       setReviewArtifactState({ status: artifactState?.status || 'empty', artifact: artifactState?.artifact || null, error: artifactState?.error || '' });
       return;
     }
@@ -104,7 +103,7 @@ export function useDistributionExportData({
     return () => {
       cancelled = true;
     };
-  }, [artifactState, currentRunId, sourceIsReview]);
+  }, [artifactState, currentRunId, sourceIsReview, categoryControl.state?.version]);
 
   const sourceRows = view.kind === 'business-list' ? (view.rows || []) : [];
   const generateView = getWorkflowArtifactView(generateArtifactState.artifact, 'generate');
@@ -122,7 +121,11 @@ export function useDistributionExportData({
     const link = distributionRowUrl(row) || raw.url || raw.productUrl || '';
     return link && sourceTitle ? [[link, sourceTitle]] : [];
   }));
-  const applyEdits = (row) => ({ ...row, ...(edits[row.key] || {}) });
+  const applyEdits = (row) => {
+    const record = categoryControl.state?.rows?.find(item => item.url === distributionRowUrl(row));
+    return { ...row, ...(edits[row.key] || {}), category: record?.category || '',
+      categoryRecord: record || null, categoryControl };
+  };
   const readyRows = sourceRows.map((row, index) => {
     const link = distributionRowUrl(row);
     const key = `${link || row.title || 'row'}:${index}`;
@@ -143,7 +146,7 @@ export function useDistributionExportData({
     : [];
 
   const manuallyIncludedRows = blockedRows
-    .filter((row) => included[row.key])
+    .filter((row) => included[row.key] && !readyRows.some(ready => distributionRowUrl(ready) === distributionRowUrl(row)))
     .map((row) => applyEdits({ ...row, removed: Boolean(removed[row.key]) }));
 
   const rows = [...readyRows, ...manuallyIncludedRows];
@@ -181,6 +184,7 @@ export function useDistributionExportData({
   };
 
   return {
+    categoryControl,
     exportStatus,
     exportError,
     reviewArtifactState,

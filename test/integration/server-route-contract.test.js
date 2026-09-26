@@ -20,7 +20,11 @@ test('server retains all pre-refactor paths, HTTP methods and route middleware c
     { method: 'post', path: '/api/workflows/runs/:runId/keyword-filter', handlers: 1 },
     { method: 'post', path: '/api/workflows/runs/:runId/keyword-filter/recollect', handlers: 1 }
   );
-  filteredExpected.push({ method: 'get', path: '/api/distribution/shops', handlers: 1 },
+  filteredExpected.push(
+    { method: 'get', path: '/api/workflows/runs/:runId/categories', handlers: 1 },
+    { method: 'post', path: '/api/workflows/runs/:runId/categories', handlers: 1 },
+    { method: 'post', path: '/api/workflows/runs/:runId/categories/copy', handlers: 1 },
+    { method: 'get', path: '/api/distribution/shops', handlers: 1 },
     { method: 'post', path: '/api/distribution/shops', handlers: 1 },
     { method: 'delete', path: '/api/distribution/shops/:shopId', handlers: 1 });
   filteredExpected.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));

@@ -124,7 +124,10 @@ test('exact runtime reaches distribution review and can retry selection without 
   let searches = 0;
   const params = {
     keyword,
-    sycmExtractor: async () => assert.fail('不得发起生意参谋查询'),
+    sycmExtractor: async () => assert.fail('不得发起生意参谋筛词'),
+    categoryExtractor: async word => ({ categoryAnalysis: { recommendation: {
+      recommended: { category: '家居 > 杯垫', clickRatio: 80, clickRate: 30 }
+    } } }),
     extractKeywords: async () => ({ coreWord: keyword }),
     searchProducts: async () => { searches++; return [product]; },
     generator: async word => {

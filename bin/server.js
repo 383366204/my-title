@@ -10,6 +10,7 @@ const { registerSelectionReviewRoutes } = require('../core/server/selection-revi
 
 const { createDistributionJobs } = require('../core/server/distribution-jobs');
 const { registerDistributionRoutes } = require('../core/server/distribution-routes');
+const { registerCategoryRoutes } = require('../core/server/category-routes');
 
 const { registerWorkflowQueryRoutes } = require('../core/server/workflow-query-routes');
 const { registerOrderSheetDraftRoutes } = require('../core/server/order-sheet-draft-routes');
@@ -348,6 +349,7 @@ registerDistributionRoutes(app, {
   summarizePipelineRun,
   originalError
 });
+registerCategoryRoutes(app, { jobs: distributionJobs, workbench, originalError });
 
 app.post('/api/review-sheets/upload', express.raw({
   type: ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/octet-stream'],
