@@ -262,6 +262,7 @@ export const ProductionNode = ({ id, data }) => {
   const view = getWorkflowNodeViewModel(id, data);
   const tone = view.tone;
   const label = data.label || data.name || data.title || id;
+  const filterCounts = data.keywordFilterCounts || data.output?.filterCounts;
 
   return (
     <div
@@ -306,6 +307,14 @@ export const ProductionNode = ({ id, data }) => {
         && !(id === 'start' && data.selectionMode)
         && <WorkflowNodeActionChip view={view} onAction={data.onAction} />}
       <WorkflowNodeSecondaryActions nodeId={id} data={data} />
+      {id === 'keywordReview' && data.keywordFilterAvailable && <button type="button"
+        className="node-secondary-button nodrag" onPointerDown={event => event.stopPropagation()}
+        onClick={event => { event.stopPropagation(); data.onAction?.('keyword-filter'); }}>
+        <Settings2 size={13} /> 筛选条件
+      </button>}
+      {id === 'keywordReview' && data.keywordFilterAvailable && filterCounts && <div className="workflow-node-output-summary">
+        符合 {filterCounts.passed} · 待确认 {filterCounts.review} · 不符合 {filterCounts.failed}
+      </div>}
       <WorkflowNodeArtifactButton data={data} />
       <WorkflowCompletionDownload nodeId={id} data={data} />
       <Handle type="source" position={Position.Right} id="out" />

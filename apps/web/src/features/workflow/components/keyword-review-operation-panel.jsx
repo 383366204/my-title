@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Check, CheckCircle2, Plus, RefreshCw, X } from 'lucide-react';
+import { Check, CheckCircle2, Plus, RefreshCw, Settings2, X } from 'lucide-react';
+import { KeywordFilterModal } from './keyword-filter-modal.jsx';
 
 import { artifactItems, candidateKeyword } from '../workflow-data.js';
 
 export const KeywordReviewOperationPanel = ({
   artifactState,
+  currentRunId,
+  onKeywordFilterApplied,
+  onKeywordFilterRecollected,
   onConfirmKeywordReview,
   onQueryKeywords,
   onRetryMine,
@@ -15,6 +19,7 @@ export const KeywordReviewOperationPanel = ({
   const candidates = artifactItems(artifactState);
   const combined = artifactState.artifact?.combinedOpportunityReview === true || candidates.some(row => row.combinedOpportunityReview);
   const [decisions, setDecisions] = useState({});
+  const [filterOpen, setFilterOpen] = useState(false);
   const [filter, setFilter] = useState('all');
   const [query, setQuery] = useState('');
   const [manualKeywordDraft, setManualKeywordDraft] = useState('');
@@ -28,8 +33,8 @@ export const KeywordReviewOperationPanel = ({
   }))].map((item, index) => {
     const keyword = candidateKeyword(item);
     const key = keyword || `candidate-${index}`;
-    const persistedDecision = item.reviewStatus === 'approved' ? 'approved' : item.reviewStatus === 'rejected' ? 'rejected'
-      : item.reviewDraft || (combined && !item.reviewRecommended ? 'rejected' : 'approved');
+    const persistedDecision = item.reviewDraft || (item.reviewStatus === 'approved' ? 'approved' : item.reviewStatus === 'rejected' ? 'rejected'
+      : combined && !item.reviewRecommended ? 'rejected' : 'approved');
     return {
       ...item,
       keyword,
@@ -42,7 +47,7 @@ export const KeywordReviewOperationPanel = ({
   const riskyCount = candidateRows.filter(row => row.reviewDecision === 'approved' && !row.reviewRecommended).length;
   const submitSelection = async () => {
     setConfirming(true);
-    try { await onConfirmKeywordReview(candidateRows, manualKeywords); } finally { setConfirming(false); setRiskConfirmation(false); }
+    try { await onConfirmKeywordReview(candidateRows, manualKeywords, artifactState.artifact?.keywordFilterVersion); } finally { setConfirming(false); setRiskConfirmation(false); }
   };
   const confirmSelection = () => {
     if (combined && riskyCount) setRiskConfirmation(true);
@@ -57,8 +62,9 @@ export const KeywordReviewOperationPanel = ({
     const marketScore = Number(item.marketScore ?? item.marketMetrics?.score ?? 0);
     const missing = Array.isArray(item.marketMetrics?.missing) ? item.marketMetrics.missing : [];
     if (filter === 'recommended') return combined ? item.reviewRecommended === true : marketScore >= 60 || Number(item.localScore || 0) >= 70;
-    if (filter === 'pending') return !item.reviewRecommended && item.reviewStatus !== 'rejected';
-    if (filter === 'missing') return missing.length > 0 || !item.sycmData;
+    if (filter === 'pending') return item.metricFilter?.status === 'review';
+    if (filter === 'failed') return item.metricFilter?.status === 'failed';
+    if (filter === 'missing') return item.metricFilter?.checks?.some(check => check.status === 'review') || missing.length > 0 || !item.sycmData;
     if (filter === 'high-confidence') return item.marketMetrics?.confidence === 'high' || item.confidence === 'high';
     if (filter === 'rejected') return item.reviewDecision === 'rejected';
     return true;
@@ -92,7 +98,13 @@ export const KeywordReviewOperationPanel = ({
           <strong>{combined ? '关键词确认' : '候选词筛选'}</strong>
           <span>已选 {approvedCount} / 共 {candidateRows.length} 个 · 排除 {rejectedCount} 个</span>
         </div>
+        {combined && <div className="workflow-node-output-summary">
+          符合 {candidates.filter(row => row.metricFilter?.passed).length} · 待确认 {candidates.filter(row => row.metricFilter?.status === 'review').length} · 不符合 {candidates.filter(row => row.metricFilter?.status === 'failed').length}
+        </div>}
         <div className="keyword-review-manual-input">
+          {combined && currentRunId && <button type="button" className="node-secondary-button" disabled={confirming} onClick={() => setFilterOpen(true)}>
+            <Settings2 size={13} /> 筛选条件
+          </button>}
           <input
             className="keyword-review-search"
             value={manualKeywordDraft}
@@ -120,15 +132,16 @@ export const KeywordReviewOperationPanel = ({
             <input className="keyword-review-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索关键词或词根" aria-label="搜索候选关键词" />
             <select className="keyword-review-filter" value={filter} onChange={(event) => setFilter(event.target.value)} aria-label="筛选候选词">
               <option value="all">全部候选词</option>
-              <option value="recommended">推荐采用</option>
+              <option value="recommended">{combined ? '符合筛选条件' : '推荐采用'}</option>
               {combined && <option value="pending">待人工判断</option>}
-              <option value="high-confidence">高置信度</option>
+              {combined && <option value="failed">不符合条件</option>}
+              {!combined && <option value="high-confidence">高置信度</option>}
               <option value="missing">有缺失指标</option>
               <option value="rejected">已筛除</option>
             </select>
             {combined && <button type="button" className="node-secondary-button success" disabled={!canConfirm || confirming}
               onClick={() => setDecisions(Object.fromEntries(candidateRows.map(item => [item.key, item.reviewRecommended ? 'approved' : 'rejected'])))}>
-              <Check size={13} /> 选择推荐项
+              <Check size={13} /> 选择符合条件项
             </button>}
             <button type="button" className="node-secondary-button success" disabled={!canConfirm || confirming} onClick={() => setAllDecisions('approved')}>
               <Check size={13} /> 全部保留
@@ -148,11 +161,15 @@ export const KeywordReviewOperationPanel = ({
                 <span>{item.root || item.seed ? `词根：${item.root || item.seed}` : ''} {item.source ? `· 来源：${item.source}` : ''}</span>
                 <span>{item.reason || item.gateReason || item.tier || '人工判断是否用于选品'}</span>
                 {combined && <>
-                  <span>验真分：{item.sycmScore?.score ?? '暂无'} · 机会分：{item.keywordOpportunity?.score ?? '暂无'} · {item.reviewRecommended ? '建议保留' : '需人工判断'}</span>
-                  <span>{!item.sycmData ? '缺少生意参谋指标' : item.sycmScore?.passed ? '验真条件已通过' : '验真条件未通过或指标不明确'}{item.keywordOpportunity?.breakdown?.gapToContinue > 0 ? `；机会分距推荐门槛还差 ${item.keywordOpportunity.breakdown.gapToContinue} 分` : ''}</span>
-                  {item.keywordOpportunity?.manualApproval?.approved && <span>已人工放行，原评分仅作参考</span>}
+                  <span>{item.reviewRecommended ? '符合全部筛选条件' : '未通过筛选，需人工判断'}</span>
+                  {!item.reviewRecommended && item.reviewDecision === 'approved' && <span className="keyword-filter-warning">已选中，但未满足当前条件；确认继续时需人工放行。</span>}
+                  {item.metricFilter?.checks?.map(check => <span key={check.key}>
+                    {check.condition} · 当前值：{check.raw == null || check.raw === '' ? '缺失' : String(check.raw)} · {check.reason}
+                  </span>)}
+                  {!item.metricFilter && <span>等待重新获取指标筛选结果</span>}
+                  {item.keywordOpportunity?.manualApproval?.approved && <span>已人工放行，原始指标保留</span>}
                 </>}
-                {(item.marketMetrics?.missing?.length > 0 || item.marketMetrics?.breakdown) && (
+                {!combined && (item.marketMetrics?.missing?.length > 0 || item.marketMetrics?.breakdown) && (
                   <details className="keyword-review-detail">
                     <summary>查看评分依据</summary>
                     {item.marketMetrics?.missing?.length > 0 && <span>缺失：{item.marketMetrics.missing.join('、')}</span>}
@@ -162,10 +179,10 @@ export const KeywordReviewOperationPanel = ({
                 )}
               </div>
               <div className="keyword-review-actions">
-                {item.localScore ? <small>本地分 {item.localScore}</small> : <small>{item.tier || ''}</small>}
+                {!combined && (item.localScore ? <small>本地分 {item.localScore}</small> : <small>{item.tier || ''}</small>)}
                 {item.sycmData?.searchPopularity != null && <small>人气 {item.sycmData.searchPopularity}</small>}
                 {item.sycmData?.demandSupplyRatio != null && <small>供需 {item.sycmData.demandSupplyRatio}</small>}
-                {item.marketScore != null && <small>市场分 {item.marketScore}</small>}
+                {!combined && item.marketScore != null && <small>市场分 {item.marketScore}</small>}
                 <button
                   type="button"
                   className={`node-secondary-button success ${item.reviewDecision === 'approved' ? 'active' : ''}`}
@@ -202,14 +219,17 @@ export const KeywordReviewOperationPanel = ({
         </div>
         {riskConfirmation && <section className="node-workbench-section" role="alertdialog" aria-label="确认人工放行">
           <strong>确认人工放行 {riskyCount} 个关键词？</strong>
-          <p>这些词未通过自动推荐或缺少指标。原评分和风险记录会保留，放行后可以继续货源选品。</p>
+          <p>这些词未满足筛选条件或缺少指标。原始指标和筛选原因会保留，放行后可以继续货源选品。</p>
           <div className="node-product-actions">
             <button type="button" className="node-secondary-button" disabled={confirming} onClick={() => setRiskConfirmation(false)}>返回调整</button>
             <button type="button" className="node-primary-button" disabled={confirming || !canConfirm} onClick={submitSelection}>确认人工放行</button>
           </div>
         </section>}
-        <p className="node-workbench-note">{combined ? '确认保留的词将进入货源选品；人工放行不改变原评分，也不跳过商品、标题和铺货类目的检查。' : '确认后，只有“保留”的关键词会进入生意参谋校验；“筛除”的关键词会写入记录但不继续请求平台。'}</p>
+        <p className="node-workbench-note">{combined ? '按本次运行的筛选条件判断，人工放行保留原始指标。' : '确认后，只有“保留”的关键词会进入生意参谋校验；“筛除”的关键词会写入记录但不继续请求平台。'}</p>
       </section>
+      {filterOpen && <KeywordFilterModal runId={currentRunId} decisions={Object.fromEntries(Object.entries(decisions).filter(([key]) => candidates.some(row => candidateKeyword(row) === key)))}
+        onRecollected={onKeywordFilterRecollected}
+        onApplied={async result => { setRiskConfirmation(false); await onKeywordFilterApplied?.(result); }} onClose={() => setFilterOpen(false)} />}
     </div>
   );
 };

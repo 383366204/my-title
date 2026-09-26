@@ -1,6 +1,7 @@
 'use strict';
 
 const { extractSycmData, DEFAULT_FILTER_CONDITIONS } = require('../../sycm-research/src/sycm-cdp-extractor');
+const { keywordFilterConditions } = require('./keyword-metric-filter');
 const { normalizeSycmMetrics, compareMetricThreshold } = require('../../sycm-research/src/metric-parser');
 
 const DEFAULT_RELAXED_FILTER_CONDITIONS = {
@@ -94,8 +95,10 @@ function shouldFallbackToNextTier({ data, sycmScore, minBlueRows = 1 } = {}) {
  * @returns {Promise<object>} Selected tier, rows, score, and attempt trace.
  */
 async function fetchSycmWithFallback(keyword, options = {}) {
+  const configured = options.keywordFilter ? keywordFilterConditions(options.keywordFilter) : null;
   const sycmExtractor = options.sycmExtractor || extractSycmData;
   const baseOptions = {
+    ...(configured ? { guardCache: false } : {}),
     port: Number(options.port || process.env.SYCM_DEBUG_PORT || 9222),
     maxPages: Number(options.pages || process.env.SYCM_MAX_PAGES || 1),
     loginMode: options.loginMode || process.env.SYCM_LOGIN_MODE || 'manual',
@@ -105,7 +108,7 @@ async function fetchSycmWithFallback(keyword, options = {}) {
   const primary = await sycmExtractor(keyword, {
     ...baseOptions,
     mode: primaryMode === 'blue_relaxed' ? 'blue' : primaryMode,
-    filterConditions: primaryMode === 'blue' ? DEFAULT_FILTER_CONDITIONS : primaryMode === 'blue_relaxed' ? DEFAULT_RELAXED_FILTER_CONDITIONS : null
+    filterConditions: configured || (primaryMode === 'blue' ? DEFAULT_FILTER_CONDITIONS : primaryMode === 'blue_relaxed' ? DEFAULT_RELAXED_FILTER_CONDITIONS : null)
   });
   const primaryData = primary && Array.isArray(primary.data) ? primary.data : [];
   const primaryScore = scoreSycmRows(primaryData, { mode: primaryMode });
@@ -123,10 +126,11 @@ async function fetchSycmWithFallback(keyword, options = {}) {
     };
   }
 
-  const relaxed = primaryMode === 'blue_relaxed' ? primary : await sycmExtractor(keyword, {
+  // 自定义门槛下不再放宽平台条件，复用同次查询，避免重复请求。
+  const relaxed = primaryMode === 'blue_relaxed' || configured ? primary : await sycmExtractor(keyword, {
     ...baseOptions,
     mode: 'blue',
-    filterConditions: options.relaxedFilterConditions || DEFAULT_RELAXED_FILTER_CONDITIONS
+    filterConditions: configured || options.relaxedFilterConditions || DEFAULT_RELAXED_FILTER_CONDITIONS
   });
   const relaxedData = relaxed && Array.isArray(relaxed.data) ? relaxed.data : [];
   const relaxedScore = scoreSycmRows(relaxedData, { mode: 'blue_relaxed' });
@@ -151,7 +155,7 @@ async function fetchSycmWithFallback(keyword, options = {}) {
   const fallback = await sycmExtractor(keyword, {
     ...baseOptions,
     mode: 'hot',
-    filterConditions: options.hotFilterConditions || DEFAULT_HOT_FILTER_CONDITIONS
+    filterConditions: configured || options.hotFilterConditions || DEFAULT_HOT_FILTER_CONDITIONS
   });
   const fallbackData = fallback && Array.isArray(fallback.data) ? fallback.data : [];
   const fallbackScore = scoreSycmRows(fallbackData, { mode: 'hot' });

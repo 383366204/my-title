@@ -7,6 +7,7 @@ const DEFAULT_ORDER_GROUP_SIZE = require('../../skills/order-sheet/src/order-gro
 const { WORKFLOW_NODE_IDS, localIsoDate } = require('./pipeline-definition-common');
 const { listProductionWorkflowVariants } = require('./pipeline-templates');
 const { DEFAULT_DIMENSIONS } = require('../../skills/keyword-mining/src/dimension-catalog');
+const { normalizeKeywordFilter } = require('../../skills/pipeline-flow/src/keyword-metric-filter');
 
 function clampInt(value, fallback, min, max) {
   const parsed = parseInt(value, 10);
@@ -111,9 +112,10 @@ function sanitizeWorkflowParams(mode, raw = {}) {
       : 'inspiration';
     return {
       mine: clampInt(raw.mine, 50, 1, 200),
+      keywordFilter: normalizeKeywordFilter(raw.keywordFilter),
       discoveryMode,
       enabledDimensions: Array.isArray(raw.enabledDimensions) ? [...new Set(raw.enabledDimensions)].filter(value => DEFAULT_DIMENSIONS.includes(value)) : DEFAULT_DIMENSIONS,
-      customInputs: Object.fromEntries(DEFAULT_DIMENSIONS.map(key => [key,
+      customInputs: Object.fromEntries([...DEFAULT_DIMENSIONS, ...(Array.isArray(raw.customInputs?.direction) ? ['direction'] : [])].map(key => [key,
         (Array.isArray(raw.customInputs?.[key]) ? raw.customInputs[key] : []).map(value => String(value).trim()).filter(Boolean)
       ])),
       source: ['local', 'ai', 'hybrid', 'sycm_hot', 'sycm_blue', 'inspiration'].includes(String(raw.source || '').trim())
@@ -155,6 +157,7 @@ function sanitizeWorkflowParams(mode, raw = {}) {
     if (keywords.length === 0) throw new Error('关键词不能为空');
     return {
       keyword: keywords[0],
+      keywordFilter: normalizeKeywordFilter(raw.keywordFilter),
       ...(keywords.length > 1 ? { keywords } : {}),
       export: clampInt(raw.export, 20, 1, 100),
       productsPerKeyword: clampInt(raw.productsPerKeyword, 12, 1, 50),
@@ -183,6 +186,7 @@ function sanitizeWorkflowParams(mode, raw = {}) {
       ? clampInt(raw.sycmMinBatchCooldownMs, 300000, 60000, 3600000)
       : presets.minCooldown;
     return {
+      keywordFilter: normalizeKeywordFilter(raw.keywordFilter),
       roots: normalizedRoots.roots,
       rootsText: normalizedRoots.roots.join('\n'),
       duplicateRoots: normalizedRoots.duplicates,
@@ -512,7 +516,7 @@ function resolveProductionWorkflowLaunch(body = {}) {
     ...(body.params || {}),
     ...(body.options || {})
   };
-  for (const key of ['enabledDimensions', 'customInputs', 'candidateScreening']) {
+  for (const key of ['enabledDimensions', 'customInputs', 'candidateScreening', 'keywordFilter']) {
     if (Object.prototype.hasOwnProperty.call(body, key)) params[key] = body[key];
   }
   for (const key of ['keyword', 'keywords', 'roots', 'rootsText', 'sycmMode', 'period', 'compareType', 'sycmRiskProfile', 'sycmMinIntervalMs', 'sycmMaxIntervalMs', 'sycmBatchSize', 'sycmMinBatchCooldownMs', 'sycmMaxBatchCooldownMs', 'sycmMaxRetries', 'mine', 'discoveryMode', 'source', 'rootMode', 'rootLimit', 'rootCooldownDays', 'familyCooldownDays', 'inspirationSycmPages', 'inspirationUseLLM', 'maxObservingSeeds', 'maxObservingPoolSize', 'maxNewSeeds', 'autoReplenishSeeds', 'recordSeedFeedback', 'verify', 'select', 'generate', 'export', 'productsPerKeyword', 'length', 'port', 'pages', 'minBlueRows', 'fallbackHot', 'autoApproveKeywords', 'autoExpandVerify', 'verifyReserve', 'autoAllowReviewKeywords', 'reviewKeywordLimit', 'workRequirement', 'dateMode', 'startDate', 'endDate', 'orderDate', 'storeName', 'sheetType', 'sortMetric', 'productLimit', 'fileName', 'includeRawData', 'includeImages', 'amountMode', 'missingAmountPolicy', 'cartQuantity', 'rowSpan', 'orderNote', 'reviewGroupSize', 'includeSpacerRow', 'uploadId', 'uploadName', 'groups', 'reviewTone', 'reviewLength', 'useAI', 'inputMode', 'manualItems', 'manualItemsText', 'competitorText', 'competitorInputs', 'maxShops', 'hotLimit', 'newLimit', 'detailLimit', 'waitMs', 'compareHistory']) {

@@ -28,6 +28,8 @@ function outputForNode(id, summary) {
       approved: Number(counts.keywordReviewApproved || 0),
       rejected: Number(counts.keywordReviewRejected || 0),
       pending: Number(counts.keywordReviewPending || 0),
+      filterCounts: { passed: Number(counts.keywordFilterPassed || 0),
+        review: Number(counts.keywordFilterReview || 0), failed: Number(counts.keywordFilterFailed || 0) },
       file: summary.files?.reviewedCandidates || ''
     };
   }

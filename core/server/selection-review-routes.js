@@ -1,4 +1,6 @@
 'use strict';
+const { registerKeywordFilterRoutes } = require('./keyword-filter-routes');
+const { getRun } = require('../../skills/pipeline-flow/src/run-store');
 
 /**
  * 注册人工筛词、货源选品复核；确认后等待显式继续。
@@ -7,6 +9,7 @@
  * @returns {void}
  */
 function registerSelectionReviewRoutes(app, deps) {
+  registerKeywordFilterRoutes(app, deps);
   const {
     isValidWorkflowRunIdParam,
     flowReviewCandidates,
@@ -23,6 +26,12 @@ function registerSelectionReviewRoutes(app, deps) {
       return res.status(400).json({ ok: false, error: '无效的运行 ID。' });
     }
     try {
+      if (req.body?.keywordFilterVersion !== undefined) {
+        const { run } = getRun({ runId, dataDir: deps.dataDir });
+        if (req.body.keywordFilterVersion !== (run.options?.keywordFilterVersion || 0)) {
+          return res.status(409).json({ ok: false, error: '筛选配置已更新，请刷新后再确认。' });
+        }
+      }
       const previousRuntime = readRuntimeState({ runId });
       if (previousRuntime && ['running', 'retrying', 'resuming'].includes(previousRuntime.status)) {
         return res.status(409).json({ ok: false, error: '节点正在运行，请等待完成或暂停后再确认。' });

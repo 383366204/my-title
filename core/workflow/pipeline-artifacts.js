@@ -9,6 +9,7 @@ const DEFAULT_ORDER_GROUP_SIZE = require('../../skills/order-sheet/src/order-gro
 const autoGroupOrderProducts = require('../../skills/order-sheet/src/order-groups').autoGroupOrderProducts;
 const { WORKFLOW_NODE_IDS, ARTIFACT_BY_NODE } = require('./pipeline-definition-common');
 const { scoreRootReviewCandidate } = require('../../skills/pipeline-flow/src/root-opportunity-review');
+const { normalizeKeywordFilter } = require('../../skills/pipeline-flow/src/keyword-metric-filter');
 
 /**
  * 读取 workflow 节点对应的 pipeline artifact。
@@ -108,11 +109,27 @@ function readWorkflowNodeArtifact(runIdOrOptions, nodeId, options = {}) {
       };
     }
     if (normalized.nodeId === WORKFLOW_NODE_IDS.keywordReview) {
-      if (summary.options?.combinedOpportunityReview || summary.options?.mode === 'root-keyword') {
+      if (summary.options?.combinedOpportunityReview || ['daily', 'keyword', 'root-keyword'].includes(summary.options?.mode)
+        || (summary.options?.mode !== 'manual' && summary.options?.keywordFilter)) {
         const saved = readArtifactJsonl(file, normalized.limit);
-        const rows = saved.length && saved.every(row => row.combinedOpportunityReview)
-          ? saved : readArtifactJsonl(summary.files?.candidates, normalized.limit).map(scoreRootReviewCandidate);
-        return { runId: summary.runId, nodeId: normalized.nodeId, file, type: 'jsonl', rows, combinedOpportunityReview: true };
+        const savedByKeyword = new Map(saved.map(row => [row.keyword, row]));
+        const candidates = readArtifactJsonl(summary.files?.candidates, normalized.limit);
+        const source = candidates.length ? candidates.map(row => {
+          const previous = savedByKeyword.get(row.keyword);
+          return { ...previous, ...row, reviewStatus: previous?.reviewStatus || row.reviewStatus,
+            ...(previous?.keywordOpportunity?.manualApproval ? { keywordOpportunity: previous.keywordOpportunity } : {}) };
+        }) : saved;
+        const rows = source.map(row => {
+          const filtered = scoreRootReviewCandidate(row, summary.options?.keywordFilter);
+          const decision = summary.options?.keywordFilterDecisions?.[row.keyword];
+          if (['approved', 'rejected'].includes(decision)) filtered.reviewDraft = decision;
+          if (row.reviewStatus) filtered.reviewStatus = row.reviewStatus;
+          if (row.keywordOpportunity?.manualApproval) filtered.keywordOpportunity.manualApproval = row.keywordOpportunity.manualApproval;
+          return filtered;
+        });
+        return { runId: summary.runId, nodeId: normalized.nodeId, file, type: 'jsonl', rows, combinedOpportunityReview: true,
+          keywordFilter: normalizeKeywordFilter(summary.options?.keywordFilter),
+          keywordFilterVersion: summary.options?.keywordFilterVersion || 0 };
       }
       if (summary.options?.mode === 'manual') {
         const selectedFile = summary.files?.selectedProducts;

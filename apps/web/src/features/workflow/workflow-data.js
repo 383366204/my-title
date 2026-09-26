@@ -163,6 +163,7 @@ export function normalizeWorkflowForCanvas(workflow = {}) {
       ...node,
       data: {
         ...node.data,
+        ...(node.id === 'keywordReview' ? { keywordFilterAvailable: ['daily', 'keyword', 'root-keyword'].includes(startData.selectionMode || workflow.mode) } : {}),
         ...(node.id === 'generateSheet' ? {
           sheetConfig: true,
           sheetType: node.data?.sheetType || startData.sheetType || 'order',

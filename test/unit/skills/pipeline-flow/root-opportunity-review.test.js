@@ -81,7 +81,7 @@ test('keywordReview pauses and resumes normally in root workflow', async t => {
 test('HTTP confirmation of root review advances to selection', () => {
   let handler, patch;
   const runtime = { mode: 'root-keyword', activeStep: 'keywordReview', status: 'blocked', steps: ['mine', 'keywordReview', 'select', 'generate', 'export'] };
-  registerSelectionReviewRoutes({ post: (url, fn) => { if (url.endsWith('/keyword-review')) handler = fn; } }, {
+  registerSelectionReviewRoutes({ get: () => {}, post: (url, fn) => { if (url.endsWith('/keyword-review')) handler = fn; } }, {
     isValidWorkflowRunIdParam: () => true,
     flowReviewCandidates: () => ({ status: 'keywords_reviewed', approved: [{ keyword: '木质摆件' }], rejected: [] }),
     readRuntimeState: () => runtime,

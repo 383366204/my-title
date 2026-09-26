@@ -397,6 +397,14 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
     selectedNode,
     artifactState,
     currentRunId,
+    onKeywordFilterApplied: async (result) => {
+      if (result.artifact) setArtifactState({ status: 'ready', nodeId: 'keywordReview', artifact: result.artifact, error: '' });
+      updateNodeFields('keywordReview', { keywordFilter: result.config, keywordFilterCounts: result.counts });
+    },
+    onKeywordFilterRecollected: async result => {
+      await loadHistoryRun(result.runId);
+      await fetchHistoryRuns();
+    },
     manualMode: activeTemplateMode === 'manual',
     selectionMode: activeTemplateMode,
     seedWorkbench: {
@@ -529,6 +537,8 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
         }}
         onUpdateNodeData={updateNodeData}
         onSaveNodeFields={updateNodeFields}
+        onKeywordFilterApplied={nodeOperationProps.onKeywordFilterApplied}
+        onKeywordFilterRecollected={nodeOperationProps.onKeywordFilterRecollected}
         updateDistributionNodeJob={updateDistributionNodeJob}
       />
       <WorkflowConsole logs={logs} onClear={() => setLogs([])} />

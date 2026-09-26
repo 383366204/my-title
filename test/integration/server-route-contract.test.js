@@ -15,6 +15,11 @@ test('server retains all pre-refactor paths, HTTP methods and route middleware c
     item.path !== '/api/workflows/runs/:runId/review-drafts/rewrite'
   ));
   filteredExpected.push({ method: 'post', path: '/api/workflows/runs/:runId/keywords/query', handlers: 1 });
+  filteredExpected.push(
+    { method: 'get', path: '/api/workflows/runs/:runId/keyword-filter', handlers: 1 },
+    { method: 'post', path: '/api/workflows/runs/:runId/keyword-filter', handlers: 1 },
+    { method: 'post', path: '/api/workflows/runs/:runId/keyword-filter/recollect', handlers: 1 }
+  );
   filteredExpected.push({ method: 'get', path: '/api/distribution/shops', handlers: 1 },
     { method: 'post', path: '/api/distribution/shops', handlers: 1 },
     { method: 'delete', path: '/api/distribution/shops/:shopId', handlers: 1 });

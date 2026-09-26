@@ -8,6 +8,11 @@ const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.ECOM_PLAYWRIGHT_MODULE || 'playwright');
 const { listProductionWorkflowTemplates } = require('../../core/workflow/pipeline-templates');
 const { validateProductionWorkflow } = require('../../core/workflow/pipeline-params');
+const { scoreRootReviewCandidate } = require('../../skills/pipeline-flow/src/root-opportunity-review');
+const reviewRows = [
+  scoreRootReviewCandidate({ keyword: '推荐词', sycmData: { searchPopularity: 500, demandSupplyRatio: 2, conversionRate: '2%', tmallClickShare: '20%' } }),
+  scoreRootReviewCandidate({ keyword: '待判断词', sycmData: { searchPopularity: 10, demandSupplyRatio: 2, conversionRate: '2%', tmallClickShare: '60%' } })
+];
 const root = fileURLToPath(new URL('../../apps/web', import.meta.url));
 const harness = `import React from 'react'; import {createRoot} from 'react-dom/client';
 import WorkflowStudio from '/src/WorkflowStudio.jsx';
@@ -29,10 +34,7 @@ window.showExactTitle = () => root.render(React.createElement(ExactTitlePanel));
 window.reviewSubmissions = [];
 window.reviewQueries = [];
 window.showReview = () => root.render(React.createElement(KeywordReviewOperationPanel, {
-  artifactState: {status:'ready',artifact:{combinedOpportunityReview:true,rows:[
-    {keyword:'推荐词',reviewRecommended:true,sycmData:{searchPopularity:500},sycmScore:{passed:true,score:80},keywordOpportunity:{score:80}},
-    {keyword:'待判断词',reviewRecommended:false,sycmData:{searchPopularity:10},sycmScore:{passed:false,score:20},keywordOpportunity:{score:20}}
-  ]}},canConfirm:true,canRetryMine:false,onConfirmKeywordReview:async rows => window.reviewSubmissions.push(rows),
+  artifactState: {status:'ready',artifact:{combinedOpportunityReview:true,rows:${JSON.stringify(reviewRows)}}},canConfirm:true,canRetryMine:false,onConfirmKeywordReview:async rows => window.reviewSubmissions.push(rows),
   onQueryKeywords:async input => window.reviewQueries.push(input)
 }));
 window.productSubmissions = [];
@@ -108,17 +110,28 @@ try {
   await dialog.getByRole('checkbox', { name: '男装', exact: true }).check();
   await dialog.getByRole('button', { name: /加入.*词根|添加.*词根|加入输入框/ }).click();
   await dialog.getByRole('button', { name: '保存配置' }).click();
+  await page.getByRole('button', { name: '筛选条件', exact: true }).click();
+  const filters = page.getByRole('dialog', { name: '关键词筛选条件' });
+  assert.equal(await filters.getByRole('spinbutton', { name: '搜索人气', exact: true }).inputValue(), '50');
+  await filters.getByRole('spinbutton', { name: '搜索人气', exact: true }).fill('80');
+  await filters.getByRole('button', { name: '保存条件', exact: true }).click();
+  await start.getByRole('button', { name: '启动流水线', exact: true }).click();
+  await page.waitForFunction(() => document.body.textContent.includes('模拟运行完成'));
+  assert.equal(launches.length, 1);
+  assert.equal(launches[0].mode, 'root-keyword');
+  assert.equal(launches[0].params.keywordFilter.searchPopularity.value, 80);
   await page.getByRole('radio', { name: '精确关键词', exact: true }).check();
+  assert.equal(await page.getByRole('button', { name: '筛选条件', exact: true }).count(), 0);
   await page.getByRole('button', { name: '输入关键词', exact: true }).click();
   assert.equal(await dialog.getByRole('textbox').inputValue(), '杯垫\n桌面收纳盒');
   await dialog.getByRole('button', { name: '保存配置' }).click();
   await start.getByRole('button', { name: '启动流水线', exact: true }).click();
   await page.waitForFunction(() => document.body.textContent.includes('模拟运行完成'));
-  assert.equal(launches.length, 1);
-  assert.equal(launches[0].templateId, 'selection-v1');
-  assert.equal(launches[0].mode, 'keyword');
-  assert.deepEqual(launches[0].params.keywords, ['杯垫', '桌面收纳盒']);
-  assert.deepEqual(launches[0].workflow.nodes.map(node => node.id), ['start', 'select', 'generate', 'export', 'end']);
+  assert.equal(launches.length, 2);
+  assert.equal(launches[1].templateId, 'selection-v1');
+  assert.equal(launches[1].mode, 'keyword');
+  assert.deepEqual(launches[1].params.keywords, ['杯垫', '桌面收纳盒']);
+  assert.deepEqual(launches[1].workflow.nodes.map(node => node.id), ['start', 'select', 'generate', 'export', 'end']);
   mkdirSync('output/selection-qa', { recursive: true });
   await page.screenshot({ path: 'output/selection-qa/desktop.png', fullPage: true });
   await page.getByRole('button', { name: '输入关键词', exact: true }).click();
@@ -129,6 +142,8 @@ try {
   await page.screenshot({ path: 'output/selection-qa/mobile.png', fullPage: true });
   await page.evaluate(() => window.showReview());
   assert.equal(await page.getByRole('checkbox', { name: '采用 推荐词', exact: true }).isChecked(), true);
+  assert.equal(await page.getByText(/验真分：|机会分：|本地分|市场分|查看评分依据/).count(), 0);
+  await page.getByText('天猫占比 < 50% · 当前值：60% · 未达到条件', { exact: true }).waitFor();
   assert.equal(await page.getByRole('checkbox', { name: '采用 待判断词', exact: true }).isChecked(), false);
   await page.getByRole('combobox', { name: '筛选候选词' }).selectOption('recommended');
   assert.equal(await page.getByRole('checkbox').count(), 1);

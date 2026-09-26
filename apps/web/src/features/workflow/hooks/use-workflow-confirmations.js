@@ -82,7 +82,7 @@ export function useWorkflowConfirmations({ currentRunId, activeTemplateMode, set
   };
 
 
-  const confirmKeywordReview = async (rows = [], manualKeywords = []) => {
+  const confirmKeywordReview = async (rows = [], manualKeywords = [], keywordFilterVersion) => {
     const ticket = beginConfirmation('keywords');
     if (!ticket) return false;
     try {
@@ -94,7 +94,7 @@ export function useWorkflowConfirmations({ currentRunId, activeTemplateMode, set
         .filter((row) => row.reviewDecision === 'rejected')
         .map((row) => candidateKeyword(row))
         .filter(Boolean);
-      const response = await confirmKeywordReviewRequest(currentRunId, { approvedKeywords, rejectedKeywords, manualKeywords });
+      const response = await confirmKeywordReviewRequest(currentRunId, { approvedKeywords, rejectedKeywords, manualKeywords, keywordFilterVersion });
       if (!ticket.isCurrent()) return false;
       setLogs((prev) => [...prev, {
         timestamp: new Date().toISOString(),

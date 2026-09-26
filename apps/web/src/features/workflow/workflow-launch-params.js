@@ -8,6 +8,8 @@ export function getStartNodeParams(nodes = []) {
   const startNode = nodes.find((node) => isWorkflowInputNodeType(node.type) || node.id === 'start') || nodes[0];
   if (!startNode?.data) return {};
   const params = { ...startNode.data };
+  const keywordFilter = nodes.find(node => node.id === 'keywordReview')?.data?.keywordFilter;
+  if (keywordFilter) params.keywordFilter = keywordFilter;
   ['status', 'state', 'output', 'error', 'progress', 'onSelect', 'originalType'].forEach((key) => delete params[key]);
   return params;
 }

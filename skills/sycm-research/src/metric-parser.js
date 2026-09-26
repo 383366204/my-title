@@ -53,6 +53,7 @@ const FIELDS = {
   demandSupplyRatio: ['number', 'demandSupplyRatio'],
   clickRate: ['ratio', 'clickRate', 'clickRatio'],
   conversionRate: ['ratio', 'conversionRate', 'payConversionRate', 'payConversion'],
+  tmallClickShare: ['ratio', 'tmallClickShare', 'tmallShare', 'tmallClickRatio'],
   buyerCount: ['count', 'buyerCount', 'payBuyerCount', 'payBuyers'],
   onlineProductCount: ['count', 'onlineProductCount', 'productCount', 'competitionCount', '商品数'],
   trend: ['ratio', 'trend', 'trendRate', 'searchTrend', 'growthRate']

@@ -6,6 +6,7 @@ export const WORKFLOW_ACTION_KINDS = Object.freeze({
 
 export const WORKFLOW_OVERLAYS = Object.freeze({
   ARTIFACT: 'artifact',
+  KEYWORD_FILTER: 'keyword-filter',
   DISTRIBUTION: 'distribution',
   NODE_WORKBENCH: 'node-workbench',
   PRODUCT_SELECT: 'product-select',
@@ -23,6 +24,7 @@ export const WORKFLOW_ACTION_ROUTES = Object.freeze({
   'open-watermark-studio': overlay(WORKFLOW_OVERLAYS.WATERMARK_STUDIO),
   'configure-sheet': overlay(WORKFLOW_OVERLAYS.SHEET_CONFIG),
   'keyword-review': overlay(WORKFLOW_OVERLAYS.NODE_WORKBENCH),
+  'keyword-filter': overlay(WORKFLOW_OVERLAYS.KEYWORD_FILTER),
   'confirm-keyword-review': overlay(WORKFLOW_OVERLAYS.NODE_WORKBENCH),
   'complete-order-sheet-products': overlay(WORKFLOW_OVERLAYS.NODE_WORKBENCH),
   'confirm-order-sheet-products': overlay(WORKFLOW_OVERLAYS.NODE_WORKBENCH),

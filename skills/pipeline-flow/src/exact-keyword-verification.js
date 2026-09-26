@@ -4,6 +4,7 @@ const fs = require('fs');
 const { extractSycmData } = require('../../sycm-research/src/sycm-cdp-extractor');
 const { getRun, readJsonl, appendJsonl, writeRun, setRunStageMetrics } = require('./run-store');
 const { sycmRecommendedCategory } = require('./product-normalizer');
+const { keywordFilterConditions } = require('./keyword-metric-filter');
 
 const keywordKey = value => String(value || '').replace(/\s+/g, '').toLowerCase();
 
@@ -15,6 +16,7 @@ const keywordKey = value => String(value || '').replace(/\s+/g, '').toLowerCase(
 async function verifyExactSelectionKeywords(options = {}) {
   const { run, runDir } = getRun(options);
   const candidates = readJsonl(run.files.candidates);
+  const filterConditions = keywordFilterConditions(run.options?.keywordFilter);
   const extractor = options.sycmExtractor || extractSycmData;
   const shouldStop = options.shouldStop || (() => null);
   const only = Array.isArray(options.onlyKeywords) ? new Set(options.onlyKeywords) : null;
@@ -36,8 +38,9 @@ async function verifyExactSelectionKeywords(options = {}) {
     options.onProgress?.({ current: currentCount(), total: targets.length, message: `正在校验：${candidate.keyword}` });
     try {
       const result = await extractor(candidate.keyword, {
+        guardCache: false,
         mode: 'hot', maxPages: Number(options.pages || 1), port: Number(options.port || 9222),
-        filterConditions: { searchPopularity: 0, demandSupplyRatio: 0, conversionRate: 0, buyerCount: 0, referencePrice: 0 },
+        filterConditions,
         guardMinCooldownMs: 45000, guardMaxCooldownMs: 90000,
         shouldStop,
         onProgress: message => options.onProgress?.({ current: currentCount(), total: targets.length, message: String(message) })
@@ -45,7 +48,9 @@ async function verifyExactSelectionKeywords(options = {}) {
       if (!result || result.ok === false) throw new Error(result?.error || '未取得有效的平台查询响应');
       const exactRows = (result.data || []).filter(row => keywordKey(row.keyword) === keywordKey(candidate.keyword));
       candidate.sycmData = exactRows[0] || null;
-      candidate.sycmEvidence = { keyword: candidate.keyword, mode: 'hot', exactChecked: true, collectedAt: new Date().toISOString() };
+      candidate.sycmEvidence = { keyword: candidate.keyword, mode: 'hot', exactChecked: true, collectedAt: new Date().toISOString(),
+        requestedFilterConditions: filterConditions,
+        filterConditions: result.filterConditions || null, filterApplied: result.filterApplied === true };
       candidate.recommendedCategory = sycmRecommendedCategory(result) || candidate.recommendedCategory || '';
       candidate.reason = exactRows.length ? '已查询原词，待人工确认机会' : '查询结果未包含原词指标，需人工判断；未使用关联词代替';
       delete candidate.error;

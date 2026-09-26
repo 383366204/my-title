@@ -447,6 +447,7 @@ describe('workflow pipeline adapter', () => {
       recordSeedFeedback: false
     }), {
       mine: 200,
+      keywordFilter: require('../../../skills/pipeline-flow/src/keyword-metric-filter').normalizeKeywordFilter(),
       discoveryMode: 'inspiration',
       enabledDimensions: ['persona', 'profession', 'hobby', 'scene', 'problem'],
       customInputs: { persona: [], profession: [], hobby: [], scene: [], problem: [] },
@@ -492,6 +493,7 @@ describe('workflow pipeline adapter', () => {
     }), {
       keyword: '纯银项链女',
       export: 1,
+      keywordFilter: require('../../../skills/pipeline-flow/src/keyword-metric-filter').normalizeKeywordFilter(),
       productsPerKeyword: 18,
       length: 30,
       port: 9222,
@@ -506,6 +508,7 @@ describe('workflow pipeline adapter', () => {
       keyword: '纯银项链女',
       keywords: ['纯银项链女', '桌面收纳盒'],
       export: 20,
+      keywordFilter: require('../../../skills/pipeline-flow/src/keyword-metric-filter').normalizeKeywordFilter(),
       productsPerKeyword: 12,
       length: 60,
       port: 9222,

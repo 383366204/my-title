@@ -1,5 +1,10 @@
 'use strict';
+const fs = require('fs');
+const path = require('path');
 const { prepareKeywordSupplement } = require('../../skills/pipeline-flow/src/keyword-supplement');
+const { getRun: getPipelineRun } = require('../../skills/pipeline-flow/src/run-store');
+const { readWorkflowNodeArtifact } = require('../workflow/pipeline-artifacts');
+const { getKeywordRecollectionRoots } = require('./keyword-filter-routes');
 
 /**
  * 注册控制路由；共享占用与运行能力由应用注入，保留请求时动态取 runner。
@@ -33,8 +38,75 @@ function registerWorkflowControlRoutes(app, {
   resolveProductionWorkflowDefinition,
   writeWorkflowDefinition,
   originalLog,
-  originalError
+  originalError,
+  dataDir
 }) {
+  app.post('/api/workflows/runs/:runId/keyword-filter/recollect', (req, res) => {
+    const sourceRunId = req.params.runId;
+    if (!isValidWorkflowRunIdParam(sourceRunId)) return res.status(400).json({ ok: false, error: '无效的运行 ID。' });
+    const runtime = readRuntimeState({ runId: sourceRunId });
+    if (!runtime || runtime.activeStep !== 'keywordReview' || !['blocked', 'paused', 'needs_review'].includes(runtime.status)
+      || runtime.progress?.keywordReview?.status === 'completed') {
+      return res.status(409).json({ ok: false, error: '请在待确认关键词阶段发起重采。' });
+    }
+    if (!['daily', 'keyword', 'root-keyword'].includes(runtime.mode)) {
+      return res.status(409).json({ ok: false, code: 'RECOLLECTION_UNSUPPORTED', error: '该模式不支持重采。' });
+    }
+    const reservation = workbench.tryAcquire({ mode: 'keyword-recollect' });
+    if (!reservation) return res.status(409).json({ ok: false, error: '已有工作流正在运行。' });
+    let receipt;
+    let dispatched = false;
+    let createdReceipt = false;
+    try {
+      const { run, runDir } = getPipelineRun({ runId: sourceRunId, dataDir });
+      if (!['awaiting_keyword_review', 'keyword_review_empty'].includes(run.status)
+        || req.body?.version !== (run.options?.keywordFilterVersion || 0)) {
+        return res.status(409).json({ ok: false, error: '筛选配置或运行状态已更新，请刷新。' });
+      }
+      const rows = readWorkflowNodeArtifact({ runId: sourceRunId, dataDir, nodeId: 'keywordReview', limit: 'all' })?.rows || [];
+      const suppliedDecisions = req.body.decisions === undefined ? {} : req.body.decisions;
+      const knownKeywords = new Set(rows.map(row => row.keyword));
+      if (!suppliedDecisions || typeof suppliedDecisions !== 'object' || Array.isArray(suppliedDecisions)
+        || Object.entries(suppliedDecisions).some(([keyword, value]) => !knownKeywords.has(keyword)
+          || !['approved', 'rejected'].includes(value))) {
+        return res.status(400).json({ ok: false, error: 'decisions 必须是已有关键词到 approved/rejected 的映射。' });
+      }
+      receipt = path.join(runDir, `keyword-filter-recollection-${req.body.version}.json`);
+      if (fs.existsSync(receipt)) {
+        return res.json({ ok: true, data: { ...JSON.parse(fs.readFileSync(receipt, 'utf8')), reused: true } });
+      }
+      const mode = runtime.mode === 'daily' ? 'root-keyword' : runtime.mode;
+      const roots = runtime.mode === 'daily' ? getKeywordRecollectionRoots(run) : null;
+      if (roots && !roots.length) {
+        return res.status(409).json({ ok: false, code: 'RECOLLECTION_UNSUPPORTED', error: '未记录实际查询词根，无法安全重采；不会重新生成灵感。' });
+      }
+      const decisions = { ...Object.fromEntries(rows.filter(row => ['approved', 'rejected'].includes(row.reviewDraft || row.reviewStatus))
+        .map(row => [row.keyword, row.reviewDraft || row.reviewStatus])), ...suppliedDecisions };
+      const params = { ...sanitizeWorkflowParams(mode, { ...run.options, ...runtime.params,
+        ...(mode === 'keyword' && rows.length ? { keywords: rows.map(row => row.keyword) } : {}),
+        ...(roots ? { roots, sycmMode: 'both', pages: runtime.params?.inspirationSycmPages || 3 } : {}),
+        keywordFilter: run.options.keywordFilter }),
+        guardCache: false, keywordFilterDecisions: decisions, recollectionOf: sourceRunId };
+      // 新运行不复用完成队列；禁用 guard 缓存，保留原运行作为审计记录。
+      const runId = `${createRunId()}-recollect-${require('crypto').randomUUID().slice(0, 8)}`;
+      writeWorkflowDefinition({ runId, definition: resolveProductionWorkflowDefinition({ mode }, { mode, params }) });
+      const response = { runId, sourceRunId, status: 'started', mode,
+        recollectionMode: 'new_run', keywordFilterVersion: 0, cacheBypassed: true };
+      // 每个源运行版本只创建一次，重复请求返回同一个新运行（包括运行完成后）。
+      fs.writeFileSync(receipt, JSON.stringify(response), { flag: 'wx' });
+      createdReceipt = true;
+      Object.assign(reservation, { runId });
+      const promise = workbench.runReserved(reservation, () => getPipelineRuntimeRunner()({ runId, mode, params, ...(dataDir ? { dataDir } : {}) }));
+      dispatched = true;
+      promise.catch(error => originalError(`[Keyword Recollect] ${runId}: ${error.message}`));
+      return res.json({ ok: true, data: response });
+    } catch (error) {
+      return res.status(400).json({ ok: false, error: error.message });
+    } finally {
+      if (createdReceipt && !dispatched) fs.unlinkSync(receipt);
+      if (!reservation.promise) workbench.release(reservation);
+    }
+  });
   app.post('/api/workflows/runs/:runId/keywords/query', (req, res) => {
     const runId = req.params.runId;
     if (!isValidWorkflowRunIdParam(runId)) return res.status(400).json({ ok: false, error: '无效的运行 ID。' });
@@ -108,7 +180,7 @@ function registerWorkflowControlRoutes(app, {
         }
       });
     } catch (err) {
-      const status = /未知 workflow mode|未知 workflow template|工作流定义|工作流必须匹配|关键词不能为空|词根不能为空|1688 商品链接|同行链接|商品缺少关键词|商品重复/.test(err.message) ? 400 : 500;
+      const status = err instanceof TypeError || /未知 workflow mode|未知 workflow template|工作流定义|工作流必须匹配|关键词不能为空|词根不能为空|1688 商品链接|同行链接|商品缺少关键词|商品重复/.test(err.message) ? 400 : 500;
       res.status(status).json({ ok: false, error: err.message });
     } finally {
       if (!runState.promise) workbench.release(runState);

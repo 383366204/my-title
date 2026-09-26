@@ -105,6 +105,8 @@ export const NodeOperationPanel = ({
   selectedNode,
   artifactState,
   currentRunId,
+  onKeywordFilterApplied,
+  onKeywordFilterRecollected,
   manualMode,
   selectionMode,
   seedWorkbench = {},
@@ -169,12 +171,12 @@ export const NodeOperationPanel = ({
   const canConfirmOrderSheetProducts = Boolean(currentRunId)
     && ['blocked', 'paused', 'waiting_manual', 'manual_action_required', 'waiting_confirmation', 'awaiting_keyword_review'].includes(selectedStatus);
   const copy = kind === 'keyword-review' && artifactState.artifact?.combinedOpportunityReview
-    ? { title: '关键词确认', description: '综合机会评分与人工选择，确认保留的词用于货源选品。' }
+    ? { title: '关键词确认', description: '按指标筛选并人工选择，确认保留的词用于货源选品。' }
     : kind === 'product-select' && manualMode
     ? { title: '商品资料获取结果', description: '逐条查看1688商品标题、主图、类目和获取失败原因。' }
     : NODE_PANEL_COPY[kind];
   const resultHint = kind === 'keyword-review' && artifactState.artifact?.combinedOpportunityReview
-    ? '查看评分并人工决定保留哪些词，确认后进入货源选品。' : nodeResultHint(kind);
+    ? '核对指标并决定保留哪些词，确认后进入货源选品。' : nodeResultHint(kind);
   // 评价复核面板自带标题和说明，操作台头部重复且无信息量，直接省略
   if (!copy && kind !== 'review-drafts') return <ArtifactPanel state={artifactState} />;
 
@@ -241,6 +243,9 @@ export const NodeOperationPanel = ({
       ) : kind === 'keyword-review' && (
         <KeywordReviewOperationPanel
           key={currentRunId}
+          currentRunId={currentRunId}
+          onKeywordFilterApplied={onKeywordFilterApplied}
+          onKeywordFilterRecollected={onKeywordFilterRecollected}
           artifactState={artifactState}
           onConfirmKeywordReview={onConfirmKeywordReview}
           onQueryKeywords={onQueryKeywords}

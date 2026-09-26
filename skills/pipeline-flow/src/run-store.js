@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { normalizeKeywordFilter } = require('./keyword-metric-filter');
 
 const DEFAULT_FLOW_DIR = path.join(process.cwd(), 'data', 'pipeline');
 const DEFAULT_PIPELINE_POLICY = Object.freeze({
@@ -180,7 +181,7 @@ function writeRun(runDir, run) {
  * @param {object} [options.options] Persisted workflow options.
  * @returns {{runId:string,dataDir:string,runDir:string,run:object}} Run context.
  */
-function initRun({ dataDir = DEFAULT_FLOW_DIR, runId, options = {} } = {}) {
+function initRun({ dataDir = DEFAULT_FLOW_DIR, runId, options = {}, keywordFilter, keywordFilterDecisions } = {}) {
   const resolved = resolveRunDir({ dataDir, runId });
   ensureDir(resolved.runDir);
   const runFile = path.join(resolved.runDir, 'run.json');
@@ -234,6 +235,13 @@ function initRun({ dataDir = DEFAULT_FLOW_DIR, runId, options = {} } = {}) {
     }
   };
   ensureRunQualityState(run, requestedPolicy);
+  if (!run.options.mode || ['daily', 'keyword', 'root-keyword'].includes(run.options.mode)) {
+    if (!existing || !run.options.keywordFilter) {
+      run.options.keywordFilter = normalizeKeywordFilter(keywordFilter ?? options.keywordFilter);
+    }
+    run.options.keywordFilterVersion ??= 0;
+  }
+  if (!existing && keywordFilterDecisions) run.options.keywordFilterDecisions = { ...keywordFilterDecisions };
   ensureRunFiles(run, resolved.runDir);
   writeRun(resolved.runDir, run);
   writeJson(path.join(dataDir, 'latest.json'), {

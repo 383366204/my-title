@@ -26,7 +26,12 @@ export function useNodeArtifact({ runId, nodeId, limit } = {}) {
     getWorkflowArtifact(runId, nodeId, { limit })
       .then((artifact) => {
         if (!cancelled) {
-          setArtifactState({ status: artifact ? 'ready' : 'empty', nodeId, artifact, error: '' });
+          setArtifactState(current => {
+            if (nodeId === 'keywordReview' && current.nodeId === nodeId
+              && current.artifact?.runId === runId
+              && Number(current.artifact?.keywordFilterVersion || 0) > Number(artifact?.keywordFilterVersion || 0)) return current;
+            return { status: artifact ? 'ready' : 'empty', nodeId, artifact, error: '' };
+          });
         }
       })
       .catch((error) => {

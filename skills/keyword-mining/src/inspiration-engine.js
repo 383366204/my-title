@@ -143,7 +143,9 @@ async function discoverInspirationRoots({
   customInputs,
   now = Date.now()
 } = {}) {
-  const collected = await collectInspirations({
+  const demands = collectDimensionInspirations({ date, runAttempt, enabledDimensions, customInputs });
+  const directed = demands.some(item => item.dimension === 'direction');
+  const collected = directed ? { inspirations: [], errors: [], stats: { news: 0 } } : await collectInspirations({
     date,
     runAttempt,
     newsItems,
@@ -152,12 +154,12 @@ async function discoverInspirationRoots({
     trendItems,
     fetcher
   });
-  const inspirations = [...collected.inspirations, ...collectDimensionInspirations({ date, runAttempt, enabledDimensions, customInputs })].map(item => {
+  const inspirations = [...(directed ? [] : collected.inspirations), ...demands].map(item => {
     const guard = assessInspiration(item);
     return { ...item, ...guard, status: guard.ok ? 'safe' : 'rejected' };
   });
   const safeInspirations = inspirations.filter(item => item.ok);
-  const productized = await productizeInspirations(safeInspirations, { llmClient, useLLM });
+  const productized = await productizeInspirations(safeInspirations, { llmClient, useLLM, ...(directed ? { maxRootsPerInspiration: Math.max(3, Number(rootLimit || 8)) } : {}) });
   const merged = new Map();
   for (const row of productized.roots) {
     const key = normalizeResearchRoot(row.rootKeyword);
@@ -191,7 +193,7 @@ async function discoverInspirationRoots({
   const eligible = cooled.filter(item => item.status === 'eligible');
   const diversified = selectDiverseCandidates(eligible, {
     count: eligible.length,
-    maxPerSeed: 1,
+    maxPerSeed: directed ? Number(rootLimit || 8) : 1,
     maxPerCategory: Math.max(1, Math.ceil(Number(rootLimit || 8) * 0.25)),
     maxPerPattern: eligible.length,
     maxPerProductCore: 1,
@@ -200,7 +202,7 @@ async function discoverInspirationRoots({
   }).selected;
   const selectedRoots = selectBySourceQuota(diversified, {
     rootLimit: Number(rootLimit || 8),
-    sourceQuotas
+    sourceQuotas: directed ? { user_input: Number(rootLimit || 8) } : sourceQuotas
   }).map((row, index) => ({ ...row, status: 'selected', selectedRank: index + 1 }));
   const selectedIds = new Set(selectedRoots.map(item => `${item.inspirationId}:${item.rootKeyword}`));
   const roots = cooled.map(item => selectedIds.has(`${item.inspirationId}:${item.rootKeyword}`)

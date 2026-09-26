@@ -86,6 +86,7 @@ async function flowMine(options = {}) {
     ? 'inspiration'
     : options.source || 'local';
   const miningOptions = {
+    keywordFilter: run.options.keywordFilter,
     candidateScreening: options.candidateScreening,
     enabledDimensions: options.enabledDimensions,
     customInputs: options.customInputs,

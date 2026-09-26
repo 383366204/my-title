@@ -4,10 +4,12 @@ const fs = require('fs');
 const path = require('path');
 const { normalizeRootKeywords } = require('../../../core/root-keywords');
 const { extractSycmData } = require('../../sycm-research/src/sycm-cdp-extractor');
+const { normalizeSycmMetrics } = require('../../sycm-research/src/metric-parser');
 const { gateCandidate } = require('../../keyword-mining/src/candidate-gate');
 const { keywordSignature } = require('../../keyword-mining/src/keyword-signature');
 const { scoreKeyword } = require('../../keyword-mining/src/score-keyword');
 const { appendJsonl, initRun, readJsonl, setRunStageMetrics, writeRun } = require('./run-store');
+const { keywordFilterConditions } = require('./keyword-metric-filter');
 const { flowResponse } = require('./flow-context');
 const { waitInterruptibly } = require('./sycm-request-scheduler');
 
@@ -35,6 +37,7 @@ function parseNumber(value) {
 
 function sycmMetrics(row = {}) {
   return {
+    ...normalizeSycmMetrics(row),
     searchPopularity: parseNumber(row.searchPopularity),
     clickRate: parseNumber(row.clickRate),
     clickPopularity: parseNumber(row.clickPopularity),
@@ -106,7 +109,9 @@ function buildRootCandidate(row, root, result, options = {}) {
       mode: options.sycmMode || 'hot',
       period: options.period || '7d',
       compareType: options.compareType || 'cycle',
-      collectedAt
+      collectedAt,
+      requestedFilterConditions: options.filterConditions,
+      filterConditions: result.filterConditions || null, filterApplied: result.filterApplied === true
     }
   };
   return { ...candidate, ...gateCandidate(candidate, { minSearchPopularity: 0 }) };
@@ -161,6 +166,8 @@ async function flowExpandRootKeywords(options = {}) {
   const { runDir, run } = initRun({
     dataDir: options.dataDir,
     runId: options.runId,
+    keywordFilter: options.keywordFilter,
+    keywordFilterDecisions: options.keywordFilterDecisions,
     options: {
       mode: 'root-keyword',
       roots: normalized.roots,
@@ -171,6 +178,7 @@ async function flowExpandRootKeywords(options = {}) {
     }
   });
   const files = queueFiles(runDir, run);
+  const filterConditions = keywordFilterConditions(run.options.keywordFilter);
 
   writeJson(files.input, {
     roots: normalized.roots,
@@ -239,9 +247,10 @@ async function flowExpandRootKeywords(options = {}) {
 
       try {
         const result = await sycmExtractor(item.root, {
+          guardCache: false,
           mode: item.mode,
           maxPages: Number(options.pages || options.sycmMaxPages || 3),
-          filterConditions: { searchPopularity: 0, demandSupplyRatio: 0, conversionRate: 0, buyerCount: 0, referencePrice: 0 },
+          filterConditions,
           port: Number(options.port || 9222),
           pageFilters: {
             timePeriod: options.period || '7d',
@@ -263,7 +272,7 @@ async function flowExpandRootKeywords(options = {}) {
         if (!result || result.ok === false) throw new Error(result?.error || '未取得有效的平台查询响应');
         const rows = Array.isArray(result.data) ? result.data : [];
         for (const row of rows) {
-          const candidate = buildRootCandidate(row, item.root, result, { ...options, sycmMode: item.mode });
+          const candidate = buildRootCandidate(row, item.root, result, { ...options, filterConditions, sycmMode: item.mode });
           if (!candidate) continue;
           const key = String(candidate.keyword).replace(/\s+/g, '').toLowerCase();
           candidateMap.set(key, mergeCandidate(candidateMap.get(key), candidate));

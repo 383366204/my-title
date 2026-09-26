@@ -39,6 +39,7 @@ function buildProductizationPrompt(inspirations, { maxRootsPerInspiration = 3 } 
     '规则：',
     '- 每个灵感最多生成指定数量的商品词根。',
     '- 从人群、任务、场景、痛点推导采购需求，再提取具体商品名词；避免机械拆成单字或拼接形容词。',
+    '- dimension=direction 表示用户指定的整体选词方向。围绕该方向自主分析需求并挖掘不同商品词根，严格遵守目标人群、场景、商品范围和排除条件；不得引入方向外的商品来凑数量。',
     '- 词根优先简短，但完整商品名可以较长，必须是具体商品，不得是场景、形容词或泛词。',
     '- 保留完整商品词 rootKeyword；另外用 queryCore 提取其中连续出现的商品核心名词，用 queryAttributes 拆出原词中连续出现的材质 material、场景 scene、功能 function、人群 audience，各值为字符串数组。不要杜撰原词没有的属性。',
     '- 示例：硅藻土浴室吸水脚垫 → queryCore=脚垫，material=[硅藻土]，scene=[浴室]，function=[吸水]；无法可靠拆分时留空。',
@@ -211,7 +212,7 @@ async function productizeInspirations(inspirations = [], {
   }
   const llmRoots = normalizeProductizedRoots({ roots: values.flatMap(value => value?.roots || value || []) }, inspirationMap, maxRootsPerInspiration);
   const covered = new Set(llmRoots.map(item => item.inspirationId));
-  const fallback = localProductize(inspirations.filter(item => !covered.has(item.id)), maxRootsPerInspiration);
+  const fallback = localProductize(inspirations.filter(item => !covered.has(item.id) && item.dimension !== 'direction'), maxRootsPerInspiration);
   const roots = normalizeProductizedRoots(fallback, inspirationMap, maxRootsPerInspiration);
   return {
     roots: [...llmRoots, ...roots],

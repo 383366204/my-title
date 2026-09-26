@@ -19,6 +19,13 @@ const DEMANDS = {
  * @returns {Array<object>} 可直接商品化的需求灵感。
  */
 function collectDimensionInspirations({ date = new Date().toISOString().slice(0, 10), runAttempt = 0, enabledDimensions = DEFAULT_DIMENSIONS, customInputs = {} } = {}) {
+  const direction = (Array.isArray(customInputs.direction) ? customInputs.direction : []).join('\n').trim();
+  if (direction) return [{
+    id: `direction_${stableHash(direction)}`, sourceType: 'user_input', sourceTitle: '用户选词方向',
+    inspirationWord: direction, contextWords: [direction], rawSourceText: direction,
+    categoryHint: '', createdAt: `${date}T00:00:00+08:00`, status: 'pending',
+    dimension: 'direction', task: direction
+  }];
   const dimensions = Array.isArray(enabledDimensions) ? [...new Set(enabledDimensions)].filter(key => DEFAULT_DIMENSIONS.includes(key)) : DEFAULT_DIMENSIONS;
   return dimensions.flatMap(dimension => {
     const sampled = [...DEMANDS[dimension]].sort((a, b) => stableHash(`${date}:${runAttempt}:${a}`).localeCompare(stableHash(`${date}:${runAttempt}:${b}`))).slice(0, 4);

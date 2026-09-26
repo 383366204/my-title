@@ -235,7 +235,7 @@ function buildDirectKeywords(seeds, limit = 20) {
  */
 async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds = 20, maxObservingSeeds = 3, maxObservingPoolSize = 24, maxPerSeed = 30, outputMaxPerSeed = 5, outputMaxPerCategory = 20, outputMaxPerPattern = 20, outputMaxPerProductCore = 3, persist = true, sycmPrecheck = false, minSearchPopularity = 50, includeDirect = false, excludeSeen = false, excludeKeywords = [], recordSeen: shouldRecordSeen = false, recordSeedFeedback = false, autoReplenishSeeds = false, maxNewSeeds = 3, seenTtlDays = 30, mode = 'balanced', source = 'local', aiCandidates = 80, aiBatchSize = 20, llmClient = null, onProgress = null, rootMode = 'auto', rootLimit = 5, rootCooldownDays = 7, familyCooldownDays = 7, recordRootHistory = true, sycmExtractor = null, sycmMaxPages = 1, sycmPort = 9222, diversityHistory = null, allowHistoryFallback = false, date = new Date().toISOString().slice(0, 10), runAttempt = 0, newsItems = [], newsFeedUrls, dictionaryWords, trendItems = [], inspirationUseLLM = true,
   enabledDimensions, customInputs, candidateScreening, researchScopeId = 'default', cycleId = randomUUID(), snapshotFile,
-  shouldStop = () => null
+  shouldStop = () => null, keywordFilter
 } = {}) {
   const effectiveSource = normalizeSource(source);
   const screening = candidateScreening && effectiveSource === 'inspiration' ? researchPolicy(candidateScreening) : null;
@@ -381,12 +381,13 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
         });
         console.log(`🔍 正在查询词根 "${query}" 的生意参谋关联词...`);
         const extractor = sycmExtractor || require('../../sycm-research/src/sycm-cdp-extractor').extractSycmData;
-        const filterConditions = sycmMode === 'blue'
-          ? require('../../sycm-research/src/sycm-cdp-extractor').DEFAULT_FILTER_CONDITIONS : null;
+        const filterConditions = keywordFilter
+          ? require('../../pipeline-flow/src/keyword-metric-filter').keywordFilterConditions(keywordFilter)
+          : sycmMode === 'blue' ? require('../../sycm-research/src/sycm-cdp-extractor').DEFAULT_FILTER_CONDITIONS : null;
         const queryContext = { mode: sycmMode, period: '7d', compareType: 'cycle', maxPages, filterConditions };
         const extract = () => extractor(query, {
           shouldStop,
-          ...(effectiveSource === 'inspiration' ? { guardCache: false } : {}),
+          ...(effectiveSource === 'inspiration' || keywordFilter ? { guardCache: false } : {}),
           mode: sycmMode,
           filterConditions,
           pageFilters: { compareType: queryContext.compareType, timePeriod: queryContext.period },
@@ -437,6 +438,8 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
             inspiration: seed.inspiration || null,
             provenance: seed.provenance || [],
             sycmEvidence: {
+              requestedFilterConditions: filterConditions,
+              filterConditions: sycmRes.filterConditions || null, filterApplied: sycmRes.filterApplied === true,
               keyword: item.keyword, root: query, mode: sycmMode, querySources: seed.querySources || [],
               period: queryContext.period, compareType: queryContext.compareType,
               collectedAt: researched.cycle?.completedAt || new Date().toISOString(),

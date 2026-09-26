@@ -12,6 +12,7 @@ import { SheetConfigurationPanel } from './sheet-configuration-panel.jsx';
 import { StartConfigurationPanel } from './start-configuration-panel.jsx';
 import { SelectionSourcePanel } from './selection-source-panel.jsx';
 import { WatermarkStudioPanel } from './watermark-studio-panel.jsx';
+import { KeywordFilterModal } from './keyword-filter-modal.jsx';
 
 const OVERLAY_COPY = {
   [WORKFLOW_OVERLAYS.ARTIFACT]: ['节点产物', '查看此节点生成的结构化结果。'],
@@ -58,6 +59,8 @@ export function WorkflowOverlayManager({
   onSaveManualInput,
   onUpdateNodeData,
   onSaveNodeFields,
+  onKeywordFilterApplied,
+  onKeywordFilterRecollected,
   updateDistributionNodeJob
 }) {
   if (!activeOverlay) return null;
@@ -69,6 +72,13 @@ export function WorkflowOverlayManager({
   const scopedArtifactState = awaitingArtifact
     ? { status: 'loading', nodeId: node?.id || null, artifact: null, error: '' }
     : artifactState;
+
+  if (activeOverlay.type === WORKFLOW_OVERLAYS.KEYWORD_FILTER) {
+    return <KeywordFilterModal key={currentRunId || 'draft'} runId={currentRunId}
+      initialConfig={node?.data?.keywordFilter}
+      onSaveDraft={config => onSaveNodeFields('keywordReview', { keywordFilter: config })}
+      onApplied={onKeywordFilterApplied} onRecollected={onKeywordFilterRecollected} onClose={onClose} />;
+  }
 
   if (activeOverlay.type === WORKFLOW_OVERLAYS.START_CONFIG && node?.data?.selectionMode) {
     return <WorkflowOverlayShell label="选词来源" onClose={onClose} wide>

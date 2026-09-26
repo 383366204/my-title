@@ -83,7 +83,8 @@ async function flowVerify(options = {}) {
               passed: scoreSycmRows(cachedData, { mode: cachedMode }).passed
             }]
           }
-        : await fetchSycmWithFallback(candidate.keyword, { ...options, ...(options.candidateScreening ? { verificationMode: requestedMode } : {}), sycmExtractor });
+        : await fetchSycmWithFallback(candidate.keyword, { ...options, keywordFilter: run.options?.keywordFilter,
+          ...(options.candidateScreening ? { verificationMode: requestedMode } : {}), sycmExtractor });
       const data = sycmAttempt.data;
       const sycmScore = sycmAttempt.sycmScore;
       const row = {
@@ -103,6 +104,11 @@ async function flowVerify(options = {}) {
           ? 'sycm'
           : (candidate.categorySource || (candidate.recommendedCategory || candidate.category ? 'candidate' : '')),
         sycmData: data,
+        sycmEvidence: reuseCandidateMetrics ? candidate.sycmEvidence : {
+          ...candidate.sycmEvidence, mode: sycmAttempt.verifyMode,
+          filterConditions: sycmAttempt.result?.filterConditions || null,
+          filterApplied: sycmAttempt.result?.filterApplied === true
+        },
         checkedAt: new Date().toISOString()
       };
       const keywordOpportunity = scoreKeywordOpportunity(row);

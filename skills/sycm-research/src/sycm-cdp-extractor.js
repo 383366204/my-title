@@ -362,6 +362,17 @@ var FILTER_FIELD_SELECTORS = {
   referencePrice: { label: '关键词推广参考价', selector: null }
 };
 
+/** @param {object} conditions 平台预筛条件。 @returns {object} 完整且有效的最低值配置，0 表示清空。 */
+function normalizeSycmFilterConditions(conditions) {
+  return Object.fromEntries(Object.keys(FILTER_FIELD_SELECTORS).map(function(key) {
+    var value = Number(conditions && conditions[key] || 0);
+    if (!Number.isFinite(value) || value < 0 || (key === 'conversionRate' && value > 100)) {
+      throw new TypeError('Invalid SYCM filter: ' + key);
+    }
+    return [key, value];
+  }));
+}
+
 /**
  * CDP 过滤条件应用
  * @param {object} cdp - CDP client with evaluate/runAction
@@ -417,11 +428,13 @@ function _applyFilterConditions(cdp, filterConditions, onProgress) {
     // Step 3: Fill in filter fields by matching label text
     var appliedFields = 0;
     var totalFields = 0;
-    var fieldKeys = Object.keys(filterConditions).filter(function(k) { return filterConditions[k] > 0; });
+    // 清空未启用的字段，避免沿用浏览器上一次查询的条件。
+    filterConditions = normalizeSycmFilterConditions(filterConditions);
+    var fieldKeys = Object.keys(FILTER_FIELD_SELECTORS);
 
     for (var fi = 0; fi < fieldKeys.length; fi++) {
       var key = fieldKeys[fi];
-      var value = filterConditions[key];
+      var value = filterConditions[key] > 0 ? filterConditions[key] : '';
       var fieldConfig = FILTER_FIELD_SELECTORS[key];
       if (!fieldConfig) continue;
 
@@ -488,7 +501,7 @@ function _applyFilterConditions(cdp, filterConditions, onProgress) {
     }
 
     // Step 5: Return result
-    if (appliedFields === 0) {
+    if (appliedFields === 0 || String(confirmResult) !== 'confirmed') {
       resolve(false);
     } else if (totalFields > 0 && appliedFields < totalFields) {
       resolve('partial');
@@ -835,6 +848,7 @@ async function _rawExtractSycmData(keyword, options) {
       method: 'cdp_multi_page',
       mode: mode,
       filterApplied: filterApplied,
+      filterConditions: mode === 'blue' && filterApplied === true ? normalizeSycmFilterConditions(options.filterConditions) : mode === 'hot' ? normalizeSycmFilterConditions({}) : null,
       pageFiltersApplied: pageFiltersApplied,
       maxPages: maxPages,
       totalPages: totalPages,
@@ -946,12 +960,14 @@ function classifySycmError(err) {
 
 async function extractSycmData(keyword, options) {
   options = options || {};
+  if (options.filterConditions) options = Object.assign({}, options, { filterConditions: normalizeSycmFilterConditions(options.filterConditions) });
   var pageFilters = options.pageFilters || DEFAULT_PAGE_FILTERS;
   return runWithPlatformGuard('sycm', {
     cacheKey: {
       keyword: keyword,
       mode: options.mode || 'blue',
       maxPages: options.maxPages || DEFAULT_MAX_PAGES,
+      filterConditions: (options.mode || 'blue') === 'blue' ? options.filterConditions || null : null,
       compareType: pageFilters.compareType || DEFAULT_PAGE_FILTERS.compareType,
       timePeriod: pageFilters.timePeriod || DEFAULT_PAGE_FILTERS.timePeriod
     },
@@ -1317,6 +1333,8 @@ function _recommendCategory(categoryData) {
 }
 
 module.exports = {
+  normalizeSycmFilterConditions: normalizeSycmFilterConditions,
+  _applyFilterConditions: _applyFilterConditions,
   extractSycmData: extractSycmData,
   classifySycmError: classifySycmError,
   _rawExtractSycmData: _rawExtractSycmData,

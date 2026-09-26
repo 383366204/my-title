@@ -24,6 +24,9 @@ export const retryWorkflowNode = (runId, nodeId) => requestJson(`${workflowRunPa
   body: { nodeId }
 });
 export const confirmKeywordReview = (runId, input) => requestJson(`${workflowRunPath(runId)}/keyword-review`, { method: 'POST', body: input });
+export const getKeywordFilter = (runId) => requestJson(`${workflowRunPath(runId)}/keyword-filter`);
+export const saveKeywordFilter = (runId, input) => requestJson(`${workflowRunPath(runId)}/keyword-filter`, { method: 'POST', body: input });
+export const recollectKeywordFilter = (runId, version, decisions) => requestJson(`${workflowRunPath(runId)}/keyword-filter/recollect`, { method: 'POST', body: { version, decisions } });
 export const querySupplementKeywords = (runId, input) => requestJson(`${workflowRunPath(runId)}/keywords/query`, { method: 'POST', body: input });
 export const confirmProductReview = (runId, input) => requestJson(`${workflowRunPath(runId)}/product-review`, { method: 'POST', body: input });
 export const workflowEventsUrl = (runId) => `${workflowRunPath(runId)}/events`;
