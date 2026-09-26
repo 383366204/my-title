@@ -134,6 +134,7 @@ export const NodeOperationPanel = ({
   } = seedWorkbench;
 
   const {
+    exactKeywordMode,
     verifiedRows,
     titleForm,
     titleLoading,
@@ -216,6 +217,7 @@ export const NodeOperationPanel = ({
       )}
       {kind === 'title-generate' && (
         <TitleGenerationOperationPanel
+          exactKeywordMode={exactKeywordMode}
           artifactState={artifactState}
           verifiedRows={verifiedRows}
           titleForm={titleForm}

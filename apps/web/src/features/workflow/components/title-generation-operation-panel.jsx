@@ -9,6 +9,7 @@ function rowSelectedKeyword(row = {}) {
 }
 
 export const TitleGenerationOperationPanel = ({
+  exactKeywordMode = false,
   artifactState,
   verifiedRows,
   titleForm,
@@ -45,7 +46,7 @@ export const TitleGenerationOperationPanel = ({
     <div className="node-embedded-workbench">
       <section className="node-workbench-section">
         <div className="node-workbench-head">
-          <strong>已验真词</strong>
+          <strong>{exactKeywordMode ? '精确关键词' : '已验真词'}</strong>
           <span>{verifiedRows.length} 个 · 可生成 {verifiedRows.filter((item) => !item.keywordOpportunity?.decision || item.keywordOpportunity.decision === 'continue').length} 个</span>
         </div>
         <div className="node-chip-list">
@@ -56,11 +57,11 @@ export const TitleGenerationOperationPanel = ({
             return (
               <button type="button" key={`${keyword}-${index}`} onClick={() => onUseVerifiedKeyword(item)}>
                 <span>{keyword || '未命名关键词'}</span>
-                <small>{score ? `机会分 ${score} · ${decision === 'continue' ? '可生成' : '需人工放行'}` : '已验真'}</small>
+                <small>{exactKeywordMode ? '用户指定' : score ? `机会分 ${score} · ${decision === 'continue' ? '可生成' : '需人工放行'}` : '已验真'}</small>
               </button>
             );
           })}
-          {verifiedRows.length === 0 && <div className="artifact-empty">生意参谋校验通过后，可在这里选择关键词生成标题。</div>}
+          {verifiedRows.length === 0 && <div className="artifact-empty">{exactKeywordMode ? '暂无已选货源对应的关键词，请先完成货源选品。' : '生意参谋校验通过后，可在这里选择关键词生成标题。'}</div>}
         </div>
       </section>
 
@@ -71,7 +72,7 @@ export const TitleGenerationOperationPanel = ({
         </div>
         <label className="node-field">
           <span>关键词</span>
-          <input value={titleForm.keyword} onChange={(event) => onTitleFormChange({ ...titleForm, keyword: event.target.value })} placeholder="选择已验真词或手动输入" />
+          <input value={titleForm.keyword} onChange={(event) => onTitleFormChange({ ...titleForm, keyword: event.target.value })} placeholder={exactKeywordMode ? '选择精确关键词或手动输入' : '选择已验真词或手动输入'} />
         </label>
         <label className="node-field">
           <span>标题长度</span>

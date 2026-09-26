@@ -14,8 +14,18 @@ import WorkflowStudio from '/src/WorkflowStudio.jsx';
 import '/src/index.css';
 import {KeywordReviewOperationPanel} from '/src/features/workflow/components/keyword-review-operation-panel.jsx';
 import {ManualProductSelectionPanel} from '/src/features/workflow/components/manual-product-selection-panel.jsx';
+import {TitleGenerationOperationPanel} from '/src/features/workflow/components/title-generation-operation-panel.jsx';
+import {useTitleGeneration} from '/src/features/workflow/hooks/use-title-generation.js';
 const root = createRoot(document.getElementById('root'));
 root.render(React.createElement(WorkflowStudio));
+function ExactTitlePanel() {
+  const state = useTitleGeneration({active:true,runId:'exact-title',exactKeywordMode:true});
+  return React.createElement(TitleGenerationOperationPanel, {
+    ...state, verifiedRows:state.verifiedArtifactRows, exactKeywordMode:true,
+    artifactState:{status:'ready',artifact:{rows:[]}}
+  });
+}
+window.showExactTitle = () => root.render(React.createElement(ExactTitlePanel));
 window.reviewSubmissions = [];
 window.reviewQueries = [];
 window.showReview = () => root.render(React.createElement(KeywordReviewOperationPanel, {
@@ -53,6 +63,7 @@ try {
   page.setDefaultTimeout(10000);
   const errors = [];
   const launches = [];
+  const artifactRequests = [];
   page.on('pageerror', error => { errors.push(error.message); console.error(error.message); });
   page.on('console', message => { if (message.type() === 'error') console.error(message.text()); });
   // 所有业务请求使用夹具，不能触发真实查询或铺货。
@@ -61,6 +72,13 @@ try {
     if (!pathname.startsWith('/api/')) return route.continue();
     let data = {};
     if (pathname === '/api/workflows/templates') data = listProductionWorkflowTemplates();
+    else if (pathname.includes('/exact-title/artifacts/')) {
+      artifactRequests.push(pathname);
+      data = {rows:[
+        {status:'selected',keyword:'杯垫'}, {status:'selected',keyword:'杯垫'},
+        {status:'product_rejected',keyword:'未采用词'}
+      ]};
+    }
     else if (pathname === '/api/workflows/runs') data = [];
     else if (pathname === '/api/workflows/validate') {
       const input = route.request().postDataJSON();
@@ -100,7 +118,7 @@ try {
   assert.equal(launches[0].templateId, 'selection-v1');
   assert.equal(launches[0].mode, 'keyword');
   assert.deepEqual(launches[0].params.keywords, ['杯垫', '桌面收纳盒']);
-  assert.deepEqual(launches[0].workflow.nodes.map(node => node.id), ['start', 'verify', 'keywordReview', 'select', 'generate', 'export', 'end']);
+  assert.deepEqual(launches[0].workflow.nodes.map(node => node.id), ['start', 'select', 'generate', 'export', 'end']);
   mkdirSync('output/selection-qa', { recursive: true });
   await page.screenshot({ path: 'output/selection-qa/desktop.png', fullPage: true });
   await page.getByRole('button', { name: '输入关键词', exact: true }).click();
@@ -138,6 +156,12 @@ try {
   assert.ok((await page.locator('body').innerText()).includes('杯垫类目'));
   await page.getByRole('button', { name: '确认并继续生成标题', exact: true }).click();
   assert.deepEqual(await page.evaluate(() => window.productSubmissions[0].approvedProductIds), ['https://detail.1688.com/offer/123.html']);
+  await page.evaluate(() => window.showExactTitle());
+  await page.getByText('用户指定', {exact:true}).waitFor();
+  assert.equal(await page.getByText('用户指定', {exact:true}).count(), 1);
+  assert.equal(await page.getByText('已验真词', {exact:true}).count(), 0);
+  assert.equal(artifactRequests.length, 1);
+  assert.ok(artifactRequests[0].endsWith('/select'));
   assert.deepEqual(errors, []);
   console.log('Unified selection browser regression passed');
 } finally {

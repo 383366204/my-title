@@ -488,9 +488,9 @@ test('getWorkflowTemplateView explains daily and exact keyword differences', () 
     mode: 'keyword'
   }), {
     entryLabel: '入口：手动关键词',
-    scenarioLabel: '适合：批量验证明确目标词',
-    flowSummary: '流程：批量输入关键词 → 跳过挖词 → 生意参谋校验 → 货源选品 → 标题生成 → 导出复核',
-    modeHint: '每行输入一个关键词，系统会逐词验真、选品和生成标题。'
+    scenarioLabel: '适合：按明确目标词直接选品',
+    flowSummary: '流程：批量输入关键词 → 货源选品 → 标题生成 → 铺货复核',
+    modeHint: '精确关键词'
   });
 });
 

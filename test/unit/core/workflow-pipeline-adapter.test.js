@@ -163,17 +163,13 @@ describe('workflow pipeline adapter', () => {
     assert.ok(templates[0].workflow.edges.every(edge => edge.type === 'straight'));
     assert.deepEqual(templates[1].workflow.nodes.map(node => node.id), [
       WORKFLOW_NODE_IDS.start,
-      WORKFLOW_NODE_IDS.verify,
-      WORKFLOW_NODE_IDS.keywordReview,
       WORKFLOW_NODE_IDS.select,
       WORKFLOW_NODE_IDS.generate,
       WORKFLOW_NODE_IDS.export,
       WORKFLOW_NODE_IDS.end
     ]);
     assert.deepEqual(templates[1].workflow.edges.map(edge => `${edge.source}->${edge.target}`), [
-      'start->verify',
-      'verify->keywordReview',
-      'keywordReview->select',
+      'start->select',
       'select->generate',
       'generate->export',
       'export->end'
@@ -278,8 +274,6 @@ describe('workflow pipeline adapter', () => {
         : template.mode === 'keyword'
         ? [
             WORKFLOW_NODE_IDS.start,
-            WORKFLOW_NODE_IDS.verify,
-            WORKFLOW_NODE_IDS.keywordReview,
             WORKFLOW_NODE_IDS.select,
             WORKFLOW_NODE_IDS.generate,
             WORKFLOW_NODE_IDS.export,

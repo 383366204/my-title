@@ -33,6 +33,7 @@ test('exact keyword input has no count cap but cannot be empty', () => {
 test('unified template description follows selected mode instead of default metadata', () => {
   const view = getWorkflowTemplateView({ id: 'selection-v1', mode: 'keyword', flowSummary: '旧摘要' });
   assert.match(view.entryLabel, /精确关键词/);
-  assert.match(view.flowSummary, /关键词确认/);
+  assert.doesNotMatch(view.flowSummary, /关键词确认|生意参谋校验/);
+  assert.match(view.flowSummary, /精确关键词 → 货源选品/);
   assert.doesNotMatch(view.flowSummary, /旧摘要/);
 });

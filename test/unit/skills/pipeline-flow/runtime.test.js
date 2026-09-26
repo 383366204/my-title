@@ -342,14 +342,14 @@ describe('pipeline runtime runner', () => {
       }
     });
 
-    assert.deepEqual(calls, ['start:纯银项链', 'verify', 'keywordReview', 'select', 'generate', 'export:3']);
+    assert.deepEqual(calls, ['start:纯银项链', 'select', 'generate', 'export:3']);
     assert.equal(result.runtimeStatus, 'completed');
     const runtime = readRuntimeState({ dataDir, runId: result.runId });
     assert.equal(runtime.mode, 'keyword');
-    assert.deepEqual(runtime.steps, ['start', 'verify', 'keywordReview', 'select', 'generate', 'export']);
+    assert.deepEqual(runtime.steps, ['start', 'select', 'generate', 'export']);
     assert.equal(runtime.progress.start.status, 'completed');
-    assert.equal(runtime.progress.verify.status, 'completed');
-    assert.equal(runtime.progress.keywordReview.status, 'completed');
+    assert.equal(runtime.progress.verify, undefined);
+    assert.equal(runtime.progress.keywordReview, undefined);
     assert.equal(runtime.progress.select.status, 'completed');
     assert.equal(runtime.progress.generate.status, 'completed');
     assert.equal(runtime.progress.export.status, 'completed');
@@ -386,7 +386,7 @@ describe('pipeline runtime runner', () => {
     assert.equal(runtime.progress.verify, undefined);
   });
 
-  it('prepares every exact keyword before verification', async () => {
+  it('prepares every exact keyword before product selection', async () => {
     const dataDir = tempDataDir();
     const keywords = ['纯银项链', '桌面收纳盒', '纯银项链'];
     const result = await runPipelineRuntime({

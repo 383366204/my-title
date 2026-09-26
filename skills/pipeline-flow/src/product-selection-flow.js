@@ -14,18 +14,22 @@ const { DEFAULT_PRODUCTS_PER_KEYWORD } = require('./flow-constants');
 const { buildFlowCommand, flowResponse, isGenerationEligibleKeyword } = require('./flow-context');
 
 /**
- * Select and score 1688 products for verified keywords.
+ * Select and score 1688 products for confirmed or user-specified keywords.
  * @param {object} [options] Product selection options.
  * @returns {Promise<object>} Selection result.
  */
 async function flowSelectProducts(options = {}) {
   const { runDir, run } = getRun(options);
-  const verified = options.manualMode
+  // 精确词代表用户的选品意图，直接使用输入记录，不伪造生意参谋验真结果。
+  const exactMode = run.options?.mode === 'keyword';
+  const keywords = exactMode
+    ? readJsonl(run.files.candidates)
+    : options.manualMode
     ? readJsonl(run.files.reviewedCandidates).filter(row => row.reviewStatus === 'approved' || row.status === 'keyword_approved')
     : readJsonl(run.files.verifiedKeywords);
-  const eligible = options.includeReviewKeywords
-    ? verified
-    : verified.filter(isGenerationEligibleKeyword);
+  const eligible = exactMode || options.includeReviewKeywords
+    ? keywords
+    : keywords.filter(isGenerationEligibleKeyword);
   const limit = Number(options.limit || options.select || options.generate || eligible.length || 0);
   const selectedKeywords = eligible.slice(0, limit);
   const productsPerKeyword = Number(options.productsPerKeyword || DEFAULT_PRODUCTS_PER_KEYWORD);

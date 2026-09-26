@@ -48,7 +48,7 @@ function workflowNodes(mode = 'daily') {
     ? {
         selectionMode: 'keyword',
         label: '开始',
-        description: '批量输入精确关键词并启动',
+        description: '按输入的精确关键词直接选品',
         keyword: '',
         keywordsText: '',
         export: 20,
@@ -176,8 +176,6 @@ if (mode === 'watermark-removal') {
   if (mode === 'keyword') {
     return withSteps(positionNodes([
       { id: WORKFLOW_NODE_IDS.start, type: 'production-start', data: startData },
-      { id: WORKFLOW_NODE_IDS.verify, type: 'pipeline-verify', data: { label: '生意参谋校验', description: '验证搜索人气和供需' } },
-      { id: WORKFLOW_NODE_IDS.keywordReview, type: 'pipeline-keyword-review', data: { label: '关键词确认', description: '查看机会评分并人工筛词，未通过项可确认风险后放行' } },
       { id: WORKFLOW_NODE_IDS.select, type: 'pipeline-select', data: { label: '货源选品', description: '搜索1688货源并评分筛选' } },
       { id: WORKFLOW_NODE_IDS.generate, type: 'pipeline-generate', data: { label: '标题生成', description: '基于已选货源生成铺货标题' } },
       { id: WORKFLOW_NODE_IDS.export, type: 'pipeline-export', data: { label: '铺货复核', description: '确认清单、风险和人工加入项' } },
@@ -237,9 +235,7 @@ function workflowEdges(mode = 'daily') {
       ]
     : mode === 'keyword'
     ? [
-        [WORKFLOW_NODE_IDS.start, WORKFLOW_NODE_IDS.verify],
-        [WORKFLOW_NODE_IDS.verify, WORKFLOW_NODE_IDS.keywordReview],
-        [WORKFLOW_NODE_IDS.keywordReview, WORKFLOW_NODE_IDS.select],
+        [WORKFLOW_NODE_IDS.start, WORKFLOW_NODE_IDS.select],
         [WORKFLOW_NODE_IDS.select, WORKFLOW_NODE_IDS.generate],
         [WORKFLOW_NODE_IDS.generate, WORKFLOW_NODE_IDS.export],
         [WORKFLOW_NODE_IDS.export, WORKFLOW_NODE_IDS.end]
