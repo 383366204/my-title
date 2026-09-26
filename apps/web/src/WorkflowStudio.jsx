@@ -144,7 +144,7 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
     verifiedArtifactRows,
     useVerifiedKeyword: useVerifiedKeywordForTitle,
     generateTitleFromNode
-  } = useTitleGeneration({ active: selectedNodeId === 'generate', runId: currentRunId });
+  } = useTitleGeneration({ active: selectedNodeId === 'generate', runId: currentRunId, exactKeywordMode: activeTemplateMode === 'keyword' });
   const { activeOverlay, closeOverlay, openOverlay } = useWorkflowOverlay();
   // 重新打开同一节点的弹窗时强制刷新产物：评价草稿的自动保存写在服务端，
   // 不重新请求就会一直显示首次打开时缓存在内存里的旧内容
@@ -419,6 +419,7 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
       onRunMiner: runRootMiner
     },
     titleWorkbench: {
+      exactKeywordMode: activeTemplateMode === 'keyword',
       verifiedRows,
       titleForm,
       titleLoading,

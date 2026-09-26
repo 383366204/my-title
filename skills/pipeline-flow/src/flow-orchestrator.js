@@ -60,8 +60,8 @@ async function flowKeywordStart(options = {}) {
     status: run.status,
     candidates,
     blockers: [],
-    allowedCommands: [buildFlowCommand('verify', run.runId, { limit: keywords.length })],
-    nextCommand: buildFlowCommand('verify', run.runId, { limit: keywords.length })
+    allowedCommands: [buildFlowCommand('select', run.runId, { limit: keywords.length })],
+    nextCommand: buildFlowCommand('select', run.runId, { limit: keywords.length })
   });
 }
 
@@ -80,23 +80,6 @@ async function flowKeyword(options = {}) {
   const runId = prepared.runId;
   const exactKeywordPayload = { exactKeyword: keywords[0], exactKeywords: keywords };
 
-  const verify = await flowVerify({ ...options, runId, limit: keywords.length });
-  if (verify.verified.length === 0 || verify.blockers.includes('sycm_manual_action_required')) {
-    return buildRunResponse(options, runId, runDir, {
-      ...exactKeywordPayload,
-      blockers: verify.blockers.length ? verify.blockers : ['no_verified_keywords'],
-      allowedCommands: [verify.nextCommand],
-      nextCommand: verify.nextCommand,
-      steps: {
-        mined: keywords.length,
-        verified: 0,
-        rejected: verify.rejected.length,
-        generated: 0,
-        exported: 0
-      }
-    });
-  }
-
   const select = await flowSelectProducts({
     ...options,
     runId,
@@ -112,9 +95,9 @@ async function flowKeyword(options = {}) {
       nextCommand: select.nextCommand,
       steps: {
         mined: keywords.length,
-        verified: verify.verified.length,
+        verified: 0,
         selected: 0,
-        rejected: verify.rejected.length,
+        rejected: 0,
         generated: 0,
         exported: 0
       }
@@ -136,9 +119,9 @@ async function flowKeyword(options = {}) {
       nextCommand: generate.nextCommand,
       steps: {
         mined: keywords.length,
-        verified: verify.verified.length,
+        verified: 0,
         selected: selectedCount,
-        rejected: verify.rejected.length,
+        rejected: 0,
         generated: 0,
         exported: 0
       }
@@ -155,9 +138,9 @@ async function flowKeyword(options = {}) {
     nextCommand: exported.nextCommand,
     steps: {
       mined: keywords.length,
-      verified: verify.verified.length,
+      verified: 0,
       selected: selectedCount,
-      rejected: verify.rejected.length,
+      rejected: 0,
       generated: generatedCount,
       exported: exported.count
     }

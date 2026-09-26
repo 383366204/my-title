@@ -4,7 +4,7 @@ import { generateTitle } from '../../../api/title-api.js';
 import { getWorkflowArtifact } from '../../../api/workflow-api.js';
 import { artifactItems, candidateKeyword } from '../workflow-data.js';
 
-export function useTitleGeneration({ active, runId }) {
+export function useTitleGeneration({ active, runId, exactKeywordMode = false }) {
   const [titleForm, setTitleForm] = useState({ keyword: '', maxLength: 60, peerTitles: '' });
   const [titleLoading, setTitleLoading] = useState(false);
   const [titleResult, setTitleResult] = useState(null);
@@ -17,9 +17,13 @@ export function useTitleGeneration({ active, runId }) {
       return;
     }
     let cancelled = false;
-    getWorkflowArtifact(runId, 'verify')
+    getWorkflowArtifact(runId, exactKeywordMode ? 'select' : 'verify')
       .then((artifact) => {
-        if (!cancelled) setVerifiedArtifactRows(artifactItems({ artifact }));
+        const rows = artifactItems({ artifact });
+        const keywords = exactKeywordMode
+          ? [...new Map(rows.filter(row => row.status === 'selected' && row.keyword).map(row => [row.keyword, row])).values()]
+          : rows;
+        if (!cancelled) setVerifiedArtifactRows(keywords);
       })
       .catch(() => {
         if (!cancelled) setVerifiedArtifactRows([]);
@@ -27,7 +31,7 @@ export function useTitleGeneration({ active, runId }) {
     return () => {
       cancelled = true;
     };
-  }, [active, runId]);
+  }, [active, runId, exactKeywordMode]);
 
   const useVerifiedKeyword = (row = {}) => {
     const keyword = candidateKeyword(row);

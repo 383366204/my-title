@@ -902,7 +902,7 @@ describe('pipeline-flow', () => {
     assert.ok(fs.readFileSync(result.files.distributionReview, 'utf8').includes('Category: 宠物用品 > 狗狗玩具'));
   });
 
-  test('flowKeyword preserves the user exact keyword through SYCM and generation', async () => {
+  test('flowKeyword preserves the user exact keyword through selection and generation without SYCM', async () => {
     const dataDir = tempDataDir();
     const exactKeyword = '宝宝醒狮虎头鞋';
     const sycmCalls = [];
@@ -949,14 +949,19 @@ describe('pipeline-flow', () => {
           ]
         };
       },
-      searchProducts: async () => [mockProduct(exactKeyword, '1049095335543')]
+      searchProducts: async () => [{
+        ...mockProduct(exactKeyword, '1049095335543'),
+        title: exactKeyword,
+        subject: exactKeyword,
+        categoryListName: '母婴用品 > 婴儿鞋'
+      }]
     });
 
     assert.strictEqual(result.exactKeyword, exactKeyword);
-    assert.deepStrictEqual(sycmCalls, [exactKeyword]);
+    assert.deepStrictEqual(sycmCalls, []);
     assert.deepStrictEqual(generatorCalls, [exactKeyword]);
     assert.strictEqual(result.steps.mined, 1);
-    assert.strictEqual(result.steps.verified, 1);
+    assert.strictEqual(result.steps.verified, 0);
     assert.strictEqual(result.steps.selected, 1);
     assert.strictEqual(result.steps.exported, 1);
     assert.ok(fs.readFileSync(result.files.distributionBatch, 'utf8').includes('1049095335543'));
@@ -1020,10 +1025,10 @@ describe('pipeline-flow', () => {
 
     assert.deepEqual(result.exactKeywords, keywords);
     assert.equal(result.exactKeyword, keywords[0]);
-    assert.deepEqual(sycmCalls, keywords);
+    assert.deepEqual(sycmCalls, []);
     assert.deepEqual(generatorCalls, keywords);
     assert.equal(result.steps.mined, 2);
-    assert.equal(result.steps.verified, 2);
+    assert.equal(result.steps.verified, 0);
     assert.equal(result.steps.selected, 2);
     assert.equal(result.steps.generated, 2);
     assert.equal(result.steps.exported, 2);

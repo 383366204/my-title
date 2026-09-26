@@ -36,7 +36,7 @@ const {
 } = require('./store');
 
 const DEFAULT_STEPS = ['mine', 'keywordReview', 'select', 'generate', 'export'];
-const KEYWORD_STEPS = ['start', 'verify', 'keywordReview', 'select', 'generate', 'export'];
+const KEYWORD_STEPS = ['start', 'select', 'generate', 'export'];
 const ROOT_KEYWORD_STEPS = ['mine', 'keywordReview', 'select', 'generate', 'export'];
 const MANUAL_STEPS = ['start', 'select', 'verify', 'generate', 'export'];
 const ORDER_SHEET_STEPS = ['collectRank', 'confirmProducts', 'generateSheet'];

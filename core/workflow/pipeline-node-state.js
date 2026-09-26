@@ -96,6 +96,11 @@ function statusPlanForSummary(summary) {
     return memo;
   }, {});
   const mode = summary.runtime?.mode || summary.options?.mode || '';
+  if (mode === 'keyword' && ['created', 'mined'].includes(status)) {
+    states[WORKFLOW_NODE_IDS.start] = 'completed';
+    states[WORKFLOW_NODE_IDS.select] = 'running';
+    return states;
+  }
   if (mode === 'competitor-analysis') {
     states[WORKFLOW_NODE_IDS.start] = 'completed';
     const steps = [
