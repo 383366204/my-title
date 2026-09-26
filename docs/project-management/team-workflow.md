@@ -177,7 +177,7 @@ npm run test:pipeline
 涉及 Web UI：
 
 ```bash
-npm run web:build
+npm run build
 ```
 
 完整回归：

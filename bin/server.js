@@ -649,6 +649,7 @@ if (process.env.NODE_ENV !== 'test' && !runningUnderNodeTest) {
       console.log(`🌟 电商选品可视化工具 (Local Web UI) 服务已启动`);
       console.log(`🔗 本地安全链接: http://127.0.0.1:${port}`);
       console.log(`======================================================\n`);
+      if (process.send) process.send({ type: 'server-ready', port });
     });
   }).catch(err => {
     console.error('无法启动服务器端口扫描:', err.message);

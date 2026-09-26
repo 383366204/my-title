@@ -13,12 +13,11 @@
     "test:pipeline": "node --test test/unit/skills/pipeline-flow/*.test.js",
     "test:workflow-browser": "node test/browser/run-regressions.mjs",
     "test:core-skills": "node --test test/unit/skills/*/*.test.js",
-    "test:all": "npm test && npm run test:core-skills && npm run web:build",
-    "ui": "node bin/server.js",
-    "web:dev": "npm run dev --prefix apps/web",
-    "web:build": "npm run build --prefix apps/web",
-    "web:preview": "npm run preview --prefix apps/web",
-    "ui:react": "npm run web:build && npm run ui"
+    "test:all": "npm test && npm run test:core-skills && npm run build",
+    "start": "npm run build && npm run serve",
+    "dev": "node bin/dev.mjs",
+    "build": "npm run build --prefix apps/web",
+    "serve": "node bin/server.js"
   },
   "keywords": [
     "ecommerce",

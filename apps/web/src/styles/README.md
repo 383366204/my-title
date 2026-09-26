@@ -24,4 +24,4 @@
 - 修改既有选择器前用 `rg` 检查所有定义。文件拆分不等于完成 CSS 去重，也不是 CSS Modules 隔离。
 - 首次纯迁移的构建 CSS 与原文件逐字节相同；之后的窄屏修复单独放在最后一层。
 - 新增本地 `url(...)` 时以所在 CSS 文件为路径基准。
-- 用 `npm run web:build` 验证构建，再用 `npm run test:workflow-browser` 检查桌面和窄屏。该浏览器测试用本地替身，不操作真实商家平台。
+- 用 `npm run build` 验证构建，再用 `npm run test:workflow-browser` 检查桌面和窄屏。该浏览器测试用本地替身，不操作真实商家平台。

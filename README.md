@@ -76,13 +76,13 @@ node bin/cli.js --help
 ## Workflow UI / Web UI
 
 ```bash
-npm run ui:react
+npm start
 ```
 
 访问：
 
 ```text
-http://localhost:3000/
+http://127.0.0.1:3000/
 ```
 
 Web UI 只有一个主操作入口：React 流水线画布。当前提供每日动态选品、精确关键词和人工词货源模板；参数、进度、暂停/继续/重试、节点产物和铺货复核都在同一画布中处理。后续运营模板会复用同一 Workflow 运行时接入同行分析、好店跟踪、关键词监控、单店月度净利润核算、活动日历、运营表单、素材批处理、异常中心和统一任务中心。
@@ -102,10 +102,21 @@ Web UI 只有一个主操作入口：React 流水线画布。当前提供每日�
 开发模式：
 
 ```bash
-npm run web:dev
+npm run dev
 ```
 
-Web UI 位于 `apps/web/`，后端 API 入口位于 `bin/server.js`。生产运行时 `npm run ui:react` 会先构建 React 工作台，再启动 Express 服务。
+Web UI 位于 `apps/web/`，后端 API 入口位于 `bin/server.js`。所有常用命令都在项目根目录运行：
+
+| 命令 | 用途 |
+|------|------|
+| `npm start` | 正常使用：先构建最新前端，再启动完整工具 |
+| `npm run dev` | 开发：同时启动后端与 React 热更新页面，默认访问 5173 |
+| `npm run build` | 只构建前端到 `apps/web/dist`，不启动服务 |
+| `npm run serve` | 启动后端和已构建页面，不重新构建；首次使用先运行 build |
+
+后端默认使用 3000，端口占用时会自动寻找空闲端口，以终端输出地址为准。`dev` 自动将 API 请求转发到它本次启动的后端，不会固定连接旧的 3000 服务。可通过 `UI_PORT` 指定后端起始端口、`WEB_PORT` 指定开发页面起始端口。按 Ctrl+C 同时退出前后端；修改后端代码后需要重启 `npm run dev`。
+
+旧命令已移除：`ui:react` 改为 `start`，`ui` 改为 `serve`，`web:dev` 改为 `dev`，`web:build` 改为 `build`。不再提供根目录 `web:preview`，预览完整工具请运行 `serve`。
 
 ## MCP Server
 
