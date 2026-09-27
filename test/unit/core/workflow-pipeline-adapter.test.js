@@ -1209,7 +1209,7 @@ describe('workflow pipeline adapter', () => {
     }
   });
 
-  it('shows the actual MiniMax title-generation failure instead of a stale GLM hint', () => {
+  it('shows the actual MiniMax title-generation failure instead of a stale LLM hint', () => {
     const run = pipelineSummaryToWorkflowRun({
       runId: 'minimax_generate_failed',
       status: 'generate_failed',
@@ -1229,7 +1229,7 @@ describe('workflow pipeline adapter', () => {
 
     assert.match(run.nodeStates.generate.actionHint, /MiniMax（MiniMax-M3）/);
     assert.match(run.nodeStates.generate.actionHint, /标题生成超时\(120s\)/);
-    assert.doesNotMatch(run.nodeStates.generate.actionHint, /检查 GLM 配置/);
+    assert.doesNotMatch(run.nodeStates.generate.actionHint, /检查 LLM 配置/);
     assert.equal(run.nodeStates.generate.nextRecommendedAction.action, 'retry-node');
   });
 

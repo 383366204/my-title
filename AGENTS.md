@@ -7,7 +7,7 @@
 ---
 
 ## 项目概述
-电商选品标题生成工具 - 基于 GLM AI + 1688 搜索的多 skill 架构。每个 skill 可独立被 AI agent 引入，也可通过 CLI / MCP Server 统一使用。
+电商选品标题生成工具 - 基于 LLM + 1688 搜索的多 skill 架构。每个 skill 可独立被 AI agent 引入，也可通过 CLI / MCP Server 统一使用。
 
 ---
 
@@ -19,7 +19,7 @@ my-title/
 │   ├── cli.js              # CLI 入口（commander）— 编排层，串联各 skill
 │   └── mcp-server.mjs      # MCP Server 入口（stdio + HTTP）— 编排层
 ├── core/                   # 共享基础层
-│   ├── glm-client.js       # GLM API 客户端
+│   ├── llm-client.js       # LLM API 客户端
 │   ├── llm-utils.js        # LLM 输出解析与重试
 │   ├── banned-words.js     # 违禁词过滤
 │   ├── constants.js        # 共享常量（刚性规则文本等）
@@ -90,13 +90,13 @@ my-title/
 |------|------|------|
 | 添加 CLI 命令 | `bin/cli.js` | 使用 commander, 编排各 skill |
 | MCP Server | `bin/mcp-server.mjs` | ESM，注册 8 个工具 |
-| 修改标题逻辑 | `skills/title-gen/src/generate-title.js` | GLM AI 参考同行标题生成 |
+| 修改标题逻辑 | `skills/title-gen/src/generate-title.js` | LLM 参考同行标题生成 |
 | 修改 1688 搜索 | `skills/alibaba1688/src/search-1688.js` | 搜索 + 评分 + 过滤 |
 | 修改淘宝搜索 | `skills/title-gen/src/search-taobao.js` | taobao-native CLI 集成 |
 | 修改热榜/趋势 | `skills/alibaba1688/src/insights.js` | opportunities + trend |
 | 修改生意参谋 | `skills/sycm-research/src/sycm-cdp-extractor.js` | CDP 提取 |
 | 修改违禁词 | `skills/title-gen/data/banned-words.json` + `core/banned-words.js` | 数据 + 逻辑 |
-| 添加共享模块 | `core/` | GLM 客户端、工具函数 |
+| 添加共享模块 | `core/` | LLM 客户端、工具函数 |
 | API 密钥设置 | `.env.example` → `.env` | GLM_API_KEY + ALI_1688_AK |
 
 ---
@@ -122,7 +122,7 @@ my-title/
 
 3. **工作流程**:
    ```
-   用户输入 → GLM提取核心词 → 1688搜索(评分过滤) + 淘宝搜索(并行) → GLM生成标题
+   用户输入 → LLM提取核心词 → 1688搜索(评分过滤) + 淘宝搜索(并行) → LLM生成标题
    ```
 
 4. **降级模式**: 
@@ -132,7 +132,7 @@ my-title/
 ### API 配置
 | 服务 | 默认配置 |
 |------|----------|
-| GLM | `glm-4-flash`, 温度=0.1, 超时=15000ms |
+| LLM (默认 glm) | `glm-4-flash`, 温度=0.1, 超时=15000ms |
 | 1688 | `https://ainext.1688.com`, 超时=10000ms |
 
 ---
@@ -228,7 +228,7 @@ cp .env.example .env
 
 ### 执行时间
 
-- `generate_title`: 约 60-120 秒（GLM API + 1688 搜索）
+- `generate_title`: 约 60-120 秒（LLM API + 1688 搜索）
 - `generate_title`（含图搜）: 约 3-10 分钟
 - `batch_generate_titles`: 关键词数 × 120 秒
 - `opportunities` / `trend`: 约 5-10 秒

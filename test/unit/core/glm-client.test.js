@@ -1,10 +1,10 @@
 const { test, describe, mock } = require('node:test');
 const assert = require('node:assert');
-const GLMClient = require('../../../core/glm-client');
+const LLMClient = require('../../../core/llm-client');
 
-describe('GLMClient.judgeRelevance', () => {
+describe('LLMClient.judgeRelevance', () => {
   const mockApiKey = 'test-api-key';
-  const client = new GLMClient({ apiKey: mockApiKey });
+  const client = new LLMClient({ apiKey: mockApiKey });
 
   test('Test 1: judgeRelevance returns product score list', async () => {
     // Mock axios.post to return valid scoring response
@@ -126,13 +126,13 @@ describe('GLMClient.judgeRelevance', () => {
         maxProducts: 15
       });
 
-      assert.strictEqual(capturedProducts.length, 15, 'Should only send 15 products to GLM');
+      assert.strictEqual(capturedProducts.length, 15, 'Should only send 15 products to LLM');
     } finally {
       axios.post = originalPost;
     }
   });
 
-  test('Test 4: GLM API failure throws error (caller handles fallback)', async () => {
+  test('Test 4: LLM API failure throws error (caller handles fallback)', async () => {
     const axios = require('axios');
     const originalPost = axios.post;
     axios.post = mock.fn(() => Promise.reject(new Error('Network error')));
@@ -185,9 +185,9 @@ describe('GLMClient.judgeRelevance', () => {
   });
 });
 
-describe('GLMClient.selectAndGenerate', () => {
+describe('LLMClient.selectAndGenerate', () => {
   const mockApiKey = 'test-api-key';
-  const client = new GLMClient({ apiKey: mockApiKey });
+  const client = new LLMClient({ apiKey: mockApiKey });
 
   test('Test 1: selectAndGenerate returns selectedProducts and titles with fields', async () => {
     const mockResponse = {

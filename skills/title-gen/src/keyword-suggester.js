@@ -29,7 +29,7 @@ const DEFAULT_MAX_CANDIDATES = 5;
 const MAX_CANDIDATES_LIMIT = 10;
 
 /**
- * 根据策略生成 GLM 提示词
+ * 根据策略生成 LLM 提示词
  * @param {string} strategy - 策略名称
  * @param {string} input - 用户输入
  * @param {Array<{name: string, keywords: string[]}>} [seasonCategories] - 季节品类列表（仅 season 策略需要）
@@ -262,11 +262,11 @@ function deduplicateKeywords(keywords) {
  * @param {string} options.strategy - 策略类型：'crowd' | 'scene' | 'season' | 'holiday' | 'problem' | 'industry' | 'gift' | 'cross' | 'guochao' | 'trend' | 'niche' | 'emotion' | 'price'
  * @param {string} options.input - 用户输入（人群、场景、痛点、送礼对象、跨界品类、国潮品类、趋势方向、大品类、情绪、价格区间等，部分策略可省略）
  * @param {number} [options.maxCandidates] - 最大候选词数量（默认 5，最大 10）
- * @param {Object} [options.glmClient] - GLMClient 实例（可选，未提供则自动创建）
+ * @param {Object} [options.llmClient] - LLMClient 实例（可选，未提供则自动创建）
  * @returns {Promise<string[]>} 候选关键词数组
  */
 async function suggestKeywords(options) {
-  const { strategy, input, maxCandidates = DEFAULT_MAX_CANDIDATES, glmClient, fetchHotData } = options;
+  const { strategy, input, maxCandidates = DEFAULT_MAX_CANDIDATES, llmClient, fetchHotData } = options;
 
   // 1. 验证策略
   if (!VALID_STRATEGIES.includes(strategy)) {
@@ -286,8 +286,8 @@ async function suggestKeywords(options) {
   // 3. 限制候选词数量
   const maxCands = Math.min(Math.max(1, maxCandidates), MAX_CANDIDATES_LIMIT);
 
-  // 4. 准备 GLM 客户端
-  let client = glmClient;
+  // 4. 准备 LLM 客户端
+  let client = llmClient;
   if (!client) {
     const { createLLMClient } = require('../../../core/llm');
     client = createLLMClient();
@@ -301,7 +301,7 @@ async function suggestKeywords(options) {
     const dataPath = path.join(__dirname, '..', 'data', 'season-data.json');
     seasonCategories = loadSeasonCategories(dataPath);
     if (seasonCategories.length === 0) {
-      console.warn('⚠️  季节数据为空，GLM 将仅基于用户输入生成关键词');
+      console.warn('⚠️  季节数据为空，LLM 将仅基于用户输入生成关键词');
     }
   }
   if (strategy === STRATEGIES.HOLIDAY) {
@@ -322,16 +322,16 @@ async function suggestKeywords(options) {
         }
         console.log('📈 趋势选词: 已加载外部热榜数据');
       } else {
-        console.warn('⚠️  趋势策略未提供 fetchHotData 回调，将使用纯GLM推理');
+        console.warn('⚠️  趋势策略未提供 fetchHotData 回调，将使用纯LLM推理');
         hotData = '';
       }
     } catch (error) {
-      console.warn('⚠️  热榜数据加载失败，将使用纯GLM推理: ' + error.message);
+      console.warn('⚠️  热榜数据加载失败，将使用纯LLM推理: ' + error.message);
       hotData = '';
     }
   }
 
-  // 6. 生成提示词并调用 GLM
+  // 6. 生成提示词并调用 LLM
   const prompt = generatePrompt(strategy, effectiveInput, seasonCategories, { 
     _holidayInfo: holidayInfo, 
     _hotData: hotData 
@@ -342,10 +342,16 @@ async function suggestKeywords(options) {
   ];
 
   try {
-    // 使用 GLM 客户端配置进行 API 调用
-    const apiBase = client.apiBase || 'https://open.bigmodel.cn/api/paas/v4';
-    const apiKey = client.apiKey || process.env.GLM_API_KEY;
-    const model = client.model || 'glm-4-flash';
+    // 使用 LLM 客户端已解析的配置进行 API 调用，禁止跨服务商借用密钥
+    const apiBase = client.apiBase;
+    const apiKey = client.apiKey;
+    const model = client.model;
+    if (!apiKey) {
+      throw new Error(`当前 LLM 服务商 (${client.provider || 'unknown'}) 未配置 API 密钥，请设置对应的环境变量`);
+    }
+    if (!apiBase || !model) {
+      throw new Error(`当前 LLM 服务商 (${client.provider || 'unknown'}) 配置不完整，缺少 apiBase 或 model`);
+    }
     const timeout = client._timeout || 15000;
 
     const response = await retry(async () => {
@@ -388,7 +394,7 @@ async function suggestKeywords(options) {
     return keywords.slice(0, maxCands);
 
   } catch (error) {
-    console.error(`GLM 调用失败: ${error.message}`);
+    console.error(`LLM 调用失败: ${error.message}`);
     // 降级：返回空数组
     return [];
   }
@@ -608,7 +614,7 @@ async function suggestAndVerify(options) {
       verified: 0,
       failed: 0,
       errors: [],
-      message: 'GLM未返回有效候选词'
+      message: 'LLM未返回有效候选词'
     };
   }
 

@@ -110,7 +110,7 @@ https://detail.1688.com/offer/<id>.html$$<铺货标题>$$<SYCM推荐类目>
 - Title too short: retry once with `--length 60`. If still short, report the exact title and do not pad with meaningless words manually.
 - Timeout: retry once with `--count 3 --run-timeout-ms 180000`. For multiple keywords, do not run several full title commands in parallel; use batch mode or `pipeline-flow`.
 - Error attribution: `title_generation_timeout` means title generation timed out. Only report 1688 rate limit when JSON has `source: "1688"` or `code: "1688_rate_limited"`.
-- If JSON includes `retryWith`, follow it literally. Do not invent GLM/1688 rate-limit causes from timeout alone.
+- If JSON includes `retryWith`, follow it literally. Do not invent LLM/1688 rate-limit causes from timeout alone.
 
 ## Never Do These
 

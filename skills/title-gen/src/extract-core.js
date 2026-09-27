@@ -1,6 +1,6 @@
 const { createLLMClient } = require('../../../core/llm');
 
-// 共享的刚性/可选修饰词判断规则（供两个 GLM prompt 复用）
+// 共享的刚性/可选修饰词判断规则（供两个 LLM prompt 复用）
 const { RIGIDITY_RULES_TEXT } = require('../../../core/constants');
 
 /**
@@ -24,7 +24,7 @@ async function extractCoreAndModifiers(input) {
 }
 
 /**
- * 降级提取（当 GLM API 失败时使用简单规则）
+ * 降级提取（当 LLM API 失败时使用简单规则）
  * @param {string} input - 用户输入
  * @returns {{
  *   coreWord: string,
@@ -148,13 +148,13 @@ async function extractCoreFromPeerTitles(peerTitles) {
   try {
     return await client.extractKeywordsFromPeers(peerTitles);
   } catch (error) {
-    console.warn(`⚠️  GLM API 调用失败，使用降级提取: ${error.message}`);
+    console.warn(`⚠️  LLM API 调用失败，使用降级提取: ${error.message}`);
     return fallbackExtractFromPeers(peerTitles);
   }
 }
 
 /**
- * 降级提取（当 GLM API 失败时使用简单规则分析同行标题）
+ * 降级提取（当 LLM API 失败时使用简单规则分析同行标题）
  * @param {string[]} peerTitles - 同行标题数组
  * @returns {{
  *   coreWord: string,

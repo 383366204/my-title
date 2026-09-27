@@ -1238,7 +1238,7 @@ server.tool(
 server.tool(
   'suggest_keywords',
   [
-    '自动选词工具。根据策略(crowd/scene/season/holiday/problem/industry/gift/cross/guochao/trend/niche/emotion/price)通过 GLM AI 推荐候选关键词，返回蓝海词列表。默认不进行生意参谋验证，设置 sycm_verify=true 可启用验证。',
+    '自动选词工具。根据策略(crowd/scene/season/holiday/problem/industry/gift/cross/guochao/trend/niche/emotion/price)通过 LLM 推荐候选关键词，返回蓝海词列表。默认不进行生意参谋验证，设置 sycm_verify=true 可启用验证。',
     '',
     '策略说明:',
     '- crowd: 人群选词（如"宝妈"、"大学生"）',
@@ -1260,7 +1260,7 @@ server.tool(
   {
     strategy: z.enum(['crowd', 'scene', 'season', 'problem', 'industry', 'holiday', 'gift', 'cross', 'guochao', 'trend', 'niche', 'emotion', 'price']).describe('选词策略'),
     input: z.string().optional().describe('策略输入（人群/场景/痛点/行业/送礼对象/跨界品类/预算区间描述，season 策略可省略）'),
-    max_candidates: z.number().default(5).describe('GLM 最大候选词数量（1-10，默认 5）'),
+    max_candidates: z.number().default(5).describe('LLM 最大候选词数量（1-10，默认 5）'),
     task_id: z.string().optional().describe('查询任务结果时传入（不需要传 strategy）'),
     port: z.number().default(9222).describe('Chrome 远程调试端口'),
     sycm_verify: z.boolean().default(false).describe('是否启用生意参谋 SYCM 验证（默认关闭，仅返回 AI 推荐候选词）'),

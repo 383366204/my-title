@@ -40,7 +40,7 @@ describe('LLM provider factory', () => {
     assert.equal(normalizeProvider(' DeepSeek '), 'deepseek');
   });
 
-  it('keeps GLM as the default provider', () => {
+  it('keeps glm as the default provider', () => {
     clearProviderEnv();
     process.env.GLM_API_KEY = 'glm-test-key';
 

@@ -32,24 +32,24 @@ function dedupeTitles(titles) {
 }
 
 /**
- * 使用 GLM 生成中文标题，包含降级兜底逻辑。
+ * 使用 LLM 生成中文标题，包含降级兜底逻辑。
  * 注：当前实现不进行中文分词，直接拼接、过滤和去重。
  *
  * @param {string} blueOceanWord 蓝海词（用户原始输入，标题必须以此开头）
  * @param {string} coreWord 核心词
  * @param {Array<{word: string, rigidity: 'rigid'|'optional'}>} modifiers 修饰词列表
  * @param {string[]} peerTitles 淘宝同行标题（用于上下文/引导）
- * @param {Array<object>} products 1688 商品列表（用于 GLM 的上下文参考）
+ * @param {Array<object>} products 1688 商品列表（用于 LLM 的上下文参考）
  * @param {number} [maxLength=60] 最大标题长度（字符数）
  * @returns {Promise<string[]>} 3-5 条候选标题
  */
 async function generateTitles(blueOceanWord, coreWord, modifiers = [], peerTitles = [], products = [], maxLength = 60, minLength = 60) {
-  // GLM 客户端实例，API KEY 等由环境变量提供
-  const glmClient = createLLMClient();
+  // LLM 客户端实例，API KEY 等由环境变量提供
+  const llmClient = createLLMClient();
 
-  // 尝试通过 GLM 生成标题
+  // 尝试通过 LLM 生成标题
   try {
-    const glmTitles = await glmClient.generateTitles({
+    const llmTitles = await llmClient.generateTitles({
       blueOceanWord,
       coreWord,
       modifiers,
@@ -59,7 +59,7 @@ async function generateTitles(blueOceanWord, coreWord, modifiers = [], peerTitle
     });
 
     // 使用统一后处理管线：移除违禁词 → 清理标点 → 蓝海词前置 → 长度归一化 → 去空格
-    const processedTitles = glmTitles
+    const processedTitles = llmTitles
       .map((title, idx) => postProcessTitle(title, blueOceanWord, minLength, maxLength)
         || constructFallbackTitle(blueOceanWord, products[idx]?.title || title, peerTitles, maxLength, minLength))
       .filter(Boolean);
@@ -68,7 +68,7 @@ async function generateTitles(blueOceanWord, coreWord, modifiers = [], peerTitle
     return unique.slice(0, 5);
   } catch (err) {
     // 降级策略：使用标题兜底生成器（如果可用）
-    console.warn('GLM generateTitles 调用失败，执行降级方案：', err && err.message ? err.message : err);
+    console.warn('LLM generateTitles 调用失败，执行降级方案：', err && err.message ? err.message : err);
     // 优先使用 constructFallbackTitle，基于 1688 第一个商品的标题以及同行标题
     const originalTitle = Array.isArray(products) && products.length > 0 ? products[0].title : '';
     const taobaoTitles = Array.isArray(peerTitles) ? peerTitles : [];

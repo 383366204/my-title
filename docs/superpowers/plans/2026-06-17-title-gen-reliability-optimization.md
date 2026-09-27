@@ -268,7 +268,7 @@ test('run limits concurrent selectAndGenerate batches', async () => {
     url: `https://detail.1688.com/offer/${100000 + index}.html`
   }));
 
-  const glmClient = {
+  const llmClient = {
     async selectAndGenerate() {
       active += 1;
       maxActive = Math.max(maxActive, active);
@@ -289,7 +289,7 @@ test('run limits concurrent selectAndGenerate batches', async () => {
     peerTitles: ['陶瓷摆件 家用桌面装饰'],
     coreWord: '摆件',
     modifiers: [{ word: '陶瓷', type: 'rigid' }],
-    glmClient,
+    llmClient,
     llmConcurrency: 2,
     runTimeoutMs: 10000,
     silent: true
@@ -334,7 +334,7 @@ Add params to `_generateTitles` and replace batch `Promise.all` with:
 ```js
 const batchResults = await runLimited(batches, async ({ index, products: batch }) => {
   try {
-    const response = await retryWithBackoff(() => glmClient.selectAndGenerate({
+    const response = await retryWithBackoff(() => llmClient.selectAndGenerate({
       blueOceanWord,
       coreWord,
       modifiers,
@@ -560,7 +560,7 @@ Append to `skills/title-gen/test/index.test.js`:
 ```js
 test('run can return non-distributable generic titles when no 1688 products exist', async () => {
   const { run } = require('../src');
-  const glmClient = {
+  const llmClient = {
     async generateTitles() {
       return ['陶瓷摆件 桌面装饰家居客厅玄关创意小摆件礼品'];
     }
@@ -572,7 +572,7 @@ test('run can return non-distributable generic titles when no 1688 products exis
     allowGenericTitlesWhenNoProducts: true,
     coreWord: '摆件',
     modifiers: [{ word: '陶瓷', type: 'rigid' }],
-    glmClient,
+    llmClient,
     silent: true
   });
 
@@ -612,7 +612,7 @@ if (!Array.isArray(products) || products.length === 0) {
       stats: { trace, matchedProducts: 0, modifiers: modifiers.map(m => m.word) }
     };
   }
-  const fallbackTitles = await glmClient.generateTitles({
+  const fallbackTitles = await llmClient.generateTitles({
     blueOceanWord,
     coreWord,
     modifiers,
