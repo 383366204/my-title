@@ -23,6 +23,27 @@
   --border-default: #334155;
   --bg-panel: #0f172a;
 
+  /* Button tokens */
+  --btn-bg: #111827;
+  --btn-border: #273449;
+  --btn-text: var(--text-subtle);
+  --btn-hover-bg: #162235;
+  --btn-hover-border: #475569;
+  --btn-hover-text: #f8fafc;
+  --btn-primary-bg: #2563eb;
+  --btn-primary-border: rgba(37, 99, 235, 0.96);
+  --btn-primary-text: #fff;
+  --btn-primary-hover-bg: #1d4ed8;
+  --btn-gradient: linear-gradient(135deg, var(--accent-purple), var(--accent-blue));
+  --btn-gradient-shadow: rgba(139, 92, 246, 0.35);
+  --btn-gradient-hover-shadow: rgba(139, 92, 246, 0.45);
+  --btn-danger-hover-border: #f43f5e;
+  --btn-danger-hover-text: #fecdd3;
+  --btn-danger-hover-bg: rgba(127, 29, 29, 0.28);
+  --btn-success-hover-border: #22c55e;
+  --btn-success-hover-text: #bbf7d0;
+  --btn-success-hover-bg: rgba(22, 101, 52, 0.24);
+
   --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
   --font-display: 'Outfit', 'Inter', system-ui, sans-serif;
 }

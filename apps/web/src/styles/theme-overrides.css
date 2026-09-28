@@ -169,15 +169,15 @@
 
 .primary-button {
   border: 0;
-  background: linear-gradient(135deg, var(--accent-purple), var(--accent-blue));
-  color: #fff;
-  box-shadow: 0 4px 14px rgba(139, 92, 246, 0.35);
+  background: var(--btn-gradient);
+  color: var(--btn-primary-text);
+  box-shadow: 0 4px 14px var(--btn-gradient-shadow);
   transition: transform 160ms ease, box-shadow 160ms ease, opacity 160ms ease;
 }
 
 .primary-button:hover {
   transform: translateY(-1px);
-  box-shadow: 0 8px 24px rgba(139, 92, 246, 0.45);
+  box-shadow: 0 8px 24px var(--btn-gradient-hover-shadow);
 }
 
 .secondary-button,
@@ -191,7 +191,7 @@
 .icon-button:hover {
   border-color: rgba(139, 92, 246, 0.34);
   background: rgba(139, 92, 246, 0.1);
-  color: #fff;
+  color: var(--btn-primary-text);
 }
 
 .secondary-button.muted {
