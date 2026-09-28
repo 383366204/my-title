@@ -1,3 +1,5 @@
+import { ATTENTION_NODE_STATUSES, BLOCKED_NODE_STATUSES, ACTIVE_NODE_STATUSES, PAUSABLE_RUN_STATUSES } from './workflow-statuses.js';
+
 export const BUSINESS_FUNNEL = [
   { id: "candidate", label: "候选词" },
   { id: "verified", label: "大盘验真" },
@@ -77,29 +79,39 @@ export function getCanvasNodeTone(state) {
   const normalized = String(state || '').toLowerCase();
   if (normalized === 'completed') return 'success';
   if (normalized === 'running') return 'active';
-  if (
-    normalized === 'needs_review' ||
-    normalized === 'waiting_confirmation' ||
-    normalized === 'waiting_manual' ||
-    normalized === 'paused' ||
-    normalized === 'retryable'
-  ) {
-    return 'warn';
-  }
+  if (ATTENTION_NODE_STATUSES.has(normalized)) return 'warn';
   if (normalized === 'blocked' || normalized === 'failed') return 'danger';
   return 'muted';
 }
 
 /**
+ * Generic status-based fallback actions, independent of node ID.
+ * Applied when no node-specific handler matches.
+ */
+function getStatusFallbackAction(normalizedNodeId, normalizedState) {
+  if (normalizedState === 'waiting_manual') return { label: '继续流程', action: 'resume', tone: 'warn' };
+  if (normalizedState === 'paused') return { label: '继续流程', action: 'resume', tone: 'warn' };
+  if (normalizedState === 'retryable') return { label: '重试节点', action: 'retry-node', tone: 'warn' };
+  if (normalizedState === 'failed') {
+    return { label: normalizedNodeId === 'collectrank' ? '重试采集' : '重试节点', action: 'retry-node', tone: 'warn' };
+  }
+  if (normalizedState === 'blocked') return { label: '查看阻塞', action: 'blocked', tone: 'danger' };
+  if (normalizedState === 'completed') return { label: '查看产物', action: 'artifact', tone: 'success' };
+  return { label: '查看节点', action: 'inspect', tone: getCanvasNodeTone(normalizedState) };
+}
+
+/**
  * 根据节点和状态返回前端画布节点动作。
  * @param {string} nodeId workflow 节点 ID。
- * @param {string} state 节点状态。
+ * @param {string|object} state 节点状态或节点数据。
  * @returns {{label: string, action: string, tone: string}} 节点动作。
  */
 export function getWorkflowNodeAction(nodeId, state) {
   const normalizedNodeId = String(nodeId || '').toLowerCase();
   const stateDetails = state && typeof state === 'object' ? state : {};
   const normalizedState = String(stateDetails.status || stateDetails.state || state || '').toLowerCase();
+
+  // --- start node handlers (priority order matters) ---
   if (normalizedNodeId === 'start' && stateDetails.reviewUpload === true) {
     return {
       label: stateDetails.uploadId ? '查看上传信息' : '上传刷单表',
@@ -196,29 +208,8 @@ if (normalizedNodeId === 'start' && stateDetails.watermarkStudio === true) {
   if (normalizedNodeId === 'review' && (normalizedState === 'needs_review' || normalizedState === 'waiting_confirmation')) {
     return { label: '处理复核', action: 'review', tone: 'warn' };
   }
-  if (normalizedState === 'waiting_manual') {
-    return { label: '继续流程', action: 'resume', tone: 'warn' };
-  }
-  if (normalizedState === 'paused') {
-    return { label: '继续流程', action: 'resume', tone: 'warn' };
-  }
-  if (normalizedState === 'retryable') {
-    return { label: '重试节点', action: 'retry-node', tone: 'warn' };
-  }
-  if (normalizedState === 'failed') {
-    return {
-      label: normalizedNodeId === 'collectrank' ? '重试采集' : '重试节点',
-      action: 'retry-node',
-      tone: 'warn'
-    };
-  }
-  if (normalizedState === 'blocked') {
-    return { label: '查看阻塞', action: 'blocked', tone: 'danger' };
-  }
-  if (normalizedState === 'completed') {
-    return { label: '查看产物', action: 'artifact', tone: 'success' };
-  }
-  return { label: '查看节点', action: 'inspect', tone: getCanvasNodeTone(normalizedState) };
+  // --- Generic status fallback ---
+  return getStatusFallbackAction(normalizedNodeId, normalizedState);
 }
 
 export function getWorkflowBlockerActions(nodeId, state = {}) {
@@ -229,7 +220,7 @@ export function getWorkflowBlockerActions(nodeId, state = {}) {
   const platformStatus = String(state.platformStatus || state.manualAction?.status || '').toLowerCase();
   const recommended = state.nextRecommendedAction || null;
   const actions = [];
-  if (!['blocked', 'failed', 'retryable', 'waiting_manual', 'paused'].includes(status)) {
+  if (!BLOCKED_NODE_STATUSES.has(status)) {
     return actions;
   }
   const chromeFailureText = `${blocker} ${error} ${actionHint} ${platformStatus}`;
@@ -350,8 +341,8 @@ export function getMiningRecoveryAction(run = null, addedCandidateCount = 0) {
 export function getWorkflowRuntimeActions({ runStatus = "", nodeId = "", state = {} } = {}) {
   const normalizedRunStatus = String(runStatus || '').toLowerCase();
   const normalizedNodeStatus = String(state.status || state.state || '').toLowerCase();
-  const activeRunStatuses = new Set(['pending', 'running', 'created', 'mined', 'awaiting_keyword_review', 'keywords_reviewed', 'verified', 'generated', 'resuming', 'retrying']);
-  const activeNodeStatuses = new Set(['running', 'resuming', 'retrying']);
+  const activeRunStatuses = PAUSABLE_RUN_STATUSES;
+  const activeNodeStatuses = ACTIVE_NODE_STATUSES;
   if (!nodeId || !activeRunStatuses.has(normalizedRunStatus) || !activeNodeStatuses.has(normalizedNodeStatus)) {
     return [];
   }

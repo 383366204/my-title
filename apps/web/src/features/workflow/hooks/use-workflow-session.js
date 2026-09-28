@@ -1,11 +1,12 @@
 import { useEffect, useRef } from 'react';
-import { MarkerType } from '@xyflow/react';
 import { getWorkflowRun } from '../../../api/workflow-api.js';
+import { styleWorkflowEdges } from '../workflow-edge-style.js';
 import { getWorkflowRunActiveNodeId } from '../workflow-history-view.js';
 import { runtimeNodeFields } from './use-workflow-runtime.js';
 import { nodeTypes } from '../workflow-node-types.js';
 import { selectionModeTemplate } from '../selection-modes.js';
-import { ACTIVE_RUN_STATUSES, getCanvasNodeState, getTemplateMode, normalizeCanvasNode, normalizeWorkflowForCanvas, resetWorkflowNodeData } from '../workflow-data.js';
+import { ACTIVE_RUN_STATUSES } from '../workflow-statuses.js';
+import { getCanvasNodeState, getTemplateMode, normalizeCanvasNode, normalizeWorkflowForCanvas, resetWorkflowNodeData } from '../workflow-data.js';
 
 /**
  * 管理模板切换、历史载入与复制运行，隔离过期历史请求。
@@ -56,11 +57,7 @@ export function useWorkflowSession({
       }
     }, setSelectedNodeId, dispatchNodeAction, dispatchNodeArtifactView, nodeTypes, dispatchNodeUpdate));
     setNodes(formattedNodes);
-    setEdges((defaultWorkflow.edges || []).map(e => ({
-      ...e,
-      markerEnd: { type: MarkerType.ArrowClosed, color: '#3b82f6' },
-      style: { stroke: '#3b82f6', strokeWidth: 2.5 }
-    })));
+    setEdges(styleWorkflowEdges(defaultWorkflow.edges));
     setActiveTemplateId(template?.id || null);
     setActiveTemplateMode(getTemplateMode(template));
     setSelectedNodeId(null);
@@ -163,11 +160,7 @@ export function useWorkflowSession({
         }, setSelectedNodeId, dispatchNodeAction, dispatchNodeArtifactView, nodeTypes, dispatchNodeUpdate);
       }));
 
-      setEdges((defaultWorkflow.edges || []).map(e => ({
-        ...e,
-        markerEnd: { type: MarkerType.ArrowClosed, color: '#3b82f6' },
-        style: { stroke: '#3b82f6', strokeWidth: 2.5 }
-      })));
+      setEdges(styleWorkflowEdges(defaultWorkflow.edges));
 
       setCurrentRunId(runId);
       setRunStatus(run.status);

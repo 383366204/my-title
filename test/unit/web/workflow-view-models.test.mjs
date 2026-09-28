@@ -1394,6 +1394,15 @@ test('getWorkflowArtifactView treats start nodes as no-artifact nodes', () => {
   assert.equal(view.emptyText, '开始节点没有产物。');
 });
 
+test('getWorkflowArtifactView handles prototype-polluting node IDs safely', () => {
+  // constructor, toString, __proto__ should not crash or return unexpected results
+  for (const dangerousId of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
+    const view = getWorkflowArtifactView({ type: 'json', items: [{ x: 1 }] }, dangerousId);
+    assert.ok(view, `should return a view for nodeId="${dangerousId}"`);
+    assert.ok(view.kind, `view should have a kind for nodeId="${dangerousId}"`);
+  }
+});
+
 test('getWorkflowArtifactView does not repeat the product-rank sort metric', () => {
   const view = getWorkflowArtifactView({
     type: 'json',
