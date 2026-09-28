@@ -663,7 +663,7 @@ test('getWorkflowNodeSuccessLabel summarizes pipeline output counts', () => {
   }), '验真通过 3 个，可生成 1 个，需复核/拒绝 2 个，验真拒绝 2 个');
   assert.equal(getWorkflowNodeSuccessLabel('select', {
     output: { count: 8, productCount: 8, file: '/tmp/selected-products.jsonl' }
-  }), '选中 8 条货源');
+  }), '候选 8 条 · 已选 8 个');
   assert.equal(getWorkflowNodeSuccessLabel('generate', {
     output: { count: 12, file: '/tmp/generated-products.jsonl' }
   }), '12 条标题记录（12 个标题，关联 12 个已选货源）');

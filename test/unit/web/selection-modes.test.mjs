@@ -21,7 +21,8 @@ test('selection mode swaps graph while restoring only target mode inputs', () =>
 test('selection summary deduplicates roots and exact keywords', () => {
   assert.equal(selectionSourceSummary({ selectionMode: 'root-keyword', rootsText: '杯垫\n杯垫\n收纳' }), '杯垫、收纳 · 共 2 个');
   assert.equal(selectionSourceSummary({ selectionMode: 'keyword', keywordsText: '' }), '尚未录入');
-  assert.equal(selectionSourceSummary({ selectionMode: 'daily', enabledDimensions: ['persona', 'hobby'] }), '已选 2 个灵感方向');
+  assert.equal(selectionSourceSummary({ selectionMode: 'daily', enabledDimensions: ['persona', 'hobby'] }), '未指定方向 · AI 自动探索');
+  assert.equal(selectionSourceSummary({ selectionMode: 'daily', customInputs: { direction: ['厨房收纳'] } }), '选词方向：厨房收纳');
 });
 
 test('exact keyword input has no count cap but cannot be empty', () => {

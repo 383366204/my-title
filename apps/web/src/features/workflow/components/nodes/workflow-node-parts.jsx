@@ -161,8 +161,7 @@ export const WorkflowNodeDiversitySummary = ({ nodeId, data }) => {
       ]
     : nodeId === 'select'
       ? [
-          Number(diversity.newOffers || 0) > 0 ? `新货源 ${diversity.newOffers} 个` : '',
-          Number(diversity.uniqueOffers || 0) > 0 ? `独立货源 ${diversity.uniqueOffers} 个` : '',
+          Number(diversity.newOffers || 0) > 0 ? `其中历史未出现 ${diversity.newOffers} 个` : '',
           Number(diversity.suppliers || 0) > 0 ? `${diversity.suppliers} 家供应商` : '',
           Number(diversity.historyFallbackCount || 0) > 0 ? `历史回退 ${diversity.historyFallbackCount} 个` : ''
         ]

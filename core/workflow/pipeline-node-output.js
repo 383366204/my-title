@@ -50,6 +50,7 @@ function outputForNode(id, summary) {
     return {
       count,
       productCount: count,
+      candidateCount: Number(counts.productsEvaluated ?? count),
       failed: Number(counts.productEnrichFailed || 0) + Number(counts.productSearchFailures || 0),
       file: summary.files?.selectedProducts || '',
       diversity: summary.diversity?.product || null

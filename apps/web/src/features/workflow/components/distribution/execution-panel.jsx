@@ -87,6 +87,8 @@ export function ExecutionPanel({
       <p>第 {distributionJob.progress?.batchIndex || 0} / {distributionJob.progress?.batchTotal || 0} 批 · {distributionJob.progress?.phase || '等待状态更新'}</p>
       {distributionJob.error && <p className="distribution-error-text">{distributionJob.error}</p>}
       {distributionJob.confirmationError && <p className="distribution-error-text">结果核对失败：{distributionJob.confirmationError}</p>}
+      {confirmation?.scanIncomplete && <p className="distribution-error-text">列表采集未完成，未找到的商品仍待确认，请稍后重新核对。</p>}
+      {confirmation?.reason && <p className="distribution-error-text">{confirmation.reason}</p>}
       {distributionSubmitError && <p className="distribution-error-text">{distributionSubmitError}</p>}
       {confirmation && <div className="distribution-confirmation-results" aria-label="铺货核对明细">
         {resultRows.map(row => <div key={row.offerId} className={`distribution-confirmation-row distribution-result-${row.status === '成功' ? 'success' : row.status === '失败' ? 'failed' : 'pending'}`}>

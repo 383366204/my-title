@@ -53,7 +53,8 @@ function createDistributionJobs({ jobDir, getConfirmationReader, summarizePipeli
       progress: { ...(job.progress || {}), phase: 'checking_confirmation' }
     });
     try {
-      const confirmationCheck = await reader({ input, shop: job.shop, targetShops: distributionTargets(job), distributionMode: job.distributionMode, port: job.port || job.shop?.port });
+      if (!Number.isFinite(Date.parse(job.startedAt || ''))) throw new Error('任务缺少提交时间，无法安全区分历史铺货记录，请人工核对。');
+      const confirmationCheck = await reader({ input, shop: job.shop, targetShops: distributionTargets(job), distributionMode: job.distributionMode, port: job.port || job.shop?.port, submittedAt: job.startedAt });
       const completed = confirmationCheck?.ok === true && confirmationCheck?.status === 'confirmed';
       const confirmation = confirmationCheck?.confirmation;
       const successIds = new Set(confirmation?.foundOfferIds || []);
