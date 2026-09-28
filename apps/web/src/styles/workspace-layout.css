@@ -89,10 +89,10 @@
   height: 28px;
   margin: 8px;
   flex: 0 0 auto;
-  border: 1px solid #334155;
+  border: 1px solid var(--border-default);
   border-radius: 6px;
-  background: #0f172a;
-  color: #94a3b8;
+  background: var(--bg-panel);
+  color: var(--text-muted);
   cursor: pointer;
   transition: color 140ms ease, background 140ms ease, border-color 140ms ease;
 }
@@ -100,7 +100,7 @@
 .workflow-sidebar-toggle:hover {
   border-color: #60a5fa;
   background: #1e293b;
-  color: #e2e8f0;
+  color: var(--text-body);
 }
 
 .workflow-left-sidebar:not(.is-collapsed) > .workflow-sidebar-toggle,
@@ -115,7 +115,7 @@
   height: 36px;
   flex-shrink: 0;
   border-bottom: 1px solid #1e293b;
-  background: #0f172a;
+  background: var(--bg-panel);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -126,7 +126,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: #94a3b8;
+  color: var(--text-muted);
   font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.02em;
@@ -137,7 +137,7 @@
   min-height: 0;
   overflow-y: auto;
   background: rgba(2, 6, 23, 0.82);
-  color: #cbd5e1;
+  color: var(--text-subtle);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   font-size: 12px;
   padding: 14px 16px;

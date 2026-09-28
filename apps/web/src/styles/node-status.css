@@ -5,7 +5,7 @@
   border-radius: 8px;
   border: 1px solid rgba(30, 41, 59, 0.9);
   background: rgba(30, 41, 59, 0.42);
-  color: #cbd5e1;
+  color: var(--text-subtle);
   font-size: 12px;
   transition: all 160ms ease;
 }
@@ -25,7 +25,7 @@
   border-radius: 8px;
   border: 1px solid rgba(30, 41, 59, 0.95);
   background: rgba(15, 23, 42, 0.78);
-  color: #64748b;
+  color: var(--text-disabled);
   transition:
     background-color 160ms ease,
     border-color 160ms ease,
@@ -63,7 +63,7 @@
   border-radius: 999px;
   border: 1px solid rgba(51, 65, 85, 0.92);
   background: rgba(15, 23, 42, 0.68);
-  color: #cbd5e1;
+  color: var(--text-subtle);
   font-size: 10px;
   font-weight: 700;
   line-height: 1.35;
@@ -146,10 +146,10 @@
   width: 232px;
   min-height: 118px;
   padding: 13px;
-  border: 2px solid #334155;
+  border: 2px solid var(--border-default);
   border-radius: 10px;
-  background: #0f172a;
-  color: #e2e8f0;
+  background: var(--bg-panel);
+  color: var(--text-body);
   text-align: left;
   box-shadow: 0 10px 24px rgba(2, 6, 23, 0.24);
 }
@@ -159,7 +159,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  color: #64748b;
+  color: var(--text-disabled);
   font-family: 'JetBrains Mono', monospace;
   font-size: 10px;
   text-transform: uppercase;
@@ -175,7 +175,7 @@
 
 .production-node-head b {
   max-width: 86px;
-  color: #94a3b8;
+  color: var(--text-muted);
   white-space: nowrap;
 }
 
@@ -207,7 +207,7 @@
 
 .production-node-description {
   margin-top: 5px;
-  color: #94a3b8;
+  color: var(--text-muted);
   font-size: 11px;
   line-height: 1.4;
   display: -webkit-box;
@@ -297,7 +297,7 @@
   border-radius: 999px;
   padding: 3px 8px;
   background: rgba(100, 116, 139, 0.16);
-  color: #cbd5e1;
+  color: var(--text-subtle);
   cursor: pointer;
   font-size: 10px;
   font-weight: 800;
@@ -314,7 +314,7 @@
 
 .production-node-artifact-action {
   align-items: center;
-  color: #94a3b8;
+  color: var(--text-muted);
   cursor: pointer;
   display: inline-flex;
   font-size: 10px;
@@ -327,7 +327,7 @@
 
 .production-node-artifact-action:hover,
 .production-node-artifact-action:focus-visible {
-  color: #e2e8f0;
+  color: var(--text-body);
   transform: translateY(-1px);
 }
 
@@ -406,7 +406,7 @@
   border: 1px solid rgba(100, 116, 139, 0.55);
   border-radius: 6px;
   background: rgba(15, 23, 42, 0.72);
-  color: #cbd5e1;
+  color: var(--text-subtle);
   cursor: pointer;
   font-size: 10px;
   font-weight: 700;
@@ -478,7 +478,7 @@
   gap: 16px;
   padding: 11px 18px;
   border-bottom: 1px solid #1e293b;
-  background: #0f172a;
+  background: var(--bg-panel);
   min-height: 64px;
   z-index: 10;
   flex-shrink: 0;
@@ -492,7 +492,7 @@
 
 .workflow-top-context span,
 .workflow-top-context small {
-  color: #94a3b8;
+  color: var(--text-muted);
   font-size: 11px;
 }
 
@@ -501,7 +501,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #e2e8f0;
+  color: var(--text-body);
   font-size: 14px;
 }
 
@@ -535,7 +535,7 @@
   border: 1px solid rgba(51, 65, 85, 0.95);
   border-radius: 8px;
   background: rgba(15, 23, 42, 0.8);
-  color: #94a3b8;
+  color: var(--text-muted);
   transition:
     background-color 160ms ease,
     border-color 160ms ease,
@@ -582,7 +582,7 @@
 .workflow-order-step-active {
   border-color: rgba(59, 130, 246, 0.75);
   background: rgba(30, 64, 175, 0.28);
-  color: #e2e8f0;
+  color: var(--text-body);
 }
 
 .workflow-order-step-active span {

@@ -16,7 +16,7 @@ import { MINER_TABS } from '../workflow-data.js';
  * @param {boolean} [options.active] - 种子池是否处于激活状态
  * @returns {object} 种子池状态与操作函数
  */
-export function useSeedPool({ active } = {}) {
+export function useSeedPool({ active, confirmDelete = (msg) => window.confirm(msg) } = {}) {
   const [seedRows, setSeedRows] = useState([]);
   const [seedDraft, setSeedDraft] = useState({ keyword: '', category: '', priority: 5, type: 'manual' });
   const [seedLoading, setSeedLoading] = useState(false);
@@ -82,7 +82,7 @@ export function useSeedPool({ active } = {}) {
   };
 
   const deleteSeedFromPool = async (keyword) => {
-    if (!window.confirm(`确认删除种子词「${keyword}」？`)) return;
+    if (!confirmDelete(`确认删除种子词「${keyword}」？`)) return;
     setSeedMessage('');
     try {
       await deleteSeed(keyword);

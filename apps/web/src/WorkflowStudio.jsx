@@ -16,6 +16,7 @@ import { useNodeDataUpdater } from './features/workflow/hooks/use-node-data-upda
 import { useNodeActionHandler } from './features/workflow/hooks/use-node-action-handler.js';
 import { useDistributionCompletion } from './features/workflow/hooks/use-distribution-completion.js';
 import { WorkflowConsole } from './features/workflow/components/workflow-console.jsx';
+import { ToastContainer } from './features/workflow/components/toast-container.jsx';
 import { WorkflowLeftSidebar } from './features/workflow/components/workflow-left-sidebar.jsx';
 import { WorkflowCanvasWorkspace } from './features/workflow/components/workflow-canvas-workspace.jsx';
 import { WorkflowRightSidebar } from './features/workflow/components/workflow-right-sidebar.jsx';
@@ -205,6 +206,7 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
         updateDistributionNodeJob={updateDistributionNodeJob}
       />
       <WorkflowConsole logs={logs} onClear={() => setLogs([])} />
+      <ToastContainer />
     </div>
   );
 }

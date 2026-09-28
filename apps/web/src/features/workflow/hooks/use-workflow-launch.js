@@ -1,3 +1,4 @@
+import { showToast } from '../toast.js';
 import { useCallback, useRef } from 'react';
 
 import { getWorkflowLaunchParams, getWorkflowLaunchBlocker } from '../workflow-launch-params.js';
@@ -133,7 +134,7 @@ export function useWorkflowLaunch(options = {}) {
       return true;
     } catch (error) {
       showInputError(error.message);
-      alert(`启动请求失败: ${error.message}`);
+      showToast(`启动请求失败: ${error.message}`, 'error');
       setRunStatus('failed');
       return false;
     } finally {

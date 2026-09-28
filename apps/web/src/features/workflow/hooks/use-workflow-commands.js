@@ -1,3 +1,4 @@
+import { showToast } from '../toast.js';
 import { useCallback } from 'react';
 import { useWorkflowRequestScope } from './use-workflow-request-scope.js';
 
@@ -68,7 +69,7 @@ export function useWorkflowCommands(options = {}) {
         level: 'error',
         message
       }]);
-      alert(message);
+      showToast(message, 'error');
       return;
     }
     const ticket = scope.begin('command');
@@ -133,7 +134,7 @@ export function useWorkflowCommands(options = {}) {
               }
             : node
         )));
-        alert(message);
+        showToast(message, 'error');
       }
       if (currentRunId) await reloadRun(currentRunId, { preserveLogs: true });
     } catch (error) {
@@ -153,7 +154,7 @@ export function useWorkflowCommands(options = {}) {
         level: 'error',
         message
       }]);
-      alert(message);
+      showToast(message, 'error');
       console.error(error);
     } finally {
       if (ticket.finish()) {

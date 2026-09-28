@@ -1,3 +1,4 @@
+import { showToast } from '../toast.js';
 import { useCallback } from 'react';
 import { getWorkflowOperationMessage } from '../workflow-node-actions.js';
 import {
@@ -81,7 +82,7 @@ export function useNodeActionHandler({
           level: 'error',
           message
         }]);
-        alert(message);
+        showToast(message, 'error');
       }
       return;
     }

@@ -15,6 +15,14 @@
   --accent-green-glow: rgba(16, 185, 129, 0.25);
   --accent-red: #ef4444;
   --accent-red-glow: rgba(239, 68, 68, 0.25);
+  /* Extended palette — Slate tones used across all CSS files */
+  --text-body: #e2e8f0;
+  --text-subtle: #cbd5e1;
+  --text-muted: #94a3b8;
+  --text-disabled: #64748b;
+  --border-default: #334155;
+  --bg-panel: #0f172a;
+
   --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
   --font-display: 'Outfit', 'Inter', system-ui, sans-serif;
 }

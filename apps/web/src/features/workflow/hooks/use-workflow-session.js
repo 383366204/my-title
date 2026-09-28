@@ -36,7 +36,8 @@ export function useWorkflowSession({
   dispatchNodeArtifactView,
   dispatchNodeUpdate,
   launchWorkflow,
-  removeHistoryRun
+  removeHistoryRun,
+  confirmDelete = (msg) => window.confirm(msg)
 }) {
   const initialTemplateLoadedRef = useRef(false);
   const historyRequestRef = useRef(0);
@@ -192,7 +193,7 @@ export function useWorkflowSession({
 
 
   const deleteHistoryRun = async (runId) => {
-    const ok = window.confirm('确认删除这次运行历史？相关产物和日志也会一起删除，此操作不可撤销。');
+    const ok = confirmDelete('确认删除这次运行历史？相关产物和日志也会一起删除，此操作不可撤销。');
     if (!ok) return;
     const request = historyRequestRef.current;
     try {

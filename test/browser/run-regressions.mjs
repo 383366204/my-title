@@ -10,6 +10,8 @@ for (const script of [
   'distribution-job-refresh.mjs',
   'distribution-copy-formats.mjs',
   'distribution-shops.mjs',
+  'distribution-list-confirmation.mjs',
+  'supplemental-products.mjs',
   'unified-selection.mjs',
   'discovery-direction.mjs',
   'distribution-completion-integration.mjs',
