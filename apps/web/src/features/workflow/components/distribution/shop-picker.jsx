@@ -64,10 +64,10 @@ export function DistributionShopPicker({ value, onChange, onEditingChange, disab
     </div>
     <div className="max-h-[180px] overflow-y-auto my-2" role="group" aria-label="目标店铺">
       {(lockedShops || shops).map(shop => <div className="flex items-center gap-2 py-1.5" key={shop.id}>
-        <label className="flex items-center gap-1.5 flex-1 min-w-0 cursor-pointer">
-          <input type="checkbox" className="w-4 h-4 shrink-0 m-0 p-0 accent-green-500" checked={Boolean(lockedShops || (value || []).some(row => row.id === shop.id))} disabled={blocked || Boolean(draft) || !shop.enabled}
+        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: '1 1 0%', minWidth: 0, cursor: 'pointer' }}>
+          <input type="checkbox" style={{ width: 16, height: 16, flexShrink: 0, margin: 0, padding: 0, accentColor: '#22c55e' }} checked={Boolean(lockedShops || (value || []).some(row => row.id === shop.id))} disabled={blocked || Boolean(draft) || !shop.enabled}
             onChange={event => onChange(event.target.checked ? [...(value || []), shop] : (value || []).filter(row => row.id !== shop.id))} />
-          <span className="min-w-0 break-words text-[11px] leading-[1.4]">{shop.name}{shop.enabled ? '' : '（已停用）'}{shop.isDefault ? '（默认）' : ''} <small className="text-slate-400 text-[10px]">平台店铺：{shop.platformShopName} · Chrome 端口：{shop.port}</small></span>
+          <span style={{ minWidth: 0, wordBreak: 'break-word', fontSize: 11, lineHeight: 1.4 }}>{shop.name}{shop.enabled ? '' : '（已停用）'}{shop.isDefault ? '（默认）' : ''} <small style={{ color: '#94a3b8', fontSize: 10 }}>平台店铺：{shop.platformShopName} · Chrome 端口：{shop.port}</small></span>
         </label>
         {!lockedShops && <>
           <button type="button" className="node-secondary-button" title={`配置店铺 ${shop.name}`} aria-label={`配置店铺 ${shop.name}`} disabled={blocked || Boolean(draft)} onClick={() => { setDraft({ ...shop }); setError(''); }}><Settings2 size={13} /></button>
@@ -78,8 +78,8 @@ export function DistributionShopPicker({ value, onChange, onEditingChange, disab
     </div>
     <div className="flex items-center flex-wrap gap-x-4 gap-y-1.5 mt-2 min-w-0 text-[11px]">
       <span className="shrink-0 text-slate-400 font-bold whitespace-nowrap">商品分配方式</span>
-      {distributionModes.map(option => <label className="inline-flex items-center gap-1.5 cursor-pointer" key={option.value}>
-        <input type="radio" className="w-3.5 h-3.5 shrink-0 m-0 p-0 accent-green-500" name="distribution-mode" value={option.value} checked={mode === option.value} onChange={() => onModeChange(option.value)} disabled={blocked || Boolean(draft)} />{option.label}
+      {distributionModes.map(option => <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer' }} key={option.value}>
+        <input type="radio" style={{ width: 14, height: 14, flexShrink: 0, margin: 0, padding: 0, accentColor: '#22c55e' }} name="distribution-mode" value={option.value} checked={mode === option.value} onChange={() => onModeChange(option.value)} disabled={blocked || Boolean(draft)} />{option.label}
       </label>)}
     </div>
     {error && <p role="alert" className="!text-red-200">{error}</p>}
