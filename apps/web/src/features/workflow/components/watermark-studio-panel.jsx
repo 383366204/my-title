@@ -46,6 +46,13 @@ function statusLabel(status) {
   return '待处理';
 }
 
+/** Toolbar/mode/action button base style */
+const TOOLBAR_BTN = 'inline-flex items-center bg-slate-900/70 border border-slate-600/70 rounded-md text-slate-300 cursor-pointer text-xs gap-1.5 py-1.5 px-2.5 disabled:cursor-not-allowed disabled:opacity-45';
+const TOOLBAR_BTN_ACTIVE = 'bg-sky-400/15 border-sky-400/50 text-sky-300';
+
+/** Empty-state action button style */
+const EMPTY_ACTION_BTN = 'inline-flex items-center bg-sky-400/10 border border-sky-400/40 rounded-[10px] text-sky-300 cursor-pointer text-sm gap-2 py-4 px-6 transition-all duration-150 ease-in-out hover:bg-sky-400/20 hover:-translate-y-px';
+
 /**
  * 批量去水印工作台：打开图片/文件夹 → 自动或手动框选水印 → 批量修复 → 预览对比 → 打包下载。
  * 全部在本机浏览器内完成，图片不会上传服务器。
@@ -341,20 +348,20 @@ export function WatermarkStudioPanel({ onClose }) {
 
   if (images.length === 0) {
     return (
-      <div className="watermark-empty">
-        <div className="watermark-empty-title">批量去水印</div>
-        <p>选择商品图片或整个文件夹，全部在本机处理，不上传服务器。</p>
-        <div className="watermark-empty-actions">
-          <button type="button" onClick={() => filesRef.current?.click()}>
+      <div className="flex flex-col items-center justify-center gap-3.5 min-h-[420px] px-5 py-10 text-center">
+        <div className="text-slate-200 text-lg font-bold">批量去水印</div>
+        <p className="text-slate-400 text-xs m-0">选择商品图片或整个文件夹，全部在本机处理，不上传服务器。</p>
+        <div className="flex gap-3.5">
+          <button type="button" className={EMPTY_ACTION_BTN} onClick={() => filesRef.current?.click()}>
             <ImageIcon size={18} />
             打开图片
           </button>
-          <button type="button" onClick={() => folderRef.current?.click()}>
+          <button type="button" className={EMPTY_ACTION_BTN} onClick={() => folderRef.current?.click()}>
             <FolderOpen size={18} />
             打开文件夹
           </button>
         </div>
-        {notice && <div className="watermark-notice">{notice}</div>}
+        {notice && <div className="bg-sky-400/10 rounded-md text-sky-300 text-[11px] py-1.5 px-2.5">{notice}</div>}
         <input ref={filesRef} type="file" accept="image/png,image/jpeg,image/webp" multiple hidden onChange={(event) => { addFiles(event.target.files); event.target.value = ''; }} />
         <input
           ref={folderRef}
@@ -370,40 +377,40 @@ export function WatermarkStudioPanel({ onClose }) {
   }
 
   return (
-    <div className="watermark-studio">
-      <div className="watermark-toolbar">
-        <div className="watermark-mode">
-          <button type="button" className={mode === 'auto' ? 'is-active' : ''} onClick={() => setMode('auto')}><Scan size={13} /> 自动识别</button>
-          <button type="button" className={mode === 'manual' ? 'is-active' : ''} onClick={() => setMode('manual')}><Wand2 size={13} /> 手动框选</button>
-          <label className="watermark-apply-all">
+    <div className="grid gap-2.5">
+      <div className="flex items-center flex-wrap gap-2.5 justify-between">
+        <div className="flex items-center flex-wrap gap-2">
+          <button type="button" className={`${TOOLBAR_BTN} ${mode === 'auto' ? TOOLBAR_BTN_ACTIVE : ''}`} onClick={() => setMode('auto')}><Scan size={13} /> 自动识别</button>
+          <button type="button" className={`${TOOLBAR_BTN} ${mode === 'manual' ? TOOLBAR_BTN_ACTIVE : ''}`} onClick={() => setMode('manual')}><Wand2 size={13} /> 手动框选</button>
+          <label className="flex items-center text-slate-400 text-[11px] gap-1.5">
             <input type="checkbox" checked={applyToAll} onChange={(event) => setApplyToAll(event.target.checked)} />
             水印框应用到全部
           </label>
         </div>
-        <div className="watermark-actions">
-          <button type="button" onClick={runAutoDetect} disabled={!activeImage || processing}><Scan size={13} /> 重新识别</button>
+        <div className="flex items-center flex-wrap gap-2">
+          <button type="button" className={TOOLBAR_BTN} onClick={runAutoDetect} disabled={!activeImage || processing}><Scan size={13} /> 重新识别</button>
           <button type="button" className="node-primary-button" onClick={processBatch} disabled={processing || pendingCount === 0}>
             {processing ? <Loader2 size={13} className="animate-spin" /> : <Wand2 size={13} />}
             {processing ? `修复中 ${processing.current}/${processing.total}` : '开始批量修复'}
           </button>
-          <button type="button" onClick={download} disabled={downloading || doneCount === 0}>
+          <button type="button" className={TOOLBAR_BTN} onClick={download} disabled={downloading || doneCount === 0}>
             {downloading ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
             打包下载{doneCount > 0 ? `（${doneCount}）` : ''}
           </button>
-          <button type="button" onClick={resetAll} disabled={processing}><RefreshCw size={13} /> 重新选择</button>
-          <button type="button" onClick={onClose}>收起</button>
+          <button type="button" className={TOOLBAR_BTN} onClick={resetAll} disabled={processing}><RefreshCw size={13} /> 重新选择</button>
+          <button type="button" className={TOOLBAR_BTN} onClick={onClose}>收起</button>
         </div>
       </div>
 
       {processing && (
-        <div className="watermark-progress">
-          <div className="watermark-progress-bar" style={{ width: `${Math.round((processing.current / Math.max(1, processing.total)) * 100)}%` }} />
+        <div className="bg-slate-800/90 rounded h-[5px] overflow-hidden">
+          <div className="h-full bg-gradient-to-r from-sky-400 to-emerald-400 transition-[width] duration-200 ease-in-out" style={{ width: `${Math.round((processing.current / Math.max(1, processing.total)) * 100)}%` }} />
         </div>
       )}
-      {notice && <div className="watermark-notice">{notice}</div>}
+      {notice && <div className="bg-sky-400/10 rounded-md text-sky-300 text-[11px] py-1.5 px-2.5">{notice}</div>}
 
-      <div className="watermark-body">
-        <aside className="watermark-file-list">
+      <div className="grid gap-3 grid-cols-[168px_minmax(0,1fr)] min-h-[460px] max-md:grid-cols-1">
+        <aside className="flex flex-col gap-2 max-h-[62vh] overflow-y-auto pr-0.5 max-md:flex-row max-md:max-h-32 max-md:overflow-x-auto">
           {images.map((image) => (
             <button
               key={image.id}
@@ -412,20 +419,33 @@ export function WatermarkStudioPanel({ onClose }) {
               onClick={() => setActiveId(image.id)}
             >
               <img src={image.resultUrl || image.url} alt={image.name} loading="lazy" />
-              <span className="watermark-file-name" title={image.name}>{image.name}</span>
-              <span className="watermark-file-status">{statusLabel(image.status)}</span>
-              {image.status === 'error' && <span className="watermark-file-error" title={image.error}>{image.error}</span>}
+              <span className="text-slate-300 text-[11px] overflow-hidden text-ellipsis whitespace-nowrap" title={image.name}>{image.name}</span>
+              <span className={`rounded text-[10px] ${image.status === 'done' ? 'text-emerald-300' : image.status === 'processing' ? 'text-sky-300' : image.status === 'error' ? 'text-red-300' : 'text-slate-400'}`}>{statusLabel(image.status)}</span>
+              {image.status === 'error' && <span className="text-red-300 text-[10px] overflow-hidden text-ellipsis whitespace-nowrap" title={image.error}>{image.error}</span>}
             </button>
           ))}
         </aside>
 
-        <div className="watermark-editor" onPointerDown={handleEditorPointerDown} onPointerMove={handleEditorPointerMove} onPointerUp={handleEditorPointerUp} onPointerLeave={handleEditorPointerUp} ref={editorRef}>
+        <div
+          className="relative flex justify-center overflow-hidden rounded-lg border border-slate-600/60 touch-none"
+          style={{
+            backgroundColor: 'rgba(15, 23, 42, 0.9)',
+            backgroundImage: 'linear-gradient(45deg, rgba(30, 41, 59, 0.7) 25%, transparent 25%, transparent 75%, rgba(30, 41, 59, 0.7) 75%), linear-gradient(45deg, rgba(30, 41, 59, 0.7) 25%, transparent 25%, transparent 75%, rgba(30, 41, 59, 0.7) 75%)',
+            backgroundPosition: '0 0, 10px 10px',
+            backgroundSize: '20px 20px'
+          }}
+          onPointerDown={handleEditorPointerDown}
+          onPointerMove={handleEditorPointerMove}
+          onPointerUp={handleEditorPointerUp}
+          onPointerLeave={handleEditorPointerUp}
+          ref={editorRef}
+        >
           {activeImage && (
             <>
-              <div className="watermark-compare-original"><img src={activeImage.url} alt="原图" draggable={false} /></div>
+              <div className="relative max-h-[62vh] max-w-full"><img src={activeImage.url} alt="原图" draggable={false} className="block max-h-[62vh] max-w-full select-none" /></div>
               {activeImage.resultUrl && (
-                <div className="watermark-compare-result" style={{ clipPath: `inset(0 ${100 - compareRatio}% 0 0)` }}>
-                  <img src={activeImage.resultUrl} alt="去水印后" draggable={false} />
+                <div className="absolute inset-0 z-[2]" style={{ clipPath: `inset(0 ${100 - compareRatio}% 0 0)` }}>
+                  <img src={activeImage.resultUrl} alt="去水印后" draggable={false} className="block max-h-[62vh] max-w-full select-none" />
                 </div>
               )}
               {activeImage.status !== 'done' && activeImage.boxes.map((box, index) => {
@@ -433,7 +453,7 @@ export function WatermarkStudioPanel({ onClose }) {
                 return (
                   <div
                     key={`${activeImage.id}-${index}`}
-                    className="watermark-box"
+                    className="absolute border-[1.5px] border-dashed border-sky-400/95 bg-sky-400/10 cursor-move z-[3]"
                     style={{ left: `${view.x * 100}%`, top: `${view.y * 100}%`, width: `${view.w * 100}%`, height: `${view.h * 100}%` }}
                     onPointerDown={(event) => {
                       event.stopPropagation();
@@ -448,8 +468,8 @@ export function WatermarkStudioPanel({ onClose }) {
                       });
                     }}
                   >
-                    <span className="watermark-box-tag">水印 {index + 1}</span>
-                    <button type="button" className="watermark-box-delete" onPointerDown={(event) => event.stopPropagation()} onClick={() => removeBox(index)}>
+                    <span className="absolute left-[3px] top-[3px] bg-sky-400/90 rounded-[3px] text-slate-900 text-[10px] px-1 py-[1px] whitespace-nowrap">水印 {index + 1}</span>
+                    <button type="button" className="absolute right-[3px] top-[3px] flex items-center bg-red-400/90 border-0 rounded-[3px] text-white cursor-pointer p-0.5" onPointerDown={(event) => event.stopPropagation()} onClick={() => removeBox(index)}>
                       <Trash2 size={10} />
                     </button>
                     <span className="watermark-box-corner" />
@@ -458,12 +478,12 @@ export function WatermarkStudioPanel({ onClose }) {
               })}
               {drawingBox && (
                 <div
-                  className="watermark-box is-drawing"
+                  className="absolute border-[1.5px] border-dashed border-emerald-400/95 bg-emerald-400/10 pointer-events-none z-[3]"
                   style={{ left: `${drawingBox.x * 100}%`, top: `${drawingBox.y * 100}%`, width: `${drawingBox.w * 100}%`, height: `${drawingBox.h * 100}%` }}
                 />
               )}
               {activeImage.resultUrl && (
-                <div className="watermark-compare-slider">
+                <div className="absolute bottom-2.5 left-1/2 -translate-x-1/2 z-[5] flex items-center bg-slate-900/85 rounded-md text-slate-400 text-[10px] gap-2 px-2.5 py-1.5">
                   <input
                     type="range"
                     min="0"
@@ -471,6 +491,7 @@ export function WatermarkStudioPanel({ onClose }) {
                     value={compareRatio}
                     onChange={(event) => setCompareRatio(Number(event.target.value))}
                     onPointerDown={(event) => event.stopPropagation()}
+                    className="w-[180px] accent-sky-400"
                   />
                   <span>拖动对比：左原图 / 右修复后</span>
                 </div>
