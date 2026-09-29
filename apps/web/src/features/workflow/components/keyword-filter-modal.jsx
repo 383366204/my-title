@@ -106,19 +106,19 @@ export function KeywordFilterModal({ runId, initialConfig, decisions, onSaveDraf
     if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog.current)) { event.preventDefault(); last?.focus(); }
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
   };
-  return createPortal(<div className="workflow-modal-backdrop keyword-filter-backdrop" onClick={close}>
-    <section className="workflow-modal keyword-filter-modal" role="dialog" aria-modal="true" aria-label="关键词筛选条件"
+  return createPortal(<div className="workflow-modal-backdrop z-[110] max-[480px]:!p-3" onClick={close}>
+    <section className="workflow-modal w-[min(560px,100%)] grid grid-rows-[auto_minmax(0,1fr)] rounded-lg text-[var(--text-primary,var(--text-body))]" role="dialog" aria-modal="true" aria-label="关键词筛选条件"
       tabIndex={-1} ref={dialog} onKeyDown={trapFocus} onClick={event => event.stopPropagation()}>
       <header className="workflow-modal-head"><strong>关键词筛选条件</strong>
         <button type="button" className="workflow-modal-close" aria-label="关闭筛选条件" disabled={saving} onClick={close}><X size={16} /></button>
       </header>
-      {loading ? <p role="status">正在读取本次运行的筛选条件…</p> : <form onSubmit={save}>
-        <fieldset disabled={!editable || saving}>
-          {KEYWORD_FILTER_FIELDS.map(field => <div className="keyword-filter-field" key={field.key}>
-            <label><input type="checkbox" aria-label={`启用${field.label}`} checked={draft[field.key].enabled}
+      {loading ? <p role="status">正在读取本次运行的筛选条件…</p> : <form className="min-h-0 overflow-y-auto" onSubmit={save}>
+        <fieldset className="border-0 p-0 m-0 min-w-0" disabled={!editable || saving}>
+          {KEYWORD_FILTER_FIELDS.map(field => <div className="grid grid-cols-[minmax(0,1fr)_32px_minmax(90px,120px)] items-center gap-3 py-3.5 border-b border-[var(--border-color,var(--border-default))] text-[13px] max-[480px]:grid-cols-[minmax(0,1fr)_28px_88px] max-[480px]:gap-1.5" key={field.key}>
+            <label className="flex items-center gap-2 break-words"><input type="checkbox" className="shrink-0 w-4 h-4 m-0 p-0" aria-label={`启用${field.label}`} checked={draft[field.key].enabled}
               onChange={event => { setSaved(false); setDraft(current => ({ ...current, [field.key]: { ...current[field.key], enabled: event.target.checked } })); }} />{field.label}</label>
             <span>{field.operator === '>' ? '大于' : '小于'}</span>
-            <div className="keyword-filter-number"><input type="number" aria-label={field.label} min="0" max={field.max} step={field.step}
+            <div className="flex items-center gap-1"><input type="number" className="w-full min-w-0 p-2 rounded-md bg-[var(--bg-secondary,#111c31)] text-inherit border border-[var(--border-color,#475569)] disabled:opacity-55" aria-label={field.label} min="0" max={field.max} step={field.step}
               required disabled={!draft[field.key].enabled} value={draft[field.key].value}
               onChange={event => { setSaved(false); setDraft(current => ({ ...current, [field.key]: { ...current[field.key], value: event.target.value } })); }} />
               {field.unit && <span>{field.unit}</span>}
@@ -126,7 +126,7 @@ export function KeywordFilterModal({ runId, initialConfig, decisions, onSaveDraf
           </div>)}
         </fieldset>
         {!editable && snapshot && <p className="node-workbench-note">{snapshot.readOnlyReason || '本次运行配置只读；正在采集或已进入后续步骤。'}</p>}
-        {snapshot?.requiresRecollection && <p className="keyword-filter-warning" role="status">{snapshot.recollectionReason || '之前的平台预筛可能排除了部分关键词，当前筛选仅覆盖已采集数据。需要完整结果时，请重新采集。'}</p>}
+        {snapshot?.requiresRecollection && <p className="text-[#d99a28] text-xs break-words" role="status">{snapshot.recollectionReason || '之前的平台预筛可能排除了部分关键词，当前筛选仅覆盖已采集数据。需要完整结果时，请重新采集。'}</p>}
         {snapshot?.requiresRecollection && snapshot.recollectionSupported && editable && onRecollected && <div>
           <button type="button" className="node-secondary-button" disabled={saving || Boolean(dirty)} onClick={() => setConfirmRecollect(true)}><RefreshCw size={14} />重新采集</button>
           {dirty && <p className="node-workbench-note">先应用筛选条件，再重新采集。</p>}
@@ -138,9 +138,9 @@ export function KeywordFilterModal({ runId, initialConfig, decisions, onSaveDraf
             </div>
           </div>}
         </div>}
-        {saved && <p className="keyword-filter-success" role="status">筛选条件已保存，已有数据已重新筛选；流程未继续。</p>}
-        {error && <p className="keyword-filter-error" role="alert">{error}</p>}
-        <footer className="node-product-actions">
+        {saved && <p className="text-[#22a779] text-xs" role="status">筛选条件已保存，已有数据已重新筛选；流程未继续。</p>}
+        {error && <p className="text-[#e65b64] text-xs break-words" role="alert">{error}</p>}
+        <footer className="node-product-actions flex items-center gap-2 pt-4 flex-wrap [&>button]:m-0">
           {editable && <button type="button" className="node-secondary-button" disabled={saving} onClick={() => { setDraft(keywordFilterDraft()); setSaved(false); }}><RotateCcw size={14} />恢复默认</button>}
           <button type="button" className="node-secondary-button" disabled={saving} onClick={close}>{saved || !editable ? '关闭' : '取消'}</button>
           {editable && <button type="submit" className="node-primary-button" disabled={saving}><Save size={14} />{saving ? '正在保存' : runId ? '应用并重新筛选' : '保存条件'}</button>}

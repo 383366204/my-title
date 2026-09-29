@@ -112,18 +112,28 @@ export function WorkflowCanvasWorkspace({
         </div>
 
         {orderedWorkflowNodes.length > 0 && (
-          <div className="workflow-order-strip" aria-label="流程顺序">
-            {orderedWorkflowNodes.map((node, index) => (
-              <button
-                type="button"
-                key={node.id}
-                className={`workflow-order-step ${selectedNodeId === node.id ? 'workflow-order-step-active' : ''}`}
-                onClick={() => onSelectNode(node.id)}
-              >
-                <span>{node.data?.stepIndex || index + 1}</span>
-                <strong>{node.data?.label || node.id}</strong>
-              </button>
-            ))}
+          <div className="flex items-center gap-2 min-h-[48px] py-2 px-4 border-b border-slate-800 bg-slate-950/[0.92] overflow-x-auto shrink-0" aria-label="流程顺序">
+            {orderedWorkflowNodes.map((node, index, all) => {
+              const isActive = selectedNodeId === node.id;
+              return (
+                <button
+                  type="button"
+                  key={node.id}
+                  className={`shrink-0 inline-flex items-center gap-[7px] min-h-[30px] max-w-[180px] py-[5px] px-[9px] border rounded-lg bg-slate-900/80 transition-colors duration-[160ms] ${
+                    isActive
+                      ? 'border-blue-500/75 bg-blue-900/[0.28] text-[#e2e8f0]'
+                      : 'border-slate-700/[0.95] text-[#94a3b8] hover:border-blue-500/75 hover:bg-blue-900/[0.28] hover:text-[#e2e8f0]'
+                  }`}
+                  onClick={() => onSelectNode(node.id)}
+                >
+                  <span className={`shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-black ${
+                    isActive ? 'bg-blue-600 text-white' : 'bg-slate-800 text-blue-200'
+                  }`}>{node.data?.stepIndex || index + 1}</span>
+                  <strong className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[11px] font-extrabold">{node.data?.label || node.id}</strong>
+                  {index < all.length - 1 && <span className="shrink-0 ml-0.5 text-slate-600 text-xs">→</span>}
+                </button>
+              );
+            })}
           </div>
         )}
 

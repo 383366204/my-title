@@ -199,44 +199,47 @@ export function ReviewDraftPanel({ artifactState, onConfirm, confirming = false,
   };
 
   return (
-    <div className="review-draft-panel">
-      <div className="review-source-groups-head">
-        <div><strong>评价草稿</strong><span>评价不复述商品标题；仍引用标题的内容已被系统换成通用文案，请逐条核对后再生成 Excel。</span></div>
-        <b className={emptyCount > 0 ? 'is-missing' : ''}>{emptyCount > 0 ? `${emptyCount} 条未填写` : `${rows.length} 条可导出`}</b>
+    <div className="grid gap-3.5">
+      <div className="flex items-center justify-between gap-2">
+        <div className="grid gap-[3px] min-w-0">
+          <strong>评价草稿</strong>
+          <span className="text-slate-400 text-[10px]">评价不复述商品标题；仍引用标题的内容已被系统换成通用文案，请逐条核对后再生成 Excel。</span>
+        </div>
+        <b className={emptyCount > 0 ? 'rounded text-[10px] px-[7px] py-[5px] whitespace-nowrap bg-amber-500/15 text-amber-300' : 'rounded text-[10px] px-[7px] py-[5px] whitespace-nowrap text-emerald-300'}>{emptyCount > 0 ? `${emptyCount} 条未填写` : `${rows.length} 条可导出`}</b>
       </div>
-      {saveStatus === 'saving' && <div className="review-autosave-hint">正在自动保存修改…</div>}
-      {saveStatus === 'saved' && <div className="review-autosave-hint">修改已自动保存 {savedAt}，关闭窗口后仍会保留</div>}
+      {saveStatus === 'saving' && <div className="text-slate-400 text-[10px] px-0.5">正在自动保存修改…</div>}
+      {saveStatus === 'saved' && <div className="text-slate-400 text-[10px] px-0.5">修改已自动保存 {savedAt}，关闭窗口后仍会保留</div>}
       {saveStatus === 'error' && (
         <div className="artifact-error">自动保存失败：{saveError}。修改仍保留在本页，可继续编辑或直接确认生成。</div>
       )}
-      {attachmentNotice && <div className="review-autosave-hint">{attachmentNotice}</div>}
+      {attachmentNotice && <div className="text-slate-400 text-[10px] px-0.5">{attachmentNotice}</div>}
       {attachmentError && <div className="artifact-error">{attachmentError}</div>}
-      <div className="review-draft-list">
+      <div className="grid gap-2.5 max-h-[min(560px,60vh)] overflow-y-auto pr-1">
         {rows.map((row, index) => (
-          <article className="review-draft-row" key={row.id || index}>
-            <div>
+          <article className="bg-slate-900/55 border border-slate-600/70 rounded-[7px] grid gap-1.5 px-2.5 py-2" key={row.id || index}>
+            <div className="flex flex-col items-start gap-[3px] min-w-0">
               <strong>{row.title}</strong>
-              <span>
+              <span className="text-slate-400 text-[10px]">
                 {row.sourceSheet} · 第 {row.sourceRow} 行
-                {row.origin === 'replaced' && <em className="review-draft-replaced">已替换引用标题的文案</em>}
+                {row.origin === 'replaced' && <em className="bg-amber-500/15 rounded text-amber-300 text-[10px] not-italic ml-1 px-1 py-px">已替换引用标题的文案</em>}
               </span>
             </div>
             <label className="node-field">
               <span>评价内容</span>
               <textarea rows="3" maxLength="500" value={row.reviewContent || ''} onChange={(event) => updateRow(index, 'reviewContent', event.target.value)} />
             </label>
-            <div className="review-draft-attachments">
-              <div className="review-draft-attachments-head">
+            <div className="border-t border-slate-600/50 grid gap-2 pt-2.5">
+              <div className="flex items-center justify-between text-slate-400 text-xs gap-2">
                 <span>对应文件图片</span>
                 <small>{attachmentsOf(row).length} / {MAX_REVIEW_ATTACHMENTS}</small>
               </div>
               {attachmentsOf(row).length > 0 && (
-                <div className="review-draft-attachment-list">
+                <div className="flex flex-wrap gap-2">
                   {attachmentsOf(row).map((attachment) => (
-                    <figure className="review-draft-attachment" key={attachment.id}>
-                      <img src={reviewAttachmentUrl(currentRunId, attachment.id)} alt={attachment.name} loading="lazy" />
-                      <figcaption title={attachment.name}>{attachment.name}</figcaption>
-                      <button type="button" title="删除图片" disabled={uploadingDraftId === row.id} onClick={() => handleRemove(row, attachment)}>
+                    <figure className="relative bg-slate-900/60 border border-slate-600/70 rounded-md grid gap-1 p-1.5 w-[104px]" key={attachment.id}>
+                      <img className="rounded h-20 w-[90px] object-cover" src={reviewAttachmentUrl(currentRunId, attachment.id)} alt={attachment.name} loading="lazy" />
+                      <figcaption className="text-slate-300 text-[10px] truncate" title={attachment.name}>{attachment.name}</figcaption>
+                      <button className="absolute top-1 right-1 bg-slate-900/85 border-none rounded text-red-300 cursor-pointer p-0.5" type="button" title="删除图片" disabled={uploadingDraftId === row.id} onClick={() => handleRemove(row, attachment)}>
                         <Trash2 size={11} />
                       </button>
                     </figure>
