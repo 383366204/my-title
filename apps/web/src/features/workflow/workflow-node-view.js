@@ -118,12 +118,8 @@ export function getSheetConfigSummary(state = {}) {
     const groupSize = [1, 2, 4].includes(Number(state.reviewGroupSize)) ? Number(state.reviewGroupSize) : 4;
     return `评价表 · ${countLabel} · ${groupSize} 个/组`;
   }
-  const amountLabel = {
-    average: '平均实付',
-    payment: '支付金额',
-    blank: '金额留空'
-  }[state.amountMode] || '平均实付';
-  return `刷单表 · ${countLabel} · ${amountLabel}${state.includeImages === false ? ' · 无主图' : ''}`;
+  // 金额来源已固定为商品页当前售价（采集阶段逐商品抓取），不再展示金额模式选项
+  return `刷单表 · ${countLabel} · 商品页当前售价${state.includeImages === false ? ' · 无主图' : ''}`;
 }
 
 /** Per-node success label builders. Each receives (output, state) and returns a string or ''. */

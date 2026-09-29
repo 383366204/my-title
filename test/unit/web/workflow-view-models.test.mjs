@@ -196,7 +196,7 @@ test('order sheet start node summarizes selected collection conditions', () => {
 
   assert.equal(getOrderSheetConfigSummary(state), '2026-08-05 至 2026-08-09 · 2 页 · 支付金额降序');
   assert.equal(getWorkflowNodeViewModel('start', state).configSummary, '2026-08-05 至 2026-08-09 · 2 页 · 支付金额降序');
-  assert.equal(getSheetConfigSummary({ sheetType: 'order', productLimit: 12, amountMode: 'payment' }), '刷单表 · 12 个商品 · 支付金额');
+  assert.equal(getSheetConfigSummary({ sheetType: 'order', productLimit: 12, amountMode: 'payment' }), '刷单表 · 12 个商品 · 商品页当前售价');
   assert.equal(getSheetConfigSummary({ sheetType: 'review', productLimit: 0, reviewGroupSize: 2 }), '评价表 · 全部商品 · 2 个/组');
   assert.equal(getWorkflowNodeAction('generateSheet', { status: 'idle', sheetConfig: true }).action, 'configure-sheet');
   assert.equal(getWorkflowNodeAction('generateSheet', { status: 'completed', sheetConfig: true, workflowReadOnly: true }).label, '查看设置');

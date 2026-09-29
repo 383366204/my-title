@@ -141,7 +141,6 @@ if (mode === 'watermark-removal') {
           fileName: '',
           includeRawData: true,
           includeImages: true,
-          amountMode: 'average',
           missingAmountPolicy: 'blank',
           cartQuantity: 1,
           rowSpan: 3,

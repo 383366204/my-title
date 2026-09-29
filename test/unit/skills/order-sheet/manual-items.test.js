@@ -138,6 +138,50 @@ describe('manual items parser', () => {
     assert.deepEqual(enriched, [{ itemId: '1001', title: '测试', enrichmentStatus: 'complete' }]);
   });
 
+  it('forceEnrich re-visits fully titled products to fill missing price without overwriting known fields', async () => {
+    let fetched = 0;
+    const item = {
+      itemId: '3001',
+      title: '排行里的标题',
+      imageUrl: 'https://img.alicdn.com/x.jpg',
+      storeName: '测试店铺',
+      productUrl: 'https://item.taobao.com/item.htm?id=3001',
+      sourceType: 'rank'
+    };
+
+    const fetchPage = async (target) => {
+      fetched += 1;
+      return {
+        itemId: target.itemId,
+        title: '页面另一个标题',
+        imageUrl: 'https://img.alicdn.com/page.jpg',
+        storeName: '页面店铺',
+        referencePrice: 59,
+        selectedSkuPrice: 59,
+        selectedSkuName: '颜色：金',
+        skuOptions: [],
+        finalUrl: target.productUrl,
+        enrichmentSource: 'http'
+      };
+    };
+
+    const [skipped] = await enrichManualItems([item], { skipEnrichmentDelay: true, fetchTaobaoItemPage: fetchPage });
+    assert.equal(fetched, 0, '默认：标题主图齐全的商品不重新抓取');
+    assert.equal(skipped.enrichmentStatus, 'complete');
+
+    const [enriched] = await enrichManualItems([item], {
+      skipEnrichmentDelay: true,
+      forceEnrich: true,
+      fetchTaobaoItemPage: fetchPage
+    });
+    assert.equal(fetched, 1, 'forceEnrich：即使资料齐全也重新抓页面补价格');
+    assert.equal(enriched.title, '排行里的标题', '已有标题不被页面数据覆盖');
+    assert.equal(enriched.imageUrl, 'https://img.alicdn.com/x.jpg');
+    assert.equal(enriched.storeName, '测试店铺');
+    assert.equal(enriched.orderAmount, 59);
+    assert.equal(enriched.sourceType, 'rank');
+  });
+
   it('falls back to one reusable Chrome session when direct pages have no title', async () => {
     const opened = [];
     let sessionCount = 0;
@@ -252,8 +296,13 @@ describe('manual items parser', () => {
     assert.equal(isPlaceholderTitle('淘宝网'), true);
     assert.equal(isPlaceholderTitle(''), true);
     assert.equal(isPlaceholderTitle('气球狗长项链装饰贝壳长款简约韩系女百搭通勤小众高级感金属配饰'), false);
+    assert.equal(isPlaceholderTitle('用户评价'), true);
+    assert.equal(isPlaceholderTitle('用户评价·1.2万'), true);
+    assert.equal(isPlaceholderTitle('用户评价-1000+'), true);
+    assert.equal(isPlaceholderTitle('用户评价收纳瓶'), false);
     assert.equal(pickTitle(['商品详情', '商品详情 - 淘宝网', '气球狗长项链装饰贝壳长款']), '气球狗长项链装饰贝壳长款');
     assert.equal(pickTitle(['商品详情', '']), '');
+    assert.equal(pickTitle(['用户评价·300', '宠物玩具飞盘狗狗互动耐咬训练球']), '宠物玩具飞盘狗狗互动耐咬训练球');
   });
 
   it('does not fall back to a placeholder <title> when og:title is missing', () => {
@@ -283,6 +332,7 @@ describe('manual items parser', () => {
     let evaluates = 0;
     const session = await createTaobaoChromeSession({
       browserTimeout: 6000,
+      priceWaitMs: 0,
       openBlankTarget: async () => ({ webSocketDebuggerUrl: 'ws://fake-cdp' }),
       createCdpClient: () => ({
         ready: Promise.resolve(),
@@ -302,6 +352,109 @@ describe('manual items parser', () => {
 
     assert.equal(evaluates, 2, '占位标题不应让轮询提前结束');
     assert.equal(detail.title, '气球狗长项链装饰贝壳长款简约韩系女');
+  });
+
+  it('waits for async SKU prices before returning once the title rendered', async () => {
+    const targetUrl = 'https://item.taobao.com/item.htm?id=2002';
+    const titled = {
+      readyState: 'interactive',
+      url: targetUrl,
+      title: '宠物玩具飞盘',
+      titleCandidates: ['宠物玩具飞盘'],
+      skuOptions: []
+    };
+    const frames = [titled, { ...titled, defaultSkuPrice: 19.9, skuOptions: [
+      { skuId: 'sku-1', name: '蓝色 / M', price: 19.9, quantity: 5, available: true }
+    ] }];
+    let evaluates = 0;
+    const session = await createTaobaoChromeSession({
+      browserTimeout: 6000,
+      openBlankTarget: async () => ({ webSocketDebuggerUrl: 'ws://fake-cdp' }),
+      createCdpClient: () => ({
+        ready: Promise.resolve(),
+        send: async () => ({}),
+        async evaluate() {
+          evaluates += 1;
+          return frames[Math.min(evaluates - 1, frames.length - 1)];
+        },
+        close: () => {}
+      })
+    });
+
+    const detail = await session.readItem({ itemId: '2002', productUrl: targetUrl });
+    assert.equal(evaluates, 2, '标题就绪但价格未填充时不应收工');
+    assert.equal(detail.title, '宠物玩具飞盘');
+    assert.equal(detail.referencePrice, 19.9);
+    assert.equal(detail.selectedSkuPrice, 19.9);
+  });
+
+  it('returns titled detail with empty price when SKU data never renders within the wait window', async () => {
+    const targetUrl = 'https://item.taobao.com/item.htm?id=2003';
+    let evaluates = 0;
+    const session = await createTaobaoChromeSession({
+      browserTimeout: 6000,
+      priceWaitMs: 700,
+      openBlankTarget: async () => ({ webSocketDebuggerUrl: 'ws://fake-cdp' }),
+      createCdpClient: () => ({
+        ready: Promise.resolve(),
+        send: async () => ({}),
+        async evaluate() {
+          evaluates += 1;
+          return {
+            readyState: 'complete',
+            url: targetUrl,
+            title: '宠物玩具飞盘',
+            titleCandidates: ['宠物玩具飞盘'],
+            skuOptions: []
+          };
+        },
+        close: () => {}
+      })
+    });
+
+    const detail = await session.readItem({ itemId: '2003', productUrl: targetUrl });
+    assert.ok(evaluates >= 3, '价格窗口内应至少多轮询一次');
+    assert.equal(detail.title, '宠物玩具飞盘');
+    assert.equal(detail.referencePrice, null);
+  });
+
+  it('ignores stale snapshots from the previous product while the tab is still navigating', async () => {
+    const frames = [
+      {
+        readyState: 'complete',
+        url: 'https://item.taobao.com/item.htm?id=1001',
+        titleCandidates: ['上一个商品的标题'],
+        skuOptions: [{ skuId: 's0', name: '规格', price: 9, quantity: 5, available: true }]
+      },
+      {
+        readyState: 'complete',
+        url: 'https://item.taobao.com/item.htm?id=1002',
+        titleCandidates: ['目标商品标题'],
+        skuOptions: [{ skuId: 's1', name: '规格', price: 29, quantity: 5, available: true }]
+      }
+    ];
+    let evaluates = 0;
+    const session = await createTaobaoChromeSession({
+      browserTimeout: 6000,
+      openBlankTarget: async () => ({ webSocketDebuggerUrl: 'ws://fake-cdp' }),
+      createCdpClient: () => ({
+        ready: Promise.resolve(),
+        send: async () => ({}),
+        async evaluate() {
+          evaluates += 1;
+          return frames[Math.min(evaluates - 1, frames.length - 1)];
+        },
+        close: () => {}
+      })
+    });
+
+    const detail = await session.readItem({
+      itemId: '1002',
+      productUrl: 'https://item.taobao.com/item.htm?id=1002'
+    });
+    assert.equal(evaluates, 2, '商品 ID 不匹配的旧文档快照不应被采纳');
+    assert.equal(detail.title, '目标商品标题');
+    assert.equal(detail.referencePrice, 29);
   });
 
   it('reports failed enrichment when only a placeholder title is ever rendered', async () => {
