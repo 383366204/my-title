@@ -633,7 +633,14 @@ describe('keyword-mining', () => {
   });
 
   test('mineKeywords default seed pool produces candidates', async () => {
-    const result = await mineKeywords({ count: 5, persist: false });
+    // 必须隔离 dataDir：默认目录带本机真实挖词的种子池与冷却记录，
+    // CI 全新检出（只有 seeds.example.json 模板）能过、本机跑过流水线后会误红
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kw-default-pool-'));
+    fs.copyFileSync(
+      path.join(__dirname, '../../../../data/keyword-mining/seeds.example.json'),
+      path.join(dataDir, 'seeds.example.json')
+    );
+    const result = await mineKeywords({ count: 5, persist: false, dataDir });
 
     assert.strictEqual(result.ok, true);
     assert.ok(result.stats.expanded > 0);
