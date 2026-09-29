@@ -66,7 +66,7 @@ export function DistributionRow({
 
     return (
       <article className={`flex gap-2 min-w-0 border rounded-lg bg-slate-900/72 p-[7px_9px] ${row.removed ? 'border-rose-400/32 opacity-[0.78]' : 'border-slate-800/90'}`}>
-        {index != null && <span className="shrink-0 self-center w-5 text-center text-slate-500 text-[11px] font-bold">{index}</span>}
+        {index != null && <span className="shrink-0 self-center w-5 text-center text-slate-500 text-[11px] font-bold border-r border-slate-700 pr-2 mr-0.5">{index}</span>}
         <div className="grid gap-1.5 min-w-0 flex-1">
         {/* Row 1: source title (clickable link) + status tag */}
         <div className="flex items-center gap-1.5 min-w-0">

@@ -15,11 +15,10 @@ export function CategoryControl({ row, actions, onUpdateEdit }) {
 
   // Merge info lines into one string
   const infoParts = [];
-  if (record?.source === 'sycm_manual') infoParts.push('已人工确认参谋候选');
-  else if (record?.category) infoParts.push('生意参谋指标推荐');
-  else infoParts.push('尚未确定铺货类目');
+  if (record?.category && record?.source !== 'sycm_manual') infoParts.push('生意参谋指标推荐');
+  else if (!record?.category) infoParts.push('尚未确定铺货类目');
   if (record?.queryWord) infoParts.push(`查询词：${record.queryWord}`);
-  if (record?.source1688Category) infoParts.push(`1688：${record.source1688Category}`);
+  if (record?.source1688Category) infoParts.push(`1688类目：${record.source1688Category}`);
   if (record?.collectedAt) infoParts.push(new Date(record.collectedAt).toLocaleString('zh-CN'));
   if (record?.legacyCategory) infoParts.push(`历史：${record.legacyCategory}`);
 
