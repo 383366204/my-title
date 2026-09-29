@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 
 /** @param {object} props 商品及后端类目操作。 @returns {import('react').JSX.Element} 类目选择与查询。 */
-export function CategoryControl({ row }) {
+export function CategoryControl({ row, actions }) {
   const record = row.categoryRecord;
   const control = row.categoryControl;
   const [query, setQuery] = useState('');
@@ -36,6 +36,7 @@ export function CategoryControl({ row }) {
         onClick={() => control?.act({ action: 'query', urls: [record.url], queryWord: query.trim() || record.keyword })}>
         <RefreshCw size={12} />{record?.candidates?.length ? '重新获取' : '获取类目'}
       </button>
+      {actions && <div className="flex gap-1 shrink-0 [&_.node-secondary-button]:!min-h-[26px] [&_.node-secondary-button]:!py-0.5 [&_.node-secondary-button]:!px-[7px] [&_.node-secondary-button]:!text-[11px]">{actions}</div>}
     </div>
     {/* Row 2: merged info line */}
     {infoParts.length > 0 && <p className="m-0 text-slate-400 text-[10px] leading-[1.3] truncate">{infoParts.join(' · ')}</p>}
