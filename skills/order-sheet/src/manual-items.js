@@ -387,7 +387,8 @@ function cleanBrowserTitle(value) {
 }
 
 // 淘宝商品页是 SPA，首屏 document.title 字面上就是「商品详情」，等渲染完成后才换成真实商品标题。
-const PLACEHOLDER_TITLE_PATTERN = /^\s*(商品详情|商品详情页|产品详情|详情|加载中[^ ]*|页面不存在|登录[^ ]*|淘宝网?|天猫(商城|国际)?)\s*(?:[-–—_]\s*(?:淘宝网?|天猫\S*))?\s*$/i;
+// 「用户评价·N」是评价区标题：同标签页连续导航时可能先于新页面渲染被读到，同样按占位处理。
+const PLACEHOLDER_TITLE_PATTERN = /^\s*(商品详情|商品详情页|产品详情|详情|加载中[^ ]*|页面不存在|登录[^ ]*|淘宝网?|天猫(商城|国际)?|用户评价(?:[·・\-–—]\s*\d[\d万千+.+]*)?)\s*(?:[-–—_]\s*(?:淘宝网?|天猫\S*))?\s*$/i;
 
 /**
  * 判断抓取结果是否只是页面未渲染完成时的占位标题。
@@ -571,6 +572,7 @@ function parseBrowserSnapshot(snapshot = {}, fallbackItem = {}) {
  * @param {number} [options.port=9222] Chrome debugging port.
  * @param {number} [options.browserTimeout=20000] Per-item loading timeout.
  * @param {number} [options.postCompleteGraceMs=6000] 页面 ready 后继续等待真实标题渲染的时间。
+ * @param {number} [options.priceWaitMs=4000] 标题就绪后继续等待 SKU/价格渲染的时间，0 表示不等。
  * @param {Function} [options.openBlankTarget] 注入的空白标签页创建函数，便于测试。
  * @param {Function} [options.createCdpClient] 注入的 CDP 客户端工厂，便于测试。
  * @returns {Promise<{readItem: Function, close: Function}>} Reusable item page session.
@@ -580,6 +582,8 @@ async function createTaobaoChromeSession(options = {}) {
   const timeout = Number(options.browserTimeout || 20000);
   // 页面 readyState 变 complete 只表示静态 HTML 加载完，SPA 还要再渲染才会写入真实标题。
   const postCompleteGrace = Number(options.postCompleteGraceMs || 6000);
+  // 标题来自首屏 SSR，SKU/价格来自异步 mtop 接口；标题就绪后太早收工会让刷单表金额列整列缺失。
+  const priceWaitMs = Math.max(0, Number.isFinite(Number(options.priceWaitMs)) ? Number(options.priceWaitMs) : 4000);
   const openBlankTarget = typeof options.openBlankTarget === 'function'
     ? options.openBlankTarget
     : async () => {
@@ -613,12 +617,23 @@ async function createTaobaoChromeSession(options = {}) {
       const startedAt = Date.now();
       const deadline = startedAt + timeout;
       let completedAt = null;
+      let titledAt = 0;
       while (Date.now() < deadline) {
         await wait(350);
         const snapshot = await cdp.evaluate(browserSnapshotExpression(), 8000);
+        // 复用同一标签页：导航尚未提交时读到的仍是上一个商品的文档，按商品 ID 丢弃陈旧快照
+        const snapshotItemId = String(snapshot?.url || '').match(/[?&]id=(\d+)/)?.[1] || '';
+        if (item?.itemId && snapshotItemId && snapshotItemId !== String(item.itemId)) continue;
         // parseBrowserSnapshot 已过滤占位标题：拿不到真标题就继续轮询，不能提前收工
         const detail = parseBrowserSnapshot(snapshot, item);
-        if (detail.title) return detail;
+        if (detail.title) {
+          // 标题就绪不等于价格就绪：有限窗口内继续等 SKU/价格填充，超窗则带着空价格返回，交给金额策略兜底
+          const hasPrice = Number(detail.referencePrice) > 0 || detail.skuOptions.length > 0;
+          const waited = titledAt ? Date.now() - titledAt : 0;
+          if (hasPrice || !priceWaitMs || waited >= priceWaitMs) return detail;
+          titledAt = titledAt || Date.now();
+          continue;
+        }
         if (snapshot?.readyState === 'complete') {
           completedAt = completedAt || Date.now();
           if (Date.now() - completedAt >= postCompleteGrace) break;
@@ -660,6 +675,7 @@ async function fetchTaobaoItemPage(item, options = {}) {
  * Default implementation performs normalization only without network crawling.
  * @param {Array<object>} items Manual items.
  * @param {object} [_options] Enrichment options.
+ * @param {boolean} [_options.forceEnrich] 已有标题/主图也重新抓页面补价格与 SKU。
  * @returns {Promise<Array<object>>} Enriched manual items.
  */
 async function enrichManualItems(items = [], _options = {}) {
@@ -667,6 +683,8 @@ async function enrichManualItems(items = [], _options = {}) {
   if (options.autoEnrichManualItems === false) {
     return items.map(item => ({ ...item, enrichmentStatus: item.title ? 'complete' : 'pending' }));
   }
+  // forceEnrich：商品即使已有标题和主图也重新抓页面，用于给零支付商品补当前售价（已有字段仍优先保留）
+  const forceEnrich = options.forceEnrich === true;
   const onProgress = typeof options.onProgress === 'function' ? options.onProgress : () => {};
   const enriched = [];
   const pageFetcher = typeof options.fetchTaobaoItemPage === 'function' ? options.fetchTaobaoItemPage : fetchTaobaoItemPage;
@@ -677,7 +695,7 @@ async function enrichManualItems(items = [], _options = {}) {
   let chromeSessionError = null;
   try {
     for (const [index, item] of items.entries()) {
-      if (item.title && item.imageUrl) {
+      if (!forceEnrich && item.title && item.imageUrl) {
         enriched.push({ ...item, enrichmentStatus: 'complete' });
       } else {
         try {

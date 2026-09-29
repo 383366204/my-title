@@ -3,12 +3,6 @@ const SHEET_TYPES = [
   { value: 'review', label: '评价表' }
 ];
 
-const AMOUNT_MODES = [
-  { value: 'average', label: '平均实付金额' },
-  { value: 'payment', label: '支付金额' },
-  { value: 'blank', label: '留空人工填写' }
-];
-
 const MISSING_AMOUNT_POLICIES = [
   { value: 'blank', label: '留空' },
   { value: 'mark', label: '标记待填写' },
@@ -105,12 +99,6 @@ export function SheetConfigurationPanel({ node, onDone, onUpdateField, readOnly 
         <section className="sheet-config-section">
           <h3>刷单表设置</h3>
           <div className="start-configuration-grid">
-            <label className="node-field">
-              <span>下单金额</span>
-              <select value={data.amountMode || 'average'} onChange={(event) => update('amountMode', event.target.value)}>
-                {AMOUNT_MODES.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-              </select>
-            </label>
             <label className="node-field">
               <span>金额缺失时</span>
               <select value={data.missingAmountPolicy || 'blank'} onChange={(event) => update('missingAmountPolicy', event.target.value)}>

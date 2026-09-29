@@ -293,6 +293,12 @@ function normalizeSheetType(value) {
   return String(value || '').trim().toLowerCase() === 'review' ? 'review' : 'order';
 }
 
+/**
+ * 计算一行商品的下单金额：显式金额 > SKU/页面参考价 > 按金额来源模式回退。
+ * @param {object} row 商品行。
+ * @param {'average'|'payment'|'blank'} mode 金额来源模式。
+ * @returns {number|null} 下单金额，取不到时返回 null。
+ */
 function orderAmount(row, mode) {
   const explicitAmount = Number(row.orderAmount);
   if (Number.isFinite(explicitAmount) && explicitAmount > 0) return Math.round(explicitAmount * 100) / 100;
@@ -556,5 +562,6 @@ module.exports = {
   generateOrderSheet,
   imageUrlCandidates,
   normalizeImageUrl,
-  normalizeSheetType
+  normalizeSheetType,
+  orderAmount
 };

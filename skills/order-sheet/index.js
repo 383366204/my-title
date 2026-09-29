@@ -3,7 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const { collectProductRankPage } = require('../sycm-research/src/product-rank');
-const { generateOrderSheet } = require('./src/generate-order-sheet');
+const { generateOrderSheet, orderAmount } = require('./src/generate-order-sheet');
 const { parseManualItems, enrichManualItems, sanitizeImageUrl } = require('./src/manual-items');
 const {
   DEFAULT_ORDER_GROUP_SIZE,
@@ -344,8 +344,9 @@ async function collectOrderSheetProducts(options = {}) {
   const files = ensureOrderSheetFiles(context.run, context.runDir);
   try {
     let rankResult = { rows: [], meta: {} };
+    const rankCollector = typeof options.collectProductRankPage === 'function' ? options.collectProductRankPage : collectProductRankPage;
     if (inputMode === 'rank' || inputMode === 'hybrid') {
-      rankResult = await collectProductRankPage({
+      rankResult = await rankCollector({
         port: options.port,
         dateMode: options.dateMode,
         startDate: options.startDate,
@@ -367,6 +368,28 @@ async function collectOrderSheetProducts(options = {}) {
       storeName: rankResult.meta?.storeName || row.storeName || options.storeName || '',
       sourceType: 'rank'
     }));
+
+    // 下单金额一律以商品页当前售价为准：不再用生意参谋支付金额/支付件数推算均价，
+    // 因此每个排行商品都要抓一次页面价格；抓价失败的商品金额留空，由「金额缺失处理方式」兜底。
+    const autoFetchRankPrices = options.sheetType !== 'review'
+      && options.autoEnrichManualItems !== false
+      && options.autoFetchRankPrices !== false;
+    if (autoFetchRankPrices && rankRows.length > 0) {
+      options.onProgress?.({
+        current: 0,
+        total: rankRows.length,
+        message: `正在为 ${rankRows.length} 个排行商品获取当前售价`
+      });
+      const priced = await enricher(rankRows, { ...options, forceEnrich: true });
+      const pricedByKey = new Map(priced.map((row, index) => [getProductKey(row) || `#${index}`, row]));
+      for (let i = 0; i < rankRows.length; i += 1) {
+        const next = pricedByKey.get(getProductKey(rankRows[i]));
+        // 只有真的抓到页面价格才替换，失败保持原行（金额列走缺失策略）
+        if (next && orderAmount(next, 'blank') != null) {
+          rankRows[i] = { ...rankRows[i], ...next, sourceType: 'rank' };
+        }
+      }
+    }
 
     const finalRows = mergeOrderSheetProducts(rankRows, enrichedManual);
 
@@ -781,7 +804,9 @@ async function buildOrderSheet(options = {}) {
     productLimit: generationOptions.productLimit,
     includeRawData: generationOptions.includeRawData,
     includeImages: generationOptions.includeImages,
-    amountMode: generationOptions.amountMode,
+    // 金额列只认页面采集的当前售价（写入 row.orderAmount）与人工确认值；
+    // 固定 blank 模式，禁止再按支付金额/支付件数推算均价回填
+    amountMode: 'blank',
     missingAmountPolicy: generationOptions.missingAmountPolicy,
     cartQuantity: generationOptions.cartQuantity,
     rowSpan: generationOptions.rowSpan,
@@ -804,7 +829,7 @@ async function buildOrderSheet(options = {}) {
     fileName: generationOptions.fileName || '',
     includeRawData: generationOptions.includeRawData !== false,
     includeImages: generationOptions.includeImages !== false,
-    amountMode: generationOptions.amountMode || 'average',
+    amountMode: 'blank',
     missingAmountPolicy: generationOptions.missingAmountPolicy || 'blank',
     cartQuantity: Number(generationOptions.cartQuantity || 1),
     rowSpan: Number(generationOptions.rowSpan || 3),

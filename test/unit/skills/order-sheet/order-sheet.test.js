@@ -133,15 +133,13 @@ describe('order sheet workflow', () => {
       }],
       outputFile,
       includeImages: false,
-      includeRawData: false,
-      orderNote: '浏览后下单'
+      includeRawData: false
     });
 
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.readFile(outputFile);
     const sheet = workbook.getWorksheet('动销一拖多');
     assert.equal(sheet.getCell('C2').value, '19.9（颜色：蓝色 / 尺码：M）');
-    assert.equal(sheet.getCell('G2').value, '浏览后下单');
   });
 
   it('renders confirmed groups in user order while keeping raw rank rows unchanged', async () => {
@@ -155,7 +153,6 @@ describe('order sheet workflow', () => {
     const groups = [
       {
         id: 'group-1',
-        workRequirement: '先浏览主商品再加购搭配商品',
         mainProduct: { ...rows[1], title: '确认后的主商品' },
         subProducts: [{ ...rows[0], title: '确认后的搭配商品' }]
       },
@@ -176,8 +173,6 @@ describe('order sheet workflow', () => {
     assert.equal(orderSheet.getCell('A3').text, '确认后的搭配商品');
     assert.ok(!orderSheet.getCell('A2').hyperlink, '编组渲染下标题同样不应带超链接');
     assert.ok(!orderSheet.getCell('A3').hyperlink, '编组渲染下标题同样不应带超链接');
-    assert.equal(orderSheet.getCell('E2').value, '先浏览主商品再加购搭配商品');
-    assert.equal(orderSheet.getCell('G2').value, '');
     assert.equal(orderSheet.getCell('A4').value, null);
     assert.equal(orderSheet.getCell('A5').value, null);
     assert.equal(orderSheet.getCell('A6').text, '下一组商品');
@@ -256,6 +251,7 @@ describe('order sheet workflow', () => {
     assert.equal(sheet.getCell('C2').value, 88);
     assert.equal(sheet.getCell('D2').value, 3);
     assert.equal(sheet.getCell('E2').value, '浏览两款后下单');
+    assert.equal(sheet.getCell('F2').value, '配置店铺');
     assert.equal(sheet.getCell('G2').value, '暗号 8');
     assert.equal(sheet.getCell('A4').value, null);
   });
@@ -352,6 +348,89 @@ describe('order sheet workflow', () => {
     assert.equal(rows[1].itemId, '987654321');
     assert.equal(rows[1].title, '');
     assert.equal(rows[1].sourceType, 'manual');
+  });
+
+  it('collects current page price for every rank product regardless of payment', async () => {
+    const { collectOrderSheetProducts } = require('../../../../skills/order-sheet/index');
+    const { getRun, readJsonl } = require('../../../../skills/pipeline-flow/src/run-store');
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'order-sheet-rank-price-'));
+    const runId = 'test_rank_price';
+    const enrichQueries = [];
+
+    const rankRows = [
+      { rank: 1, itemId: '9001', title: '有成交商品', productUrl: 'https://item.taobao.com/item.htm?id=9001', imageUrl: 'https://img/a.jpg', paymentAmount: 200, paidItemCount: 4, visitorCount: 90 },
+      { rank: 2, itemId: '9002', title: '零支付商品', productUrl: 'https://item.taobao.com/item.htm?id=9002', imageUrl: 'https://img/b.jpg', paymentAmount: 0, paidItemCount: 0, visitorCount: 40 }
+    ];
+
+    const collected = await collectOrderSheetProducts({
+      dataDir: tempDir,
+      runId,
+      inputMode: 'rank',
+      collectProductRankPage: async () => ({
+        rows: rankRows,
+        meta: { statDate: '2026-09-28', storeName: '测试店铺', pagesCollected: 1 }
+      }),
+      enrichManualItems: async (items, opts) => {
+        enrichQueries.push({ ids: items.map(item => item.itemId), force: opts.forceEnrich });
+        return items.map((item, index) => ({ ...item, orderAmount: index === 0 ? 66 : 39.9, selectedSkuName: '颜色：金' }));
+      }
+    });
+
+    assert.equal(collected.count, 2);
+    assert.deepEqual(enrichQueries, [{ ids: ['9001', '9002'], force: true }], '每个排行商品都抓页面价，且带 forceEnrich');
+
+    const rows = readJsonl(getRun({ dataDir: tempDir, runId }).run.files.productRank);
+    assert.equal(rows[0].paymentAmount, 200, '排行指标原样保留');
+    assert.equal(rows[0].orderAmount, 66, '有成交商品也用页面价，不用支付金额推算');
+    assert.equal(rows[1].orderAmount, 39.9, '零支付商品补上当前售价');
+    assert.equal(rows[1].sourceType, 'rank', '补价不改变商品来源类型');
+  });
+
+  it('leaves rank amounts to missing policy when price cannot be collected', async () => {
+    const { collectOrderSheetProducts } = require('../../../../skills/order-sheet/index');
+    const { getRun, readJsonl } = require('../../../../skills/pipeline-flow/src/run-store');
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'order-sheet-rank-price-fail-'));
+    const runId = 'test_rank_price_fail';
+
+    const collected = await collectOrderSheetProducts({
+      dataDir: tempDir,
+      runId,
+      inputMode: 'rank',
+      collectProductRankPage: async () => ({
+        rows: [{ rank: 1, itemId: '9003', title: '零支付商品', productUrl: 'https://item.taobao.com/item.htm?id=9003', imageUrl: 'https://img/c.jpg', paymentAmount: 0, paidItemCount: 0, visitorCount: 10 }],
+        meta: { statDate: '2026-09-28', storeName: '测试店铺', pagesCollected: 1 }
+      }),
+      enrichManualItems: async items => items.map(item => ({ ...item, enrichmentStatus: 'failed', enrichmentError: '淘宝登录态不可用' }))
+    });
+
+    assert.equal(collected.count, 1);
+    const rows = readJsonl(getRun({ dataDir: tempDir, runId }).run.files.productRank);
+    assert.ok(rows[0].orderAmount == null, '抓价失败保持原行，金额走缺失策略');
+    assert.equal(rows[0].title, '零支付商品', '失败不应污染已采集的排行字段');
+  });
+
+  it('never derives the order amount from payment metrics when the page price is unavailable', async () => {
+    const { collectOrderSheetProducts, buildOrderSheet } = require('../../../../skills/order-sheet/index');
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'order-sheet-no-derive-'));
+    const runId = 'test_no_derive';
+
+    await collectOrderSheetProducts({
+      dataDir: tempDir,
+      runId,
+      inputMode: 'rank',
+      autoFetchRankPrices: false,
+      collectProductRankPage: async () => ({
+        rows: [{ rank: 1, itemId: '9101', title: '有支付但没抓到页面价', productUrl: 'https://item.taobao.com/item.htm?id=9101', imageUrl: 'https://img/d.jpg', paymentAmount: 100, paidItemCount: 2, visitorCount: 30 }],
+        meta: { statDate: '2026-09-28', storeName: '测试店铺', pagesCollected: 1 }
+      })
+    });
+
+    const built = await buildOrderSheet({ dataDir: tempDir, runId, includeImages: false, includeRawData: false, missingAmountPolicy: 'mark' });
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(built.file);
+    const sheet = workbook.getWorksheet('动销一拖多');
+    // 旧逻辑会用 paymentAmount/paidItemCount 推出 50；现在只认页面价，抓不到就按缺失策略标记
+    assert.equal(sheet.getCell('C2').value, '待填写');
   });
 
   it('requires at least one manual item in manual inputMode', async () => {
