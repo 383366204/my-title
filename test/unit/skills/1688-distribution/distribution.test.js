@@ -246,6 +246,10 @@ describe('1688 distribution input handling', () => {
               '657358172481': { source: 'batch' }
             },
             preview: '全部(2)',
+            records: [
+              { shopName: '', text: '上家ID：640322388000\n复制成功' },
+              { shopName: '', text: '上家ID：657358172481\n跳过复制\n跳过不支持分销商品' }
+            ],
             url: 'https://item.jnesoft.com/ali_view/ali_batchLog'
           };
         }
@@ -263,7 +267,7 @@ describe('1688 distribution input handling', () => {
 
     assert.equal(result.ok, false);
     assert.equal(result.status, 'completed_with_issues');
-    assert.deepEqual(result.blockers, ['copy_record_issues']);
+    assert.deepEqual(result.blockers, ['missing_offer_ids', 'copy_record_issues']);
     assert.deepEqual(result.confirmation.issueOfferIds, ['657358172481']);
   });
 

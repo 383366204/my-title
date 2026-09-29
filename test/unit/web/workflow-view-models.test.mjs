@@ -663,7 +663,7 @@ test('getWorkflowNodeSuccessLabel summarizes pipeline output counts', () => {
   }), '验真通过 3 个，可生成 1 个，需复核/拒绝 2 个，验真拒绝 2 个');
   assert.equal(getWorkflowNodeSuccessLabel('select', {
     output: { count: 8, productCount: 8, file: '/tmp/selected-products.jsonl' }
-  }), '选中 8 条货源');
+  }), '候选 8 条 · 已选 8 个');
   assert.equal(getWorkflowNodeSuccessLabel('generate', {
     output: { count: 12, file: '/tmp/generated-products.jsonl' }
   }), '12 条标题记录（12 个标题，关联 12 个已选货源）');
@@ -1392,6 +1392,15 @@ test('getWorkflowArtifactView treats start nodes as no-artifact nodes', () => {
 
   assert.equal(view.kind, 'none');
   assert.equal(view.emptyText, '开始节点没有产物。');
+});
+
+test('getWorkflowArtifactView handles prototype-polluting node IDs safely', () => {
+  // constructor, toString, __proto__ should not crash or return unexpected results
+  for (const dangerousId of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
+    const view = getWorkflowArtifactView({ type: 'json', items: [{ x: 1 }] }, dangerousId);
+    assert.ok(view, `should return a view for nodeId="${dangerousId}"`);
+    assert.ok(view.kind, `view should have a kind for nodeId="${dangerousId}"`);
+  }
 });
 
 test('getWorkflowArtifactView does not repeat the product-rank sort metric', () => {

@@ -42,7 +42,7 @@
 }
 
 .production-collection-actions label span {
-  color: #64748b;
+  color: var(--text-disabled);
   font-size: 9px;
   font-weight: 700;
 }
@@ -52,10 +52,10 @@
   width: 100%;
   min-width: 0;
   height: 28px;
-  border: 1px solid #334155;
+  border: 1px solid var(--border-default);
   border-radius: 5px;
   background: #020617;
-  color: #cbd5e1;
+  color: var(--text-subtle);
   font-size: 10px;
   padding: 4px 6px;
 }
@@ -75,7 +75,7 @@
 }
 
 .production-collection-count span {
-  color: #64748b;
+  color: var(--text-disabled);
   font-size: 9px;
   font-weight: 700;
 }
@@ -84,10 +84,10 @@
   min-height: 28px;
   display: flex;
   align-items: center;
-  border: 1px solid #334155;
+  border: 1px solid var(--border-default);
   border-radius: 5px;
   background: #020617;
-  color: #cbd5e1;
+  color: var(--text-subtle);
   font-size: 10px;
   padding: 4px 6px;
 }
@@ -149,7 +149,7 @@
 .review-source-groups-head span,
 .review-source-group-title span,
 .review-draft-row > div span {
-  color: #94a3b8;
+  color: var(--text-muted);
   font-size: 10px;
 }
 
@@ -201,7 +201,7 @@
 }
 
 .review-paste-panel summary {
-  color: #cbd5e1;
+  color: var(--text-subtle);
   cursor: pointer;
   font-size: 12px;
   font-weight: 700;
@@ -211,7 +211,7 @@
   background: rgba(2, 6, 23, 0.72);
   border: 1px solid rgba(71, 85, 105, 0.7);
   border-radius: 6px;
-  color: #e2e8f0;
+  color: var(--text-body);
   font-size: 12px;
   line-height: 1.7;
   margin-top: 8px;
@@ -256,7 +256,7 @@
   padding: 6px 9px;
 }
 .review-autosave-hint {
-  color: #94a3b8;
+  color: var(--text-muted);
   font-size: 10px;
   padding: 0 2px;
 }
@@ -289,7 +289,7 @@
 .review-field-optional {
   background: rgba(71, 85, 105, 0.34);
   border-radius: 4px;
-  color: #94a3b8;
+  color: var(--text-muted);
   font-size: 10px;
   font-style: normal;
   margin-left: 4px;
@@ -315,7 +315,7 @@
 
 .review-draft-attachments-head {
   align-items: center;
-  color: #94a3b8;
+  color: var(--text-muted);
   display: flex;
   font-size: 12px;
   gap: 8px;
@@ -347,7 +347,7 @@
 }
 
 .review-draft-attachment figcaption {
-  color: #cbd5e1;
+  color: var(--text-subtle);
   font-size: 10px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -370,7 +370,7 @@
   align-items: center;
   border: 1px dashed rgba(100, 116, 139, 0.72);
   border-radius: 6px;
-  color: #94a3b8;
+  color: var(--text-muted);
   cursor: pointer;
   display: inline-flex;
   font-size: 12px;
@@ -389,7 +389,7 @@
 }
 
 .review-source-group details {
-  color: #94a3b8;
+  color: var(--text-muted);
   font-size: 10px;
 }
 
@@ -431,7 +431,7 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 3px;
-  border: 1px solid #334155;
+  border: 1px solid var(--border-default);
   border-radius: 6px;
   background: #020617;
   padding: 3px;
@@ -443,7 +443,7 @@
   border: 0;
   border-radius: 4px;
   background: transparent;
-  color: #94a3b8;
+  color: var(--text-muted);
   font-size: 10px;
   font-weight: 700;
   line-height: 1;
@@ -465,7 +465,7 @@
   justify-content: center;
   gap: 4px;
   border: 1px solid #475569;
-  color: #cbd5e1;
+  color: var(--text-subtle);
   white-space: nowrap;
 }
 
@@ -489,7 +489,7 @@
 
 .sheet-config-section h3 {
   margin: 0;
-  color: #e2e8f0;
+  color: var(--text-body);
   font-size: 12px;
   letter-spacing: 0;
 }
@@ -504,7 +504,7 @@
   align-items: center;
   gap: 8px;
   min-height: 36px;
-  color: #cbd5e1;
+  color: var(--text-subtle);
   font-size: 11px;
 }
 
@@ -525,10 +525,10 @@
   align-items: center;
   gap: 7px 12px;
   min-height: 32px;
-  border: 1px solid #334155;
+  border: 1px solid var(--border-default);
   border-radius: 7px;
   background: rgba(2, 6, 23, 0.62);
-  color: #94a3b8;
+  color: var(--text-muted);
   font-size: 11px;
   padding: 7px 9px;
 }
@@ -558,7 +558,7 @@
 .order-sheet-manual-item {
   display: grid;
   gap: 9px;
-  border: 1px solid #334155;
+  border: 1px solid var(--border-default);
   border-radius: 7px;
   background: rgba(15, 23, 42, 0.76);
   padding: 10px;
@@ -574,7 +574,7 @@
 .order-sheet-manual-item-head strong {
   min-width: 0;
   overflow: hidden;
-  color: #e2e8f0;
+  color: var(--text-body);
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -712,7 +712,7 @@
 }
 
 .node-field span small {
-  color: #64748b;
+  color: var(--text-disabled);
   font-size: 9px;
   font-weight: 500;
 }
@@ -766,12 +766,12 @@
   margin: 0 -2px -2px;
   padding: 12px 2px 2px;
   border-top: 1px solid rgba(51, 65, 85, 0.76);
-  background: #0f172a;
+  background: var(--bg-panel);
 }
 
 .node-field span b {
   float: right;
-  color: #64748b;
+  color: var(--text-disabled);
 }
 
 .node-field span b.is-invalid {
@@ -780,7 +780,7 @@
 
 .node-field small,
 .workflow-diagnostic-caption {
-  color: #64748b;
+  color: var(--text-disabled);
   font-size: 10px;
   line-height: 1.45;
 }

@@ -23,7 +23,7 @@ export function DistributionShopPicker({ value, onChange, onEditingChange, disab
       if (!alive) return;
       if (!Array.isArray(rows)) throw new Error('店铺配置返回格式异常');
       setShops(rows);
-      if (value === null) onChange(rows.filter(row => row.enabled && row.isDefault));
+      if (value === null && !lockedShops) onChange(rows.filter(row => row.enabled));
     }).catch(err => { if (alive) setError(err.message); }).finally(() => { if (alive) setBusy(false); });
     return () => { alive = false; };
   }, [onChange]);

@@ -1,75 +1,54 @@
+/* Node button sizing overrides (base styles unified in console-base.css) */
 .node-icon-button,
 .node-primary-button,
 .node-secondary-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   gap: 6px;
   border-radius: 8px;
   font-size: 11px;
   font-weight: 700;
-  transition:
-    background-color 160ms ease,
-    border-color 160ms ease,
-    color 160ms ease;
 }
 
 .node-icon-button {
   width: 32px;
   height: 32px;
-  border: 1px solid #334155;
-  background: #0f172a;
-  color: #cbd5e1;
 }
 
 .node-icon-button:hover {
-  border-color: #3b82f6;
+  border-color: var(--accent-blue);
   color: #dbeafe;
 }
 
 .node-icon-button.danger:hover {
-  border-color: #f43f5e;
-  color: #fecdd3;
-  background: rgba(127, 29, 29, 0.28);
+  border-color: var(--btn-danger-hover-border);
+  color: var(--btn-danger-hover-text);
+  background: var(--btn-danger-hover-bg);
 }
 
 .node-primary-button,
 .node-secondary-button {
-  min-height: 34px;
   padding: 8px 10px;
 }
 
 .node-primary-button {
-  border: 1px solid rgba(37, 99, 235, 0.96);
-  background: #2563eb;
-  color: #fff;
+  border: 1px solid var(--btn-primary-border);
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-text);
 }
 
 .node-primary-button:hover {
-  background: #1d4ed8;
-}
-
-.node-secondary-button {
-  border: 1px solid #334155;
-  background: #0f172a;
-  color: #cbd5e1;
-}
-
-.node-secondary-button:hover {
-  border-color: #475569;
-  background: #1e293b;
+  background: var(--btn-primary-hover-bg);
 }
 
 .node-secondary-button.success:hover {
-  border-color: #22c55e;
-  color: #bbf7d0;
-  background: rgba(22, 101, 52, 0.24);
+  border-color: var(--btn-success-hover-border);
+  color: var(--btn-success-hover-text);
+  background: var(--btn-success-hover-bg);
 }
 
 .node-secondary-button.danger:hover {
-  border-color: #f43f5e;
-  color: #fecdd3;
-  background: rgba(127, 29, 29, 0.28);
+  border-color: var(--btn-danger-hover-border);
+  color: var(--btn-danger-hover-text);
+  background: var(--btn-danger-hover-bg);
 }
 
 .node-primary-button:disabled,
@@ -111,14 +90,14 @@
 }
 
 .review-summary-grid strong {
-  color: #e2e8f0;
+  color: var(--text-body);
   font-size: 18px;
   line-height: 1.1;
 }
 
 .review-summary-grid span {
   margin-top: 4px;
-  color: #94a3b8;
+  color: var(--text-muted);
   font-size: 10px;
 }
 
@@ -245,7 +224,7 @@
   border-radius: 6px;
   padding: 4px 7px;
   background: rgba(15, 23, 42, 0.48);
-  color: #cbd5e1;
+  color: var(--text-subtle);
   font-size: 10px;
 }
 

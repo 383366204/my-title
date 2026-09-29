@@ -377,254 +377,252 @@ function parseDistributionReview(text = '') {
   return rows;
 }
 
+// --- Artifact view handlers by node ID ---
+// Each handler receives (artifact, effectiveNodeId) and returns a view object.
+// Handlers are tried in order; the first match wins.
+
+function buildResolveShopsView(artifact) {
+  const items = Array.isArray(artifact.items) ? artifact.items : artifact.rows;
+  if (!Array.isArray(items)) return null;
+  return {
+    kind: 'business-list', title: '已识别同行店铺', emptyText: '暂无已识别店铺',
+    rows: items.map((shop) => ({
+      title: shop.shopName || '未命名店铺',
+      meta: [shop.followerText || '', `${(shop.categories || []).length} 个商品分类`].filter(Boolean).join(' · '),
+      metrics: (shop.signals || []).slice(0, 4),
+      description: (shop.categories || []).slice(0, 12).join('、'),
+      sourceUrl: shop.shopUrl || '', raw: shop
+    })),
+    text: ''
+  };
+}
+
+function buildCollectCompetitorsView(artifact) {
+  const type = String(artifact.type || '').toLowerCase();
+  if (type !== 'competitor-products') return null;
+  const hotRows = Array.isArray(artifact.hotRows) ? artifact.hotRows : [];
+  const newRows = Array.isArray(artifact.newRows) ? artifact.newRows : [];
+  return {
+    kind: 'business-list',
+    title: `爆款 ${hotRows.length} 个 · 新品 ${newRows.length} 个`,
+    emptyText: '暂无同行商品',
+    rows: [...hotRows.map(item => ({ ...item, listLabel: '销量榜' })), ...newRows.map(item => ({ ...item, listLabel: '新品榜' }))].map(item => ({
+      title: item.title || '未命名商品',
+      meta: `${item.shopName || ''} · ${item.listLabel}第 ${item.rank || '-'} 位`,
+      metrics: [item.paymentText || '付款表现未获取', ...(item.labels || []).slice(0, 3)],
+      description: item.enrichmentError
+        ? `商品链接补全失败：${item.enrichmentError}；${item.listLabel === '新品榜' ? '新品表示店铺页面排序，不代表精确上架日期。' : '付款人数为页面区间或下限，不等同于30天销量。'}`
+        : item.productUrl
+          ? (item.listLabel === '新品榜' ? '已补全商品链接；新品表示店铺页面排序，不代表精确上架日期。' : '已补全商品链接；付款人数为页面区间或下限，不等同于30天销量。')
+          : `该商品未纳入链接补全范围，可在启动配置中提高“每榜补全商品链接”；${item.listLabel === '新品榜' ? '新品表示店铺页面排序，不代表精确上架日期。' : '付款人数为页面区间或下限，不等同于30天销量。'}`,
+      sourceUrl: item.productUrl || '', raw: item
+    })),
+    text: ''
+  };
+}
+
+function buildEnrichCompetitorsView(artifact) {
+  const items = Array.isArray(artifact.items) ? artifact.items : artifact.rows;
+  if (!Array.isArray(items)) return null;
+  return {
+    kind: 'business-list', title: '商品链接补全结果', emptyText: '暂无商品链接补全结果',
+    rows: items.map(item => ({
+      title: item.title || '未命名商品',
+      meta: [item.shopName || '', item.itemId ? `商品ID ${item.itemId}` : '链接补全失败'].filter(Boolean).join(' · '),
+      metrics: [item.paymentText || '', item.sortType === 'new' ? '新品样本' : '爆款样本'].filter(Boolean),
+      description: item.enrichmentError ? `补全失败：${item.enrichmentError}` : '已取得标准商品链接',
+      sourceUrl: item.productUrl || '', raw: item
+    })),
+    text: ''
+  };
+}
+
+function buildAnalyzeCompetitorsView(artifact) {
+  const type = String(artifact.type || '').toLowerCase();
+  if (type !== 'json') return null;
+  const keywords = Array.isArray(artifact.opportunityKeywords) ? artifact.opportunityKeywords : [];
+  const shops = Array.isArray(artifact.shopSummaries) ? artifact.shopSummaries : [];
+  const history = artifact.historyComparison || {};
+  const historyLabel = history.status === 'compared'
+    ? `较上次新增爆款样本 ${(history.newlyObservedHot || []).length} 个、新品样本 ${(history.newlyObservedNew || []).length} 个`
+    : history.status === 'no_baseline' ? '首次快照' : '未启用历史对比';
+  return {
+    kind: 'business-list',
+    title: `同行对比分析 · ${shops.length} 家店铺 · ${historyLabel}`,
+    emptyText: '暂无分析结果',
+    rows: keywords.map(item => ({
+      title: item.keyword, meta: `覆盖 ${item.productCount} 个商品`,
+      metrics: ['待生意参谋验真'], description: '来自同行标题频次统计，不直接代表市场机会。', raw: item
+    })),
+    text: ''
+  };
+}
+
+function buildMineView(artifact) {
+  const items = Array.isArray(artifact.items) ? artifact.items : artifact.rows;
+  if (!Array.isArray(items)) return null;
+  return {
+    kind: 'candidate-list', emptyText: '暂无候选词',
+    rows: items.map((item) => ({
+      title: candidateTitle(item), meta: candidateMeta(item),
+      metrics: [
+        item.rootKeyword ? `商品词根 ${item.rootKeyword}` : '',
+        item.inspiration?.sourceType ? `来源 ${inspirationSourceLabel(item.inspiration.sourceType)}` : '',
+        item.diversity?.familyRunCount ? `词族历史 ${item.diversity.familyRunCount} 次` : '',
+        item.diversity?.historyPenalty ? `新鲜度扣分 ${item.diversity.historyPenalty}` : ''
+      ].filter(Boolean),
+      description: [
+        item.inspiration?.inspirationWord ? `灵感“${item.inspiration.inspirationWord}”映射为“${item.rootKeyword || item.coreProduct || ''}”` : '',
+        item.relationReason || item.reason || item.keywordOpportunity || item.nextAction || ''
+      ].filter(Boolean).join('；'),
+      sourceUrl: String(item.inspiration?.sourceUrl || item.sourceUrl || '').trim(), raw: item
+    })),
+    text: ''
+  };
+}
+
+function buildKeywordReviewView(artifact) {
+  const items = Array.isArray(artifact.items) ? artifact.items : artifact.rows;
+  if (!Array.isArray(items)) return null;
+  return {
+    kind: 'candidate-list', title: '人工筛词结果', emptyText: '暂无待筛选候选词',
+    rows: items.map((item) => ({
+      title: candidateTitle(item),
+      meta: [candidateMeta(item), item.reviewStatus === 'approved' ? '已通过' : item.reviewStatus === 'rejected' ? '已筛除' : '待确认'].filter(Boolean).join(' · '),
+      description: String(item.reviewReason || item.reason || item.nextAction || '').trim(), raw: item
+    })),
+    text: ''
+  };
+}
+
+function buildBusinessListView(artifact, nodeId) {
+  const items = Array.isArray(artifact.items) ? artifact.items : artifact.rows;
+  if (!Array.isArray(items)) return null;
+  const TITLES = { verify: '验真通过词', select: '货源选品结果', generate: '标题与货源链接', export: '待确认铺货清单' };
+  const EMPTY = { verify: '暂无验真通过词', select: '暂无已选货源', generate: '暂无标题与货源链接', export: '暂无铺货清单' };
+  if (!TITLES[nodeId]) return null;
+  return { kind: 'business-list', title: TITLES[nodeId], emptyText: EMPTY[nodeId], rows: mapBusinessRows(items, nodeId), text: '' };
+}
+
+function buildCollectRankView(artifact) {
+  const items = Array.isArray(artifact.items) ? artifact.items : artifact.rows;
+  if (!Array.isArray(items)) return null;
+  const pages = Math.max(1, ...items.map((item) => Number(item.sourcePage || 1)));
+  const manualCount = items.filter(item => item.sourceType === 'manual').length;
+  return {
+    kind: 'business-list',
+    title: manualCount > 0 ? `商品资料（含 ${manualCount} 个指定商品）` : `商品排行（${pages} 页）`,
+    emptyText: '暂无商品资料',
+    rows: items.map((item, index) => {
+      if (item.sourceType === 'manual') {
+        return {
+          title: item.title || `待补标题商品 ${index + 1}`,
+          meta: [item.itemId ? `商品ID ${item.itemId}` : '短链接商品', item.storeName || '', '用户指定'].filter(Boolean).join(' · '),
+          metrics: [
+            item.orderAmount != null ? `下单金额 ${Number(item.orderAmount).toFixed(2)}` : '下单金额待填写',
+            item.selectedSkuName ? `${item.skuSelectionMode === 'manual' ? '指定规格' : '最低价规格'} ${item.selectedSkuName}` : '',
+            item.referencePrice != null ? `页面参考价 ${Number(item.referencePrice).toFixed(2)}` : ''
+          ].filter(Boolean),
+          description: item.enrichmentError ? `自动读取失败：${item.enrichmentError}` : '指定商品资料已保存',
+          sourceUrl: item.productUrl || '', raw: item
+        };
+      }
+      const monetarySort = ['payAmt', 'sucRefundAmt'].includes(item.sortMetric);
+      const primaryValue = Number(item.sortValue ?? item.visitorCount ?? 0);
+      const metrics = [`${item.sortLabel || '商品访客数'} ${monetarySort ? primaryValue.toFixed(2) : primaryValue}`];
+      if (item.sortMetric !== 'itmUv') metrics.push(`商品访客数 ${Number(item.visitorCount || 0)}`);
+      if (item.sortMetric !== 'payAmt') metrics.push(`支付金额 ${Number(item.paymentAmount || 0).toFixed(2)}`);
+      if (item.sortMetric !== 'payItmCnt') metrics.push(`支付件数 ${Number(item.paidItemCount || 0)}`);
+      if (item.sortMetric !== 'itemCartCnt') metrics.push(`加购件数 ${Number(item.cartItemCount || 0)}`);
+      return {
+        title: item.title || `第 ${index + 1} 名商品`,
+        meta: [`排名 ${item.rank || index + 1}`, `第 ${item.sourcePage || 1} 页`, item.itemId ? `商品ID ${item.itemId}` : '', item.storeName || ''].filter(Boolean).join(' · '),
+        metrics,
+        description: item.visitorChange ? `访客较上一周期 ${item.visitorChange}` : `按${item.sortLabel || '商品访客数'}降序采集`,
+        sourceUrl: item.productUrl || '', raw: item
+      };
+    }),
+    text: ''
+  };
+}
+
+function buildFileView(artifact, nodeId) {
+  const type = String(artifact.type || '').toLowerCase();
+  if (type !== 'xlsx') return null;
+  if (nodeId === 'generateSheet') {
+    const fileName = String(artifact.filename || artifact.file || '');
+    return { kind: 'file', title: fileName.includes('评价') ? '商品评价表' : '商品排行刷单表', emptyText: '表格尚未生成', rows: [], text: '' };
+  }
+  if (nodeId === 'competitorReport') {
+    return { kind: 'file', title: '同行分析报告', emptyText: '报告尚未生成', rows: [], text: '' };
+  }
+  return null;
+}
+
+function buildExportTextView(artifact) {
+  const text = typeof artifact.text === 'string' ? artifact.text : typeof artifact.content === 'string' ? artifact.content : '';
+  if (!text.trim()) return null;
+  return { kind: 'business-list', title: '待确认铺货清单', emptyText: '暂无铺货清单', rows: parseDistributionBatch(text), text: '' };
+}
+
+function buildReviewTextView(artifact) {
+  const text = typeof artifact.text === 'string' ? artifact.text : typeof artifact.content === 'string' ? artifact.content : '';
+  if (!text.trim()) return null;
+  return { kind: 'review-list', title: '铺货复核', emptyText: '暂无复核项', rows: parseDistributionReview(text), text: '' };
+}
+
+/** Node-specific handler registry. Order matters: first match wins. */
+const ARTIFACT_HANDLERS = {
+  resolveShops: [buildResolveShopsView],
+  collectCompetitors: [buildCollectCompetitorsView],
+  enrichCompetitors: [buildEnrichCompetitorsView],
+  analyzeCompetitors: [buildAnalyzeCompetitorsView],
+  mine: [buildMineView],
+  keywordReview: [buildKeywordReviewView],
+  verify: [(a) => buildBusinessListView(a, 'verify')],
+  select: [(a) => buildBusinessListView(a, 'select')],
+  generate: [(a) => buildBusinessListView(a, 'generate')],
+  collectRank: [buildCollectRankView],
+  generateSheet: [buildFileView],
+  competitorReport: [buildFileView],
+  export: [(a) => buildBusinessListView(a, 'export'), buildExportTextView],
+  review: [buildReviewTextView]
+};
+
+/**
+ * Build a frontend artifact view for a given node.
+ * Signature and return structure unchanged from original implementation.
+ * @param {object|null} artifact Node artifact data.
+ * @param {string} [nodeId=''] Canvas node identifier.
+ * @returns {object} View descriptor with kind, title, emptyText, rows, text.
+ */
 export function getWorkflowArtifactView(artifact, nodeId = '') {
   const effectiveNodeId = nodeId || artifact?.nodeId || '';
+
+  // Public special cases (preserved order)
   if (effectiveNodeId === 'start') {
     return { kind: 'none', emptyText: '开始节点没有产物。', rows: [], text: '' };
   }
   if (!artifact) {
     return { kind: 'empty', emptyText: '选择运行记录后，节点完成产物会在这里展示。', rows: [], text: '' };
   }
+
+  // Try node-specific handlers (own-property check prevents prototype pollution)
+  const handlers = Object.hasOwn(ARTIFACT_HANDLERS, effectiveNodeId) ? ARTIFACT_HANDLERS[effectiveNodeId] : null;
+  if (handlers) {
+    for (const handler of handlers) {
+      const result = handler(artifact, effectiveNodeId);
+      if (result) return result;
+    }
+  }
+
+  // Generic fallbacks
   const type = String(artifact.type || '').toLowerCase();
   const items = Array.isArray(artifact.items) ? artifact.items : artifact.rows;
-  if (effectiveNodeId === 'resolveShops' && Array.isArray(items)) {
-    return {
-      kind: 'business-list',
-      title: '已识别同行店铺',
-      emptyText: '暂无已识别店铺',
-      rows: items.map((shop) => ({
-        title: shop.shopName || '未命名店铺',
-        meta: [shop.followerText || '', `${(shop.categories || []).length} 个商品分类`].filter(Boolean).join(' · '),
-        metrics: (shop.signals || []).slice(0, 4),
-        description: (shop.categories || []).slice(0, 12).join('、'),
-        sourceUrl: shop.shopUrl || '',
-        raw: shop
-      })),
-      text: ''
-    };
-  }
-  if (effectiveNodeId === 'collectCompetitors' && type === 'competitor-products') {
-    const hotRows = Array.isArray(artifact.hotRows) ? artifact.hotRows : [];
-    const newRows = Array.isArray(artifact.newRows) ? artifact.newRows : [];
-    return {
-      kind: 'business-list',
-      title: `爆款 ${hotRows.length} 个 · 新品 ${newRows.length} 个`,
-      emptyText: '暂无同行商品',
-      rows: [...hotRows.map(item => ({ ...item, listLabel: '销量榜' })), ...newRows.map(item => ({ ...item, listLabel: '新品榜' }))].map(item => ({
-        title: item.title || '未命名商品',
-        meta: `${item.shopName || ''} · ${item.listLabel}第 ${item.rank || '-'} 位`,
-        metrics: [item.paymentText || '付款表现未获取', ...(item.labels || []).slice(0, 3)],
-        description: item.enrichmentError
-          ? `商品链接补全失败：${item.enrichmentError}；${item.listLabel === '新品榜' ? '新品表示店铺页面排序，不代表精确上架日期。' : '付款人数为页面区间或下限，不等同于30天销量。'}`
-          : item.productUrl
-            ? (item.listLabel === '新品榜' ? '已补全商品链接；新品表示店铺页面排序，不代表精确上架日期。' : '已补全商品链接；付款人数为页面区间或下限，不等同于30天销量。')
-            : `该商品未纳入链接补全范围，可在启动配置中提高“每榜补全商品链接”；${item.listLabel === '新品榜' ? '新品表示店铺页面排序，不代表精确上架日期。' : '付款人数为页面区间或下限，不等同于30天销量。'}`,
-        sourceUrl: item.productUrl || '',
-        raw: item
-      })),
-      text: ''
-    };
-  }
-  if (effectiveNodeId === 'enrichCompetitors' && Array.isArray(items)) {
-    return {
-      kind: 'business-list',
-      title: '商品链接补全结果',
-      emptyText: '暂无商品链接补全结果',
-      rows: items.map(item => ({
-        title: item.title || '未命名商品',
-        meta: [item.shopName || '', item.itemId ? `商品ID ${item.itemId}` : '链接补全失败'].filter(Boolean).join(' · '),
-        metrics: [item.paymentText || '', item.sortType === 'new' ? '新品样本' : '爆款样本'].filter(Boolean),
-        description: item.enrichmentError ? `补全失败：${item.enrichmentError}` : '已取得标准商品链接',
-        sourceUrl: item.productUrl || '',
-        raw: item
-      })),
-      text: ''
-    };
-  }
-  if (effectiveNodeId === 'analyzeCompetitors' && type === 'json') {
-    const keywords = Array.isArray(artifact.opportunityKeywords) ? artifact.opportunityKeywords : [];
-    const shops = Array.isArray(artifact.shopSummaries) ? artifact.shopSummaries : [];
-    const history = artifact.historyComparison || {};
-    const historyLabel = history.status === 'compared'
-      ? `较上次新增爆款样本 ${(history.newlyObservedHot || []).length} 个、新品样本 ${(history.newlyObservedNew || []).length} 个`
-      : history.status === 'no_baseline' ? '首次快照' : '未启用历史对比';
-    return {
-      kind: 'business-list',
-      title: `同行对比分析 · ${shops.length} 家店铺 · ${historyLabel}`,
-      emptyText: '暂无分析结果',
-      rows: keywords.map(item => ({
-        title: item.keyword,
-        meta: `覆盖 ${item.productCount} 个商品`,
-        metrics: ['待生意参谋验真'],
-        description: '来自同行标题频次统计，不直接代表市场机会。',
-        raw: item
-      })),
-      text: ''
-    };
-  }
-  if (effectiveNodeId === 'mine' && Array.isArray(items)) {
-    return {
-      kind: 'candidate-list',
-      emptyText: '暂无候选词',
-      rows: items.map((item) => ({
-        title: candidateTitle(item),
-        meta: candidateMeta(item),
-        metrics: [
-          item.rootKeyword ? `商品词根 ${item.rootKeyword}` : '',
-          item.inspiration?.sourceType ? `来源 ${inspirationSourceLabel(item.inspiration.sourceType)}` : '',
-          item.diversity?.familyRunCount ? `词族历史 ${item.diversity.familyRunCount} 次` : '',
-          item.diversity?.historyPenalty ? `新鲜度扣分 ${item.diversity.historyPenalty}` : ''
-        ].filter(Boolean),
-        description: [
-          item.inspiration?.inspirationWord ? `灵感“${item.inspiration.inspirationWord}”映射为“${item.rootKeyword || item.coreProduct || ''}”` : '',
-          item.relationReason || item.reason || item.keywordOpportunity || item.nextAction || ''
-        ].filter(Boolean).join('；'),
-        sourceUrl: String(item.inspiration?.sourceUrl || item.sourceUrl || '').trim(),
-        raw: item
-      })),
-      text: ''
-    };
-  }
-  if (effectiveNodeId === 'keywordReview' && Array.isArray(items)) {
-    return {
-      kind: 'candidate-list',
-      title: '人工筛词结果',
-      emptyText: '暂无待筛选候选词',
-      rows: items.map((item) => ({
-        title: candidateTitle(item),
-        meta: [
-          candidateMeta(item),
-          item.reviewStatus === 'approved' ? '已通过' : item.reviewStatus === 'rejected' ? '已筛除' : '待确认'
-        ].filter(Boolean).join(' · '),
-        description: String(item.reviewReason || item.reason || item.nextAction || '').trim(),
-        raw: item
-      })),
-      text: ''
-    };
-  }
-  if (effectiveNodeId === 'verify' && Array.isArray(items)) {
-    return {
-      kind: 'business-list',
-      title: '验真通过词',
-      emptyText: '暂无验真通过词',
-      rows: mapBusinessRows(items, effectiveNodeId),
-      text: ''
-    };
-  }
-  if (effectiveNodeId === 'select' && Array.isArray(items)) {
-    return {
-      kind: 'business-list',
-      title: '货源选品结果',
-      emptyText: '暂无已选货源',
-      rows: mapBusinessRows(items, effectiveNodeId),
-      text: ''
-    };
-  }
-  if (effectiveNodeId === 'generate' && Array.isArray(items)) {
-    return {
-      kind: 'business-list',
-      title: '标题与货源链接',
-      emptyText: '暂无标题与货源链接',
-      rows: mapBusinessRows(items, effectiveNodeId),
-      text: ''
-    };
-  }
-  if (effectiveNodeId === 'collectRank' && Array.isArray(items)) {
-    const pages = Math.max(1, ...items.map((item) => Number(item.sourcePage || 1)));
-    const manualCount = items.filter(item => item.sourceType === 'manual').length;
-    return {
-      kind: 'business-list',
-      title: manualCount > 0 ? `商品资料（含 ${manualCount} 个指定商品）` : `商品排行（${pages} 页）`,
-      emptyText: '暂无商品资料',
-      rows: items.map((item, index) => {
-        if (item.sourceType === 'manual') {
-          return {
-            title: item.title || `待补标题商品 ${index + 1}`,
-            meta: [item.itemId ? `商品ID ${item.itemId}` : '短链接商品', item.storeName || '', '用户指定'].filter(Boolean).join(' · '),
-            metrics: [
-              item.orderAmount != null ? `下单金额 ${Number(item.orderAmount).toFixed(2)}` : '下单金额待填写',
-              item.selectedSkuName ? `${item.skuSelectionMode === 'manual' ? '指定规格' : '最低价规格'} ${item.selectedSkuName}` : '',
-              item.referencePrice != null ? `页面参考价 ${Number(item.referencePrice).toFixed(2)}` : ''
-            ].filter(Boolean),
-            description: item.enrichmentError ? `自动读取失败：${item.enrichmentError}` : '指定商品资料已保存',
-            sourceUrl: item.productUrl || '',
-            raw: item
-          };
-        }
-        const monetarySort = ['payAmt', 'sucRefundAmt'].includes(item.sortMetric);
-        const primaryValue = Number(item.sortValue ?? item.visitorCount ?? 0);
-        const metrics = [
-          `${item.sortLabel || '商品访客数'} ${monetarySort ? primaryValue.toFixed(2) : primaryValue}`
-        ];
-        if (item.sortMetric !== 'itmUv') metrics.push(`商品访客数 ${Number(item.visitorCount || 0)}`);
-        if (item.sortMetric !== 'payAmt') metrics.push(`支付金额 ${Number(item.paymentAmount || 0).toFixed(2)}`);
-        if (item.sortMetric !== 'payItmCnt') metrics.push(`支付件数 ${Number(item.paidItemCount || 0)}`);
-        if (item.sortMetric !== 'itemCartCnt') metrics.push(`加购件数 ${Number(item.cartItemCount || 0)}`);
-        return {
-          title: item.title || `第 ${index + 1} 名商品`,
-          meta: [
-            `排名 ${item.rank || index + 1}`,
-            `第 ${item.sourcePage || 1} 页`,
-            item.itemId ? `商品ID ${item.itemId}` : '',
-            item.storeName || ''
-          ].filter(Boolean).join(' · '),
-          metrics,
-          description: item.visitorChange ? `访客较上一周期 ${item.visitorChange}` : `按${item.sortLabel || '商品访客数'}降序采集`,
-          sourceUrl: item.productUrl || '',
-          raw: item
-        };
-      }),
-      text: ''
-    };
-  }
-  if (effectiveNodeId === 'generateSheet' && type === 'xlsx') {
-    const fileName = String(artifact.filename || artifact.file || '');
-    return {
-      kind: 'file',
-      title: fileName.includes('评价') ? '商品评价表' : '商品排行刷单表',
-      emptyText: '表格尚未生成',
-      rows: [],
-      text: ''
-    };
-  }
-  if (effectiveNodeId === 'competitorReport' && type === 'xlsx') {
-    return { kind: 'file', title: '同行分析报告', emptyText: '报告尚未生成', rows: [], text: '' };
-  }
-  if (effectiveNodeId === 'export' && Array.isArray(items)) {
-    return {
-      kind: 'business-list',
-      title: '待确认铺货清单',
-      emptyText: '暂无铺货清单',
-      rows: mapBusinessRows(items, effectiveNodeId),
-      text: ''
-    };
-  }
-  const text = typeof artifact.text === 'string'
-    ? artifact.text
-    : typeof artifact.content === 'string'
-      ? artifact.content
-      : '';
-  if (effectiveNodeId === 'export' && text.trim()) {
-    return {
-      kind: 'business-list',
-      title: '待确认铺货清单',
-      emptyText: '暂无铺货清单',
-      rows: parseDistributionBatch(text),
-      text: ''
-    };
-  }
-  if (effectiveNodeId === 'review' && text.trim()) {
-    return {
-      kind: 'review-list',
-      title: '铺货复核',
-      emptyText: '暂无复核项',
-      rows: parseDistributionReview(text),
-      text: ''
-    };
-  }
   if (Array.isArray(items)) {
     return { kind: 'json-list', emptyText: '暂无数据项', rows: items, text: '' };
   }
+  const text = typeof artifact.text === 'string' ? artifact.text : typeof artifact.content === 'string' ? artifact.content : '';
   return {
     kind: type === 'json' ? 'json-text' : 'text',
     emptyText: '暂无文本产物',

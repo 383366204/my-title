@@ -126,22 +126,21 @@ export function getSheetConfigSummary(state = {}) {
   return `刷单表 · ${countLabel} · ${amountLabel}${state.includeImages === false ? ' · 无主图' : ''}`;
 }
 
-export function getWorkflowNodeSuccessLabel(nodeId, state = {}) {
-  const output = state.output && typeof state.output === 'object' ? state.output : {};
-  const normalized = String(nodeId || '');
-  if (normalized === 'mine') {
+/** Per-node success label builders. Each receives (output, state) and returns a string or ''. */
+const SUCCESS_LABEL_HANDLERS = {
+  mine(output, state) {
     const count = Number(output.count ?? state.count ?? 0);
     return count > 0 ? `成功 ${count} 个候选词` : '';
-  }
-  if (normalized === 'keywordReview') {
+  },
+  keywordReview(output, state) {
     const approved = Number(output.approved ?? state.approved ?? 0);
     const rejected = Number(output.rejected ?? state.rejected ?? 0);
     const pending = Number(output.pending ?? state.pending ?? 0);
     if (approved > 0 || rejected > 0) return `通过 ${approved} 个，筛除 ${rejected} 个`;
     if (pending > 0) return `待筛选 ${pending} 个候选词`;
     return '';
-  }
-  if (normalized === 'verify') {
+  },
+  verify(output, state) {
     const verified = Number(output.verified ?? output.count ?? state.verified ?? 0);
     const rejected = Number(output.rejected ?? state.rejected ?? 0);
     const generationEligible = Number(output.generationEligible ?? verified);
@@ -150,27 +149,28 @@ export function getWorkflowNodeSuccessLabel(nodeId, state = {}) {
       return `验真通过 ${verified} 个，可生成 ${generationEligible} 个，需复核/拒绝 ${opportunityReview} 个，验真拒绝 ${rejected} 个`;
     }
     return '';
-  }
-  if (normalized === 'generate') {
+  },
+  generate(output, state) {
     const count = Number(output.count ?? state.count ?? 0);
     const titleCount = Number(output.titleCount ?? count);
     const sourceCount = Number(output.sourceCount ?? count);
     return count > 0 ? `${count} 条标题记录（${titleCount} 个标题，关联 ${sourceCount} 个已选货源）` : '';
-  }
-  if (normalized === 'select') {
+  },
+  select(output, state) {
     const count = Number(output.productCount ?? output.count ?? state.count ?? 0);
     const failed = Number(output.failed ?? state.failed ?? 0);
     if (state.manualDirectInput === true) {
       if (count > 0 || failed > 0) return `获取 ${count} 个商品，失败 ${failed} 个`;
       return '';
     }
-    return count > 0 ? `选中 ${count} 条货源` : '';
-  }
-  if (normalized === 'export') {
+    const candidates = Number(output.candidateCount ?? count);
+    return candidates > 0 ? `候选 ${candidates} 条 · 已选 ${count} 个` : '';
+  },
+  export(output, state) {
     const count = Number(output.count ?? state.count ?? 0);
     return count > 0 ? `成功 ${count} 条铺货清单` : '';
-  }
-  if (normalized === 'collectRank') {
+  },
+  collectRank(output, state) {
     const count = Number(output.count ?? state.count ?? 0);
     const manualCount = Number(output.manualCount ?? 0);
     const rankCount = Number(output.rankCount ?? Math.max(0, count - manualCount));
@@ -180,55 +180,59 @@ export function getWorkflowNodeSuccessLabel(nodeId, state = {}) {
     const pages = Number(output.pages ?? 0);
     const sortLabel = output.sortLabel || '商品访客数';
     return count > 0 ? `采集 ${pages || 1} 页、${count} 条商品，按${sortLabel}降序` : '';
-  }
-  if (normalized === 'confirmProducts') {
+  },
+  confirmProducts(output, state) {
     const groups = Number(output.groupCount ?? state.groupCount ?? 0);
     const products = Number(output.productCount ?? state.productCount ?? 0);
     return groups > 0 ? `已编排 ${groups} 个任务组、${products} 个商品` : '';
-  }
-  if (normalized === 'importSheet') {
+  },
+  importSheet(output) {
     const groups = Number(output.groupCount || 0);
     const products = Number(output.productCount || 0);
     return products > 0 ? `识别 ${groups} 个订单组、${products} 个商品` : '';
-  }
-  if (normalized === 'generateReviews') {
+  },
+  generateReviews(output) {
     const count = Number(output.count || 0);
-    if (count <= 0) return '';
-    return `已生成 ${count} 条评价草稿`;
-  }
-  if (normalized === 'generateSheet') {
+    return count > 0 ? `已生成 ${count} 条评价草稿` : '';
+  },
+  generateSheet(output, state) {
     const count = Number(output.count ?? state.count ?? 0);
     const imageCount = Number(output.imageCount ?? 0);
     if (count <= 0) return '';
     return output.sheetType === 'review'
       ? `生成评价表，写入 ${count} 条商品`
       : `生成刷单表，写入 ${count} 条商品和 ${imageCount} 张主图`;
-  }
-  if (normalized === 'resolveShops') {
+  },
+  resolveShops(output) {
     const count = Number(output.count || 0);
     const failed = Number(output.failed || 0);
     return count > 0 ? `识别 ${count} 家同行店铺${failed ? `，失败 ${failed} 条` : ''}` : '';
-  }
-  if (normalized === 'collectCompetitors') {
+  },
+  collectCompetitors(output) {
     const hotCount = Number(output.hotCount || 0);
     const newCount = Number(output.newCount || 0);
     return hotCount + newCount > 0 ? `采集 ${hotCount} 个爆款样本、${newCount} 个新品样本` : '';
-  }
-  if (normalized === 'enrichCompetitors') {
+  },
+  enrichCompetitors(output) {
     const count = Number(output.count || 0);
     const failed = Number(output.failed || 0);
     return count + failed > 0 ? `补全 ${count} 个商品链接${failed ? `，失败 ${failed} 个` : ''}` : '';
-  }
-  if (normalized === 'analyzeCompetitors') {
+  },
+  analyzeCompetitors(output, state) {
     const count = Number(output.count || 0);
     const status = String(state.status || state.state || '').toLowerCase();
     return count > 0 ? `发现 ${count} 个待验真机会词` : status === 'completed' ? '同行分析已完成' : '';
-  }
-  if (normalized === 'competitorReport') {
+  },
+  competitorReport(output) {
     const count = Number(output.count || 0);
     return count > 0 ? `报告包含 ${count} 条商品记录` : '';
   }
-  return '';
+};
+
+export function getWorkflowNodeSuccessLabel(nodeId, state = {}) {
+  const output = state.output && typeof state.output === 'object' ? state.output : {};
+  const handler = Object.hasOwn(SUCCESS_LABEL_HANDLERS, nodeId) ? SUCCESS_LABEL_HANDLERS[nodeId] : null;
+  return handler ? handler(output, state) : '';
 }
 
 export function getWorkflowNodeResultLocation(nodeId, state = {}) {

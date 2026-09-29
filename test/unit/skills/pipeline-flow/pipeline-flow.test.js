@@ -487,6 +487,10 @@ describe('pipeline-flow', () => {
     assert.strictEqual(result.selected[0].status, 'selected');
     assert.strictEqual(result.selected[0].manualSelectionPreviousStatus, 'product_rejected');
     assert.strictEqual(result.selected[0].selectionDecision, 'manual_approved');
+    const updatedRun = getRun({ dataDir, runId }).run;
+    assert.strictEqual(updatedRun.counts.productsEvaluated, 1);
+    assert.strictEqual(updatedRun.diversity.product.uniqueOffers, 1);
+    assert.strictEqual(updatedRun.diversity.product.newOffers, 0);
   });
 
   test('fetchSycmWithFallback switches to hot search when blue rows are insufficient', async () => {

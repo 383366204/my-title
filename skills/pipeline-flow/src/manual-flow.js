@@ -299,6 +299,16 @@ function flowReviewProducts(options = {}) {
   run.status = unique.length > 0 ? 'products_selected' : 'select_failed';
   run.counts.selectedProducts = unique.length;
   run.counts.productReviewPending = 0;
+  run.counts.productsEvaluated = unique.length;
+  // 人工确认会重写货源清单，统计也必须基于确认后的商品重新计算。
+  run.diversity = { ...(run.diversity || {}), product: {
+    ...(run.diversity?.product || {}),
+    selected: unique.length,
+    uniqueOffers: unique.length,
+    newOffers: unique.filter(row => row.productDiversity?.noveltyStatus === 'new_offer').length,
+    historyFallbackCount: unique.filter(row => row.productDiversity?.historyFallback).length,
+    suppliers: new Set(unique.map(row => row.supplierKey).filter(Boolean)).size
+  } };
   setRunStageMetrics(run, 'select', {
     input: rows.length + manualProducts.length,
     passedGate: unique.length,

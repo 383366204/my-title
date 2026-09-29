@@ -9,7 +9,8 @@ import {
   reviewAttachmentUrl,
   saveReviewDrafts,
   uploadReviewAttachment
-} from '../../../api/workflow-api.js';
+} from '../../../api/review-api.js';
+
 import { collectChangedReviews, snapshotDraftRows } from '../review-draft-autosave.js';
 import { canAutoCompress, compressedFileName, compressReviewImage } from '../review-image-compress.js';
 

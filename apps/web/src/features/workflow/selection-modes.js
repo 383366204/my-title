@@ -12,7 +12,12 @@ export const SELECTION_MODES = [
  * @returns {string} 配置摘要。
  */
 export function selectionSourceSummary(data = {}) {
-  if (data.selectionMode === 'daily') return `已选 ${data.enabledDimensions?.length || 0} 个灵感方向`;
+  if (data.selectionMode === 'daily') {
+    const direction = (Array.isArray(data.customInputs?.direction)
+      ? data.customInputs.direction
+      : Object.values(data.customInputs || {}).flat()).filter(Boolean).join('、').trim();
+    return direction ? `选词方向：${direction}` : '未指定方向 · AI 自动探索';
+  }
   const words = data.selectionMode === 'keyword'
     ? parseExactKeywords(data.keywordsText ?? data.keywords ?? data.keyword)
     : parseRootKeywords(data.rootsText ?? data.roots);

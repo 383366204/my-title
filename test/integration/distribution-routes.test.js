@@ -8,13 +8,23 @@ const { createDistributionJobs } = require('../../core/server/distribution-jobs'
 const { registerDistributionRoutes } = require('../../core/server/distribution-routes');
 const { createDistributionShopStore } = require('../../core/distribution-shops');
 
+test('recheck refuses undated jobs instead of matching historical successes', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'distribution-undated-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  let queried = false;
+  const jobs = createDistributionJobs({ jobDir: dir, getConfirmationReader: () => async () => { queried = true; } });
+  const job = jobs.writeDistributionJob({ jobId: 'undated', items: [{ url: 'https://detail.1688.com/offer/123.html' }] });
+  await assert.rejects(jobs.recheckDistributionJob(job), /缺少提交时间/);
+  assert.equal(queried, false);
+});
+
 test('partial recheck replaces stale counts without marking the workflow complete', async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'distribution-counts-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const jobs = createDistributionJobs({ jobDir: dir, getConfirmationReader: () => async () => ({
     ok: false, status: 'completed_with_issues', confirmation: { foundOfferIds: ['1'], issueOfferIds: ['2'] }
   }) });
-  const job = jobs.writeDistributionJob({ jobId: 'partial', total: 3, completed: 0, failed: 3,
+  const job = jobs.writeDistributionJob({ jobId: 'partial', startedAt: new Date().toISOString(), total: 3, completed: 0, failed: 3,
     items: ['1', '2', '3'].map(offerId => ({ offerId, url: `https://detail.1688.com/offer/${offerId}.html`, title: '测试商品' })) });
   const result = await jobs.recheckDistributionJob(job);
   assert.equal(result.completed, 1);

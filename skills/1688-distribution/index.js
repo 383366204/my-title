@@ -1336,7 +1336,7 @@ async function confirmCopyRecords(client, offerIds) {
   return result;
 }
 
-async function confirmCopyRecordsStable(client, offerIds, shop = null, mode = 'random-average') {
+async function confirmCopyRecordsStable(client, offerIds, shop = null, mode = 'random-average', options = {}) {
   const targets = Array.isArray(shop) ? shop : shop ? [shop] : [];
   await client.evaluate(pageHelpersExpression());
   let state = await client.evaluate('window.__ecom1688.readState()');
@@ -1353,15 +1353,15 @@ async function confirmCopyRecordsStable(client, offerIds, shop = null, mode = 'r
       const offerIds = ${JSON.stringify(offerIds)};
       const targetShops = ${JSON.stringify(targets.map(row => row.platformShopName))};
       const records = new Map();
+      const maxPages = ${Math.max(1, Math.min(100, Number(options.maxPages) || 30))};
       const normalize = value => String(value || '').replace(/\\s+/g, ' ').trim();
       const recordText = () => {
-        if (!targetShops.length) return document.body ? document.body.innerText : '';
         const texts = [];
         for (const row of document.querySelectorAll('.el-table__row, tbody tr')) {
           const names = targetShops.filter(name => Array.from(row.querySelectorAll('td, .cell')).some(cell => normalize(cell.innerText) === normalize(name)));
-          if (names.length !== 1) continue;
+          if (targetShops.length && names.length !== 1) continue;
           const text = row.innerText;
-          records.set(names[0] + '\\n' + text, { shopName: names[0], text });
+          records.set((names[0] || '') + '\\n' + text, { shopName: names[0] || '', text });
           texts.push(text);
         }
         return texts.join('\\n');
@@ -1375,9 +1375,6 @@ async function confirmCopyRecordsStable(client, offerIds, shop = null, mode = 'r
       const inputs = () => Array.from(document.querySelectorAll('input'));
       const idInput = inputs().find(el => (el.placeholder || '').includes(${jsString(TXT_COMMA_OR_SPACE)}))
         || inputs().find((el, index) => index >= 5 && !el.readOnly && !el.disabled);
-      if (!idInput) {
-        return { ok: false, status: 'not_confirmed', reason: 'copy log offer id input not found' };
-      }
       const searchButton = Array.from(document.querySelectorAll('button'))
         .find(button => visible(button) && (button.innerText || '').trim() === ${jsString(TXT_SEARCH)});
       if (!searchButton) {
@@ -1385,56 +1382,68 @@ async function confirmCopyRecordsStable(client, offerIds, shop = null, mode = 'r
       }
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
       const setSearchValue = value => {
+        if (!idInput) return;
         idInput.focus();
         setter.call(idInput, value);
         idInput.dispatchEvent(new Event('input', { bubbles: true }));
         idInput.dispatchEvent(new Event('change', { bubbles: true }));
       };
-      const collectPages = async (maxPages = 8) => {
-        let allText = recordText();
+      const fingerprint = () => Array.from(document.querySelectorAll('.el-table__row, tbody tr')).map(row => row.innerText).join('\\n');
+      const waitForRows = async (before = null) => {
+        let previous = null;
+        let stable = 0;
+        for (let attempt = 0; attempt < 20; attempt++) {
+          await sleep(500);
+          const current = fingerprint();
+          const loading = Array.from(document.querySelectorAll('.el-loading-mask')).some(visible);
+          stable = !loading && current === previous && (before === null || current !== before) ? stable + 1 : 0;
+          if (stable >= 3) return true;
+          previous = current;
+        }
+        return false;
+      };
+      const collectPages = async () => {
+        let allText = '';
+        const seen = new Set();
         for (let pageTurn = 0; pageTurn < maxPages; pageTurn++) {
-          const before = document.body ? document.body.innerText : '';
-          const nextPageBtn = Array.from(document.querySelectorAll('a, button, span, div'))
+          const before = fingerprint();
+          if (seen.has(before)) return { text: allText, scanIncomplete: true };
+          seen.add(before);
+          allText += '\\n--- PAGE BREAK ---\\n' + recordText();
+          const nextPageBtn = Array.from(document.querySelectorAll('.el-pagination .btn-next, .ant-pagination-next button, a, button'))
             .find(el => {
               const text = (el.innerText || '').trim();
-              const disabled = el.classList.contains('disabled') || el.classList.contains('is-disabled') || el.getAttribute('aria-disabled') === 'true';
-              return visible(el) && !disabled && (text === '\\u4e0b\\u4e00\\u9875' || text === '>' || text === 'Next');
+              const disabled = el.disabled || el.closest('.disabled, .is-disabled, .ant-pagination-disabled') || el.getAttribute('aria-disabled') === 'true';
+              return visible(el) && !disabled && (el.matches('.btn-next, .ant-pagination-next button') || text === '\\u4e0b\\u4e00\\u9875' || text === '>' || text === 'Next');
             });
-          if (!nextPageBtn) break;
+          if (!nextPageBtn) return { text: allText, scanIncomplete: false };
+          if (pageTurn + 1 >= maxPages) return { text: allText, scanIncomplete: true };
           nextPageBtn.click();
-          await sleep(1000);
-          const after = document.body ? document.body.innerText : '';
-          if (after === before || allText.includes(after.slice(0, 120))) break;
-          allText += '\\n--- PAGE BREAK ---\\n' + recordText();
+          if (!await waitForRows(before)) return { text: allText, scanIncomplete: true };
         }
-        return allText;
       };
-      const runSearch = async (query, waitMs) => {
-        setSearchValue(query);
-        searchButton.click();
-        await sleep(waitMs);
-        return collectPages(query.includes(',') ? 10 : 2);
-      };
-
-      let combinedText = await runSearch(offerIds.join(','), 2500);
-      let found = new Set(offerIds.filter(id => combinedText.includes(id)));
-      const perOfferId = {};
-      for (const id of found) perOfferId[id] = { source: 'batch' };
-
-      const missingAfterBatch = offerIds.filter(id => !found.has(id));
-      for (const id of missingAfterBatch) {
-        const singleText = await runSearch(id, 1800);
-        combinedText += '\\n--- SINGLE SEARCH ' + id + ' ---\\n' + singleText;
-        if (singleText.includes(id)) {
-          found.add(id);
-          perOfferId[id] = { source: 'single' };
-        }
+      // 清空 ID 筛选后只查询一次列表，不再逐个商品发起搜索。
+      setSearchValue('');
+      searchButton.click();
+      await sleep(2500);
+      if (!await waitForRows()) return { reason: '复制记录列表尚未加载完成，请稍后重新核对' };
+      const firstPage = Array.from(document.querySelectorAll('.el-pager li, .ant-pagination-item-1')).find(el => visible(el) && el.textContent.trim() === '1');
+      if (firstPage && !firstPage.matches('.active, .is-active, .ant-pagination-item-active')) {
+        const before = fingerprint();
+        firstPage.click();
+        if (!await waitForRows(before)) return { reason: '无法返回复制记录第一页，请稍后重新核对' };
       }
+      const collected = await collectPages();
+      const combinedText = collected.text;
+      const found = new Set(offerIds.filter(id => combinedText.split(/\\D+/).includes(id)));
+      const perOfferId = {};
+      for (const id of found) perOfferId[id] = { source: 'list' };
 
       return {
         ok: found.size === offerIds.length,
         text: combinedText,
         records: Array.from(records.values()),
+        scanIncomplete: collected.scanIncomplete,
         perOfferId,
         preview: combinedText.slice(0, 2000),
         url: location.href
@@ -1445,14 +1454,24 @@ async function confirmCopyRecordsStable(client, offerIds, shop = null, mode = 'r
   if (!pageResult || pageResult.reason) {
     return pageResult || { ok: false, status: 'not_confirmed', reason: 'copy log confirmation failed' };
   }
-  if (targets.length) {
+  const since = Date.parse(options.submittedAt || '');
+  // 平台时间按中国时区解释；没有可靠时间的记录不能用于确认本次提交。
+  const recordTime = row => {
+    const match = String(row.text).match(/(\d{4})[-/](\d{2})[-/](\d{2})\s+(\d{2}):(\d{2}):(\d{2})/);
+    return match ? Date.parse(`${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6]}+08:00`) : NaN;
+  };
+  if (Number.isFinite(since)) {
+    pageResult.records = (pageResult.records || []).filter(row => recordTime(row) >= Math.floor(since / 1000) * 1000);
+    pageResult.text = pageResult.records.map(row => row.text).join('\n');
+  }
+  {
     // 多店重复分配必须每个商品在每家店均成功，其他模式要求在目标店铺之一成功。
-    const byShop = targets.map(target => ({
+    const byShop = (targets.length ? targets : [{ platformShopName: '' }]).map(target => ({
       shopName: target.platformShopName,
       perOfferId: Object.fromEntries(offerIds.map(id => {
-        const rows = (pageResult.records || []).filter(row => row.shopName === target.platformShopName && String(row.text).split(/\D+/).includes(String(id)));
-        const statuses = rows.map(row => inferOfferCopyStatus(row.text, id));
-        const status = statuses.includes('success') ? 'success' : statuses.find(value => value !== 'unknown') || 'unknown';
+        const rows = (pageResult.records || []).filter(row => (!targets.length || row.shopName === target.platformShopName) && String(row.text).split(/\D+/).includes(String(id)));
+        rows.sort((a, b) => (recordTime(b) || 0) - (recordTime(a) || 0));
+        const status = rows.length ? inferOfferCopyStatus(rows[0].text, id) : 'unknown';
         const failedRow = rows.find(row => inferOfferCopyStatus(row.text, id) === status);
         const reason = ['failed', 'skipped', 'stopped', 'cancelled'].includes(status)
           ? String(failedRow?.text || '').split(/复制失败|跳过复制|停止复制|取消复制/).slice(1).join(' ').split(/编辑重试|一键重试|再次复制|快速编辑/)[0].trim().slice(0, 2000)
@@ -1467,14 +1486,9 @@ async function confirmCopyRecordsStable(client, offerIds, shop = null, mode = 'r
     const foundOfferIds = offerIds.filter(successful);
     const missingOfferIds = offerIds.filter(id => !successful(id));
     const issueOfferIds = missingOfferIds.filter(id => byShop.some(row => ['failed', 'skipped', 'stopped', 'cancelled'].includes(row.perOfferId[id].status)));
-    const status = !missingOfferIds.length ? 'confirmed' : issueOfferIds.length ? 'completed_with_issues' : foundOfferIds.length ? 'partial_confirmed' : 'not_confirmed';
-    return { ok: status === 'confirmed', status, foundOfferIds, missingOfferIds, issueOfferIds, byShop, preview: pageResult.preview, url: pageResult.url };
+    const status = !missingOfferIds.length && !pageResult.scanIncomplete ? 'confirmed' : issueOfferIds.length ? 'completed_with_issues' : foundOfferIds.length ? 'partial_confirmed' : 'not_confirmed';
+    return { ok: status === 'confirmed', status, foundOfferIds, missingOfferIds, issueOfferIds, byShop: targets.length ? byShop : [], perOfferId: targets.length ? undefined : byShop[0].perOfferId, scanIncomplete: pageResult.scanIncomplete, preview: pageResult.preview, url: pageResult.url };
   }
-  return classifyCopyRecordText(offerIds, pageResult.text, {
-    preview: pageResult.preview,
-    url: pageResult.url,
-    perOfferId: pageResult.perOfferId || {}
-  });
 }
 
 async function distributeProducts(options = {}) {
@@ -1564,10 +1578,11 @@ async function distributeProducts(options = {}) {
       await preSubmitCheckStable(client, batchItems);
       const targets = distributionTargets(options);
       if (targets.length) await ensureSelectedShop(client, targets);
+      const submittedAt = new Date().toISOString();
       const logState = await submitAndOpenLogStable(client, targets.length ? targets : null, shopSelection.distributionModeText, () => {
         appendRunRecord({ batchHash, submittedAt: new Date().toISOString(), status: 'awaiting_confirmation', targetShops: targets, distributionMode: shopSelection.distributionMode, offerIds: batchItems.map(item => item.offerId) }, stateFile);
       });
-      const confirmation = await confirmCopyRecordsStable(client, batchItems.map(item => item.offerId), targets.length ? targets : null, options.distributionMode);
+      const confirmation = await confirmCopyRecordsStable(client, batchItems.map(item => item.offerId), targets.length ? targets : null, options.distributionMode, { submittedAt });
       if (confirmation.status !== 'confirmed') {
         results.push({
           ok: false,
@@ -1674,7 +1689,7 @@ async function confirmDistributionLog(options = {}) {
   const shouldClose = !options.client;
   try {
     const targets = distributionTargets(options);
-    const confirmation = await confirmCopyRecordsStable(client, offerIds, targets.length ? targets : null, options.distributionMode);
+    const confirmation = await confirmCopyRecordsStable(client, offerIds, targets.length ? targets : null, options.distributionMode, { submittedAt: options.submittedAt, maxPages: options.maxPages });
     const blockers = [];
     if (confirmation.missingOfferIds && confirmation.missingOfferIds.length) blockers.push('missing_offer_ids');
     if (confirmation.issueOfferIds && confirmation.issueOfferIds.length) blockers.push('copy_record_issues');

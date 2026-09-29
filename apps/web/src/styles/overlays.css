@@ -14,7 +14,7 @@
   width: min(560px, 100%);
   grid-template-rows: auto minmax(0, 1fr);
   border-radius: 8px;
-  color: var(--text-primary, #e2e8f0);
+  color: var(--text-primary, var(--text-body));
 }
 .keyword-filter-modal form { min-height: 0; overflow-y: auto; }
 .keyword-filter-modal fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
@@ -24,7 +24,7 @@
   align-items: center;
   gap: 12px;
   padding: 14px 0;
-  border-bottom: 1px solid var(--border-color, #334155);
+  border-bottom: 1px solid var(--border-color, var(--border-default));
   font-size: 13px;
 }
 .keyword-filter-field label { display: flex; align-items: center; gap: 8px; overflow-wrap: anywhere; }
@@ -54,7 +54,7 @@
   gap: 12px;
   border: 1px solid rgba(51, 65, 85, 0.96);
   border-radius: 10px;
-  background: #0f172a;
+  background: var(--bg-panel);
   box-shadow: 0 26px 80px rgba(2, 6, 23, 0.48);
   padding: 14px;
 }
@@ -80,7 +80,7 @@
 
 .workflow-modal-head span {
   margin-top: 4px;
-  color: #94a3b8;
+  color: var(--text-muted);
   font-size: 11px;
 }
 
@@ -89,16 +89,16 @@
   height: 32px;
   display: inline-grid;
   place-items: center;
-  border: 1px solid #334155;
+  border: 1px solid var(--border-default);
   border-radius: 7px;
   background: #111c31;
-  color: #cbd5e1;
+  color: var(--text-subtle);
   cursor: pointer;
   transition: border-color 160ms ease, background 160ms ease, color 160ms ease;
 }
 
 .workflow-modal-close:hover {
-  border-color: #64748b;
+  border-color: var(--text-disabled);
   background: #1e293b;
   color: #f8fafc;
 }
@@ -140,12 +140,12 @@
 }
 
 .workflow-overlay-diagnostics span {
-  color: #94a3b8;
+  color: var(--text-muted);
   font-size: 10px;
 }
 
 .workflow-overlay-diagnostics strong {
-  color: #e2e8f0;
+  color: var(--text-body);
   font-size: 11px;
   line-height: 1.45;
   overflow-wrap: anywhere;

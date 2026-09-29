@@ -1,5 +1,7 @@
+import { showToast } from '../toast.js';
 import { useState } from 'react';
-import { confirmKeywordReview as confirmKeywordReviewRequest, confirmProductReview as confirmProductReviewRequest, confirmOrderSheetProducts as confirmOrderSheetProductsRequest, confirmReviewSheet, getWorkflowArtifact } from '../../../api/workflow-api.js';
+import { confirmKeywordReview as confirmKeywordReviewRequest, confirmProductReview as confirmProductReviewRequest, confirmOrderSheetProducts as confirmOrderSheetProductsRequest, getWorkflowArtifact } from '../../../api/workflow-api.js';
+import { confirmReviewSheet } from '../../../api/review-api.js';
 import { candidateKeyword } from '../workflow-data.js';
 import { querySupplementKeywords } from '../../../api/workflow-api.js';
 import { useWorkflowRequestScope } from './use-workflow-request-scope.js';
@@ -41,7 +43,7 @@ export function useWorkflowConfirmations({ currentRunId, activeTemplateMode, set
       return ticket.isCurrent();
     } catch (error) {
       if (!ticket.isCurrent()) return false;
-      alert(`确认评价失败：${error.message}`);
+      showToast(`确认评价失败：${error.message}`, 'error');
       return false;
     } finally {
       finishConfirmation(ticket);
@@ -74,7 +76,7 @@ export function useWorkflowConfirmations({ currentRunId, activeTemplateMode, set
       if (!ticket.isCurrent()) return false;
       const message = `保存商品资料失败：${error.message}`;
       setLogs((previous) => [...previous, { timestamp: new Date().toISOString(), level: 'error', message }]);
-      alert(message);
+      showToast(message, 'error');
       return false;
     } finally {
       finishConfirmation(ticket);
@@ -118,7 +120,7 @@ export function useWorkflowConfirmations({ currentRunId, activeTemplateMode, set
       if (!ticket.isCurrent()) return false;
       const message = `人工筛词确认失败: ${err.message}`;
       setLogs((prev) => [...prev, { timestamp: new Date().toISOString(), level: 'error', message }]);
-      alert(message);
+      showToast(message, 'error');
       return false;
     } finally {
       finishConfirmation(ticket);
@@ -153,7 +155,7 @@ export function useWorkflowConfirmations({ currentRunId, activeTemplateMode, set
       if (!ticket.isCurrent()) return false;
       const message = `人工选品确认失败: ${err.message}`;
       setLogs((prev) => [...prev, { timestamp: new Date().toISOString(), level: 'error', message }]);
-      alert(message);
+      showToast(message, 'error');
       return false;
     } finally {
       finishConfirmation(ticket);
@@ -173,7 +175,7 @@ export function useWorkflowConfirmations({ currentRunId, activeTemplateMode, set
       await reloadRun(currentRunId, { preserveLogs: true });
       return ticket.isCurrent();
     } catch (error) {
-      if (ticket.isCurrent()) alert(`补充词查询失败：${error.message}`);
+      if (ticket.isCurrent()) showToast(`补充词查询失败：${error.message}`, 'error');
       return false;
     } finally {
       finishConfirmation(ticket);

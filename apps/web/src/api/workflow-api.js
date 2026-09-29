@@ -1,4 +1,5 @@
 import { ApiError, requestJson, requestPayload } from './http.js';
+// Review source/attachment APIs moved to review-api.js
 
 const workflowRunPath = (runId) => `/api/workflows/runs/${encodeURIComponent(runId)}`;
 
@@ -31,71 +32,6 @@ export const querySupplementKeywords = (runId, input) => requestJson(`${workflow
 export const confirmProductReview = (runId, input) => requestJson(`${workflowRunPath(runId)}/product-review`, { method: 'POST', body: input });
 export const workflowEventsUrl = (runId) => `${workflowRunPath(runId)}/events`;
 
-export async function uploadReviewSource(file, groupSize) {
-  const query = groupSize ? `?groupSize=${encodeURIComponent(groupSize)}` : '';
-  const response = await fetch(`/api/review-sheets/upload${query}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'X-File-Name': encodeURIComponent(file.name)
-    },
-    body: file
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok || payload.ok === false) {
-    throw new ApiError(payload.error || `上传失败: ${response.status}`, { status: response.status, payload });
-  }
-  return payload.data ?? payload;
-}
-
-export const regroupReviewSource = (uploadId, groupSize) => requestJson(
-  `/api/review-sheets/uploads/${encodeURIComponent(uploadId)}/group-size`,
-  { method: 'POST', body: { groupSize } }
-);
-
-export const confirmReviewSheet = (runId, reviews) => requestJson(`${workflowRunPath(runId)}/review-confirm`, {
-  method: 'POST',
-  body: { reviews }
-});
-// options 透传 fetch 参数（如 keepalive），供关窗前兜底保存使用
-export const saveReviewDrafts = (runId, reviews, options = {}) => requestJson(`${workflowRunPath(runId)}/review-drafts`, {
-  method: 'POST',
-  body: { reviews },
-  ...options
-});
-
-// 与后端 MAX_REVIEW_ATTACHMENTS 保持一致：每条评价最多 4 张配图
-export const MAX_REVIEW_ATTACHMENTS = 4;
-
-// 与服务端 review-assets 路由的 8mb express.raw 上限保持一致，上传前先在前端拦截
-export const MAX_REVIEW_ATTACHMENT_BYTES = 8 * 1024 * 1024;
-
-const reviewAssetsPath = (runId) => `${workflowRunPath(runId)}/review-assets`;
-
-export const reviewAttachmentUrl = (runId, attachmentId) => `${reviewAssetsPath(runId)}/${encodeURIComponent(attachmentId)}`;
-
-export async function uploadReviewAttachment(runId, draftId, file) {
-  const response = await fetch(`${reviewAssetsPath(runId)}?draftId=${encodeURIComponent(draftId)}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': file.type || 'application/octet-stream',
-      'X-File-Name': encodeURIComponent(file.name)
-    },
-    body: file
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok || payload.ok === false) {
-    throw new ApiError(payload.error || `上传配图失败: ${response.status}`, { status: response.status, payload });
-  }
-  return payload.data ?? payload;
-}
-
-export const listReviewAttachments = (runId) => requestJson(reviewAssetsPath(runId));
-
-export const deleteReviewAttachment = (runId, draftId, attachmentId) => requestJson(
-  `${reviewAttachmentUrl(runId, attachmentId)}?draftId=${encodeURIComponent(draftId)}`,
-  { method: 'DELETE' }
-);
 export const getOrderSheetDraft = (runId) => requestJson(`${workflowRunPath(runId)}/order-sheet/draft`);
 export const saveOrderSheetDraft = (runId, input) => requestJson(`${workflowRunPath(runId)}/order-sheet/draft`, {
   method: 'POST',

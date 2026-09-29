@@ -12,7 +12,7 @@
     z-index: 20;
     width: min(360px, calc(100% - 42px));
     max-width: calc(100% - 42px);
-    background: #0f172a;
+    background: var(--bg-panel);
     box-shadow: 0 0 20px rgb(0 0 0 / 35%);
   }
 

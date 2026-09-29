@@ -1,19 +1,5 @@
 export const DEFAULT_WORKFLOW_MODE = 'daily';
 
-export const ACTIVE_RUN_STATUSES = new Set([
-  'pending',
-  'running',
-  'created',
-  'mined',
-  'verified',
-  'products_selected',
-  'generated',
-  'resuming',
-  'retrying',
-  'awaiting_keyword_review',
-  'awaiting_product_review'
-]);
-
 export const MINER_TABS = [
   { id: 'peer', label: '同行词根', endpoint: '/api/miner/peer', needsInput: true },
   { id: 'opp', label: '1688商机', endpoint: '/api/miner/opportunities', needsInput: false },

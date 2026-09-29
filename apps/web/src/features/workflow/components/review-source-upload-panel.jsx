@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { FileSpreadsheet, Upload } from 'lucide-react';
 
-import { regroupReviewSource, uploadReviewSource } from '../../../api/workflow-api.js';
+import { regroupReviewSource, uploadReviewSource } from '../../../api/review-api.js';
 import { applyPastedOrders, parsePastedOrders } from '../review-paste-parser.js';
 import { REVIEW_GROUP_FIELDS } from '../review-group-fields.js';
 
