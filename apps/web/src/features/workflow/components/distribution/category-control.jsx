@@ -30,14 +30,18 @@ export function CategoryControl({ row, actions }) {
         <option value="">{record?.candidates?.length ? '请选择参谋候选类目' : '待获取参谋类目'}</option>
         {(record?.candidates || []).map(item => <option key={item.category} value={item.category}>{item.category}{item.clickRatio != null ? ` · 点击人数占比 ${item.clickRatio}%` : ''}{item.clickRate != null ? ` · 点击率 ${item.clickRate}%` : ''}</option>)}
       </select>
-      <input aria-label="类目查询词" placeholder={record?.keyword || '查询词'} value={query} disabled={disabled}
-        onChange={event => setQuery(event.target.value)}
-        style={{ fontSize: '11px' }}
-        className="flex-1 min-w-[60px] py-1 px-[7px] border border-slate-700 rounded-[5px] bg-[#091224] text-slate-200 font-normal leading-[1.4] focus:border-blue-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-55" />
-      <button type="button" className="node-secondary-button shrink-0 !min-h-[26px] !py-0.5 !px-[7px] !text-[11px]" disabled={disabled}
-        onClick={() => control?.act({ action: 'query', urls: [record.url], queryWord: query.trim() || record.keyword })}>
-        <RefreshCw size={12} />{record?.candidates?.length ? '重新获取' : '获取类目'}
-      </button>
+      <div className="inline-flex flex-1 min-w-[80px]">
+        <input aria-label="类目查询词" placeholder={record?.keyword || '查询词'} value={query} disabled={disabled}
+          onChange={event => setQuery(event.target.value)}
+          style={{ fontSize: '11px' }}
+          className="flex-1 min-w-0 py-1 pl-[7px] pr-1 border border-r-0 border-slate-700 rounded-l-[5px] bg-[#091224] text-slate-200 font-normal leading-[1.4] focus:border-blue-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-55" />
+        <button type="button" disabled={disabled}
+          onClick={() => control?.act({ action: 'query', urls: [record.url], queryWord: query.trim() || record.keyword })}
+          style={{ fontSize: '11px' }}
+          className="shrink-0 inline-flex items-center gap-1 py-1 px-[7px] border border-slate-700 rounded-r-[5px] bg-[#1e293b] text-slate-300 hover:bg-[#334155] hover:text-slate-100 transition-colors disabled:cursor-not-allowed disabled:opacity-55 cursor-pointer">
+          <RefreshCw size={12} />{record?.candidates?.length ? '重新获取' : '获取'}
+        </button>
+      </div>
       {actions && <div className="flex gap-1 shrink-0 [&_.node-secondary-button]:!min-h-[26px] [&_.node-secondary-button]:!py-0.5 [&_.node-secondary-button]:!px-[7px] [&_.node-secondary-button]:!text-[11px]">{actions}</div>}
     </div>
     {/* Row 2: merged info line */}
