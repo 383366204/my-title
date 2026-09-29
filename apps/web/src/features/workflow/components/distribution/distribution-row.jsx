@@ -64,32 +64,34 @@ export function DistributionRow({
     }
 
     return (
-      <article className={`grid grid-cols-[minmax(0,1fr)] gap-2 min-w-0 border rounded-lg bg-slate-900/72 p-[11px] ${row.removed ? 'border-rose-400/32 opacity-[0.78]' : 'border-slate-800/90'}`}>
-        <div>
+      <article className={`grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1.5 min-w-0 border rounded-lg bg-slate-900/72 p-[9px] items-start ${row.removed ? 'border-rose-400/32 opacity-[0.78]' : 'border-slate-800/90'}`}>
+        <div className="min-w-0">
           <div className="flex items-center gap-1.5 min-w-0">
-            <strong className="block text-slate-200 text-[13px] leading-[1.35] break-all" title={sourceTitle}>{sourceTitle}</strong>
-            <em className={`shrink-0 ml-auto whitespace-nowrap rounded-full text-[10px] not-italic font-extrabold px-[7px] py-1 ${row.removed ? 'bg-[rgba(127,29,29,0.28)] text-rose-200' : 'bg-emerald-900/28 text-green-200'}`}>{row.removed ? '已移除' : '将导出'}</em>
+            <strong className="block flex-auto min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-slate-200 text-[13px] leading-[1.35]" title={sourceTitle}>{sourceTitle}</strong>
+            <em className={`shrink-0 whitespace-nowrap rounded-full text-[10px] not-italic font-extrabold px-[7px] py-1 ${row.removed ? 'bg-[rgba(127,29,29,0.28)] text-rose-200' : 'bg-emerald-900/28 text-green-200'}`}>{row.removed ? '已移除' : '将导出'}</em>
           </div>
-          {keyword && <small className="mt-1.5 inline-flex w-fit max-w-full items-center border border-sky-500/32 rounded-full bg-sky-900/28 text-sky-200 text-[10px] font-extrabold leading-[1.1] px-[7px] py-1 break-all">选词：{keyword}</small>}
+          {keyword && <small className="mt-1 inline-flex w-fit max-w-full items-center border border-sky-500/32 rounded-full bg-sky-900/28 text-sky-200 text-[10px] font-extrabold leading-[1.1] px-[7px] py-1 break-all">选词：{keyword}</small>}
+          {Array.isArray(row.metrics) && row.metrics.length > 0 && <p className="m-0 mt-1 text-slate-400 text-[10px] leading-[1.4] break-all">{row.metrics.join(' · ')}</p>}
         </div>
-        {Array.isArray(row.metrics) && row.metrics.length > 0 && <p className="m-0 text-slate-400 text-[11px] leading-[1.45] break-all">{row.metrics.join(' · ')}</p>}
-        <div className="grid min-w-0 grid-cols-[minmax(0,1.5fr)_minmax(180px,0.7fr)] gap-2.5 my-2.5 max-sm:grid-cols-[minmax(0,1fr)] [&>label]:flex [&>label]:min-w-0 [&>label]:flex-col [&>label]:gap-[5px] [&>label]:text-slate-400 [&>label]:text-[10px] [&>label]:font-bold [&>input]:w-full [&>input]:min-w-0 [&>input]:py-2 [&>input]:px-[9px] [&>input]:border [&>input]:border-slate-700 [&>input]:rounded-[5px] [&>input]:bg-[#091224] [&>input]:text-slate-200 [&>input]:text-xs [&>input:focus]:border-blue-500 [&>input:focus]:outline-none [&>input:disabled]:cursor-not-allowed [&>input:disabled]:opacity-55">
-          <label>
-            <span>铺货标题</span>
-            <input value={row.title || ''} disabled={row.removed} onChange={(event) => onUpdateEdit?.(row.key, 'title', event.target.value)} />
-          </label>
-          <CategoryControl row={row} />
-        </div>
-        <div className="flex flex-wrap gap-1.5 mt-[9px] [&_.node-secondary-button]:min-h-[30px] [&_.node-secondary-button]:py-1.5 [&_.node-secondary-button]:px-[9px] [&_.node-secondary-button]:no-underline">
-          <button type="button" className={`node-secondary-button ${row.removed ? 'success' : 'danger'}`} onClick={() => onMarkRemoved?.(row.key, !row.removed)}>
-            {row.removed ? <Check size={13} /> : <X size={13} />}
-            {row.removed ? '恢复' : '移除'}
-          </button>
-          {url && (
-            <a className="node-secondary-button" href={url} target="_blank" rel="noreferrer">
-              <ExternalLink size={13} /> 打开货源
-            </a>
-          )}
+        <div className="flex flex-col gap-1.5 shrink-0 min-w-[180px] max-sm:col-span-full max-sm:min-w-0">
+          <div className="grid grid-cols-[minmax(0,1fr)_minmax(120px,0.6fr)] gap-1.5 max-sm:grid-cols-[minmax(0,1fr)] [&>label]:flex [&>label]:min-w-0 [&>label]:flex-col [&>label]:gap-[3px] [&>label]:text-slate-400 [&>label]:text-[10px] [&>label]:font-bold [&>input]:w-full [&>input]:min-w-0 [&>input]:py-1.5 [&>input]:px-[7px] [&>input]:border [&>input]:border-slate-700 [&>input]:rounded-[5px] [&>input]:bg-[#091224] [&>input]:text-slate-200 [&>input]:text-xs [&>input:focus]:border-blue-500 [&>input:focus]:outline-none [&>input:disabled]:cursor-not-allowed [&>input:disabled]:opacity-55">
+            <label>
+              <span>铺货标题</span>
+              <input value={row.title || ''} disabled={row.removed} onChange={(event) => onUpdateEdit?.(row.key, 'title', event.target.value)} />
+            </label>
+            <CategoryControl row={row} />
+          </div>
+          <div className="flex flex-wrap gap-1 [&_.node-secondary-button]:min-h-[26px] [&_.node-secondary-button]:py-1 [&_.node-secondary-button]:px-[7px] [&_.node-secondary-button]:text-[10px]">
+            <button type="button" className={`node-secondary-button ${row.removed ? 'success' : 'danger'}`} onClick={() => onMarkRemoved?.(row.key, !row.removed)}>
+              {row.removed ? <Check size={13} /> : <X size={13} />}
+              {row.removed ? '恢复' : '移除'}
+            </button>
+            {url && (
+              <a className="node-secondary-button" href={url} target="_blank" rel="noreferrer">
+                <ExternalLink size={13} /> 打开货源
+              </a>
+            )}
+          </div>
         </div>
       </article>
     );
