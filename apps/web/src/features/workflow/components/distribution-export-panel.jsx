@@ -286,9 +286,10 @@ export const DistributionExportPanel = ({
         {exportStatus !== 'loading' && rows.length === 0 && (
           <div className="artifact-empty">当前导出清单为空，通常表示前面的生成或复核没有产出可铺货商品。</div>
         )}
-        {rows.map((row) => (
+        {rows.map((row, index) => (
           <DistributionRow
             key={row.key}
+            index={index + 1}
             row={row}
             variant="preview"
             isBlocked={false}
@@ -296,9 +297,10 @@ export const DistributionExportPanel = ({
             onMarkRemoved={markRemoved}
           />
         ))}
-        {pendingBlockedRows.map((row) => (
+        {pendingBlockedRows.map((row, index) => (
           <DistributionRow
             key={row.key}
+            index={index + 1 + rows.length}
             row={row}
             variant="preview"
             isBlocked={true}
@@ -435,9 +437,10 @@ export const DistributionExportPanel = ({
         {(exportStatus === 'ready' || exportStatus === 'empty') && rows.length === 0 && (
           <div className="artifact-empty">当前导出清单为空，通常表示前面的生成或复核没有产出可铺货商品。</div>
         )}
-        {rows.map((row) => (
+        {rows.map((row, index) => (
           <DistributionRow
             key={row.key}
+            index={index + 1}
             row={row}
             variant="workbench"
             isBlocked={false}
@@ -455,9 +458,10 @@ export const DistributionExportPanel = ({
               <span>{pendingBlockedRows.length} 条</span>
             </div>
             <div className="grid gap-[9px] max-h-[360px] overflow-auto pr-0.5">
-              {pendingBlockedRows.map((row) => (
+              {pendingBlockedRows.map((row, index) => (
                 <DistributionRow
                   key={row.key}
+                  index={index + 1 + rows.length}
                   row={row}
                   variant="workbench"
                   isBlocked={true}

@@ -16,6 +16,7 @@ import { CategoryControl } from './category-control.jsx';
  */
 export function DistributionRow({
   row,
+  index,
   variant = 'workbench', // 'preview' | 'workbench'
   isBlocked = false,
   onUpdateEdit,
@@ -64,7 +65,9 @@ export function DistributionRow({
     }
 
     return (
-      <article className={`grid gap-1.5 min-w-0 border rounded-lg bg-slate-900/72 p-[7px_9px] ${row.removed ? 'border-rose-400/32 opacity-[0.78]' : 'border-slate-800/90'}`}>
+      <article className={`flex gap-2 min-w-0 border rounded-lg bg-slate-900/72 p-[7px_9px] ${row.removed ? 'border-rose-400/32 opacity-[0.78]' : 'border-slate-800/90'}`}>
+        {index != null && <span className="shrink-0 self-center w-5 text-center text-slate-500 text-[11px] font-bold">{index}</span>}
+        <div className="grid gap-1.5 min-w-0 flex-1">
         {/* Row 1: source title (clickable link) + status tag */}
         <div className="flex items-center gap-1.5 min-w-0">
           <span className="shrink-0 w-[56px] text-slate-400 text-[11px] font-bold whitespace-nowrap">原标题</span>
@@ -95,6 +98,7 @@ export function DistributionRow({
             {Array.isArray(row.metrics) && row.metrics.length > 0 && <span className="text-slate-400 text-[11px] leading-[1.4] break-all">{row.metrics.join(' · ')}</span>}
           </div>
         )}
+        </div>
       </article>
     );
   }
