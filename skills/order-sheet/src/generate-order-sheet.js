@@ -87,10 +87,16 @@ function parseOrderDate(value) {
 // 新版 Excel 会嗅探字节所以本机正常，旧版 Excel、WPS、手机 Office 和微信/钉钉预览按 jpeg 解码失败，图片区域空白。
 const IMAGE_ACCEPT = 'image/jpeg, image/png';
 const CDN_RESIZE_HOSTS = /(^|\.)(alicdn|taobaocdn|tbcdn)\.com$/i;
-const CDN_THUMBNAIL_SUFFIX = '_200x200q90.jpg';
+// 嵌图取 600×600 缩放变体：单元格显示框仅约 114×127px，但放大查看、Windows 高 DPI（150%/200%）
+// 或调大 rowSpan 时，200px 缩略图会被拉伸而发糊。600px 单图约 20KB（真原图约 127~660KB/张），
+// 50 商品也就 1MB 量级，是清晰度与 xlsx 体积的平衡点。
+const CDN_THUMBNAIL_SUFFIX = '_600x600q90.jpg';
 
 /**
- * 去掉 CDN 强制输出 WebP 的变换后缀，拿回可嵌入的原始格式地址。
+ * 还原图片的原始地址：路径里第一个 .jpg/.jpeg/.png 之后全是 CDN 变换链
+ * （如 _70x70.jpg、_200x200q90.jpg、_.webp），必须整段截掉。
+ * 后台列表页采到的主图本身就带 _70x70.jpg 缩略后缀，不截断的话后续拼缩放变体
+ * 是在小图上再放大，嵌进 Excel 依旧发糊；无登录态抓取时淘宝也会先回 _70x70 小图。
  * @param {string} imageUrl 原始图片地址
  * @returns {string} 归一化后的地址，无需处理时原样返回
  */
@@ -100,10 +106,11 @@ function normalizeImageUrl(imageUrl) {
   const queryIndex = raw.indexOf('?');
   const base = queryIndex >= 0 ? raw.slice(0, queryIndex) : raw;
   const query = queryIndex >= 0 ? raw.slice(queryIndex) : '';
-  let next = base.replace(/_\.(webp|avif)$/i, '');
-  if (next === base) next = base.replace(/\.(webp|avif)$/i, '.jpg');
-  if (next === base) return raw;
-  return `${next}${query}`;
+  const originMatch = base.match(/^(.*?\.(?:jpe?g|png))_.+$/i);
+  if (originMatch) return `${originMatch[1]}${query}`;
+  const resized = base.replace(/\.(webp|avif)$/i, '.jpg');
+  if (resized !== base) return `${resized}${query}`;
+  return raw;
 }
 
 /**
@@ -124,7 +131,7 @@ function imageUrlCandidates(imageUrl) {
     hostname = '';
   }
   const candidates = [];
-  // 表格只嵌 82px 见方，用 CDN 缩放图可避免 xlsx 体积膨胀十倍以上（真原图约 660KB/张）
+  // 用 CDN 缩放变体（600×600）而非真原图，既保证放大/高 DPI 下清晰，又避免 xlsx 体积膨胀（真原图约 660KB/张）
   if (hostname && CDN_RESIZE_HOSTS.test(hostname) && /\.(jpe?g|png)$/i.test(withoutQuery)) {
     candidates.push(`${withoutQuery}${CDN_THUMBNAIL_SUFFIX}${query}`);
   }

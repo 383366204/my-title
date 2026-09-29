@@ -496,23 +496,38 @@ describe('order sheet workflow', () => {
     assert.equal(sniffImageFormat(Buffer.alloc(4)), '');
   });
 
-  it('normalizes alicdn webp transform suffixes back to embeddable sources', () => {
+  it('strips alicdn transform chains back to the true original before scaling', () => {
     assert.equal(
       normalizeImageUrl('https://img.alicdn.com/i2/394/O1CN01abc_!!394.jpg_.webp'),
       'https://img.alicdn.com/i2/394/O1CN01abc_!!394.jpg'
     );
+    // 生意参谋列表页采到的主图带 _70x70.jpg 缩略后缀，必须整段截回原图，否则嵌的是 70px 小图（模糊根因）
+    assert.equal(
+      normalizeImageUrl('https://img.alicdn.com/bao/uploaded/i1/429/O1CN01abc_!!429.jpg_70x70.jpg'),
+      'https://img.alicdn.com/bao/uploaded/i1/429/O1CN01abc_!!429.jpg'
+    );
+    // 多层变换链（先缩放再 webp）也一并截到第一个真实扩展名
     assert.equal(
       normalizeImageUrl('https://img.alicdn.com/i2/394/O1CN01abc_!!394.jpg_400x400q90.jpg_.webp'),
-      'https://img.alicdn.com/i2/394/O1CN01abc_!!394.jpg_400x400q90.jpg'
+      'https://img.alicdn.com/i2/394/O1CN01abc_!!394.jpg'
     );
     assert.equal(normalizeImageUrl('https://cdn.example.com/a.webp'), 'https://cdn.example.com/a.jpg');
     assert.equal(normalizeImageUrl('https://cdn.example.com/a.jpg'), 'https://cdn.example.com/a.jpg');
     assert.equal(normalizeImageUrl(''), '');
 
+    // 缩放变体要拼在原图上，而不是叠在 _70x70 缩略图之上
+    assert.deepEqual(
+      imageUrlCandidates('https://img.alicdn.com/bao/uploaded/i1/429/O1CN01abc_!!429.jpg_70x70.jpg'),
+      [
+        'https://img.alicdn.com/bao/uploaded/i1/429/O1CN01abc_!!429.jpg_600x600q90.jpg',
+        'https://img.alicdn.com/bao/uploaded/i1/429/O1CN01abc_!!429.jpg',
+        'https://img.alicdn.com/bao/uploaded/i1/429/O1CN01abc_!!429.jpg_70x70.jpg'
+      ]
+    );
     assert.deepEqual(
       imageUrlCandidates('https://img.alicdn.com/i2/394/O1CN01abc_!!394.jpg_.webp'),
       [
-        'https://img.alicdn.com/i2/394/O1CN01abc_!!394.jpg_200x200q90.jpg',
+        'https://img.alicdn.com/i2/394/O1CN01abc_!!394.jpg_600x600q90.jpg',
         'https://img.alicdn.com/i2/394/O1CN01abc_!!394.jpg',
         'https://img.alicdn.com/i2/394/O1CN01abc_!!394.jpg_.webp'
       ]
@@ -541,14 +556,14 @@ describe('order sheet workflow', () => {
     const hits = [];
     const realistic = async (url) => {
       hits.push(url);
-      const isJpeg = url.endsWith('_200x200q90.jpg');
+      const isJpeg = url.endsWith('_600x600q90.jpg');
       return {
         data: isJpeg ? jpeg : webp,
         headers: { 'content-type': isJpeg ? 'image/jpeg' : 'image/webp' }
       };
     };
     const result = await fetchImage('https://img.alicdn.com/x/O1CN01.jpg_.webp', { request: realistic });
-    assert.deepEqual(hits, ['https://img.alicdn.com/x/O1CN01.jpg_200x200q90.jpg']);
+    assert.deepEqual(hits, ['https://img.alicdn.com/x/O1CN01.jpg_600x600q90.jpg']);
     assert.equal(result.extension, 'jpeg');
     assert.equal(Buffer.compare(result.buffer, jpeg), 0);
   });
