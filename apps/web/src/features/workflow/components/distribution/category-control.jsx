@@ -41,7 +41,7 @@ export function CategoryControl({ row, actions, onUpdateEdit, compact }) {
       <select aria-label="铺货类目" disabled={disabled} value={selectValue}
         onChange={handleSelectChange}
         style={{ fontSize: '11px' }}
-        className={`${isCustom ? 'flex-1' : 'flex-[2]'} min-w-[80px] py-1 px-[7px] border border-slate-700 rounded-[5px] bg-[#18212f] text-slate-200 font-normal leading-[1.4]`}>
+        className={`${isCustom ? 'flex-1' : 'flex-[2]'} min-w-[80px] py-0.5 px-[7px] border border-slate-700 rounded-[5px] bg-[#18212f] text-slate-200 font-normal leading-[1.4]`}>
         <option value="" disabled>{record?.candidates?.length ? '请选择参谋候选类目' : '待获取参谋类目'}</option>
         {(record?.candidates || []).map(item => <option key={item.category} value={item.category}>{item.category}</option>)}
         <option value={CUSTOM_VALUE}>用户指定类目</option>
@@ -49,7 +49,7 @@ export function CategoryControl({ row, actions, onUpdateEdit, compact }) {
       {isCustom && <input aria-label="自定义类目" placeholder="请输入自定义类目" value={customCategory} disabled={row.removed}
         onChange={event => onUpdateEdit?.(row.key, 'customCategory', event.target.value)}
         style={{ fontSize: '11px' }}
-        className="flex-1 min-w-[60px] py-1 px-[7px] border border-slate-700 rounded-[5px] bg-[#091224] text-slate-200 font-normal leading-[1.4] focus:border-blue-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-55" />}
+        className="flex-1 min-w-[60px] py-0.5 px-[7px] border border-slate-700 rounded-[5px] bg-[#091224] text-slate-200 font-normal leading-[1.4] focus:border-blue-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-55" />}
       {actions && <div className="flex gap-1 shrink-0">{actions}</div>}
     </div>;
   }

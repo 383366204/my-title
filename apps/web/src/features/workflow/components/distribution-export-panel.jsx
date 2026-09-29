@@ -431,7 +431,7 @@ export const DistributionExportPanel = ({
         </div>
       )}
 
-      <div className="grid gap-[9px] max-h-[440px] overflow-auto pr-0.5">
+      <div className="grid content-start gap-[9px] max-h-[440px] overflow-auto pr-0.5">
         {exportStatus === 'loading' && <div className="artifact-empty"><RefreshCw size={13} className="animate-spin" /> 正在加载铺货清单...</div>}
         {exportStatus === 'error' && <div className="artifact-error">{exportError || '铺货清单加载失败'}</div>}
         {(exportStatus === 'ready' || exportStatus === 'empty') && rows.length === 0 && (

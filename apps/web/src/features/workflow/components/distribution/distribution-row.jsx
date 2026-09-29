@@ -65,11 +65,11 @@ export function DistributionRow({
     }
 
     return (
-      <article className={`flex min-w-0 border rounded-lg bg-slate-900/72 overflow-hidden ${row.removed ? 'border-rose-400/32 opacity-[0.78]' : 'border-slate-800/90'}`}>
-        {index != null && <span className="shrink-0 self-stretch flex items-center justify-center w-7 text-slate-500 text-[11px] font-bold border-r border-slate-700 bg-slate-900/40">{index}</span>}
-        <div className="grid gap-1 min-w-0 flex-1 py-1 pl-2 pr-0">
+      <article className={`flex min-w-0 border rounded-md bg-slate-900/72 overflow-hidden ${row.removed ? 'border-rose-400/32 opacity-[0.78]' : 'border-slate-800/90'}`}>
+        {index != null && <span className="shrink-0 self-stretch flex items-center justify-center w-6 text-slate-500 text-[11px] font-bold border-r border-slate-700 bg-slate-900/40">{index}</span>}
+        <div className="flex flex-col gap-0.5 min-w-0 flex-1 py-1 px-2">
           {/* Row 1: source title + keyword/metrics + status + remove */}
-          <div className="flex items-center gap-1.5 min-w-0 pr-2">
+          <div className="flex items-center gap-1.5 min-w-0">
             <span className="shrink-0 text-slate-400 text-[11px] font-bold whitespace-nowrap">原标题</span>
             {url
               ? <a href={url} target="_blank" rel="noreferrer" className="flex-auto min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-blue-400 hover:text-blue-300 underline underline-offset-2 text-[11px] leading-[1.35]" title={sourceTitle}>{sourceTitle}</a>
@@ -84,11 +84,11 @@ export function DistributionRow({
             </button>
           </div>
           {/* Row 2: editable title + category side by side */}
-          <div className="flex items-center gap-1.5 min-w-0 pr-2">
+          <div className="flex items-center gap-1.5 min-w-0">
             <span className="shrink-0 text-slate-400 text-[11px] font-bold whitespace-nowrap">铺货标题</span>
             <input value={row.title || ''} disabled={row.removed} onChange={(event) => onUpdateEdit?.(row.key, 'title', event.target.value)}
               style={{ fontSize: '11px' }}
-              className="flex-1 min-w-0 py-1 px-[7px] border border-slate-700 rounded-[5px] bg-[#091224] text-slate-200 font-normal leading-[1.4] focus:border-blue-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-55" />
+              className="flex-1 min-w-0 py-0.5 px-[7px] border border-slate-700 rounded-[5px] bg-[#091224] text-slate-200 font-normal leading-[1.4] focus:border-blue-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-55" />
             <span className="shrink-0 text-slate-400 text-[11px] font-bold whitespace-nowrap ml-2">铺货类目</span>
             <div className="flex-1 min-w-[120px]">
               <CategoryControl row={row} onUpdateEdit={onUpdateEdit} compact />
