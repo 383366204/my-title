@@ -4,6 +4,9 @@ import { listDistributionShops, saveDistributionShop, deleteDistributionShop } f
 import distributionModes from '../../../../../../../core/distribution-modes.json';
 
 const emptyShop = { name: '', platformShopName: '', port: 9222, enabled: true, isDefault: false };
+const FORM_LABEL = 'grid gap-1.5 text-[var(--text-body)] text-xs';
+const FORM_INPUT = 'min-w-0 w-full box-border p-2 text-slate-50 bg-[#0b1220] border border-slate-600 rounded text-[11px]';
+const FORM_SELECT = 'min-w-0 w-full box-border p-2 text-slate-50 bg-[#0b1220] border border-slate-600 rounded text-[11px]';
 
 /**
  * 铺货目标与本机店铺管理；已创建任务使用不可变店铺快照。
@@ -52,17 +55,17 @@ export function DistributionShopPicker({ value, onChange, onEditingChange, disab
   };
   const blocked = busy || disabled || Boolean(lockedShops);
   const field = (key, next) => setDraft(current => ({ ...current, [key]: next }));
-  return <section className="min-w-0 py-2.5 border-b border-[var(--border-default)] [&_strong]:break-words [&_form_label]:grid [&_form_label]:gap-1.5 [&_form_label]:text-[var(--text-body)] [&_form_label]:text-xs [&_form_input:not([type=checkbox]):not([type=radio])]:min-w-0 [&_form_input:not([type=checkbox]):not([type=radio])]:w-full [&_form_input:not([type=checkbox]):not([type=radio])]:box-border [&_form_input:not([type=checkbox]):not([type=radio])]:p-2 [&_form_input:not([type=checkbox]):not([type=radio])]:text-slate-50 [&_form_input:not([type=checkbox]):not([type=radio])]:bg-[#0b1220] [&_form_input:not([type=checkbox]):not([type=radio])]:border [&_form_input:not([type=checkbox]):not([type=radio])]:border-slate-600 [&_form_input:not([type=checkbox]):not([type=radio])]:rounded [&_form_select]:min-w-0 [&_form_select]:w-full [&_form_select]:box-border [&_form_select]:p-2 [&_form_select]:text-slate-50 [&_form_select]:bg-[#0b1220] [&_form_select]:border [&_form_select]:border-slate-600 [&_form_select]:rounded [&_form_small]:block [&_form_small]:text-[var(--text-muted)] [&_form_small]:mt-1.5 [&_form_small]:break-words" aria-label="铺货店铺">
+  return <section className="min-w-0 py-2.5 border-b border-[var(--border-default)]" aria-label="铺货店铺">
     <div className="flex items-center flex-wrap gap-2">
-      <strong>目标店铺 · 已选 {(lockedShops || value || []).length} 家</strong>
+      <strong className="break-words">目标店铺 · 已选 {(lockedShops || value || []).length} 家</strong>
       {!lockedShops && <>
         <button type="button" className="node-secondary-button" disabled={blocked} onClick={() => { setDraft({ ...emptyShop }); setError(''); }}><Plus size={13} />新增店铺</button>
       </>}
     </div>
     <div className="max-h-[180px] overflow-y-auto my-2" role="group" aria-label="目标店铺">
       {(lockedShops || shops).map(shop => <div className="flex items-center gap-2 py-1.5" key={shop.id}>
-        <label className="flex items-center gap-1.5 flex-1 min-w-0 cursor-pointer [&_input[type=checkbox]]:w-4 [&_input[type=checkbox]]:h-4 [&_input[type=checkbox]]:shrink-0 [&_input[type=checkbox]]:m-0 [&_input[type=checkbox]]:p-0 [&_input[type=checkbox]]:accent-green-500">
-          <input type="checkbox" checked={Boolean(lockedShops || (value || []).some(row => row.id === shop.id))} disabled={blocked || Boolean(draft) || !shop.enabled}
+        <label className="flex items-center gap-1.5 flex-1 min-w-0 cursor-pointer">
+          <input type="checkbox" className="w-4 h-4 shrink-0 m-0 p-0 accent-green-500" checked={Boolean(lockedShops || (value || []).some(row => row.id === shop.id))} disabled={blocked || Boolean(draft) || !shop.enabled}
             onChange={event => onChange(event.target.checked ? [...(value || []), shop] : (value || []).filter(row => row.id !== shop.id))} />
           <span className="min-w-0 break-words text-[11px] leading-[1.4]">{shop.name}{shop.enabled ? '' : '（已停用）'}{shop.isDefault ? '（默认）' : ''} <small className="text-slate-400 text-[10px]">平台店铺：{shop.platformShopName} · Chrome 端口：{shop.port}</small></span>
         </label>
@@ -71,22 +74,22 @@ export function DistributionShopPicker({ value, onChange, onEditingChange, disab
           <button type="button" className="node-secondary-button danger" title={`删除店铺 ${shop.name}`} aria-label={`删除店铺 ${shop.name}`} disabled={blocked || Boolean(draft)} onClick={() => remove(shop)}><Trash2 size={13} /></button>
         </>}
       </div>)}
-      {!lockedShops && !shops.length && <small>{busy ? '正在加载店铺…' : '暂无店铺配置'}</small>}
+      {!lockedShops && !shops.length && <small className="block text-[var(--text-muted)] mt-1.5 break-words">{busy ? '正在加载店铺…' : '暂无店铺配置'}</small>}
     </div>
     <div className="flex items-center flex-wrap gap-x-4 gap-y-1.5 mt-2 min-w-0 text-[11px]">
       <span className="shrink-0 text-slate-400 font-bold whitespace-nowrap">商品分配方式</span>
-      {distributionModes.map(option => <label className="inline-flex items-center gap-1.5 cursor-pointer [&_input]:w-3.5 [&_input]:h-3.5 [&_input]:shrink-0 [&_input]:m-0 [&_input]:p-0 [&_input]:accent-green-500" key={option.value}>
-        <input type="radio" name="distribution-mode" value={option.value} checked={mode === option.value} onChange={() => onModeChange(option.value)} disabled={blocked || Boolean(draft)} />{option.label}
+      {distributionModes.map(option => <label className="inline-flex items-center gap-1.5 cursor-pointer" key={option.value}>
+        <input type="radio" className="w-3.5 h-3.5 shrink-0 m-0 p-0 accent-green-500" name="distribution-mode" value={option.value} checked={mode === option.value} onChange={() => onModeChange(option.value)} disabled={blocked || Boolean(draft)} />{option.label}
       </label>)}
     </div>
     {error && <p role="alert" className="!text-red-200">{error}</p>}
-    {draft && <form className="grid gap-3 mt-3 [&_fieldset]:grid [&_fieldset]:grid-cols-2 [&_fieldset]:gap-3 [&_fieldset]:p-0 [&_fieldset]:border-0 [&_fieldset]:min-w-0 max-sm:[&_fieldset]:grid-cols-1" onSubmit={save}>
-      <fieldset disabled={busy || disabled}>
-        <label>显示名称<input required maxLength={80} value={draft.name} onChange={event => field('name', event.target.value)} /></label>
-        <label>铺货平台店铺名称<input required maxLength={160} placeholder="与铺货平台显示的店铺名完全一致" value={draft.platformShopName} onChange={event => field('platformShopName', event.target.value)} /></label>
-        <label>Chrome 调试端口<input required type="number" min="1" max="65535" value={draft.port} onChange={event => field('port', event.target.value)} /></label>
-        <label className="flex items-center justify-start whitespace-nowrap [&_input[type=checkbox]]:shrink-0 [&_input[type=checkbox]]:w-4 [&_input[type=checkbox]]:h-4 [&_input[type=checkbox]]:m-0 [&_input[type=checkbox]]:p-0"><input type="checkbox" checked={draft.enabled} onChange={event => field('enabled', event.target.checked)} />启用</label>
-        <label className="flex items-center justify-start whitespace-nowrap [&_input[type=checkbox]]:shrink-0 [&_input[type=checkbox]]:w-4 [&_input[type=checkbox]]:h-4 [&_input[type=checkbox]]:m-0 [&_input[type=checkbox]]:p-0"><input type="checkbox" checked={draft.isDefault} disabled={!draft.enabled} onChange={event => field('isDefault', event.target.checked)} />默认店铺</label>
+    {draft && <form className="grid gap-3 mt-3" onSubmit={save}>
+      <fieldset className="grid grid-cols-2 gap-3 p-0 border-0 min-w-0 max-sm:grid-cols-1" disabled={busy || disabled}>
+        <label className={FORM_LABEL}>显示名称<input required maxLength={80} className={FORM_INPUT} value={draft.name} onChange={event => field('name', event.target.value)} /></label>
+        <label className={FORM_LABEL}>铺货平台店铺名称<input required maxLength={160} className={FORM_INPUT} placeholder="与铺货平台显示的店铺名完全一致" value={draft.platformShopName} onChange={event => field('platformShopName', event.target.value)} /></label>
+        <label className={FORM_LABEL}>Chrome 调试端口<input required type="number" min="1" max="65535" className={FORM_INPUT} value={draft.port} onChange={event => field('port', event.target.value)} /></label>
+        <label className="flex items-center justify-start whitespace-nowrap gap-1.5 text-[11px]"><input type="checkbox" className="w-4 h-4 shrink-0 m-0 p-0 accent-green-500" checked={draft.enabled} onChange={event => field('enabled', event.target.checked)} />启用</label>
+        <label className="flex items-center justify-start whitespace-nowrap gap-1.5 text-[11px]"><input type="checkbox" className="w-4 h-4 shrink-0 m-0 p-0 accent-green-500" checked={draft.isDefault} disabled={!draft.enabled} onChange={event => field('isDefault', event.target.checked)} />默认店铺</label>
       </fieldset>
       <div className="flex items-center flex-wrap gap-2">
         <button type="submit" className="node-primary-button" disabled={busy || disabled}><Save size={13} />{busy ? '保存中…' : '保存店铺'}</button>
