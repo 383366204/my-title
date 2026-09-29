@@ -8,7 +8,7 @@ export function CategoryControl({ row }) {
   const [query, setQuery] = useState('');
   const disabled = row.removed || !record || control?.busy || control?.state?.locked
     || control?.state?.job?.status === 'running' || control?.state?.job?.inFlight;
-  return <div className="distribution-category-control">
+  return <div className="distribution-category-control text-[11px] [&_select]:text-[11px] [&_input]:text-[11px] [&_label]:text-slate-400 [&_label]:font-bold [&_small]:text-[11px]">
     <label>
       <span>铺货类目（生意参谋）</span>
       <select aria-label="铺货类目（生意参谋）" disabled={disabled} value={record?.category || ''}
