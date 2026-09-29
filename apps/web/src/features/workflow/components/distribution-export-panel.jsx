@@ -23,17 +23,19 @@ function CategoryToolbar({ control, rows, onRemove }) {
   const job = control.state?.job;
   const missing = control.state?.rows?.filter(row => !row.category) || [];
   const activeMissing = rows.filter(row => !row.categoryRecord?.category);
+  const hasWork = missing.length > 0 || job?.status === 'running' || job?.status === 'paused' || job?.error || control.error || activeMissing.length > 0;
+  if (!hasWork) return null;
   return <div className="flex items-center flex-wrap gap-2 py-3">
-    <span>{missing.length > 0 ? `${missing.length} 件商品缺少类目` : '类目已就绪'}{job?.status === 'running' ? `（正在查询 ${job.completed || 0}/${job.requests?.length || 0}）` : ''}</span>
-    <button type="button" className="node-secondary-button" disabled={!missing.length || control.busy || control.state?.locked || job?.status === 'running' || job?.inFlight}
-      onClick={() => control.act({ action: 'query', urls: missing.map(row => row.url) })}>补全缺失类目</button>
+    {missing.length > 0 && <span className="text-[11px] text-slate-400">{missing.length} 件商品缺少类目{job?.status === 'running' ? `（正在查询 ${job.completed || 0}/${job.requests?.length || 0}）` : ''}</span>}
+    {missing.length > 0 && <button type="button" className="node-secondary-button" disabled={control.busy || control.state?.locked || job?.status === 'running' || job?.inFlight}
+      onClick={() => control.act({ action: 'query', urls: missing.map(row => row.url) })}>补全缺失类目</button>}
     {job?.status === 'running' && <button type="button" className="node-secondary-button" disabled={control.busy} onClick={() => control.act({ action: 'pause' })}>暂停获取</button>}
     {job?.status === 'paused' && <button type="button" className="node-secondary-button" disabled={control.busy || job.inFlight} onClick={() => control.act({ action: 'resume' })}>继续获取</button>}
     {job?.error && <button type="button" className="node-secondary-button" disabled={control.busy || job.inFlight || control.state?.locked} onClick={control.startChrome}>启动生意参谋 Chrome</button>}
     {activeMissing.length > 0 && <button type="button" className="node-secondary-button" onClick={() => {
       if (window.confirm(`从当前清单移除 ${activeMissing.length} 件待补类目商品，仅保留已就绪项？`)) activeMissing.forEach(row => onRemove(row.key, true));
     }}>仅保留类目已就绪商品</button>}
-    {(control.error || job?.error) && <span role="alert" className="basis-full text-[#efb467]">{control.error || job.error}</span>}
+    {(control.error || job?.error) && <span role="alert" className="basis-full text-[#efb467] text-[11px]">{control.error || job.error}</span>}
   </div>;
 }
 
