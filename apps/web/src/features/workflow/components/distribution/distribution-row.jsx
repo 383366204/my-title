@@ -75,7 +75,8 @@ export function DistributionRow({
         <div className="flex items-center gap-1.5 min-w-0">
           <span className="shrink-0 w-[56px] text-slate-400 text-[11px] font-bold whitespace-nowrap">铺货标题</span>
           <input value={row.title || ''} disabled={row.removed} onChange={(event) => onUpdateEdit?.(row.key, 'title', event.target.value)}
-            className="flex-1 min-w-0 py-1 px-[7px] border border-slate-700 rounded-[5px] bg-[#091224] text-slate-200 text-[11px] font-normal leading-[1.4] focus:border-blue-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-55" />
+            style={{ fontSize: '11px' }}
+            className="flex-1 min-w-0 py-1 px-[7px] border border-slate-700 rounded-[5px] bg-[#091224] text-slate-200 font-normal leading-[1.4] focus:border-blue-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-55" />
         </div>
         {/* Row 3: category + action buttons in one line */}
         <CategoryControl row={row} actions={<>
