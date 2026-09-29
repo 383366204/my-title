@@ -92,21 +92,21 @@ export const KeywordReviewOperationPanel = ({
   };
 
   return (
-    <div className="node-embedded-workbench">
-      <section className="node-workbench-section">
-        <div className="node-workbench-head">
+    <div className="grid gap-3">
+      <section className="grid gap-2.5 p-3 border border-slate-800/90 rounded-lg bg-slate-950/[0.42]">
+        <div className="flex items-center justify-between gap-2.5">
           <strong>{combined ? '关键词确认' : '候选词筛选'}</strong>
           <span>已选 {approvedCount} / 共 {candidateRows.length} 个 · 排除 {rejectedCount} 个</span>
         </div>
-        {combined && <div className="workflow-node-output-summary">
+        {combined && <div className="mt-2 rounded-lg border border-emerald-500/28 bg-emerald-900/18 text-emerald-200 text-[11px] font-extrabold leading-[1.35] px-2 py-[7px]">
           符合 {candidates.filter(row => row.metricFilter?.passed).length} · 待确认 {candidates.filter(row => row.metricFilter?.status === 'review').length} · 不符合 {candidates.filter(row => row.metricFilter?.status === 'failed').length}
         </div>}
-        <div className="keyword-review-manual-input">
+        <div className="flex gap-2 items-center my-2.5">
           {combined && currentRunId && <button type="button" className="node-secondary-button" disabled={confirming} onClick={() => setFilterOpen(true)}>
             <Settings2 size={13} /> 筛选条件
           </button>}
           <input
-            className="keyword-review-search"
+            className="flex-1 min-h-8 px-2.5 bg-[#090f1f] border border-slate-600 rounded-md text-slate-200 min-w-[160px]"
             value={manualKeywordDraft}
             onChange={(event) => setManualKeywordDraft(event.target.value)}
             onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addManualKeywords(); } }}
@@ -123,14 +123,14 @@ export const KeywordReviewOperationPanel = ({
           </button>}
         </div>
         {manualKeywords.length > 0 && (
-          <div className="node-chip-list keyword-review-manual-list">
-            {manualKeywords.map((keyword) => <span className="workflow-template-chip" key={keyword}>{keyword}</span>)}
+          <div className="flex flex-wrap gap-1.5 max-h-[150px] overflow-auto mb-2.5">
+            {manualKeywords.map((keyword) => <span className="inline-flex items-center min-h-5 max-w-full px-[7px] py-0.5 rounded-full border border-slate-700/92 bg-slate-900/68 text-slate-300 text-[10px]" key={keyword}>{keyword}</span>)}
           </div>
         )}
         {candidateRows.length > 0 && (
-          <div className="keyword-review-toolbar">
-            <input className="keyword-review-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索关键词或词根" aria-label="搜索候选关键词" />
-            <select className="keyword-review-filter" value={filter} onChange={(event) => setFilter(event.target.value)} aria-label="筛选候选词">
+          <div className="flex flex-wrap gap-2">
+            <input className="flex-1 min-h-8 px-2.5 bg-[#090f1f] border border-slate-600 rounded-md text-slate-200 min-w-[160px]" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索关键词或词根" aria-label="搜索候选关键词" />
+            <select className="min-h-8 px-2.5 bg-[#090f1f] border border-slate-600 rounded-md text-slate-200" value={filter} onChange={(event) => setFilter(event.target.value)} aria-label="筛选候选词">
               <option value="all">全部候选词</option>
               <option value="recommended">{combined ? '符合筛选条件' : '推荐采用'}</option>
               {combined && <option value="pending">待人工判断</option>}
@@ -151,7 +151,7 @@ export const KeywordReviewOperationPanel = ({
             </button>
           </div>
         )}
-        <div className="node-candidate-list">
+        <div className="grid gap-[7px] max-h-[250px] overflow-auto">
           {visibleRows.slice(0, visibleLimit).map((item) => (
             <div className={`node-candidate-row keyword-review-row ${item.reviewDecision === 'rejected' ? 'is-rejected' : 'is-approved'}`} key={item.key}>
               <input type="checkbox" aria-label={`采用 ${item.keyword}`} checked={item.reviewDecision === 'approved'} disabled={!canConfirm || confirming}
@@ -162,7 +162,7 @@ export const KeywordReviewOperationPanel = ({
                 <span>{item.reason || item.gateReason || item.tier || '人工判断是否用于选品'}</span>
                 {combined && <>
                   <span>{item.reviewRecommended ? '符合全部筛选条件' : '未通过筛选，需人工判断'}</span>
-                  {!item.reviewRecommended && item.reviewDecision === 'approved' && <span className="keyword-filter-warning">已选中，但未满足当前条件；确认继续时需人工放行。</span>}
+                  {!item.reviewRecommended && item.reviewDecision === 'approved' && <span className="text-[#d99a28] text-xs break-words">已选中，但未满足当前条件；确认继续时需人工放行。</span>}
                   {item.metricFilter?.checks?.map(check => <span key={check.key}>
                     {check.condition} · 当前值：{check.raw == null || check.raw === '' ? '缺失' : String(check.raw)} · {check.reason}
                   </span>)}
@@ -170,7 +170,7 @@ export const KeywordReviewOperationPanel = ({
                   {item.keywordOpportunity?.manualApproval?.approved && <span>已人工放行，原始指标保留</span>}
                 </>}
                 {!combined && (item.marketMetrics?.missing?.length > 0 || item.marketMetrics?.breakdown) && (
-                  <details className="keyword-review-detail">
+                  <details className="text-[#667085] text-xs mt-[5px] [&>summary]:cursor-pointer [&>summary]:inline-block [&>summary]:mb-1 [&>span]:block">
                     <summary>查看评分依据</summary>
                     {item.marketMetrics?.missing?.length > 0 && <span>缺失：{item.marketMetrics.missing.join('、')}</span>}
                     {item.marketMetrics?.confidence && <span>置信度：{item.marketMetrics.confidence === 'high' ? '高' : item.marketMetrics.confidence === 'medium' ? '中' : '低'}</span>}
@@ -178,7 +178,7 @@ export const KeywordReviewOperationPanel = ({
                   </details>
                 )}
               </div>
-              <div className="keyword-review-actions">
+              <div className="flex flex-wrap justify-end items-center gap-1.5">
                 {!combined && (item.localScore ? <small>本地分 {item.localScore}</small> : <small>{item.tier || ''}</small>)}
                 {item.sycmData?.searchPopularity != null && <small>人气 {item.sycmData.searchPopularity}</small>}
                 {item.sycmData?.demandSupplyRatio != null && <small>供需 {item.sycmData.demandSupplyRatio}</small>}
@@ -205,7 +205,7 @@ export const KeywordReviewOperationPanel = ({
           {candidates.length === 0 && manualKeywords.length === 0 && <div className="artifact-empty">暂无候选词，可以先手动输入关键词。</div>}
         </div>
         {visibleRows.length > visibleLimit && (
-          <button type="button" className="node-secondary-button keyword-review-load-more" onClick={() => setVisibleLimit((current) => current + 50)}>
+          <button type="button" className="node-secondary-button" onClick={() => setVisibleLimit((current) => current + 50)}>
             继续显示（剩余 {visibleRows.length - visibleLimit} 个）
           </button>
         )}
@@ -217,7 +217,7 @@ export const KeywordReviewOperationPanel = ({
             <RefreshCw size={13} /> {retryLabel}
           </button>
         </div>
-        {riskConfirmation && <section className="node-workbench-section" role="alertdialog" aria-label="确认人工放行">
+        {riskConfirmation && <section className="grid gap-2.5 p-3 border border-slate-800/90 rounded-lg bg-slate-950/[0.42]" role="alertdialog" aria-label="确认人工放行">
           <strong>确认人工放行 {riskyCount} 个关键词？</strong>
           <p>这些词未满足筛选条件或缺少指标。原始指标和筛选原因会保留，放行后可以继续货源选品。</p>
           <div className="node-product-actions">
@@ -225,7 +225,7 @@ export const KeywordReviewOperationPanel = ({
             <button type="button" className="node-primary-button" disabled={confirming || !canConfirm} onClick={submitSelection}>确认人工放行</button>
           </div>
         </section>}
-        <p className="node-workbench-note">{combined ? '按本次运行的筛选条件判断，人工放行保留原始指标。' : '确认后，只有“保留”的关键词会进入生意参谋校验；“筛除”的关键词会写入记录但不继续请求平台。'}</p>
+        <p className="node-workbench-note">{combined ? '按本次运行的筛选条件判断，人工放行保留原始指标。' : '确认后，只有"保留"的关键词会进入生意参谋校验；"筛除"的关键词会写入记录但不继续请求平台。'}</p>
       </section>
       {filterOpen && <KeywordFilterModal runId={currentRunId} decisions={Object.fromEntries(Object.entries(decisions).filter(([key]) => candidates.some(row => candidateKeyword(row) === key)))}
         onRecollected={onKeywordFilterRecollected}
