@@ -502,6 +502,7 @@ test('workflow recovery APIs - pause, resume, and retry', async (t) => {
       fs.writeFileSync(jobFile, JSON.stringify({
         jobId,
         workflowRunId: runId,
+        startedAt: '2026-07-26T04:10:00.000Z',
         status: 'completed_with_issues',
         total: 1,
         completed: 0,
