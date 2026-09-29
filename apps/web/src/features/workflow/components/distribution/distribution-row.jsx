@@ -67,11 +67,11 @@ export function DistributionRow({
       <article className={`grid gap-1.5 min-w-0 border rounded-lg bg-slate-900/72 p-[7px_9px] ${row.removed ? 'border-rose-400/32 opacity-[0.78]' : 'border-slate-800/90'}`}>
         {/* Row 1: source title + status tag */}
         <div className="flex items-center gap-1.5 min-w-0">
-          <strong className="block flex-auto min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-slate-200 text-[12px] leading-[1.35]" title={sourceTitle}>{sourceTitle}</strong>
+          <strong className="block flex-auto min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-slate-200 text-[11px] leading-[1.35]" title={sourceTitle}>{sourceTitle}</strong>
           <em className={`shrink-0 whitespace-nowrap rounded-full text-[10px] not-italic font-extrabold px-[7px] py-0.5 ${row.removed ? 'bg-[rgba(127,29,29,0.28)] text-rose-200' : 'bg-emerald-900/28 text-green-200'}`}>{row.removed ? '已移除' : '将导出'}</em>
         </div>
         {/* Row 2: editable title + category side by side */}
-        <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-1.5 max-sm:grid-cols-[minmax(0,1fr)] [&>label]:flex [&>label]:min-w-0 [&>label]:flex-col [&>label]:gap-[2px] [&>label]:text-slate-400 [&>label]:text-[10px] [&>label]:font-bold [&>input]:w-full [&>input]:min-w-0 [&>input]:py-1 [&>input]:px-[7px] [&>input]:border [&>input]:border-slate-700 [&>input]:rounded-[5px] [&>input]:bg-[#091224] [&>input]:text-slate-200 [&>input]:text-xs [&>input:focus]:border-blue-500 [&>input:focus]:outline-none [&>input:disabled]:cursor-not-allowed [&>input:disabled]:opacity-55 [&>select]:w-full [&>select]:min-w-0 [&>select]:py-1 [&>select]:px-[7px] [&>select]:border [&>select]:border-slate-700 [&>select]:rounded-[5px] [&>select]:bg-[#091224] [&>select]:text-slate-200 [&>select]:text-xs">
+        <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-1.5 max-sm:grid-cols-[minmax(0,1fr)] [&>label]:flex [&>label]:min-w-0 [&>label]:flex-col [&>label]:gap-[2px] [&>label]:text-slate-400 [&>label]:text-[11px] [&>label]:font-bold [&>input]:w-full [&>input]:min-w-0 [&>input]:py-1 [&>input]:px-[7px] [&>input]:border [&>input]:border-slate-700 [&>input]:rounded-[5px] [&>input]:bg-[#091224] [&>input]:text-slate-200 [&>input]:text-[11px] [&>input:focus]:border-blue-500 [&>input:focus]:outline-none [&>input:disabled]:cursor-not-allowed [&>input:disabled]:opacity-55 [&>select]:w-full [&>select]:min-w-0 [&>select]:py-1 [&>select]:px-[7px] [&>select]:border [&>select]:border-slate-700 [&>select]:rounded-[5px] [&>select]:bg-[#091224] [&>select]:text-slate-200 [&>select]:text-[11px]">
           <label>
             <span>铺货标题</span>
             <input value={row.title || ''} disabled={row.removed} onChange={(event) => onUpdateEdit?.(row.key, 'title', event.target.value)} />
@@ -80,10 +80,10 @@ export function DistributionRow({
         </div>
         {/* Row 3: keyword badge + metrics + actions in one line */}
         <div className="flex items-center flex-wrap gap-1.5">
-          {keyword && <small className="inline-flex w-fit max-w-full items-center border border-sky-500/32 rounded-full bg-sky-900/28 text-sky-200 text-[10px] font-extrabold leading-[1.1] px-[7px] py-0.5 break-all">选词：{keyword}</small>}
-          {Array.isArray(row.metrics) && row.metrics.length > 0 && <span className="text-slate-400 text-[10px] leading-[1.4] break-all">{row.metrics.join(' · ')}</span>}
+          {keyword && <small className="inline-flex w-fit max-w-full items-center border border-sky-500/32 rounded-full bg-sky-900/28 text-sky-200 text-[11px] font-extrabold leading-[1.1] px-[7px] py-0.5 break-all">选词：{keyword}</small>}
+          {Array.isArray(row.metrics) && row.metrics.length > 0 && <span className="text-slate-400 text-[11px] leading-[1.4] break-all">{row.metrics.join(' · ')}</span>}
           <span className="flex-1" />
-          <div className="flex flex-wrap gap-1 [&_.node-secondary-button]:min-h-[24px] [&_.node-secondary-button]:py-0.5 [&_.node-secondary-button]:px-[7px] [&_.node-secondary-button]:text-[10px]">
+          <div className="flex flex-wrap gap-1 [&_.node-secondary-button]:min-h-[24px] [&_.node-secondary-button]:py-0.5 [&_.node-secondary-button]:px-[7px] [&_.node-secondary-button]:text-[11px]">
             <button type="button" className={`node-secondary-button ${row.removed ? 'success' : 'danger'}`} onClick={() => onMarkRemoved?.(row.key, !row.removed)}>
               {row.removed ? <Check size={12} /> : <X size={12} />}
               {row.removed ? '恢复' : '移除'}
