@@ -58,10 +58,7 @@
 .nav-button,
 .icon-button,
 .primary-button,
-.secondary-button,
-.node-icon-button,
-.node-primary-button,
-.node-secondary-button {
+.secondary-button {
   min-height: 34px;
   border: 1px solid var(--btn-border);
   border-radius: 7px;
@@ -74,9 +71,7 @@
 
 .nav-button,
 .primary-button,
-.secondary-button,
-.node-primary-button,
-.node-secondary-button {
+.secondary-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -92,8 +87,7 @@
 
 .nav-button:hover,
 .icon-button:hover,
-.secondary-button:hover,
-.node-secondary-button:hover {
+.secondary-button:hover {
   border-color: var(--btn-hover-border);
   background: var(--btn-hover-bg);
   color: var(--btn-hover-text);

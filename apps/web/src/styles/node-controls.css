@@ -1,11 +1,20 @@
-/* Node button sizing overrides (base styles unified in console-base.css) */
+/* Node button base + sizing (separate from console-base buttons to preserve font-size: 11px) */
 .node-icon-button,
 .node-primary-button,
 .node-secondary-button {
-  gap: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  border: 1px solid var(--btn-border);
   border-radius: 8px;
+  color: var(--btn-text);
+  background: var(--btn-bg);
   font-size: 11px;
   font-weight: 700;
+  gap: 6px;
+  cursor: pointer;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
 }
 
 .node-icon-button {
