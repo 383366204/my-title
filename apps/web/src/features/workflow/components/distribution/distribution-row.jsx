@@ -70,11 +70,12 @@ export function DistributionRow({
           <strong className="block flex-auto min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-slate-200 text-[11px] leading-[1.35]" title={sourceTitle}>{sourceTitle}</strong>
           <em className={`shrink-0 whitespace-nowrap rounded-full text-[10px] not-italic font-extrabold px-[7px] py-0.5 ${row.removed ? 'bg-[rgba(127,29,29,0.28)] text-rose-200' : 'bg-emerald-900/28 text-green-200'}`}>{row.removed ? '已移除' : '将导出'}</em>
         </div>
-        {/* Row 2: editable title */}
-        <label className="flex min-w-0 flex-col gap-[2px] text-slate-400 text-[11px] font-bold [&>input]:w-full [&>input]:min-w-0 [&>input]:py-1 [&>input]:px-[7px] [&>input]:border [&>input]:border-slate-700 [&>input]:rounded-[5px] [&>input]:bg-[#091224] [&>input]:text-slate-200 [&>input]:text-[11px] [&>input]:font-normal [&>input:focus]:border-blue-500 [&>input:focus]:outline-none [&>input:disabled]:cursor-not-allowed [&>input:disabled]:opacity-55">
-          <span>铺货标题</span>
-          <input value={row.title || ''} disabled={row.removed} onChange={(event) => onUpdateEdit?.(row.key, 'title', event.target.value)} />
-        </label>
+        {/* Row 2: editable title (label + input inline) */}
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span className="shrink-0 text-slate-400 text-[11px] font-bold whitespace-nowrap">铺货标题</span>
+          <input value={row.title || ''} disabled={row.removed} onChange={(event) => onUpdateEdit?.(row.key, 'title', event.target.value)}
+            className="flex-1 min-w-0 py-1 px-[7px] border border-slate-700 rounded-[5px] bg-[#091224] text-slate-200 text-[11px] focus:border-blue-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-55" />
+        </div>
         {/* Row 3: category control (full width, below title) */}
         <CategoryControl row={row} />
         {/* Row 3: keyword badge + metrics + actions in one line */}
