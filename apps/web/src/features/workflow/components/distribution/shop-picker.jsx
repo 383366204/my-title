@@ -60,11 +60,11 @@ export function DistributionShopPicker({ value, onChange, onEditingChange, disab
       </>}
     </div>
     <div className="max-h-[180px] overflow-y-auto my-2" role="group" aria-label="目标店铺">
-      {(lockedShops || shops).map(shop => <div className="flex items-start gap-2 py-1.5 [&>label]:flex-1 [&>label]:min-w-0" key={shop.id}>
-        <label className="flex items-start gap-2 [&_input[type=checkbox]]:w-4 [&_input[type=checkbox]]:h-4 [&_input[type=checkbox]]:shrink-0 [&_input[type=checkbox]]:mt-0.5 [&_input[type=checkbox]]:m-0 [&_input[type=checkbox]]:p-0 [&_input[type=checkbox]]:accent-green-500 [&_input[type=radio]]:w-4 [&_input[type=radio]]:h-4 [&_input[type=radio]]:shrink-0 [&_input[type=radio]]:m-0 [&_input[type=radio]]:p-0 [&_input[type=radio]]:accent-green-500">
+      {(lockedShops || shops).map(shop => <div className="flex items-center gap-2 py-1.5" key={shop.id}>
+        <label className="flex items-center gap-1.5 flex-1 min-w-0 cursor-pointer [&_input[type=checkbox]]:w-4 [&_input[type=checkbox]]:h-4 [&_input[type=checkbox]]:shrink-0 [&_input[type=checkbox]]:m-0 [&_input[type=checkbox]]:p-0 [&_input[type=checkbox]]:accent-green-500">
           <input type="checkbox" checked={Boolean(lockedShops || (value || []).some(row => row.id === shop.id))} disabled={blocked || Boolean(draft) || !shop.enabled}
             onChange={event => onChange(event.target.checked ? [...(value || []), shop] : (value || []).filter(row => row.id !== shop.id))} />
-          <span className="min-w-0 break-words text-[11px] leading-[1.4]">{shop.name}{shop.enabled ? '' : '（已停用）'}{shop.isDefault ? '（默认）' : ''}<br /><small className="text-slate-400 text-[10px]">平台店铺：{shop.platformShopName} · Chrome 端口：{shop.port}</small></span>
+          <span className="min-w-0 break-words text-[11px] leading-[1.4]">{shop.name}{shop.enabled ? '' : '（已停用）'}{shop.isDefault ? '（默认）' : ''} <small className="text-slate-400 text-[10px]">平台店铺：{shop.platformShopName} · Chrome 端口：{shop.port}</small></span>
         </label>
         {!lockedShops && <>
           <button type="button" className="node-secondary-button" title={`配置店铺 ${shop.name}`} aria-label={`配置店铺 ${shop.name}`} disabled={blocked || Boolean(draft)} onClick={() => { setDraft({ ...shop }); setError(''); }}><Settings2 size={13} /></button>
