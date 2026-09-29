@@ -66,34 +66,38 @@ export function DistributionRow({
 
     return (
       <article className={`flex gap-2 min-w-0 border rounded-lg bg-slate-900/72 p-[7px_9px] ${row.removed ? 'border-rose-400/32 opacity-[0.78]' : 'border-slate-800/90'}`}>
-        {index != null && <span className="shrink-0 self-center w-5 text-center text-slate-500 text-[11px] font-bold border-r border-slate-700 pr-2 mr-0.5">{index}</span>}
+        {index != null && <span className="shrink-0 self-center w-5 text-center text-slate-500 text-[11px] font-bold">{index}</span>}
         <div className="grid gap-1.5 min-w-0 flex-1">
-          {/* Row 1: source title + keyword/metrics + status + remove */}
-          <div className="flex items-center gap-1.5 min-w-0">
-            <span className="shrink-0 text-slate-400 text-[11px] font-bold whitespace-nowrap">原标题</span>
-            {url
-              ? <a href={url} target="_blank" rel="noreferrer" className="flex-auto min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-blue-400 hover:text-blue-300 underline underline-offset-2 text-[11px] leading-[1.35]" title={sourceTitle}>{sourceTitle}</a>
-              : <strong className="block flex-auto min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-slate-200 text-[11px] leading-[1.35]" title={sourceTitle}>{sourceTitle}</strong>
-            }
-            {keyword && <small className="shrink-0 inline-flex items-center border border-sky-500/32 rounded-full bg-sky-900/28 text-sky-200 text-[10px] font-extrabold leading-[1.1] px-[5px] py-0.5">选词：{keyword}</small>}
-            {Array.isArray(row.metrics) && row.metrics.length > 0 && <span className="shrink-0 text-slate-500 text-[10px] whitespace-nowrap">{row.metrics.join(' · ')}</span>}
-            <em className={`shrink-0 whitespace-nowrap rounded-full text-[10px] not-italic font-extrabold px-[7px] py-0.5 ${row.removed ? 'bg-[rgba(127,29,29,0.28)] text-rose-200' : 'bg-emerald-900/28 text-green-200'}`}>{row.removed ? '已移除' : '将导出'}</em>
-            <button type="button" className={`node-secondary-button shrink-0 !min-h-[22px] !py-0 !px-[6px] !text-[10px] ${row.removed ? 'success' : 'danger'}`} onClick={() => onMarkRemoved?.(row.key, !row.removed)}>
-              {row.removed ? <Check size={11} /> : <X size={11} />}
-              {row.removed ? '恢复' : '移除'}
-            </button>
+        {/* Row 1: source title (clickable link) + status tag */}
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span className="shrink-0 w-[56px] text-slate-400 text-[11px] font-bold whitespace-nowrap">原标题</span>
+          {url
+            ? <a href={url} target="_blank" rel="noreferrer" className="flex-auto min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-blue-400 hover:text-blue-300 underline underline-offset-2 text-[11px] leading-[1.35]" title={sourceTitle}>{sourceTitle}</a>
+            : <strong className="block flex-auto min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-slate-200 text-[11px] leading-[1.35]" title={sourceTitle}>{sourceTitle}</strong>
+          }
+          <em className={`shrink-0 whitespace-nowrap rounded-full text-[10px] not-italic font-extrabold px-[7px] py-0.5 ${row.removed ? 'bg-[rgba(127,29,29,0.28)] text-rose-200' : 'bg-emerald-900/28 text-green-200'}`}>{row.removed ? '已移除' : '将导出'}</em>
+        </div>
+        {/* Row 2: editable title (label + input inline) */}
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span className="shrink-0 w-[56px] text-slate-400 text-[11px] font-bold whitespace-nowrap">铺货标题</span>
+          <input value={row.title || ''} disabled={row.removed} onChange={(event) => onUpdateEdit?.(row.key, 'title', event.target.value)}
+            style={{ fontSize: '11px' }}
+            className="flex-1 min-w-0 py-1 px-[7px] border border-slate-700 rounded-[5px] bg-[#091224] text-slate-200 font-normal leading-[1.4] focus:border-blue-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-55" />
+        </div>
+        {/* Row 3: category + action buttons in one line */}
+        <CategoryControl row={row} onUpdateEdit={onUpdateEdit} actions={<>
+          <button type="button" className={`node-secondary-button ${row.removed ? 'success' : 'danger'}`} onClick={() => onMarkRemoved?.(row.key, !row.removed)}>
+            {row.removed ? <Check size={12} /> : <X size={12} />}
+            {row.removed ? '恢复' : '移除'}
+          </button>
+        </>} />
+        {/* Row 4: keyword badge + metrics */}
+        {(keyword || (Array.isArray(row.metrics) && row.metrics.length > 0)) && (
+          <div className="flex items-center flex-wrap gap-1.5">
+            {keyword && <small className="inline-flex w-fit max-w-full items-center border border-sky-500/32 rounded-full bg-sky-900/28 text-sky-200 text-[11px] font-extrabold leading-[1.1] px-[7px] py-0.5 break-all">选词：{keyword}</small>}
+            {Array.isArray(row.metrics) && row.metrics.length > 0 && <span className="text-slate-400 text-[11px] leading-[1.4] break-all">{row.metrics.join(' · ')}</span>}
           </div>
-          {/* Row 2: editable title + category side by side */}
-          <div className="flex items-center gap-1.5 min-w-0">
-            <span className="shrink-0 text-slate-400 text-[11px] font-bold whitespace-nowrap">铺货标题</span>
-            <input value={row.title || ''} disabled={row.removed} onChange={(event) => onUpdateEdit?.(row.key, 'title', event.target.value)}
-              style={{ fontSize: '11px' }}
-              className="flex-1 min-w-0 py-0.5 px-[7px] border border-slate-700 rounded-[5px] bg-[#091224] text-slate-200 font-normal leading-[1.4] focus:border-blue-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-55" />
-            <span className="shrink-0 text-slate-400 text-[11px] font-bold whitespace-nowrap ml-2">铺货类目</span>
-            <div className="flex-1 min-w-[120px]">
-              <CategoryControl row={row} onUpdateEdit={onUpdateEdit} compact />
-            </div>
-          </div>
+        )}
         </div>
       </article>
     );
