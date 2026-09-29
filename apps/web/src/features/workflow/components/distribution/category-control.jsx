@@ -8,26 +8,37 @@ export function CategoryControl({ row }) {
   const [query, setQuery] = useState('');
   const disabled = row.removed || !record || control?.busy || control?.state?.locked
     || control?.state?.job?.status === 'running' || control?.state?.job?.inFlight;
-  return <div className="distribution-category-control text-[11px] [&_select]:text-[11px] [&_input]:text-[11px] [&_label]:text-slate-400 [&_label]:font-bold [&_small]:text-[11px]">
-    <label>
-      <span>铺货类目（生意参谋）</span>
+
+  // Merge info lines into one string
+  const infoParts = [];
+  if (record?.source === 'sycm_manual') infoParts.push('已人工确认参谋候选');
+  else if (record?.category) infoParts.push('生意参谋指标推荐');
+  else infoParts.push('尚未确定铺货类目');
+  if (record?.queryWord) infoParts.push(`查询词：${record.queryWord}`);
+  if (record?.source1688Category) infoParts.push(`1688：${record.source1688Category}`);
+  if (record?.collectedAt) infoParts.push(new Date(record.collectedAt).toLocaleString('zh-CN'));
+  if (record?.legacyCategory) infoParts.push(`历史：${record.legacyCategory}`);
+
+  return <div className="grid gap-1 min-w-0 text-[11px] [&_select]:text-[11px] [&_input]:text-[11px]">
+    {/* Row 1: label + select + query input + button in one line */}
+    <div className="flex items-center gap-1.5 min-w-0">
+      <span className="shrink-0 text-slate-400 font-bold whitespace-nowrap">铺货类目</span>
       <select aria-label="铺货类目（生意参谋）" disabled={disabled} value={record?.category || ''}
-        onChange={event => control?.act({ action: 'select', url: record.url, category: event.target.value })}>
+        onChange={event => control?.act({ action: 'select', url: record.url, category: event.target.value })}
+        className="flex-1 min-w-0 py-1 px-[7px] border border-slate-700 rounded-[5px] bg-[#18212f] text-slate-200">
         <option value="">{record?.candidates?.length ? '请选择参谋候选类目' : '待获取参谋类目'}</option>
         {(record?.candidates || []).map(item => <option key={item.category} value={item.category}>{item.category}{item.clickRatio != null ? ` · 点击人数占比 ${item.clickRatio}%` : ''}{item.clickRate != null ? ` · 点击率 ${item.clickRate}%` : ''}</option>)}
       </select>
-    </label>
-    <small>{record?.source === 'sycm_manual' ? '已人工确认参谋候选' : record?.category ? '生意参谋指标推荐' : '尚未确定铺货类目'}{record?.queryWord ? ` · 查询词：${record.queryWord}` : ''}</small>
-    {record?.source1688Category && <small>1688 原始类目：{record.source1688Category}（参考）</small>}
-    {record?.collectedAt && <small>查询时间：{new Date(record.collectedAt).toLocaleString('zh-CN')}</small>}
-    {record?.legacyCategory && <small>历史类目来源未确认：{record.legacyCategory}</small>}
-    {record?.error && <small role="alert">{record.error}</small>}
-    <div className="distribution-category-query">
-      <input aria-label="类目查询词" placeholder={record?.keyword || '类目查询词'} value={query} disabled={disabled} onChange={event => setQuery(event.target.value)} />
-      <button type="button" className="node-secondary-button" disabled={disabled}
+      <input aria-label="类目查询词" placeholder={record?.keyword || '查询词'} value={query} disabled={disabled}
+        onChange={event => setQuery(event.target.value)}
+        className="w-[100px] shrink-0 py-1 px-[7px] border border-slate-700 rounded-[5px] bg-[#091224] text-slate-200 focus:border-blue-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-55" />
+      <button type="button" className="node-secondary-button shrink-0 !min-h-[26px] !py-0.5 !px-[7px] !text-[11px]" disabled={disabled}
         onClick={() => control?.act({ action: 'query', urls: [record.url], queryWord: query.trim() || record.keyword })}>
-        <RefreshCw size={13} />{record?.candidates?.length ? '重新获取' : '获取类目'}
+        <RefreshCw size={12} />{record?.candidates?.length ? '重新获取' : '获取类目'}
       </button>
     </div>
+    {/* Row 2: merged info line */}
+    {infoParts.length > 0 && <p className="m-0 text-slate-400 text-[10px] leading-[1.3] truncate">{infoParts.join(' · ')}</p>}
+    {record?.error && <p className="m-0 text-rose-300 text-[10px]" role="alert">{record.error}</p>}
   </div>;
 }
