@@ -453,7 +453,7 @@ export function WatermarkStudioPanel({ onClose }) {
                 return (
                   <div
                     key={`${activeImage.id}-${index}`}
-                    className="absolute border-[1.5px] border-dashed border-sky-400/95 bg-sky-400/10 cursor-move z-[3]"
+                    className="watermark-box absolute border-[1.5px] border-dashed border-sky-400/95 bg-sky-400/10 cursor-move z-[3]"
                     style={{ left: `${view.x * 100}%`, top: `${view.y * 100}%`, width: `${view.w * 100}%`, height: `${view.h * 100}%` }}
                     onPointerDown={(event) => {
                       event.stopPropagation();
@@ -472,7 +472,7 @@ export function WatermarkStudioPanel({ onClose }) {
                     <button type="button" className="absolute right-[3px] top-[3px] flex items-center bg-red-400/90 border-0 rounded-[3px] text-white cursor-pointer p-0.5" onPointerDown={(event) => event.stopPropagation()} onClick={() => removeBox(index)}>
                       <Trash2 size={10} />
                     </button>
-                    <span className="watermark-box-corner" />
+                    <span className="watermark-box-corner absolute bottom-[-5px] right-[-5px] w-2.5 h-2.5 rounded-full bg-sky-400 cursor-nwse-resize" />
                   </div>
                 );
               })}
