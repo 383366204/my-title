@@ -70,14 +70,13 @@ export function DistributionRow({
           <strong className="block flex-auto min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-slate-200 text-[11px] leading-[1.35]" title={sourceTitle}>{sourceTitle}</strong>
           <em className={`shrink-0 whitespace-nowrap rounded-full text-[10px] not-italic font-extrabold px-[7px] py-0.5 ${row.removed ? 'bg-[rgba(127,29,29,0.28)] text-rose-200' : 'bg-emerald-900/28 text-green-200'}`}>{row.removed ? '已移除' : '将导出'}</em>
         </div>
-        {/* Row 2: editable title + category side by side */}
-        <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-1.5 max-sm:grid-cols-[minmax(0,1fr)] [&>label]:flex [&>label]:min-w-0 [&>label]:flex-col [&>label]:gap-[2px] [&>label]:text-slate-400 [&>label]:text-[11px] [&>label]:font-bold [&>input]:w-full [&>input]:min-w-0 [&>input]:py-1 [&>input]:px-[7px] [&>input]:border [&>input]:border-slate-700 [&>input]:rounded-[5px] [&>input]:bg-[#091224] [&>input]:text-slate-200 [&>input]:text-[11px] [&>input:focus]:border-blue-500 [&>input:focus]:outline-none [&>input:disabled]:cursor-not-allowed [&>input:disabled]:opacity-55 [&>select]:w-full [&>select]:min-w-0 [&>select]:py-1 [&>select]:px-[7px] [&>select]:border [&>select]:border-slate-700 [&>select]:rounded-[5px] [&>select]:bg-[#091224] [&>select]:text-slate-200 [&>select]:text-[11px]">
-          <label>
-            <span>铺货标题</span>
-            <input value={row.title || ''} disabled={row.removed} onChange={(event) => onUpdateEdit?.(row.key, 'title', event.target.value)} />
-          </label>
-          <CategoryControl row={row} />
-        </div>
+        {/* Row 2: editable title */}
+        <label className="flex min-w-0 flex-col gap-[2px] text-slate-400 text-[11px] font-bold [&>input]:w-full [&>input]:min-w-0 [&>input]:py-1 [&>input]:px-[7px] [&>input]:border [&>input]:border-slate-700 [&>input]:rounded-[5px] [&>input]:bg-[#091224] [&>input]:text-slate-200 [&>input]:text-[11px] [&>input]:font-normal [&>input:focus]:border-blue-500 [&>input:focus]:outline-none [&>input:disabled]:cursor-not-allowed [&>input:disabled]:opacity-55">
+          <span>铺货标题</span>
+          <input value={row.title || ''} disabled={row.removed} onChange={(event) => onUpdateEdit?.(row.key, 'title', event.target.value)} />
+        </label>
+        {/* Row 3: category control (full width, below title) */}
+        <CategoryControl row={row} />
         {/* Row 3: keyword badge + metrics + actions in one line */}
         <div className="flex items-center flex-wrap gap-1.5">
           {keyword && <small className="inline-flex w-fit max-w-full items-center border border-sky-500/32 rounded-full bg-sky-900/28 text-sky-200 text-[11px] font-extrabold leading-[1.1] px-[7px] py-0.5 break-all">选词：{keyword}</small>}
