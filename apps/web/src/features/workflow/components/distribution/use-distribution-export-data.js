@@ -123,7 +123,8 @@ export function useDistributionExportData({
   }));
   const applyEdits = (row) => {
     const record = categoryControl.state?.rows?.find(item => item.url === distributionRowUrl(row));
-    return { ...row, ...(edits[row.key] || {}), category: record?.category || '',
+    const edit = edits[row.key] || {};
+    return { ...row, ...edit, category: edit.customCategory || record?.category || '',
       categoryRecord: record || null, categoryControl };
   };
   const readyRows = sourceRows.map((row, index) => {

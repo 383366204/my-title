@@ -1,11 +1,7 @@
-import { useState } from 'react';
-import { RefreshCw } from 'lucide-react';
-
 /** @param {object} props 商品及后端类目操作。 @returns {import('react').JSX.Element} 类目选择与查询。 */
-export function CategoryControl({ row, actions }) {
+export function CategoryControl({ row, actions, onUpdateEdit }) {
   const record = row.categoryRecord;
   const control = row.categoryControl;
-  const [query, setQuery] = useState('');
   const disabled = row.removed || !record || control?.busy || control?.state?.locked
     || control?.state?.job?.status === 'running' || control?.state?.job?.inFlight;
 
@@ -19,8 +15,10 @@ export function CategoryControl({ row, actions }) {
   if (record?.collectedAt) infoParts.push(new Date(record.collectedAt).toLocaleString('zh-CN'));
   if (record?.legacyCategory) infoParts.push(`历史：${record.legacyCategory}`);
 
-  return <div className="grid gap-1 min-w-0 text-[11px] [&_select]:text-[11px] [&_input]:text-[11px]">
-    {/* Row 1: label + select + query input + button in one line */}
+  const customCategory = row.customCategory || '';
+
+  return <div className="grid gap-1 min-w-0 text-[11px]">
+    {/* Row 1: label + select + custom category input + actions */}
     <div className="flex items-center gap-1.5 min-w-0">
       <span className="shrink-0 w-[56px] text-slate-400 text-[11px] font-bold whitespace-nowrap">铺货类目</span>
       <select aria-label="铺货类目（生意参谋）" disabled={disabled} value={record?.category || ''}
@@ -30,18 +28,10 @@ export function CategoryControl({ row, actions }) {
         <option value="">{record?.candidates?.length ? '请选择参谋候选类目' : '待获取参谋类目'}</option>
         {(record?.candidates || []).map(item => <option key={item.category} value={item.category}>{item.category}{item.clickRatio != null ? ` · 点击人数占比 ${item.clickRatio}%` : ''}{item.clickRate != null ? ` · 点击率 ${item.clickRate}%` : ''}</option>)}
       </select>
-      <div className="inline-flex flex-1 min-w-[80px]">
-        <input aria-label="类目查询词" placeholder={record?.keyword || '查询词'} value={query} disabled={disabled}
-          onChange={event => setQuery(event.target.value)}
-          style={{ fontSize: '11px' }}
-          className="flex-1 min-w-0 py-1 pl-[7px] pr-1 border border-r-0 border-slate-700 rounded-l-[5px] bg-[#091224] text-slate-200 font-normal leading-[1.4] focus:border-blue-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-55" />
-        <button type="button" disabled={disabled}
-          onClick={() => control?.act({ action: 'query', urls: [record.url], queryWord: query.trim() || record.keyword })}
-          style={{ fontSize: '11px' }}
-          className="shrink-0 inline-flex items-center gap-1 py-1 px-[7px] border border-slate-700 rounded-r-[5px] bg-[#1e293b] text-slate-300 hover:bg-[#334155] hover:text-slate-100 transition-colors disabled:cursor-not-allowed disabled:opacity-55 cursor-pointer">
-          <RefreshCw size={12} />{record?.candidates?.length ? '重新获取' : '获取'}
-        </button>
-      </div>
+      <input aria-label="自定义类目" placeholder="请输入自定义类目" value={customCategory} disabled={row.removed}
+        onChange={event => onUpdateEdit?.(row.key, 'customCategory', event.target.value)}
+        style={{ fontSize: '11px' }}
+        className="flex-1 min-w-[80px] py-1 px-[7px] border border-slate-700 rounded-[5px] bg-[#091224] text-slate-200 font-normal leading-[1.4] focus:border-blue-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-55" />
       {actions && <div className="flex gap-1 shrink-0 [&_.node-secondary-button]:!min-h-[26px] [&_.node-secondary-button]:!py-0.5 [&_.node-secondary-button]:!px-[7px] [&_.node-secondary-button]:!text-[11px]">{actions}</div>}
     </div>
     {/* Row 2: merged info line */}

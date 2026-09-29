@@ -47,7 +47,7 @@ export function DistributionRow({
               <span>铺货标题</span>
               <input value={row.title || ''} onChange={(event) => onUpdateEdit?.(row.key, 'title', event.target.value)} />
             </label>
-            <CategoryControl row={row} />
+            <CategoryControl row={row} onUpdateEdit={onUpdateEdit} />
           </div>
           <div className="flex flex-wrap gap-1.5 mt-[9px] [&_.node-secondary-button]:min-h-[30px] [&_.node-secondary-button]:py-1.5 [&_.node-secondary-button]:px-[9px] [&_.node-secondary-button]:no-underline">
             <button type="button" className="node-secondary-button success" onClick={() => onMarkIncluded?.(row.key, true)}>
@@ -82,7 +82,7 @@ export function DistributionRow({
             className="flex-1 min-w-0 py-1 px-[7px] border border-slate-700 rounded-[5px] bg-[#091224] text-slate-200 font-normal leading-[1.4] focus:border-blue-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-55" />
         </div>
         {/* Row 3: category + action buttons in one line */}
-        <CategoryControl row={row} actions={<>
+        <CategoryControl row={row} onUpdateEdit={onUpdateEdit} actions={<>
           <button type="button" className={`node-secondary-button ${row.removed ? 'success' : 'danger'}`} onClick={() => onMarkRemoved?.(row.key, !row.removed)}>
             {row.removed ? <Check size={12} /> : <X size={12} />}
             {row.removed ? '恢复' : '移除'}
@@ -124,7 +124,7 @@ export function DistributionRow({
             <span>铺货标题</span>
             <input value={row.title || ''} onChange={(event) => onUpdateEdit?.(row.key, 'title', event.target.value)} />
           </label>
-          <CategoryControl row={row} />
+          <CategoryControl row={row} onUpdateEdit={onUpdateEdit} />
         </div>
         <div className="flex flex-wrap gap-1.5 mt-[9px] [&_.node-secondary-button]:min-h-[30px] [&_.node-secondary-button]:py-1.5 [&_.node-secondary-button]:px-[9px] [&_.node-secondary-button]:no-underline">
           <button type="button" className="node-secondary-button success" onClick={() => onMarkIncluded?.(row.key, true)}>
@@ -162,7 +162,7 @@ export function DistributionRow({
           <span>铺货标题</span>
           <input value={row.title || ''} disabled={row.removed} onChange={(event) => onUpdateEdit?.(row.key, 'title', event.target.value)} />
         </label>
-        <CategoryControl row={row} />
+        <CategoryControl row={row} onUpdateEdit={onUpdateEdit} />
       </div>
       <div className="flex flex-wrap gap-1.5 mt-[9px] [&_.node-secondary-button]:min-h-[30px] [&_.node-secondary-button]:py-1.5 [&_.node-secondary-button]:px-[9px] [&_.node-secondary-button]:no-underline">
         <button type="button" className="node-secondary-button" onClick={() => onCopyText?.(row.title || '')}>
