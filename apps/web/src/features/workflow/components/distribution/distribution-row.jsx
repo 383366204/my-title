@@ -67,15 +67,15 @@ export function DistributionRow({
       <article className={`grid gap-1.5 min-w-0 border rounded-lg bg-slate-900/72 p-[7px_9px] ${row.removed ? 'border-rose-400/32 opacity-[0.78]' : 'border-slate-800/90'}`}>
         {/* Row 1: source title + status tag */}
         <div className="flex items-center gap-1.5 min-w-0">
-          <span className="shrink-0 text-slate-500 text-[11px] whitespace-nowrap">原标题</span>
+          <span className="shrink-0 w-[56px] text-slate-400 text-[11px] font-bold whitespace-nowrap">原标题</span>
           <strong className="block flex-auto min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-slate-200 text-[11px] leading-[1.35]" title={sourceTitle}>{sourceTitle}</strong>
           <em className={`shrink-0 whitespace-nowrap rounded-full text-[10px] not-italic font-extrabold px-[7px] py-0.5 ${row.removed ? 'bg-[rgba(127,29,29,0.28)] text-rose-200' : 'bg-emerald-900/28 text-green-200'}`}>{row.removed ? '已移除' : '将导出'}</em>
         </div>
         {/* Row 2: editable title (label + input inline) */}
         <div className="flex items-center gap-1.5 min-w-0">
-          <span className="shrink-0 text-slate-400 text-[11px] font-bold whitespace-nowrap">铺货标题</span>
+          <span className="shrink-0 w-[56px] text-slate-400 text-[11px] font-bold whitespace-nowrap">铺货标题</span>
           <input value={row.title || ''} disabled={row.removed} onChange={(event) => onUpdateEdit?.(row.key, 'title', event.target.value)}
-            className="flex-1 min-w-0 py-1 px-[7px] border border-slate-700 rounded-[5px] bg-[#091224] text-slate-200 text-[11px] focus:border-blue-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-55" />
+            className="flex-1 min-w-0 py-1 px-[7px] border border-slate-700 rounded-[5px] bg-[#091224] text-slate-200 text-[11px] font-normal leading-[1.4] focus:border-blue-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-55" />
         </div>
         {/* Row 3: category + action buttons in one line */}
         <CategoryControl row={row} actions={<>

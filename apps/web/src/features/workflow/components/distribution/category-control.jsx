@@ -22,16 +22,16 @@ export function CategoryControl({ row, actions }) {
   return <div className="grid gap-1 min-w-0 text-[11px] [&_select]:text-[11px] [&_input]:text-[11px]">
     {/* Row 1: label + select + query input + button in one line */}
     <div className="flex items-center gap-1.5 min-w-0">
-      <span className="shrink-0 text-slate-400 font-bold whitespace-nowrap">铺货类目</span>
+      <span className="shrink-0 w-[56px] text-slate-400 text-[11px] font-bold whitespace-nowrap">铺货类目</span>
       <select aria-label="铺货类目（生意参谋）" disabled={disabled} value={record?.category || ''}
         onChange={event => control?.act({ action: 'select', url: record.url, category: event.target.value })}
-        className="flex-[3] min-w-[120px] py-1 px-[7px] border border-slate-700 rounded-[5px] bg-[#18212f] text-slate-200">
+        className="flex-[3] min-w-[120px] py-1 px-[7px] border border-slate-700 rounded-[5px] bg-[#18212f] text-slate-200 text-[11px] font-normal leading-[1.4]">
         <option value="">{record?.candidates?.length ? '请选择参谋候选类目' : '待获取参谋类目'}</option>
         {(record?.candidates || []).map(item => <option key={item.category} value={item.category}>{item.category}{item.clickRatio != null ? ` · 点击人数占比 ${item.clickRatio}%` : ''}{item.clickRate != null ? ` · 点击率 ${item.clickRate}%` : ''}</option>)}
       </select>
       <input aria-label="类目查询词" placeholder={record?.keyword || '查询词'} value={query} disabled={disabled}
         onChange={event => setQuery(event.target.value)}
-        className="flex-1 min-w-[60px] py-1 px-[7px] border border-slate-700 rounded-[5px] bg-[#091224] text-slate-200 focus:border-blue-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-55" />
+        className="flex-1 min-w-[60px] py-1 px-[7px] border border-slate-700 rounded-[5px] bg-[#091224] text-slate-200 text-[11px] font-normal leading-[1.4] focus:border-blue-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-55" />
       <button type="button" className="node-secondary-button shrink-0 !min-h-[26px] !py-0.5 !px-[7px] !text-[11px]" disabled={disabled}
         onClick={() => control?.act({ action: 'query', urls: [record.url], queryWord: query.trim() || record.keyword })}>
         <RefreshCw size={12} />{record?.candidates?.length ? '重新获取' : '获取类目'}
