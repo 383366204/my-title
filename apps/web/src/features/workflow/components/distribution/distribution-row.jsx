@@ -65,9 +65,9 @@ export function DistributionRow({
     }
 
     return (
-      <article className={`flex gap-2 min-w-0 border rounded-lg bg-slate-900/72 p-[7px_9px] ${row.removed ? 'border-rose-400/32 opacity-[0.78]' : 'border-slate-800/90'}`}>
-        {index != null && <span className="shrink-0 self-stretch flex items-center justify-center w-5 text-slate-500 text-[11px] font-bold border-r border-slate-700 pr-2 mr-0.5">{index}</span>}
-        <div className="grid gap-1.5 min-w-0 flex-1">
+      <article className={`flex min-w-0 border rounded-lg bg-slate-900/72 overflow-hidden ${row.removed ? 'border-rose-400/32 opacity-[0.78]' : 'border-slate-800/90'}`}>
+        {index != null && <span className="shrink-0 self-stretch flex items-center justify-center w-7 text-slate-500 text-[11px] font-bold border-r border-slate-700 bg-slate-900/40">{index}</span>}
+        <div className="grid gap-1.5 min-w-0 flex-1 p-[7px_9px]">
         {/* Row 1: source title (clickable link) + status tag */}
         <div className="flex items-center gap-1.5 min-w-0">
           <span className="shrink-0 w-[56px] text-slate-400 text-[11px] font-bold whitespace-nowrap">原标题</span>
