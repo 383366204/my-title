@@ -84,13 +84,8 @@ export function DistributionRow({
             style={{ fontSize: '11px' }}
             className="flex-1 min-w-0 py-1 px-[7px] border border-slate-700 rounded-[5px] bg-[#091224] text-slate-200 font-normal leading-[1.4] focus:border-blue-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-55" />
         </div>
-        {/* Row 3: category + action buttons in one line */}
-        <CategoryControl row={row} onUpdateEdit={onUpdateEdit} actions={<>
-          <button type="button" className={`node-secondary-button ${row.removed ? 'success' : 'danger'}`} onClick={() => onMarkRemoved?.(row.key, !row.removed)}>
-            {row.removed ? <Check size={12} /> : <X size={12} />}
-            {row.removed ? '恢复' : '移除'}
-          </button>
-        </>} />
+        {/* Row 3: category */}
+        <CategoryControl row={row} onUpdateEdit={onUpdateEdit} />
         {/* Row 4: keyword badge + metrics */}
         {(keyword || (Array.isArray(row.metrics) && row.metrics.length > 0)) && (
           <div className="flex items-center flex-wrap gap-1.5">
@@ -99,6 +94,11 @@ export function DistributionRow({
           </div>
         )}
         </div>
+        {/* Remove button on the far right */}
+        <button type="button" className={`node-secondary-button shrink-0 self-center !min-h-[26px] !py-0.5 !px-[7px] !text-[11px] ${row.removed ? 'success' : 'danger'}`} onClick={() => onMarkRemoved?.(row.key, !row.removed)}>
+          {row.removed ? <Check size={12} /> : <X size={12} />}
+          {row.removed ? '恢复' : '移除'}
+        </button>
       </article>
     );
   }
