@@ -24,7 +24,7 @@ function CategoryToolbar({ control, rows, onRemove }) {
   const missing = control.state?.rows?.filter(row => !row.category) || [];
   const activeMissing = rows.filter(row => !row.categoryRecord?.category);
   return <div className="flex items-center flex-wrap gap-2 py-3">
-    <span>待补类目 {missing.length} 件{job ? ` · 查询 ${job.completed || 0}/${job.requests?.length || 0} ${job.currentWord || ''}` : ''}</span>
+    <span>{missing.length > 0 ? `${missing.length} 件商品缺少类目` : '类目已就绪'}{job?.status === 'running' ? `（正在查询 ${job.completed || 0}/${job.requests?.length || 0}）` : ''}</span>
     <button type="button" className="node-secondary-button" disabled={!missing.length || control.busy || control.state?.locked || job?.status === 'running' || job?.inFlight}
       onClick={() => control.act({ action: 'query', urls: missing.map(row => row.url) })}>补全缺失类目</button>
     {job?.status === 'running' && <button type="button" className="node-secondary-button" disabled={control.busy} onClick={() => control.act({ action: 'pause' })}>暂停获取</button>}
