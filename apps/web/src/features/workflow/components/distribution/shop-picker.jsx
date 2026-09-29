@@ -60,11 +60,11 @@ export function DistributionShopPicker({ value, onChange, onEditingChange, disab
       </>}
     </div>
     <div className="max-h-[180px] overflow-y-auto my-2" role="group" aria-label="目标店铺">
-      {(lockedShops || shops).map(shop => <div className="flex items-center gap-2 py-1.5 [&>label]:flex-1 [&>label]:min-w-0 [&_span]:break-words [&_span]:min-w-0" key={shop.id}>
-        <label className="flex items-center gap-2 [&_input[type=checkbox]]:w-4 [&_input[type=checkbox]]:h-4 [&_input[type=checkbox]]:shrink-0 [&_input[type=checkbox]]:m-0 [&_input[type=checkbox]]:p-0 [&_input[type=checkbox]]:accent-green-500 [&_input[type=radio]]:w-4 [&_input[type=radio]]:h-4 [&_input[type=radio]]:shrink-0 [&_input[type=radio]]:m-0 [&_input[type=radio]]:p-0 [&_input[type=radio]]:accent-green-500">
+      {(lockedShops || shops).map(shop => <div className="flex items-start gap-2 py-1.5 [&>label]:flex-1 [&>label]:min-w-0" key={shop.id}>
+        <label className="flex items-start gap-2 [&_input[type=checkbox]]:w-4 [&_input[type=checkbox]]:h-4 [&_input[type=checkbox]]:shrink-0 [&_input[type=checkbox]]:mt-0.5 [&_input[type=checkbox]]:m-0 [&_input[type=checkbox]]:p-0 [&_input[type=checkbox]]:accent-green-500 [&_input[type=radio]]:w-4 [&_input[type=radio]]:h-4 [&_input[type=radio]]:shrink-0 [&_input[type=radio]]:m-0 [&_input[type=radio]]:p-0 [&_input[type=radio]]:accent-green-500">
           <input type="checkbox" checked={Boolean(lockedShops || (value || []).some(row => row.id === shop.id))} disabled={blocked || Boolean(draft) || !shop.enabled}
             onChange={event => onChange(event.target.checked ? [...(value || []), shop] : (value || []).filter(row => row.id !== shop.id))} />
-          <span>{shop.name}{shop.enabled ? '' : '（已停用）'}{shop.isDefault ? '（默认）' : ''}<small>平台店铺：{shop.platformShopName} · Chrome 端口：{shop.port}</small></span>
+          <span className="min-w-0 break-words text-[11px] leading-[1.4]">{shop.name}{shop.enabled ? '' : '（已停用）'}{shop.isDefault ? '（默认）' : ''}<br /><small className="text-slate-400 text-[10px]">平台店铺：{shop.platformShopName} · Chrome 端口：{shop.port}</small></span>
         </label>
         {!lockedShops && <>
           <button type="button" className="node-secondary-button" title={`配置店铺 ${shop.name}`} aria-label={`配置店铺 ${shop.name}`} disabled={blocked || Boolean(draft)} onClick={() => { setDraft({ ...shop }); setError(''); }}><Settings2 size={13} /></button>
@@ -73,12 +73,12 @@ export function DistributionShopPicker({ value, onChange, onEditingChange, disab
       </div>)}
       {!lockedShops && !shops.length && <small>{busy ? '正在加载店铺…' : '暂无店铺配置'}</small>}
     </div>
-    <fieldset className="flex flex-wrap gap-x-5 gap-y-3 mt-3 border-0 p-0 min-w-0 [&_legend]:mb-2 [&_legend]:text-xs [&_legend]:text-[var(--text-body)]" disabled={blocked || Boolean(draft)}>
-      <legend>商品分配方式</legend>
-      {distributionModes.map(option => <label className="flex items-center gap-2 [&_input[type=checkbox]]:w-4 [&_input[type=checkbox]]:h-4 [&_input[type=checkbox]]:shrink-0 [&_input[type=checkbox]]:m-0 [&_input[type=checkbox]]:p-0 [&_input[type=checkbox]]:accent-green-500 [&_input[type=radio]]:w-4 [&_input[type=radio]]:h-4 [&_input[type=radio]]:shrink-0 [&_input[type=radio]]:m-0 [&_input[type=radio]]:p-0 [&_input[type=radio]]:accent-green-500" key={option.value}>
-        <input type="radio" name="distribution-mode" value={option.value} checked={mode === option.value} onChange={() => onModeChange(option.value)} />{option.label}
+    <div className="flex items-center flex-wrap gap-x-4 gap-y-1.5 mt-2 min-w-0 text-[11px]">
+      <span className="shrink-0 text-slate-400 font-bold whitespace-nowrap">商品分配方式</span>
+      {distributionModes.map(option => <label className="inline-flex items-center gap-1.5 cursor-pointer [&_input]:w-3.5 [&_input]:h-3.5 [&_input]:shrink-0 [&_input]:m-0 [&_input]:p-0 [&_input]:accent-green-500" key={option.value}>
+        <input type="radio" name="distribution-mode" value={option.value} checked={mode === option.value} onChange={() => onModeChange(option.value)} disabled={blocked || Boolean(draft)} />{option.label}
       </label>)}
-    </fieldset>
+    </div>
     {error && <p role="alert" className="!text-red-200">{error}</p>}
     {draft && <form className="grid gap-3 mt-3 [&_fieldset]:grid [&_fieldset]:grid-cols-2 [&_fieldset]:gap-3 [&_fieldset]:p-0 [&_fieldset]:border-0 [&_fieldset]:min-w-0 max-sm:[&_fieldset]:grid-cols-1" onSubmit={save}>
       <fieldset disabled={busy || disabled}>
