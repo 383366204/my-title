@@ -35,17 +35,17 @@ export function SheetConfigurationPanel({ node, onDone, onUpdateField, readOnly 
   const update = (field, value) => onUpdateField(node.id, field, value);
 
   return (
-    <div className="sheet-configuration-panel">
-      <fieldset className="sheet-config-fields" disabled={readOnly}>
+    <div className="grid gap-3.5">
+      <fieldset className="grid gap-3.5 min-w-0 m-0 p-0 border-0 disabled:opacity-[0.72]" disabled={readOnly}>
       {data.reviewSourceUpload !== true && data.orderSheetOnly !== true && (
-      <section className="sheet-config-section">
+      <section className="grid gap-2.5 border-b border-slate-700/72 pb-3.5 last:border-b-0 [&>h3]:m-0 [&>h3]:text-slate-200 [&>h3]:text-xs [&>h3]:tracking-normal">
         <h3>表格类型</h3>
-        <div className="node-segmented sheet-type-segmented" role="group" aria-label="表格类型">
+        <div className="grid grid-cols-2 gap-1 p-[3px] rounded-lg bg-[#020617] border border-slate-800 max-w-[420px]" role="group" aria-label="表格类型">
           {SHEET_TYPES.map((option) => (
             <button
               type="button"
               key={option.value}
-              className={sheetType === option.value ? 'active' : ''}
+              className={`min-w-0 border-0 rounded-md bg-transparent text-slate-400 text-[10px] font-bold p-1.5 ${sheetType === option.value ? 'bg-blue-700 text-white' : ''}`}
               aria-pressed={sheetType === option.value}
               onClick={() => update('sheetType', option.value)}
             >
@@ -56,9 +56,9 @@ export function SheetConfigurationPanel({ node, onDone, onUpdateField, readOnly 
       </section>
       )}
 
-      <section className="sheet-config-section">
+      <section className="grid gap-2.5 border-b border-slate-700/72 pb-3.5 last:border-b-0 [&>h3]:m-0 [&>h3]:text-slate-200 [&>h3]:text-xs [&>h3]:tracking-normal">
         <h3>输出范围</h3>
-        <div className="start-configuration-grid">
+        <div className="grid grid-cols-2 gap-3 max-md:grid-cols-1">
           {data.reviewSourceUpload !== true && <label className="node-field">
             <span>店铺名</span>
             <input
@@ -80,7 +80,7 @@ export function SheetConfigurationPanel({ node, onDone, onUpdateField, readOnly 
             />
             <small>0 表示使用全部已采集商品</small>
           </label>
-          <label className="node-field start-configuration-wide">
+          <label className="node-field col-span-full">
             <span>文件名</span>
             <input
               type="text"
@@ -90,7 +90,7 @@ export function SheetConfigurationPanel({ node, onDone, onUpdateField, readOnly 
               placeholder="留空自动命名"
             />
           </label>
-          {data.reviewSourceUpload !== true && <label className="sheet-config-toggle start-configuration-wide">
+          {data.reviewSourceUpload !== true && <label className="flex items-center gap-2 min-h-9 text-slate-300 text-[11px] col-span-full [&>input]:w-[15px] [&>input]:h-[15px] [&>input]:m-0 [&>input]:accent-blue-600">
             <input
               type="checkbox"
               checked={data.includeRawData !== false}
@@ -102,9 +102,9 @@ export function SheetConfigurationPanel({ node, onDone, onUpdateField, readOnly 
       </section>
 
       {sheetType === 'order' ? (
-        <section className="sheet-config-section">
+        <section className="grid gap-2.5 border-b border-slate-700/72 pb-3.5 last:border-b-0 [&>h3]:m-0 [&>h3]:text-slate-200 [&>h3]:text-xs [&>h3]:tracking-normal">
           <h3>刷单表设置</h3>
-          <div className="start-configuration-grid">
+          <div className="grid grid-cols-2 gap-3 max-md:grid-cols-1">
             <label className="node-field">
               <span>下单金额</span>
               <select value={data.amountMode || 'average'} onChange={(event) => update('amountMode', event.target.value)}>
@@ -137,7 +137,7 @@ export function SheetConfigurationPanel({ node, onDone, onUpdateField, readOnly 
                 onChange={(event) => update('rowSpan', numberValue(event.target.value, 3, 1, 5))}
               />
             </label>
-            <label className="node-field start-configuration-wide">
+            <label className="node-field col-span-full">
               <span>做单要求</span>
               <textarea
                 rows="3"
@@ -146,7 +146,7 @@ export function SheetConfigurationPanel({ node, onDone, onUpdateField, readOnly 
                 onChange={(event) => update('workRequirement', event.target.value)}
               />
             </label>
-            <label className="node-field start-configuration-wide">
+            <label className="node-field col-span-full">
               <span>下单备注</span>
               <input
                 type="text"
@@ -156,7 +156,7 @@ export function SheetConfigurationPanel({ node, onDone, onUpdateField, readOnly 
                 placeholder="留空人工填写"
               />
             </label>
-            <label className="sheet-config-toggle start-configuration-wide">
+            <label className="flex items-center gap-2 min-h-9 text-slate-300 text-[11px] col-span-full [&>input]:w-[15px] [&>input]:h-[15px] [&>input]:m-0 [&>input]:accent-blue-600">
               <input
                 type="checkbox"
                 checked={data.includeImages !== false}
@@ -167,9 +167,9 @@ export function SheetConfigurationPanel({ node, onDone, onUpdateField, readOnly 
           </div>
         </section>
       ) : (
-        <section className="sheet-config-section">
+        <section className="grid gap-2.5 border-b border-slate-700/72 pb-3.5 last:border-b-0 [&>h3]:m-0 [&>h3]:text-slate-200 [&>h3]:text-xs [&>h3]:tracking-normal">
           <h3>评价表设置</h3>
-          <div className="start-configuration-grid">
+          <div className="grid grid-cols-2 gap-3 max-md:grid-cols-1">
             {data.reviewSourceUpload !== true && <label className="node-field">
               <span>刷单日期</span>
               <input type="date" value={data.orderDate || todayDateValue()} onChange={(event) => update('orderDate', event.target.value)} />
@@ -182,7 +182,7 @@ export function SheetConfigurationPanel({ node, onDone, onUpdateField, readOnly 
                 <option value="4">4 个</option>
               </select>
             </label>}
-            <label className="sheet-config-toggle start-configuration-wide">
+            <label className="flex items-center gap-2 min-h-9 text-slate-300 text-[11px] col-span-full [&>input]:w-[15px] [&>input]:h-[15px] [&>input]:m-0 [&>input]:accent-blue-600">
               <input
                 type="checkbox"
                 checked={data.includeSpacerRow !== false}
@@ -194,7 +194,7 @@ export function SheetConfigurationPanel({ node, onDone, onUpdateField, readOnly 
         </section>
       )}
       </fieldset>
-      <div className="start-configuration-actions">
+      <div className="sticky bottom-0 z-[2] flex justify-end mx-[-2px] mb-[-2px] px-0.5 pt-3 pb-0.5 border-t border-slate-700/[0.76] bg-slate-900">
         <button type="button" className="node-primary-button" onClick={onDone}>{readOnly ? '关闭' : '完成配置'}</button>
       </div>
     </div>

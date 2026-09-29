@@ -32,24 +32,24 @@ export function DistributionRow({
   if (isPreview) {
     if (isBlocked) {
       return (
-        <article className="export-preview-row blocked">
+        <article className="grid grid-cols-[minmax(0,1fr)] gap-2 min-w-0 border border-amber-500/32 rounded-lg bg-[rgba(120,53,15,0.12)] p-[11px]">
           <div>
-            <div className="export-row-title-line">
-              <strong title={sourceTitle}>{sourceTitle}</strong>
-              <em>未加入</em>
+            <div className="flex items-center gap-1.5 min-w-0">
+              <strong className="block text-slate-200 text-[13px] leading-[1.35] break-all" title={sourceTitle}>{sourceTitle}</strong>
+              <em className="shrink-0 ml-auto whitespace-nowrap rounded-full bg-slate-900/95 text-slate-300 text-[10px] not-italic font-extrabold px-[7px] py-1">未加入</em>
             </div>
-            {keyword && <small className="selected-keyword-badge">选词：{keyword}</small>}
+            {keyword && <small className="mt-1.5 inline-flex w-fit max-w-full items-center border border-sky-500/32 rounded-full bg-sky-900/28 text-sky-200 text-[10px] font-extrabold leading-[1.1] px-[7px] py-1 break-all">选词：{keyword}</small>}
           </div>
-          {row.description && <p>拦截原因：{row.description}</p>}
-          {Array.isArray(row.metrics) && row.metrics.length > 0 && <p>{row.metrics.join(' · ')}</p>}
-          <div className="distribution-edit-grid">
+          {row.description && <p className="m-0 text-slate-400 text-[11px] leading-[1.45] break-all">拦截原因：{row.description}</p>}
+          {Array.isArray(row.metrics) && row.metrics.length > 0 && <p className="m-0 text-slate-400 text-[11px] leading-[1.45] break-all">{row.metrics.join(' · ')}</p>}
+          <div className="grid min-w-0 grid-cols-[minmax(0,1.5fr)_minmax(180px,0.7fr)] gap-2.5 my-2.5 max-sm:grid-cols-[minmax(0,1fr)] [&>label]:flex [&>label]:min-w-0 [&>label]:flex-col [&>label]:gap-[5px] [&>label]:text-slate-400 [&>label]:text-[10px] [&>label]:font-bold [&>input]:w-full [&>input]:min-w-0 [&>input]:py-2 [&>input]:px-[9px] [&>input]:border [&>input]:border-slate-700 [&>input]:rounded-[5px] [&>input]:bg-[#091224] [&>input]:text-slate-200 [&>input]:text-xs [&>input:focus]:border-blue-500 [&>input:focus]:outline-none [&>input:disabled]:cursor-not-allowed [&>input:disabled]:opacity-55">
             <label>
               <span>铺货标题</span>
               <input value={row.title || ''} onChange={(event) => onUpdateEdit?.(row.key, 'title', event.target.value)} />
             </label>
             <CategoryControl row={row} />
           </div>
-          <div className="review-row-actions">
+          <div className="flex flex-wrap gap-1.5 mt-[9px] [&_.node-secondary-button]:min-h-[30px] [&_.node-secondary-button]:py-1.5 [&_.node-secondary-button]:px-[9px] [&_.node-secondary-button]:no-underline">
             <button type="button" className="node-secondary-button success" onClick={() => onMarkIncluded?.(row.key, true)}>
               <Check size={13} /> 加入当前清单
             </button>
@@ -64,23 +64,23 @@ export function DistributionRow({
     }
 
     return (
-      <article className={`export-preview-row ${row.removed ? 'is-removed' : ''}`}>
+      <article className={`grid grid-cols-[minmax(0,1fr)] gap-2 min-w-0 border rounded-lg bg-slate-900/72 p-[11px] ${row.removed ? 'border-rose-400/32 opacity-[0.78]' : 'border-slate-800/90'}`}>
         <div>
-          <div className="export-row-title-line">
-            <strong title={sourceTitle}>{sourceTitle}</strong>
-            <em>{row.removed ? '已移除' : '将导出'}</em>
+          <div className="flex items-center gap-1.5 min-w-0">
+            <strong className="block text-slate-200 text-[13px] leading-[1.35] break-all" title={sourceTitle}>{sourceTitle}</strong>
+            <em className={`shrink-0 ml-auto whitespace-nowrap rounded-full text-[10px] not-italic font-extrabold px-[7px] py-1 ${row.removed ? 'bg-[rgba(127,29,29,0.28)] text-rose-200' : 'bg-emerald-900/28 text-green-200'}`}>{row.removed ? '已移除' : '将导出'}</em>
           </div>
-          {keyword && <small className="selected-keyword-badge">选词：{keyword}</small>}
+          {keyword && <small className="mt-1.5 inline-flex w-fit max-w-full items-center border border-sky-500/32 rounded-full bg-sky-900/28 text-sky-200 text-[10px] font-extrabold leading-[1.1] px-[7px] py-1 break-all">选词：{keyword}</small>}
         </div>
-        {Array.isArray(row.metrics) && row.metrics.length > 0 && <p>{row.metrics.join(' · ')}</p>}
-        <div className="distribution-edit-grid">
+        {Array.isArray(row.metrics) && row.metrics.length > 0 && <p className="m-0 text-slate-400 text-[11px] leading-[1.45] break-all">{row.metrics.join(' · ')}</p>}
+        <div className="grid min-w-0 grid-cols-[minmax(0,1.5fr)_minmax(180px,0.7fr)] gap-2.5 my-2.5 max-sm:grid-cols-[minmax(0,1fr)] [&>label]:flex [&>label]:min-w-0 [&>label]:flex-col [&>label]:gap-[5px] [&>label]:text-slate-400 [&>label]:text-[10px] [&>label]:font-bold [&>input]:w-full [&>input]:min-w-0 [&>input]:py-2 [&>input]:px-[9px] [&>input]:border [&>input]:border-slate-700 [&>input]:rounded-[5px] [&>input]:bg-[#091224] [&>input]:text-slate-200 [&>input]:text-xs [&>input:focus]:border-blue-500 [&>input:focus]:outline-none [&>input:disabled]:cursor-not-allowed [&>input:disabled]:opacity-55">
           <label>
             <span>铺货标题</span>
             <input value={row.title || ''} disabled={row.removed} onChange={(event) => onUpdateEdit?.(row.key, 'title', event.target.value)} />
           </label>
           <CategoryControl row={row} />
         </div>
-        <div className="review-row-actions">
+        <div className="flex flex-wrap gap-1.5 mt-[9px] [&_.node-secondary-button]:min-h-[30px] [&_.node-secondary-button]:py-1.5 [&_.node-secondary-button]:px-[9px] [&_.node-secondary-button]:no-underline">
           <button type="button" className={`node-secondary-button ${row.removed ? 'success' : 'danger'}`} onClick={() => onMarkRemoved?.(row.key, !row.removed)}>
             {row.removed ? <Check size={13} /> : <X size={13} />}
             {row.removed ? '恢复' : '移除'}
@@ -98,31 +98,31 @@ export function DistributionRow({
   // Workbench variant
   if (isBlocked) {
     return (
-      <article className="export-row blocked">
-        <div className="export-row-head">
+      <article className="min-w-0 border border-amber-500/32 rounded-lg bg-[rgba(120,53,15,0.12)] p-[11px]">
+        <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 items-start [&>div>strong]:block [&>div>strong]:min-w-0 [&>div>strong]:text-slate-200 [&>div>strong]:text-[13px] [&>div>strong]:leading-[1.35] [&>div>strong]:break-all [&>div>span]:block [&>div>span]:min-w-0 [&>div>span]:mt-1 [&>div>span]:text-blue-300 [&>div>span]:text-[10px]">
           <div>
-            <div className="export-row-title-line">
-              <strong title={sourceTitle}>{sourceTitle}</strong>
-              <em>未加入</em>
+            <div className="flex items-center gap-1.5 min-w-0">
+              <strong className="block flex-auto min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-slate-200 text-[13px] leading-[1.35]" title={sourceTitle}>{sourceTitle}</strong>
+              <em className="shrink-0 ml-auto whitespace-nowrap rounded-full bg-emerald-900/28 text-green-200 text-[10px] not-italic font-extrabold px-[7px] py-1">未加入</em>
             </div>
             <span>{row.meta}</span>
-            {keyword && <small className="selected-keyword-badge">选词：{keyword}</small>}
+            {keyword && <small className="mt-1.5 inline-flex w-fit max-w-full items-center border border-sky-500/32 rounded-full bg-sky-900/28 text-sky-200 text-[10px] font-extrabold leading-[1.1] px-[7px] py-1 break-all">选词：{keyword}</small>}
           </div>
         </div>
         {Array.isArray(row.metrics) && row.metrics.length > 0 && (
-          <div className="review-row-meta">
+          <div className="flex flex-wrap gap-1.5 mt-[9px] [&>span]:rounded-full [&>span]:bg-slate-800/90 [&>span]:text-slate-300 [&>span]:text-[10px] [&>span]:leading-none [&>span]:px-[7px] [&>span]:py-[5px]">
             {row.metrics.map((metric) => <span key={metric}>{metric}</span>)}
           </div>
         )}
-        {row.description && <p className="export-row-url">拦截原因：{row.description}</p>}
-        <div className="distribution-edit-grid">
+        {row.description && <p className="mt-2 mb-0 text-slate-400 text-[10px] leading-[1.45] break-all">拦截原因：{row.description}</p>}
+        <div className="grid min-w-0 grid-cols-[minmax(0,1.5fr)_minmax(180px,0.7fr)] gap-2.5 my-2.5 max-sm:grid-cols-[minmax(0,1fr)] [&>label]:flex [&>label]:min-w-0 [&>label]:flex-col [&>label]:gap-[5px] [&>label]:text-slate-400 [&>label]:text-[10px] [&>label]:font-bold [&>input]:w-full [&>input]:min-w-0 [&>input]:py-2 [&>input]:px-[9px] [&>input]:border [&>input]:border-slate-700 [&>input]:rounded-[5px] [&>input]:bg-[#091224] [&>input]:text-slate-200 [&>input]:text-xs [&>input:focus]:border-blue-500 [&>input:focus]:outline-none [&>input:disabled]:cursor-not-allowed [&>input:disabled]:opacity-55">
           <label>
             <span>铺货标题</span>
             <input value={row.title || ''} onChange={(event) => onUpdateEdit?.(row.key, 'title', event.target.value)} />
           </label>
           <CategoryControl row={row} />
         </div>
-        <div className="review-row-actions">
+        <div className="flex flex-wrap gap-1.5 mt-[9px] [&_.node-secondary-button]:min-h-[30px] [&_.node-secondary-button]:py-1.5 [&_.node-secondary-button]:px-[9px] [&_.node-secondary-button]:no-underline">
           <button type="button" className="node-secondary-button success" onClick={() => onMarkIncluded?.(row.key, true)}>
             <Check size={13} /> 加入当前清单
           </button>
@@ -137,30 +137,30 @@ export function DistributionRow({
   }
 
   return (
-    <article className={`export-row ${row.removed ? 'is-removed' : ''}`}>
-      <div className="export-row-head">
+    <article className={`min-w-0 border rounded-lg bg-slate-900/66 p-[11px] ${row.removed ? 'border-rose-400/32 opacity-[0.78]' : 'border-slate-800/90'}`}>
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 items-start [&>div>strong]:block [&>div>strong]:min-w-0 [&>div>strong]:text-slate-200 [&>div>strong]:text-[13px] [&>div>strong]:leading-[1.35] [&>div>strong]:break-all [&>div>span]:block [&>div>span]:min-w-0 [&>div>span]:mt-1 [&>div>span]:text-blue-300 [&>div>span]:text-[10px]">
         <div>
-          <div className="export-row-title-line">
-            <strong title={row.title || '未命名铺货项'}>{row.title || '未命名铺货项'}</strong>
-            <em>{row.removed ? '已移除' : '将导出'}</em>
+          <div className="flex items-center gap-1.5 min-w-0">
+            <strong className="block flex-auto min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-slate-200 text-[13px] leading-[1.35]" title={row.title || '未命名铺货项'}>{row.title || '未命名铺货项'}</strong>
+            <em className={`shrink-0 ml-auto whitespace-nowrap rounded-full text-[10px] not-italic font-extrabold px-[7px] py-1 ${row.removed ? 'bg-[rgba(127,29,29,0.28)] text-rose-200' : 'bg-emerald-900/28 text-green-200'}`}>{row.removed ? '已移除' : '将导出'}</em>
           </div>
           {row.meta && <span>{row.meta}{row.fromReview ? ' · 人工加入' : ''}</span>}
-          {keyword && <small className="selected-keyword-badge">选词：{keyword}</small>}
+          {keyword && <small className="mt-1.5 inline-flex w-fit max-w-full items-center border border-sky-500/32 rounded-full bg-sky-900/28 text-sky-200 text-[10px] font-extrabold leading-[1.1] px-[7px] py-1 break-all">选词：{keyword}</small>}
         </div>
       </div>
       {Array.isArray(row.metrics) && row.metrics.length > 0 && (
-        <div className="review-row-meta">
+        <div className="flex flex-wrap gap-1.5 mt-[9px] [&>span]:rounded-full [&>span]:bg-slate-800/90 [&>span]:text-slate-300 [&>span]:text-[10px] [&>span]:leading-none [&>span]:px-[7px] [&>span]:py-[5px]">
           {row.metrics.map((metric) => <span key={metric}>{metric}</span>)}
         </div>
       )}
-      <div className="distribution-edit-grid">
+      <div className="grid min-w-0 grid-cols-[minmax(0,1.5fr)_minmax(180px,0.7fr)] gap-2.5 my-2.5 max-sm:grid-cols-[minmax(0,1fr)] [&>label]:flex [&>label]:min-w-0 [&>label]:flex-col [&>label]:gap-[5px] [&>label]:text-slate-400 [&>label]:text-[10px] [&>label]:font-bold [&>input]:w-full [&>input]:min-w-0 [&>input]:py-2 [&>input]:px-[9px] [&>input]:border [&>input]:border-slate-700 [&>input]:rounded-[5px] [&>input]:bg-[#091224] [&>input]:text-slate-200 [&>input]:text-xs [&>input:focus]:border-blue-500 [&>input:focus]:outline-none [&>input:disabled]:cursor-not-allowed [&>input:disabled]:opacity-55">
         <label>
           <span>铺货标题</span>
           <input value={row.title || ''} disabled={row.removed} onChange={(event) => onUpdateEdit?.(row.key, 'title', event.target.value)} />
         </label>
         <CategoryControl row={row} />
       </div>
-      <div className="review-row-actions">
+      <div className="flex flex-wrap gap-1.5 mt-[9px] [&_.node-secondary-button]:min-h-[30px] [&_.node-secondary-button]:py-1.5 [&_.node-secondary-button]:px-[9px] [&_.node-secondary-button]:no-underline">
         <button type="button" className="node-secondary-button" onClick={() => onCopyText?.(row.title || '')}>
           <Copy size={13} /> 复制标题
         </button>
