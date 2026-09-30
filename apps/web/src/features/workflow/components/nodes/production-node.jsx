@@ -18,7 +18,7 @@ import {
 const WorkflowNodeOperationStatus = ({ data }) => {
   if (!data?.operationMessage) return null;
   return (
-    <div className="workflow-node-operation-status" role="status" aria-live="polite">
+    <div className="flex items-center gap-[5px] mt-[7px] border border-blue-500/35 rounded-md bg-blue-900/20 text-blue-200 text-[10px] font-bold leading-[1.4] px-[7px] py-[5px]" role="status" aria-live="polite">
       {data.pendingAction && <RefreshCw size={11} className="animate-spin" />}
       <span>{data.operationMessage}</span>
     </div>
@@ -30,13 +30,13 @@ const WorkflowSheetQuickActions = ({ data, view }) => {
   const readOnly = data.workflowReadOnly === true || !['idle', 'pending'].includes(String(data.status || data.state || 'idle').toLowerCase());
   const sheetType = data.sheetType === 'review' ? 'review' : 'order';
   return (
-    <div className="production-sheet-actions" aria-label="制表操作">
-      {data.reviewSourceUpload !== true && data.orderSheetOnly !== true && <div className="production-sheet-type" role="group" aria-label="表格类型快捷选择">
+    <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-[6px] mt-2" aria-label="制表操作">
+      {data.reviewSourceUpload !== true && data.orderSheetOnly !== true && <div className="grid grid-cols-2 gap-[3px] border border-slate-700 rounded-md bg-slate-950 p-[3px]" role="group" aria-label="表格类型快捷选择">
         {[['order', '刷单表'], ['review', '评价表']].map(([value, label]) => (
           <button
             type="button"
             key={value}
-            className={sheetType === value ? 'active' : ''}
+            className={`min-w-0 border-0 rounded bg-transparent text-[10px] font-bold leading-none px-2 py-[7px] ${sheetType === value ? 'bg-blue-700 text-white' : 'text-slate-400'} ${readOnly ? 'cursor-default' : ''}`}
             aria-pressed={sheetType === value}
             disabled={readOnly}
             onPointerDown={(event) => event.stopPropagation()}
@@ -51,7 +51,7 @@ const WorkflowSheetQuickActions = ({ data, view }) => {
       </div>}
       <button
         type="button"
-        className="production-sheet-settings"
+        className="inline-flex items-center justify-center gap-1 min-w-0 border border-slate-600 rounded bg-transparent text-slate-300 text-[10px] font-bold leading-none px-2 py-[7px] whitespace-nowrap hover:border-blue-400 hover:bg-blue-700/16 hover:text-slate-50 focus-visible:border-blue-400 focus-visible:bg-blue-700/16 focus-visible:text-slate-50"
         title={view.primaryAction.label}
         onPointerDown={(event) => event.stopPropagation()}
         onClick={(event) => {
@@ -73,8 +73,8 @@ const WorkflowCollectionQuickActions = ({ data, view }) => {
   const usesRank = inputMode !== 'manual';
   const manualCount = Array.isArray(data.manualItems) ? data.manualItems.length : 0;
   return (
-    <div className="production-collection-actions" aria-label="采集条件">
-      <label className="production-collection-source">
+    <div className="grid grid-cols-[minmax(92px,1fr)_54px] gap-[6px] mt-2 [&>label]:grid [&>label]:gap-[3px] [&>label]:min-w-0 [&_span]:text-slate-500 [&_span]:text-[9px] [&_span]:font-bold [&_select]:w-full [&_select]:min-w-0 [&_select]:h-7 [&_select]:border [&_select]:border-slate-700 [&_select]:rounded-[5px] [&_select]:bg-slate-950 [&_select]:text-slate-300 [&_select]:text-[10px] [&_select]:px-1.5 [&_select]:py-1 [&_input]:w-full [&_input]:min-w-0 [&_input]:h-7 [&_input]:border [&_input]:border-slate-700 [&_input]:rounded-[5px] [&_input]:bg-slate-950 [&_input]:text-slate-300 [&_input]:text-[10px] [&_input]:px-1.5 [&_input]:py-1" aria-label="采集条件">
+      <label className="col-span-full">
         <span>来源</span>
         <select
           aria-label="刷单表商品来源"
@@ -118,11 +118,11 @@ const WorkflowCollectionQuickActions = ({ data, view }) => {
           onChange={(event) => data.onUpdate?.('pages', Math.min(5, Math.max(1, Number.parseInt(event.target.value, 10) || 1)))}
         />
       </label>}
-      {!usesRank && <div className="production-collection-count"><span>商品</span><strong>{manualCount} 个</strong></div>}
-      {inputMode === 'hybrid' && <div className="production-collection-count"><span>追加</span><strong>{manualCount} 个</strong></div>}
+      {!usesRank && <div className="grid gap-[3px] min-w-0 [&>span]:text-slate-500 [&>span]:text-[9px] [&>span]:font-bold [&>strong]:min-h-7 [&>strong]:flex [&>strong]:items-center [&>strong]:border [&>strong]:border-slate-700 [&>strong]:rounded-[5px] [&>strong]:bg-slate-950 [&>strong]:text-slate-300 [&>strong]:text-[10px] [&>strong]:px-1.5 [&>strong]:py-1"><span>商品</span><strong>{manualCount} 个</strong></div>}
+      {inputMode === 'hybrid' && <div className="grid gap-[3px] min-w-0 [&>span]:text-slate-500 [&>span]:text-[9px] [&>span]:font-bold [&>strong]:min-h-7 [&>strong]:flex [&>strong]:items-center [&>strong]:border [&>strong]:border-slate-700 [&>strong]:rounded-[5px] [&>strong]:bg-slate-950 [&>strong]:text-slate-300 [&>strong]:text-[10px] [&>strong]:px-1.5 [&>strong]:py-1"><span>追加</span><strong>{manualCount} 个</strong></div>}
       <button
         type="button"
-        className="production-sheet-settings"
+        className="col-span-full inline-flex items-center justify-center gap-1 min-w-0 border border-slate-600 rounded bg-transparent text-slate-300 text-[10px] font-bold leading-none px-2 py-[7px] whitespace-nowrap hover:border-blue-400 hover:bg-blue-700/16 hover:text-slate-50 focus-visible:border-blue-400 focus-visible:bg-blue-700/16 focus-visible:text-slate-50"
         title={view.primaryAction.label}
         onPointerDown={(event) => event.stopPropagation()}
         onClick={(event) => {
@@ -140,7 +140,7 @@ const WorkflowReviewQuickActions = ({ data }) => {
   if (data?.reviewConfig !== true) return null;
   const readOnly = data.workflowReadOnly === true || !['idle', 'pending'].includes(String(data.status || data.state || 'idle').toLowerCase());
   return (
-    <div className="production-collection-actions production-review-actions" aria-label="评价生成设置">
+    <div className="grid grid-cols-[minmax(92px,1fr)_54px] !grid-cols-[minmax(0,1fr)_64px_46px] gap-[6px] mt-2 [&>label]:grid [&>label]:gap-[3px] [&>label]:min-w-0 [&_span]:text-slate-500 [&_span]:text-[9px] [&_span]:font-bold [&_select]:w-full [&_select]:min-w-0 [&_select]:h-7 [&_select]:border [&_select]:border-slate-700 [&_select]:rounded-[5px] [&_select]:bg-slate-950 [&_select]:text-slate-300 [&_select]:text-[10px] [&_select]:px-1.5 [&_select]:py-1 [&_input]:w-full [&_input]:min-w-0 [&_input]:h-7 [&_input]:border [&_input]:border-slate-700 [&_input]:rounded-[5px] [&_input]:bg-slate-950 [&_input]:text-slate-300 [&_input]:text-[10px] [&_input]:px-1.5 [&_input]:py-1" aria-label="评价生成设置">
       <label>
         <span>语气</span>
         <select
@@ -170,7 +170,7 @@ const WorkflowReviewQuickActions = ({ data }) => {
           onChange={(event) => data.onUpdate?.('reviewLength', Math.min(100, Math.max(15, Number.parseInt(event.target.value, 10) || 35)))}
         />
       </label>
-      <label className="production-review-toggle">
+      <label className="!flex !flex-row !items-center !justify-center !gap-[5px] [&>input]:h-3.5 [&>input]:min-h-0 [&>input]:w-3.5">
         <input
           type="checkbox"
           checked={data.useAI !== false}
@@ -195,7 +195,7 @@ const WorkflowCompletionDownload = ({ nodeId, data }) => {
   const downloadUrl = `/api/workflows/runs/${encodeURIComponent(workflowRunId)}/artifacts/${artifactNodeId}/raw`;
   return (
     <a
-      className="production-node-download-action"
+      className="inline-flex items-center gap-[5px] mt-2.5 bg-emerald-600 border border-emerald-500 rounded-md text-white text-[10px] font-extrabold px-[9px] py-1.5 no-underline transition-all duration-[160ms] hover:bg-emerald-700 hover:border-emerald-400 hover:-translate-y-px focus-visible:bg-emerald-700 focus-visible:border-emerald-400 focus-visible:-translate-y-px focus-visible:outline-none cursor-pointer"
       href={downloadUrl}
       download
       title={data?.competitorDownload === true ? '下载同行分析报告' : '下载本次生成的 Excel 表格'}
@@ -229,12 +229,12 @@ const WorkflowNodeSecondaryActions = ({ nodeId, data }) => {
     .slice(0, 3);
   if (actions.length === 0) return null;
   return (
-    <div className="production-node-secondary-actions">
+    <div className="flex flex-wrap gap-[5px] mt-1.5">
       {actions.map((action) => (
         <button
           type="button"
           key={action.action}
-          className="production-node-secondary-action"
+          className="border border-slate-500/55 rounded-md bg-slate-900/72 text-slate-300 text-[10px] font-bold px-[7px] py-1 cursor-pointer hover:border-blue-400/80 hover:bg-blue-900/34 hover:text-blue-100 focus-visible:border-blue-400/80 focus-visible:bg-blue-900/34 focus-visible:text-blue-100 focus-visible:outline-none disabled:cursor-wait disabled:opacity-[0.58]"
           title={action.description || action.label}
           disabled={action.disabled || Boolean(data.pendingAction)}
           onPointerDown={(event) => event.stopPropagation()}
@@ -283,14 +283,14 @@ export const ProductionNode = ({ id, data }) => {
       }}
     >
       <Handle type="target" position={Position.Left} id="in" />
-      <div className="production-node-head">
+      <div className="flex items-center justify-between gap-2 text-slate-500 font-mono text-[10px] uppercase [&>span]:truncate [&>b]:truncate [&>b]:max-w-[86px] [&>b]:text-slate-400 [&>b]:whitespace-nowrap">
         <span>{data.stage || data.kind || data.action || data.type || 'workflow'}</span>
         <WorkflowStepBadge data={data} />
         <b>{labelPipelineStatus(status)}</b>
       </div>
-      <div className="production-node-title">{label}</div>
-      {data.description && <div className="production-node-description">{data.description}</div>}
-      {view.configSummary && !data.selectionMode && <div className="workflow-node-config-summary">{view.configSummary}</div>}
+      <div className="mt-2 text-slate-50 text-sm font-extrabold leading-[1.3] whitespace-nowrap truncate">{label}</div>
+      {data.description && <div className="mt-[5px] text-slate-400 text-[11px] leading-[1.4] line-clamp-2">{data.description}</div>}
+      {view.configSummary && !data.selectionMode && <div className="mt-[7px] border-l-2 border-sky-400/72 text-sky-200 text-[10px] font-bold leading-[1.45] break-all pl-[7px] py-0.5">{view.configSummary}</div>}
       {id === 'start' && data.selectionMode && <SelectionStartControls data={data} />}
 
       <WorkflowProgressStrip view={view} />

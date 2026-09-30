@@ -88,10 +88,10 @@ export function ReviewSourceUploadPanel({ node, onDone, onUpdateField, readOnly 
   )).length, 0);
 
   return (
-    <div className="review-source-upload-panel">
+    <div className="grid gap-3.5">
       <p className="start-configuration-hint">上传实际执行后的刷单表。系统优先按订单号分组；表里没有订单号时，按下面的「每组商品数」顺序切分。修改每组数量会重新分组，已填写的订单信息需要重新核对。旺旺、手机号和订单号只保存在本机。</p>
       <fieldset className="sheet-config-fields" disabled={readOnly || uploading}>
-        <label className="node-field review-source-group-size">
+        <label className="node-field">
           <span>每组商品数</span>
           <select
             value={groupSize}
@@ -114,7 +114,7 @@ export function ReviewSourceUploadPanel({ node, onDone, onUpdateField, readOnly 
         </label>
         {error && <div className="artifact-error">{error}</div>}
         {groups.length > 0 && !readOnly && (
-          <details className="review-paste-panel" open={groups.some(group => !group.buyerName || !group.buyerPhone)}>
+          <details className="rounded-[7px] border border-slate-600/[0.68] bg-slate-900/[0.56] px-3 py-2.5 [&>summary]:cursor-pointer [&>summary]:text-xs [&>summary]:font-bold [&>summary]:text-slate-300 [&>textarea]:mt-2 [&>textarea]:min-h-[118px] [&>textarea]:w-full [&>textarea]:resize-y [&>textarea]:rounded-[6px] [&>textarea]:border [&>textarea]:border-slate-600/70 [&>textarea]:bg-slate-950/[0.72] [&>textarea]:px-2.5 [&>textarea]:py-2 [&>textarea]:text-xs [&>textarea]:leading-[1.7] [&>textarea]:text-slate-200 [&>textarea:focus]:border-sky-400/60 [&>textarea:focus]:outline-none" open={groups.some(group => !group.buyerName || !group.buyerPhone)}>
             <summary>粘贴订单信息自动填充旺旺、手机号和订单号</summary>
             <textarea
               rows="6"
@@ -122,30 +122,30 @@ export function ReviewSourceUploadPanel({ node, onDone, onUpdateField, readOnly 
               onChange={(event) => setPasteText(event.target.value)}
               placeholder={'订单编号：3316868653089013989\n买家旺旺：penguin玄珠\n收货电话：14727236390-8997\n\n可一次粘贴多单：同一字段再次出现会自动拆分成下一单'}
             />
-            <div className="review-paste-actions">
+            <div className="mt-2 flex gap-2 [&>button]:cursor-pointer [&>button]:rounded-[6px] [&>button]:border [&>button]:border-sky-400/[0.42] [&>button]:bg-sky-400/[0.14] [&>button]:px-3 [&>button]:py-1.5 [&>button]:text-xs [&>button]:text-sky-300 [&>button:disabled]:cursor-not-allowed [&>button:disabled]:opacity-45">
               <button type="button" disabled={uploading || regrouping} onClick={handlePasteFill}>识别并填充</button>
               <button type="button" disabled={uploading || regrouping || !pasteText} onClick={() => { setPasteText(''); setPasteNotice(''); }}>清空</button>
             </div>
-            {pasteNotice && <div className="review-paste-notice">{pasteNotice}</div>}
+            {pasteNotice && <div className="mt-2 rounded-[5px] bg-sky-400/10 px-[9px] py-1.5 text-[11px] text-sky-300">{pasteNotice}</div>}
           </details>
         )}
 
         {groups.length > 0 && (
-          <div className="review-source-groups">
-            <div className="review-source-groups-head">
-              <div><strong>确认订单分组</strong><span>请核对自动分组；店铺名和日期必填，旺旺、手机号和订单号可稍后补录。</span></div>
+          <div className="grid gap-2.5">
+            <div className="flex items-center justify-between gap-2 [&>b]:whitespace-nowrap [&>b]:rounded-[5px] [&>b]:px-[7px] [&>b]:py-[5px] [&>b]:text-[10px] [&>b]:text-emerald-300 [&>b.is-missing]:bg-amber-500/[0.14] [&>b.is-missing]:text-yellow-300 [&>div]:grid [&>div]:min-w-0 [&>div]:gap-[3px]">
+              <div><strong>确认订单分组</strong><span className="text-[10px] text-slate-400">请核对自动分组；店铺名和日期必填，旺旺、手机号和订单号可稍后补录。</span></div>
               <b className={missingCount > 0 ? 'is-missing' : ''}>{missingCount > 0 ? `${missingCount} 项待补` : '信息完整'}</b>
             </div>
             {groups.map((group, index) => (
-              <section className="review-source-group" key={group.id || index}>
-                <div className="review-source-group-title">
+              <section className="grid gap-1.5 rounded-[7px] border border-slate-600/[0.72] bg-slate-900/[0.56] px-2.5 py-2 [&>details]:text-[10px] [&>details]:text-slate-400 [&>details_summary]:cursor-pointer [&>ol]:mt-2 [&>ol]:pl-5 [&>ol]:leading-normal" key={group.id || index}>
+                <div className="flex min-w-0 items-center justify-between gap-2">
                   <strong>{group.sourceSheet || `订单组 ${index + 1}`}</strong>
-                  <span>{group.products?.length || 0} 个商品 · {group.inferred ? '按工作表推断' : '按订单号识别'}</span>
+                  <span className="text-[10px] text-slate-400">{group.products?.length || 0} 个商品 · {group.inferred ? '按工作表推断' : '按订单号识别'}</span>
                 </div>
-                <div className="review-source-group-fields">
+                <div className="grid grid-cols-2 gap-2 max-md:grid-cols-1 [&>.node-field:first-child]:col-span-full [&>.node-field:first-child]:max-w-[220px] max-md:[&>.node-field:first-child]:col-auto">
                   {REVIEW_GROUP_FIELDS.map(({ field, label, type, required }) => (
                     <label className="node-field" key={field}>
-                      <span>{label}{!required && <em className="review-field-optional">选填</em>}</span>
+                      <span>{label}{!required && <em className="ml-1 rounded bg-slate-600/[0.34] px-1 py-px text-[10px] not-italic text-slate-400">选填</em>}</span>
                       <input
                         type={type}
                         value={group[field] || ''}

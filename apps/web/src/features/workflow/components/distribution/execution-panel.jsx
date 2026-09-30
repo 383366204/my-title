@@ -1,6 +1,8 @@
 import { Clock, RefreshCw, Square } from 'lucide-react';
 import distributionModes from '../../../../../../../core/distribution-modes.json';
 
+const RESULT_COLORS = { success: '#86efac', failed: '#fca5a5', pending: '#fcd34d' };
+
 /**
  * Component to render active distribution job progress and execution controls.
  * @param {object} props Component props.
@@ -54,17 +56,17 @@ export function ExecutionPanel({
 
   return (
     <section className={`distribution-execution-panel ${isBlockedStyle ? 'blocked' : ''}`}>
-      <div className="distribution-execution-head">
-        <div>
-          <strong>{statusTitle}</strong>
-          {(distributionJob.targetShops || (distributionJob.shop ? [distributionJob.shop] : [])).map(shop => <span key={shop.id || shop.platformShopName}>店铺：{shop.name} · {shop.platformShopName}</span>)}
-          {distributionJob.distributionMode && <span>商品分配方式：{distributionModes.find(mode => mode.value === distributionJob.distributionMode)?.label || distributionJob.distributionMode}</span>}
-          <span role="status" className="distribution-result-summary">
-            <span className="distribution-result-success">成功 {completedCount}</span> · <span className="distribution-result-failed">失败 {failedCount}</span> · <span className="distribution-result-pending">待确认 {Math.max(0, (distributionJob.total || activeRowsCount) - completedCount - failedCount)}</span>
+      <div className="flex items-center justify-between gap-3">
+        <div className="grid gap-[3px]">
+          <strong className="text-[13px] text-inherit">{statusTitle}</strong>
+          {(distributionJob.targetShops || (distributionJob.shop ? [distributionJob.shop] : [])).map(shop => <span key={shop.id || shop.platformShopName} className={`text-[11px] m-0 ${isBlockedStyle ? 'text-[#fecaca]' : 'text-[#bbf7d0]'}`}>店铺：{shop.name} · {shop.platformShopName}</span>)}
+          {distributionJob.distributionMode && <span className={`text-[11px] m-0 ${isBlockedStyle ? 'text-[#fecaca]' : 'text-[#bbf7d0]'}`}>商品分配方式：{distributionModes.find(mode => mode.value === distributionJob.distributionMode)?.label || distributionJob.distributionMode}</span>}
+          <span role="status" className="inline">
+            <span className={`inline text-[#86efac]`}>成功 {completedCount}</span> · <span className={`inline text-[#fca5a5]`}>失败 {failedCount}</span> · <span className={`inline text-[#fcd34d]`}>待确认 {Math.max(0, (distributionJob.total || activeRowsCount) - completedCount - failedCount)}</span>
           </span>
         </div>
         {distributionJob.status === 'submitting' && (
-          <div className="distribution-execution-actions">
+          <div className="flex flex-wrap justify-end gap-1.5">
             <button type="button" className="node-secondary-button" onClick={() => onControlJob?.('pause')}>
               <Clock size={13} /> 批次完成后暂停
             </button>
@@ -74,41 +76,46 @@ export function ExecutionPanel({
           </div>
         )}
         {distributionJob.status === 'completed_with_issues' && (
-          <div className="distribution-execution-actions">
+          <div className="flex flex-wrap justify-end gap-1.5">
             <button type="button" className="node-secondary-button" onClick={() => onControlJob?.('recheck')}>
               <RefreshCw size={13} /> 重新核对铺货结果
             </button>
           </div>
         )}
       </div>
-      <div className="distribution-progress-track">
-        <span style={{ width: `${Math.min(100, Math.round((completedCount / Math.max(1, distributionJob.total || 1)) * 100))}%` }} />
+      <div className="h-1.5 overflow-hidden rounded-full bg-slate-900/60">
+        <span className="block h-full bg-green-500 transition-[width] duration-[220ms] ease-linear" style={{ width: `${Math.min(100, Math.round((completedCount / Math.max(1, distributionJob.total || 1)) * 100))}%` }} />
       </div>
-      <p>第 {distributionJob.progress?.batchIndex || 0} / {distributionJob.progress?.batchTotal || 0} 批 · {distributionJob.progress?.phase || '等待状态更新'}</p>
-      {distributionJob.error && <p className="distribution-error-text">{distributionJob.error}</p>}
-      {distributionJob.confirmationError && <p className="distribution-error-text">结果核对失败：{distributionJob.confirmationError}</p>}
-      {confirmation?.scanIncomplete && <p className="distribution-error-text">列表采集未完成，未找到的商品仍待确认，请稍后重新核对。</p>}
-      {confirmation?.reason && <p className="distribution-error-text">{confirmation.reason}</p>}
-      {distributionSubmitError && <p className="distribution-error-text">{distributionSubmitError}</p>}
-      {confirmation && <div className="distribution-confirmation-results" aria-label="铺货核对明细">
-        {resultRows.map(row => <div key={row.offerId} className={`distribution-confirmation-row distribution-result-${row.status === '成功' ? 'success' : row.status === '失败' ? 'failed' : 'pending'}`}>
-          <div className="distribution-confirmation-heading">
-            <strong><span className="distribution-result-label">{row.status}</span> · {row.title || '商品'}</strong>
-            <span className="distribution-confirmation-id">ID：{row.offerId}</span>
-          </div>
-          {row.details.map(detail => <div key={detail.shopName}>
-            <p>{detail.shopName}：{detail.label}</p>
-            {detail.failed && <p className="distribution-confirmation-reason">失败原因：{detail.reason || '历史记录未保存具体原因，请点击“重新核对铺货结果”获取；若仍未返回，请查看平台复制日志。'}</p>}
-          </div>)}
-        </div>)}
+      <p className={`text-[11px] m-0 ${isBlockedStyle ? 'text-[#fecaca]' : 'text-[#bbf7d0]'}`}>第 {distributionJob.progress?.batchIndex || 0} / {distributionJob.progress?.batchTotal || 0} 批 · {distributionJob.progress?.phase || '等待状态更新'}</p>
+      {distributionJob.error && <p className={`text-[11px] m-0 !text-[#fecaca]`}>{distributionJob.error}</p>}
+      {distributionJob.confirmationError && <p className={`text-[11px] m-0 !text-[#fecaca]`}>结果核对失败：{distributionJob.confirmationError}</p>}
+      {confirmation?.scanIncomplete && <p className={`text-[11px] m-0 !text-[#fecaca]`}>列表采集未完成，未找到的商品仍待确认，请稍后重新核对。</p>}
+      {confirmation?.reason && <p className={`text-[11px] m-0 !text-[#fecaca]`}>{confirmation.reason}</p>}
+      {distributionSubmitError && <p className={`text-[11px] m-0 !text-[#fecaca]`}>{distributionSubmitError}</p>}
+      {confirmation && <div aria-label="铺货核对明细">
+        {resultRows.map(row => {
+          const resultType = row.status === '成功' ? 'success' : row.status === '失败' ? 'failed' : 'pending';
+          return (
+            <div key={row.offerId} className="distribution-confirmation-row" style={{ '--result-color': RESULT_COLORS[resultType] }}>
+              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                <strong><span className="text-[var(--result-color)]">{row.status}</span> · {row.title || '商品'}</strong>
+                <span className="text-xs text-[var(--text-subtle)] whitespace-nowrap">ID：{row.offerId}</span>
+              </div>
+              {row.details.map(detail => <div key={detail.shopName}>
+                <p>{detail.shopName}：{detail.label}</p>
+                {detail.failed && <p className="text-[#fca5a5] whitespace-pre-wrap break-all">失败原因：{detail.reason || '历史记录未保存具体原因，请点击"重新核对铺货结果"获取；若仍未返回，请查看平台复制日志。'}</p>}
+              </div>)}
+            </div>
+          );
+        })}
       </div>}
       {!confirmation && Array.isArray(distributionJob.results) && distributionJob.results.some(row => row.status && row.status !== 'confirmed' && !row.skipped) && (
-        <p className="distribution-error-text">存在未确认成功的批次，请查看结果后再处理，不会自动重复提交。</p>
+        <p className={`text-[11px] m-0 !text-[#fecaca]`}>存在未确认成功的批次，请查看结果后再处理，不会自动重复提交。</p>
       )}
       {!confirmation && Array.isArray(distributionJob.results) && distributionJob.results.length > 0 && (
-        <div className="distribution-batch-results">
+        <div className="flex flex-wrap gap-1.5">
           {distributionJob.results.map((batch) => (
-            <span key={`${batch.batchIndex}-${batch.batchHash || batch.status}`} className={batch.status === 'confirmed' ? 'success' : 'failed'}>
+            <span key={`${batch.batchIndex}-${batch.batchHash || batch.status}`} className={`rounded-md px-[7px] py-1 bg-slate-900/[0.48] text-[var(--text-subtle)] text-[10px] ${batch.status === 'confirmed' ? 'text-[#bbf7d0]' : 'text-[#fecaca]'}`}>
               第 {batch.batchIndex} 批：{batch.status === 'confirmed' ? '已确认' : batch.skipped ? '已跳过' : '需处理'}（{batch.count || 0} 个）
             </span>
           ))}

@@ -43,21 +43,21 @@ export const TitleGenerationOperationPanel = ({
   const visibleGeneratedRows = generatedRows.slice(0, visibleLimit);
 
   return (
-    <div className="node-embedded-workbench">
-      <section className="node-workbench-section">
-        <div className="node-workbench-head">
-          <strong>{exactKeywordMode ? '精确关键词' : '已验真词'}</strong>
-          <span>{verifiedRows.length} 个 · 可生成 {verifiedRows.filter((item) => !item.keywordOpportunity?.decision || item.keywordOpportunity.decision === 'continue').length} 个</span>
+    <div className="grid gap-3">
+      <section className="grid gap-2.5 p-3 border border-slate-800/90 rounded-lg bg-slate-950/[0.42]">
+        <div className="flex items-center justify-between gap-2.5">
+          <strong className="min-w-0 text-slate-200 text-xs">{exactKeywordMode ? '精确关键词' : '已验真词'}</strong>
+          <span className="shrink-0 text-slate-400 text-[10px]">{verifiedRows.length} 个 · 可生成 {verifiedRows.filter((item) => !item.keywordOpportunity?.decision || item.keywordOpportunity.decision === 'continue').length} 个</span>
         </div>
-        <div className="node-chip-list">
+        <div className="flex flex-wrap gap-1.5 max-h-[150px] overflow-auto">
           {sortedVerifiedRows.slice(0, 16).map((item, index) => {
             const keyword = candidateKeyword(item);
             const decision = item.keywordOpportunity?.decision || 'continue';
             const score = item.keywordOpportunity?.score ?? item.sycmScore?.score ?? item.score;
             return (
-              <button type="button" key={`${keyword}-${index}`} onClick={() => onUseVerifiedKeyword(item)}>
+              <button type="button" key={`${keyword}-${index}`} onClick={() => onUseVerifiedKeyword(item)} className="inline-flex items-center gap-1.5 max-w-full border border-slate-700 rounded-full bg-slate-900 text-slate-200 text-[11px] px-2 py-[5px]">
                 <span>{keyword || '未命名关键词'}</span>
-                <small>{exactKeywordMode ? '用户指定' : score ? `机会分 ${score} · ${decision === 'continue' ? '可生成' : '需人工放行'}` : '已验真'}</small>
+                <small className="text-slate-400 text-[10px]">{exactKeywordMode ? '用户指定' : score ? `机会分 ${score} · ${decision === 'continue' ? '可生成' : '需人工放行'}` : '已验真'}</small>
               </button>
             );
           })}
@@ -65,10 +65,10 @@ export const TitleGenerationOperationPanel = ({
         </div>
       </section>
 
-      <form className="node-workbench-section" onSubmit={onGenerateTitle}>
-        <div className="node-workbench-head">
-          <strong>标题生成</strong>
-          <span>{titleLoading ? '生成中' : '手动可补同行标题'}</span>
+      <form className="grid gap-2.5 p-3 border border-slate-800/90 rounded-lg bg-slate-950/[0.42]" onSubmit={onGenerateTitle}>
+        <div className="flex items-center justify-between gap-2.5">
+          <strong className="min-w-0 text-slate-200 text-xs">标题生成</strong>
+          <span className="shrink-0 text-slate-400 text-[10px]">{titleLoading ? '生成中' : '手动可补同行标题'}</span>
         </div>
         <label className="node-field">
           <span>关键词</span>
@@ -92,14 +92,14 @@ export const TitleGenerationOperationPanel = ({
         </button>
       </form>
 
-      <section className="node-workbench-section">
-        <div className="node-workbench-head">
-          <strong>标题与货源链接结果</strong>
-          <span>{generatedRows.length} 条记录 · {titles.length} 个标题 · {sourceCount} 个链接</span>
+      <section className="grid gap-2.5 p-3 border border-slate-800/90 rounded-lg bg-slate-950/[0.42]">
+        <div className="flex items-center justify-between gap-2.5">
+          <strong className="min-w-0 text-slate-200 text-xs">标题与货源链接结果</strong>
+          <span className="shrink-0 text-slate-400 text-[10px]">{generatedRows.length} 条记录 · {titles.length} 个标题 · {sourceCount} 个链接</span>
         </div>
         {generatedRows.length > 0 && (
           <p className="node-workbench-note">
-            这里的“记录”是一组可复核对象：1 个铺货标题 + 1 个 1688 货源链接 + 评分信息。当前展示 {visibleGeneratedRows.length}/{generatedRows.length} 条。
+            这里的"记录"是一组可复核对象：1 个铺货标题 + 1 个 1688 货源链接 + 评分信息。当前展示 {visibleGeneratedRows.length}/{generatedRows.length} 条。
           </p>
         )}
         {titles.length > 0 && (
@@ -108,22 +108,22 @@ export const TitleGenerationOperationPanel = ({
           </button>
         )}
         {generatedRows.length > 0 ? (
-          <div className="node-product-list">
+          <div className="grid gap-[7px] max-h-[250px] overflow-auto">
             {visibleGeneratedRows.map((item, index) => {
               const product = item.product || item;
               const title = item['铺货标题'] || item.title || product['铺货标题'] || '未生成标题';
               const url = item.url || item.productUrl || item['产品链接'] || product['产品链接'];
               const keyword = rowSelectedKeyword(item);
               return (
-                <div className="node-product-row" key={`${url || index}`}>
-                  <strong>{title}</strong>
-                  {keyword && <small className="selected-keyword-badge">选词：{keyword}</small>}
-                  <span>{item['链接原标题'] || item.productTitle || product['链接原标题'] || item.keyword || '货源结果'}</span>
-                  <div>
-                    <em>{product['商品原价'] || item.price ? `价格 ${product['商品原价'] || item.price}` : '暂无价格'}</em>
-                    <em>{product['30天销量'] || item.sales ? `销量 ${product['30天销量'] || item.sales}` : '暂无销量'}</em>
+                <div className="grid gap-2 p-[9px] border border-slate-800/[0.86] rounded-lg bg-slate-900/[0.62]" key={`${url || index}`}>
+                  <strong className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-slate-200 text-xs">{title}</strong>
+                  {keyword && <small className="inline-flex w-fit max-w-full items-center border border-sky-500/30 rounded-full bg-sky-900/[0.28] text-sky-200 text-[10px] font-extrabold leading-[1.1] px-[7px] py-1 break-words">选词：{keyword}</small>}
+                  <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-slate-400 text-[10px]">{item['链接原标题'] || item.productTitle || product['链接原标题'] || item.keyword || '货源结果'}</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    <em className="rounded-full bg-slate-800/90 text-slate-300 text-[10px] not-italic px-[7px] py-[2px]">{product['商品原价'] || item.price ? `价格 ${product['商品原价'] || item.price}` : '暂无价格'}</em>
+                    <em className="rounded-full bg-slate-800/90 text-slate-300 text-[10px] not-italic px-[7px] py-[2px]">{product['30天销量'] || item.sales ? `销量 ${product['30天销量'] || item.sales}` : '暂无销量'}</em>
                   </div>
-                  <div className="node-product-actions">
+                  <div className="node-product-actions mt-[2px] [&_.node-secondary-button]:min-h-[30px] [&_.node-secondary-button]:px-[9px] [&_.node-secondary-button]:py-[6px] [&_.node-secondary-button]:no-underline">
                     <button type="button" className="node-secondary-button" onClick={() => onCopyTitle(title)}>
                       <Copy size={13} /> 复制标题
                     </button>

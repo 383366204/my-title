@@ -80,37 +80,41 @@ export const SeedPoolWorkbench = ({
   const lowQualityCount = normalizedSeeds.filter((seed) => Number(seed.qualityScore || 0) < 50).length;
   const repeatedFamilyCount = Object.values(familyCounts).filter((count) => count > 1).length;
 
+  const statCellClass = 'grid gap-0.5 min-w-0 p-[7px] border border-[#263449] rounded-md bg-slate-900/60 text-[var(--text-muted)] text-[9px] text-center';
+  const statStrongClass = 'text-[var(--text-body)] text-xs';
+  const inputClass = 'w-full min-w-0 border border-[var(--border-default)] rounded-lg bg-[#020617] text-[var(--text-body)] text-xs leading-[1.4] px-[9px] py-2 outline-none focus:border-blue-500';
+
   return (
     <>
-      <section className="node-workbench-section">
-        <div className="node-workbench-head">
-          <strong>种子池</strong>
-          <span>{seedLoading ? '加载中' : `活跃 ${statusCounts.active || 0} · 观察 ${statusCounts.observing || 0}`}</span>
+      <section className="grid gap-[10px] p-3 border border-slate-800/90 rounded-lg bg-[rgba(2,6,23,0.42)]">
+        <div className="flex items-center justify-between gap-[10px]">
+          <strong className="min-w-0 text-[var(--text-body)] text-xs">种子池</strong>
+          <span className="shrink-0 text-[var(--text-muted)] text-[10px]">{seedLoading ? '加载中' : `活跃 ${statusCounts.active || 0} · 观察 ${statusCounts.observing || 0}`}</span>
         </div>
-        <div className="node-seed-health-summary">
-          <span><strong>{normalizedSeeds.length}</strong> 总种子</span>
-          <span><strong>{normalizedSeeds.filter((seed) => ['discovery_root', 'direct_candidate'].includes(seed.role)).length}</strong> 可执行</span>
-          <span className={repeatedFamilyCount ? 'warning' : ''}><strong>{repeatedFamilyCount}</strong> 重复商品族</span>
-          <span className={lowQualityCount ? 'warning' : ''}><strong>{lowQualityCount}</strong> 低质量</span>
+        <div className="grid grid-cols-4 gap-1.5">
+          <span className={statCellClass}><strong className={statStrongClass}>{normalizedSeeds.length}</strong> 总种子</span>
+          <span className={statCellClass}><strong className={statStrongClass}>{normalizedSeeds.filter((seed) => ['discovery_root', 'direct_candidate'].includes(seed.role)).length}</strong> 可执行</span>
+          <span className={`${statCellClass} ${repeatedFamilyCount ? 'border-amber-500/50 !text-amber-400' : ''}`}><strong className={statStrongClass}>{repeatedFamilyCount}</strong> 重复商品族</span>
+          <span className={`${statCellClass} ${lowQualityCount ? 'border-amber-500/50 !text-amber-400' : ''}`}><strong className={statStrongClass}>{lowQualityCount}</strong> 低质量</span>
         </div>
-        <form className="node-inline-form" onSubmit={(event) => { event.preventDefault(); onAddSeed(); }}>
-          <input value={seedDraft.keyword} onChange={(event) => onSeedDraftChange({ ...seedDraft, keyword: event.target.value })} placeholder="新增种子词" />
-          <input value={seedDraft.category} onChange={(event) => onSeedDraftChange({ ...seedDraft, category: event.target.value })} placeholder="类目" />
+        <form className="grid grid-cols-[minmax(0,1fr)_minmax(72px,0.7fr)_34px] gap-2" onSubmit={(event) => { event.preventDefault(); onAddSeed(); }}>
+          <input className={inputClass} value={seedDraft.keyword} onChange={(event) => onSeedDraftChange({ ...seedDraft, keyword: event.target.value })} placeholder="新增种子词" />
+          <input className={inputClass} value={seedDraft.category} onChange={(event) => onSeedDraftChange({ ...seedDraft, category: event.target.value })} placeholder="类目" />
           <button type="submit" className="node-icon-button" title="添加种子词"><Plus size={14} /></button>
         </form>
-        {seedMessage && <div className="node-workbench-message">{seedMessage}</div>}
-        <div className="node-seed-status-tabs" role="tablist" aria-label="种子池状态筛选">
+        {seedMessage && <div className="rounded-lg border border-blue-500/30 bg-blue-900/10 text-blue-200 text-[11px] leading-normal p-2">{seedMessage}</div>}
+        <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="种子池状态筛选">
           {[['active', '活跃'], ['observing', '观察'], ['explore', '探索'], ['cooling', '冷却'], ['paused', '暂停'], ['all', '全部']].map(([status, label]) => (
-            <button type="button" key={status} className={seedFilter === status ? 'active' : ''} onClick={() => setSeedFilter(status)}>
+            <button type="button" key={status} className={`border border-[var(--border-default)] rounded-md bg-[var(--bg-panel)] text-[var(--text-muted)] text-[10px] font-bold px-[7px] py-[5px] ${seedFilter === status ? 'border-blue-500/80 bg-blue-900/30 text-blue-100' : ''}`} onClick={() => setSeedFilter(status)}>
               {label} {status === 'all' ? normalizedSeeds.length : (statusCounts[status] || 0)}
             </button>
           ))}
         </div>
-        <div className="node-seed-compact-list">
+        <div className="grid gap-[7px] max-h-[250px] overflow-auto">
           {visibleSeeds.slice(0, 12).map((seed) => (
             <div className={`node-seed-compact-row ${selectedSeed?.keyword === seed.keyword ? 'is-selected' : ''}`} key={seed.keyword}>
               <button type="button" onClick={() => setSelectedSeedKeyword(seed.keyword)}>
-                <div className="node-seed-row-title">
+                <div className="flex items-center justify-between gap-2 min-w-0">
                   <strong>{seed.keyword}</strong>
                   <span className={`node-seed-quality ${Number(seed.qualityScore || 0) < 50 ? 'low' : ''}`}>{seed.qualityScore ?? '--'} 分</span>
                 </div>
@@ -127,24 +131,24 @@ export const SeedPoolWorkbench = ({
           {visibleSeeds.length === 0 && <div className="artifact-empty">当前状态下没有种子词。</div>}
         </div>
         {selectedSeed && (
-          <div className="node-seed-detail">
-            <div>
-              <strong>{selectedSeed.keyword}</strong>
-              <span>{selectedSeed.category || '未分类'} · 商品族 {selectedSeed.familyKey || '待识别'} · {roleLabel[selectedSeed.role] || '待识别'} · 来源 {selectedSeed.source || '未记录'}</span>
-              <small>{selectedSeed.classificationReason || selectedSeed.statusReason || '暂无识别说明'}</small>
+          <div className="grid gap-[10px] p-2.5 border border-blue-500/30 rounded-lg bg-blue-900/10">
+            <div className="grid gap-1">
+              <strong className="text-blue-100 text-xs">{selectedSeed.keyword}</strong>
+              <span className="text-[var(--text-muted)] text-[10px] leading-[1.45]">{selectedSeed.category || '未分类'} · 商品族 {selectedSeed.familyKey || '待识别'} · {roleLabel[selectedSeed.role] || '待识别'} · 来源 {selectedSeed.source || '未记录'}</span>
+              <small className="text-[var(--text-muted)] text-[10px] leading-[1.45]">{selectedSeed.classificationReason || selectedSeed.statusReason || '暂无识别说明'}</small>
               {selectedSeed.recommendedStatus && selectedSeed.recommendedStatus !== selectedSeed.status && (
-                <small className="node-seed-recommendation">建议状态：{seedStatusLabel[selectedSeed.recommendedStatus] || selectedSeed.recommendedStatus}</small>
+                <small className="!text-amber-400 text-[10px] leading-[1.45]">建议状态：{seedStatusLabel[selectedSeed.recommendedStatus] || selectedSeed.recommendedStatus}</small>
               )}
             </div>
-            <div className="node-seed-funnel" aria-label="种子效果漏斗">
-              <span><strong>{selectedSeed.stats?.runs || 0}</strong>运行</span>
-              <span><strong>{selectedSeed.stats?.candidates || 0}</strong>候选</span>
-              <span><strong>{selectedSeed.stats?.verified || 0}</strong>验真</span>
-              <span><strong>{selectedSeed.stats?.generationEligible || 0}</strong>可生成</span>
-              <span><strong>{selectedSeed.stats?.selectedProducts || 0}</strong>选品</span>
-              <span><strong>{selectedSeed.stats?.generatedTitles || 0}</strong>标题</span>
+            <div className="grid grid-cols-3 gap-1.5" aria-label="种子效果漏斗">
+              <span className={statCellClass}><strong className={statStrongClass}>{selectedSeed.stats?.runs || 0}</strong>运行</span>
+              <span className={statCellClass}><strong className={statStrongClass}>{selectedSeed.stats?.candidates || 0}</strong>候选</span>
+              <span className={statCellClass}><strong className={statStrongClass}>{selectedSeed.stats?.verified || 0}</strong>验真</span>
+              <span className={statCellClass}><strong className={statStrongClass}>{selectedSeed.stats?.generationEligible || 0}</strong>可生成</span>
+              <span className={statCellClass}><strong className={statStrongClass}>{selectedSeed.stats?.selectedProducts || 0}</strong>选品</span>
+              <span className={statCellClass}><strong className={statStrongClass}>{selectedSeed.stats?.generatedTitles || 0}</strong>标题</span>
             </div>
-            <div className="node-seed-detail-actions">
+            <div className="flex flex-wrap gap-1.5">
               {selectedSeed.status !== 'active' && <button type="button" className="node-secondary-button success" onClick={() => onSetSeedStatus(selectedSeed.keyword, 'active')}>晋升活跃</button>}
               {selectedSeed.status !== 'observing' && <button type="button" className="node-secondary-button" onClick={() => onSetSeedStatus(selectedSeed.keyword, 'observing')}>转为观察</button>}
               {selectedSeed.status !== 'explore' && <button type="button" className="node-secondary-button" onClick={() => onSetSeedStatus(selectedSeed.keyword, 'explore')}>仅作探索</button>}
@@ -158,10 +162,10 @@ export const SeedPoolWorkbench = ({
         </button>
       </section>
 
-      <section className="node-workbench-section">
-        <div className="node-workbench-head">
-          <strong>词根发现</strong>
-          <span>{minerResults.length} 个结果</span>
+      <section className="grid gap-[10px] p-3 border border-slate-800/90 rounded-lg bg-[rgba(2,6,23,0.42)]">
+        <div className="flex items-center justify-between gap-[10px]">
+          <strong className="min-w-0 text-[var(--text-body)] text-xs">词根发现</strong>
+          <span className="shrink-0 text-[var(--text-muted)] text-[10px]">{minerResults.length} 个结果</span>
         </div>
         <div className="node-segmented">
           {MINER_TABS.map((tab) => (
@@ -171,7 +175,7 @@ export const SeedPoolWorkbench = ({
           ))}
         </div>
         {activeTab.needsInput && (
-          <input className="node-wide-input" value={minerInput} onChange={(event) => onMinerInputChange(event.target.value)} placeholder="输入关键词或商品链接" />
+          <input className={inputClass} value={minerInput} onChange={(event) => onMinerInputChange(event.target.value)} placeholder="输入关键词或商品链接" />
         )}
         <button type="button" className="node-primary-button" onClick={onRunMiner} disabled={minerBusy || (activeTab.needsInput && !minerInput.trim())}>
           {minerBusy ? <RefreshCw size={14} className="animate-spin" /> : <Database size={14} />}

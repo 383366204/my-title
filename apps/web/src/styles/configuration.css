@@ -267,8 +267,8 @@
   border: 1px solid rgba(71, 85, 105, 0.72);
   border-radius: 7px;
   display: grid;
-  gap: 10px;
-  padding: 12px;
+  gap: 6px;
+  padding: 8px 10px;
 }
 
 .review-source-group-fields {

@@ -148,7 +148,7 @@ export function ManualWorkflowInputPanel({ initialDefaultKeyword = '', initialIt
   };
 
   return (
-    <section className="workflow-modal manual-workflow-input-modal" role="dialog" aria-modal="true" aria-label="录入1688链接" onClick={(event) => event.stopPropagation()}>
+    <section className="workflow-modal w-[min(920px,calc(100vw-48px))] max-h-[min(760px,calc(100vh-48px))] flex flex-col max-md:w-[calc(100vw-20px)] max-md:max-h-[calc(100vh-20px)]" role="dialog" aria-modal="true" aria-label="录入1688链接" onClick={(event) => event.stopPropagation()}>
       <div className="workflow-modal-head">
         <div>
           <strong>录入1688商品或分享口令</strong>
@@ -157,32 +157,32 @@ export function ManualWorkflowInputPanel({ initialDefaultKeyword = '', initialIt
         <button type="button" className="node-icon-button" title="关闭" onClick={onCancel}><X size={14} /></button>
       </div>
 
-      <div className="manual-input-body">
-        <div className="manual-input-toolbar">
-          <label className="node-field manual-default-keyword">
+      <div className="min-h-0 overflow-y-auto p-[18px] flex flex-col gap-4">
+        <div className="grid grid-cols-[minmax(260px,1fr)_auto] items-end gap-3 max-md:grid-cols-[minmax(0,1fr)]">
+          <label className="node-field m-0">
             <span>默认关键词（可选）</span>
             <input value={defaultKeyword} onChange={(event) => setDefaultKeyword(event.target.value)} placeholder="例如：法式复古连衣裙" />
           </label>
           <button type="button" className="node-secondary-button" onClick={applyDefaultKeyword}><Check size={13} /> 应用到空白行</button>
         </div>
 
-        <div className="manual-input-table" role="table" aria-label="关键词与1688链接">
-          <div className="manual-input-row is-head" role="row">
+        <div className="min-h-0 max-h-[min(360px,42vh)] border border-[#26344d] rounded-[6px] overflow-x-hidden overflow-y-auto overscroll-contain scrollbar-gutter-stable" role="table" aria-label="关键词与1688链接">
+          <div className="grid grid-cols-[minmax(180px,0.8fr)_minmax(360px,1.7fr)_44px] items-center gap-[10px] py-[9px] px-[10px] border-t border-[#1f2a40] first:border-t-0 sticky top-0 z-[1] text-[var(--text-muted)] bg-[#111d31] text-[11px] font-bold max-md:hidden" role="row">
             <span>关键词（可选）</span><span>商品链接或分享口令</span><span>操作</span>
           </div>
           {rows.map((row) => (
-            <div className="manual-input-row" role="row" key={row.clientId}>
-              <input value={row.keyword} onChange={(event) => updateRow(row.clientId, 'keyword', event.target.value)} placeholder={defaultKeyword || '留空自动提取'} />
-              <input value={row.url} onChange={(event) => updateRow(row.clientId, 'url', event.target.value)} placeholder="商品链接或手机分享口令" />
-              <button type="button" className="node-icon-button danger" title="删除此行" onClick={() => removeRow(row.clientId)}><Trash2 size={14} /></button>
+            <div className="grid grid-cols-[minmax(180px,0.8fr)_minmax(360px,1.7fr)_44px] items-center gap-[10px] py-[9px] px-[10px] border-t border-[#1f2a40] bg-[#0e1729] first:border-t-0 max-md:grid-cols-[minmax(0,1fr)]" role="row" key={row.clientId}>
+              <input className="w-full min-w-0 py-[9px] px-[10px] border border-[var(--border-default)] rounded-[5px] bg-[#091224] text-[var(--text-body)] text-xs focus:border-[#3b82f6] focus:outline-none" value={row.keyword} onChange={(event) => updateRow(row.clientId, 'keyword', event.target.value)} placeholder={defaultKeyword || '留空自动提取'} />
+              <input className="w-full min-w-0 py-[9px] px-[10px] border border-[var(--border-default)] rounded-[5px] bg-[#091224] text-[var(--text-body)] text-xs focus:border-[#3b82f6] focus:outline-none" value={row.url} onChange={(event) => updateRow(row.clientId, 'url', event.target.value)} placeholder="商品链接或手机分享口令" />
+              <button type="button" className="node-icon-button danger max-md:justify-self-end" title="删除此行" onClick={() => removeRow(row.clientId)}><Trash2 size={14} /></button>
             </div>
           ))}
         </div>
 
         <button type="button" className="node-secondary-button" onClick={() => setRows((current) => [...current, emptyRow(current.length)])}><Plus size={13} /> 添加一行</button>
 
-        <div className="manual-bulk-input">
-          <div className="node-workbench-head"><strong>批量粘贴链接或分享口令</strong><span>一行一个，也支持“关键词$$链接”</span></div>
+        <div className="flex flex-col gap-[9px] pt-[14px] border-t border-[#243047]">
+          <div className="node-workbench-head"><strong>批量粘贴链接或分享口令</strong><span>一行一个，也支持"关键词$$链接"</span></div>
           <textarea className="node-field-textarea" rows="4" value={bulkUrls} onChange={(event) => setBulkUrls(event.target.value)} placeholder="1688商品链接，或从手机复制的完整分享文本" />
           <button type="button" className="node-secondary-button" disabled={!bulkUrls.trim() || resolving} onClick={appendBulkUrls}>
             {resolving ? <RefreshCw size={13} className="animate-spin" /> : <Link2 size={13} />}
@@ -190,12 +190,12 @@ export function ManualWorkflowInputPanel({ initialDefaultKeyword = '', initialIt
           </button>
         </div>
 
-        {message && <div className="manual-input-message">{message}</div>}
+        {message && <div className="py-[10px] px-3 border border-[#355178] rounded-[5px] bg-[#10213a] text-[#bfdbfe] text-xs">{message}</div>}
       </div>
 
-      <div className="manual-input-footer">
+      <div className="flex items-center justify-between gap-3 py-[14px] px-[18px] border-t border-[#27344b] bg-[#0d1729] text-[var(--text-muted)] text-xs max-md:items-stretch max-md:flex-col">
         <span>已准备 {validCount} 个商品{autoKeywordCount > 0 ? `，${autoKeywordCount} 个将自动查词` : ''}</span>
-        <div>
+        <div className="flex gap-2 max-md:justify-end">
           <button type="button" className="node-secondary-button" onClick={onCancel}>取消</button>
           <button type="button" className="node-primary-button" disabled={resolving} onClick={submit}>
             {resolving ? <RefreshCw size={13} className="animate-spin" /> : <Check size={13} />}

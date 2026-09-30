@@ -23,17 +23,19 @@ function CategoryToolbar({ control, rows, onRemove }) {
   const job = control.state?.job;
   const missing = control.state?.rows?.filter(row => !row.category) || [];
   const activeMissing = rows.filter(row => !row.categoryRecord?.category);
-  return <div className="distribution-category-toolbar">
-    <span>待补类目 {missing.length} 件{job ? ` · 查询 ${job.completed || 0}/${job.requests?.length || 0} ${job.currentWord || ''}` : ''}</span>
-    <button type="button" className="node-secondary-button" disabled={!missing.length || control.busy || control.state?.locked || job?.status === 'running' || job?.inFlight}
-      onClick={() => control.act({ action: 'query', urls: missing.map(row => row.url) })}>补全缺失类目</button>
+  const hasWork = missing.length > 0 || job?.status === 'running' || job?.status === 'paused' || job?.error || control.error || activeMissing.length > 0;
+  if (!hasWork) return null;
+  return <div className="flex items-center flex-wrap gap-2 py-3">
+    {missing.length > 0 && <span className="text-[11px] text-slate-400">{missing.length} 件商品缺少类目{job?.status === 'running' ? `（正在查询 ${job.completed || 0}/${job.requests?.length || 0}）` : ''}</span>}
+    {missing.length > 0 && <button type="button" className="node-secondary-button" disabled={control.busy || control.state?.locked || job?.status === 'running' || job?.inFlight}
+      onClick={() => control.act({ action: 'query', urls: missing.map(row => row.url) })}>补全缺失类目</button>}
     {job?.status === 'running' && <button type="button" className="node-secondary-button" disabled={control.busy} onClick={() => control.act({ action: 'pause' })}>暂停获取</button>}
     {job?.status === 'paused' && <button type="button" className="node-secondary-button" disabled={control.busy || job.inFlight} onClick={() => control.act({ action: 'resume' })}>继续获取</button>}
     {job?.error && <button type="button" className="node-secondary-button" disabled={control.busy || job.inFlight || control.state?.locked} onClick={control.startChrome}>启动生意参谋 Chrome</button>}
     {activeMissing.length > 0 && <button type="button" className="node-secondary-button" onClick={() => {
       if (window.confirm(`从当前清单移除 ${activeMissing.length} 件待补类目商品，仅保留已就绪项？`)) activeMissing.forEach(row => onRemove(row.key, true));
     }}>仅保留类目已就绪商品</button>}
-    {(control.error || job?.error) && <span role="alert">{control.error || job.error}</span>}
+    {(control.error || job?.error) && <span role="alert" className="basis-full text-[#efb467] text-[11px]">{control.error || job.error}</span>}
   </div>;
 }
 
@@ -100,7 +102,7 @@ export const DistributionExportPanel = ({
     setManualCompleteStatus({ status: 'idle', message: '' });
   };
   const copyValidation = copyIssues.length > 0 && (
-    <div className="distribution-modal-feedback blocked" role="alert">
+    <div className="grid gap-0.5 border border-red-400/40 bg-red-900/15 text-red-200 px-2.5 py-2 rounded-md text-[11px] leading-normal break-all" role="alert">
       当前格式有 {copyIssues.length} 条商品需要补充或修正：
       {copyIssues.map(issue => <div key={issue.index}>第 {issue.index} 条「{issue.title}」：{issue.fields.join('、')}</div>)}
     </div>
@@ -179,7 +181,7 @@ export const DistributionExportPanel = ({
       setManualCopiedText(latest.text === manualText ? copyIdentity : '');
       setManualCompleteStatus({
         status: 'copied',
-        message: `已复制 ${activeRows.length} 条：${copyFormat.label}。完成外部铺货后，再点击“标记人工铺货完成”。`
+        message: `已复制 ${activeRows.length} 条：${copyFormat.label}。完成外部铺货后，再点击"标记人工铺货完成"。`
       });
       return true;
     } catch (error) {
@@ -220,7 +222,7 @@ export const DistributionExportPanel = ({
   const previewPanelContent = (
     <>
       <DistributionShopPicker key={currentRunId || 'new'} value={selectedShops} onChange={setSelectedShops} onEditingChange={setEditingShop} disabled={shopBusy} lockedShops={lockedShops} mode={distributionMode} onModeChange={setSelectedMode} />
-      <div className="export-preview-actions">
+      <div className="flex flex-wrap gap-2">
         <DistributionCopyButton label="复制铺货内容" primary disabled={!canManualCopy} onCopy={copyManualDistribution} format={copyFormat} onFormatChange={changeCopyFormat} successMessage={`已复制 ${activeRows.length} 条铺货内容，格式：${copyFormat.label}`} />
         <button type="button" className="node-secondary-button success" disabled={!manualCopyCurrent || !canRecordManualComplete || manualCompleteStatus.status === 'completing' || distributionJob?.status === 'submitting'} onClick={confirmManualDistributionComplete}>
           {manualCompleteStatus.status === 'completing' ? <RefreshCw size={13} className="animate-spin" /> : <Check size={13} />}
@@ -234,30 +236,30 @@ export const DistributionExportPanel = ({
           {distributionCheck.status === 'loading' ? '正在检查铺货环境' : '确认并开始自动铺货'}
         </button>
       </div>
-      <div className="export-preview-status">
-        {targetShops.length > 0 && !targetsValid && <div role="alert" className="distribution-modal-feedback blocked">请选择已启用且使用同一 Chrome 调试端口的店铺。</div>}
+      <div className="grid gap-2 min-w-0">
+        {targetShops.length > 0 && !targetsValid && <div role="alert" className="grid gap-0.5 border border-red-400/40 bg-red-900/15 text-red-200 px-2.5 py-2 rounded-md text-[11px] leading-normal break-all">请选择已启用且使用同一 Chrome 调试端口的店铺。</div>}
         <ExecutionPanel distributionJob={distributionJob} activeRowsCount={activeRows.length} distributionSubmitError={distributionSubmitError} onControlJob={controlDistribution} />
         {copyValidation}
-        {!canRecordManualComplete && activeRows.length > 0 && <div className="distribution-modal-feedback checking">标记人工铺货完成前，清单仍需补齐链接和标题。</div>}
-        {manualCopiedText && !manualCopyCurrent && <div className="distribution-modal-feedback blocked">清单已经修改，请重新复制最新内容后再确认完成。</div>}
-        {manualCompleteStatus.status !== 'copied' && manualCompleteStatus.message && (manualCopyCurrent || manualCompleteStatus.status === 'error') && <div role="status" className={`distribution-modal-feedback ${manualCompleteStatus.status === 'error' ? 'blocked' : 'checking'}`}>{manualCompleteStatus.message}</div>}
+        {!canRecordManualComplete && activeRows.length > 0 && <div className="flex items-start gap-[7px] px-2.5 py-2 rounded-md text-[11px] leading-normal break-all border border-blue-400/30 bg-blue-900/15 text-blue-200">标记人工铺货完成前，清单仍需补齐链接和标题。</div>}
+        {manualCopiedText && !manualCopyCurrent && <div className="grid gap-0.5 border border-red-400/40 bg-red-900/15 text-red-200 px-2.5 py-2 rounded-md text-[11px] leading-normal break-all">清单已经修改，请重新复制最新内容后再确认完成。</div>}
+        {manualCompleteStatus.status !== 'copied' && manualCompleteStatus.message && (manualCopyCurrent || manualCompleteStatus.status === 'error') && <div role="status" className={`${manualCompleteStatus.status === 'error' ? 'grid gap-0.5 border border-red-400/40 bg-red-900/15 text-red-200' : 'flex items-start gap-[7px] border border-blue-400/30 bg-blue-900/15 text-blue-200'} px-2.5 py-2 rounded-md text-[11px] leading-normal break-all`}>{manualCompleteStatus.message}</div>}
         {distributionCheck.status === 'loading' && (
-          <div className="distribution-modal-feedback checking">
+          <div className="flex items-start gap-[7px] px-2.5 py-2 rounded-md text-[11px] leading-normal break-all border border-blue-400/30 bg-blue-900/15 text-blue-200">
             <RefreshCw size={13} className="animate-spin" /> 正在检查清单、Chrome 调试端口和登录状态，请稍候...
           </div>
         )}
         {distributionCheck.status === 'error' && (
-          <div className="distribution-modal-feedback blocked">铺货检查失败：{distributionCheck.error || '未知错误'}</div>
+          <div className="grid gap-0.5 border border-red-400/40 bg-red-900/15 text-red-200 px-2.5 py-2 rounded-md text-[11px] leading-normal break-all">铺货检查失败：{distributionCheck.error || '未知错误'}</div>
         )}
         {distributionCheck.status === 'ready' && !distributionCheck.result?.canSubmit && (
-          <div className="distribution-modal-feedback blocked">
+          <div className="grid gap-0.5 border border-red-400/40 bg-red-900/15 text-red-200 px-2.5 py-2 rounded-md text-[11px] leading-normal break-all">
             <strong>暂时无法开始自动铺货</strong>
             {distributionCheck.result?.shopError && <span>{distributionCheck.result.shopError}</span>}
             {Array.isArray(distributionCheck.result?.blockers) && distributionCheck.result.blockers.length > 0
               ? <span>阻塞原因：{distributionCheck.result.blockers.map(labelDistributionBlocker).join('，')}</span>
               : <span>请检查 Chrome 登录状态、CDP 端口和清单格式。</span>}
             {distributionNeedsChrome && (
-              <div className="distribution-modal-feedback-actions">
+              <div className="flex flex-wrap gap-2 mt-1.5">
                 <button type="button" className="node-secondary-button" onClick={startDistributionChrome} disabled={distributionChromeStarting}>
                   {distributionChromeStarting ? <RefreshCw size={13} className="animate-spin" /> : <Play size={13} />}
                   {distributionChromeStarting ? '正在启动 Chrome' : '启动铺货 Chrome'}
@@ -270,23 +272,24 @@ export const DistributionExportPanel = ({
           </div>
         )}
         {distributionSubmitError && (
-          <div className="distribution-modal-feedback blocked">提交失败：{distributionSubmitError}</div>
+          <div className="grid gap-0.5 border border-red-400/40 bg-red-900/15 text-red-200 px-2.5 py-2 rounded-md text-[11px] leading-normal break-all">提交失败：{distributionSubmitError}</div>
         )}
         {distributionChromeMessage && !distributionSubmitError && (
-          <div className="distribution-modal-feedback checking">{distributionChromeMessage}</div>
+          <div className="flex items-start gap-[7px] px-2.5 py-2 rounded-md text-[11px] leading-normal break-all border border-blue-400/30 bg-blue-900/15 text-blue-200">{distributionChromeMessage}</div>
         )}
       </div>
 
       <CategoryToolbar control={categoryControl} rows={activeRows} onRemove={markRemoved} />
-      <div className="export-preview-list">
+      <div className="min-h-0 grid content-start gap-[9px] overflow-auto pr-0.5">
         {exportStatus === 'loading' && <div className="artifact-empty"><RefreshCw size={13} className="animate-spin" /> 正在加载铺货清单...</div>}
         {exportStatus === 'error' && <div className="artifact-error">{exportError || '铺货清单加载失败'}</div>}
         {exportStatus !== 'loading' && rows.length === 0 && (
           <div className="artifact-empty">当前导出清单为空，通常表示前面的生成或复核没有产出可铺货商品。</div>
         )}
-        {rows.map((row) => (
+        {rows.map((row, index) => (
           <DistributionRow
             key={row.key}
+            index={index + 1}
             row={row}
             variant="preview"
             isBlocked={false}
@@ -294,9 +297,10 @@ export const DistributionExportPanel = ({
             onMarkRemoved={markRemoved}
           />
         ))}
-        {pendingBlockedRows.map((row) => (
+        {pendingBlockedRows.map((row, index) => (
           <DistributionRow
             key={row.key}
+            index={index + 1 + rows.length}
             row={row}
             variant="preview"
             isBlocked={true}
@@ -310,8 +314,8 @@ export const DistributionExportPanel = ({
 
   if (directPreview) {
     return (
-      <div className="export-preview-direct">
-        <div className="export-preview-direct-summary">
+      <div className="flex flex-col overflow-y-auto gap-3 h-full min-h-0">
+        <div className="flex items-center justify-between gap-2.5 min-w-0 pb-[9px] border-b border-slate-700/70 [&>strong]:text-slate-50 [&>strong]:text-[13px] [&>span]:text-[var(--text-muted)] [&>span]:text-[11px] [&>span]:text-right">
           <strong>{activeRows.length} 条待铺货</strong>
           <span>{removedRows.length} 条已移除 · {pendingBlockedRows.length} 条待人工加入</span>
         </div>
@@ -321,11 +325,11 @@ export const DistributionExportPanel = ({
   }
 
   return (
-    <div className="export-workbench">
+    <div className="grid gap-3 min-w-0">
       <CategoryToolbar control={categoryControl} rows={activeRows} onRemove={markRemoved} />
       <section className={`distribution-ready-hero ${activeRows.length > 0 ? 'has-items' : 'is-empty'}`}>
-        <div className="distribution-ready-hero-copy">
-          <span className="distribution-ready-eyebrow">当前要处理</span>
+        <div className="min-w-0 [&>strong]:text-slate-50 [&>strong]:block [&>strong]:text-[18px] [&>p]:text-[var(--text-subtle)] [&>p]:text-[11px] [&>p]:leading-normal [&>p]:mt-[5px]">
+          <span className="text-blue-300 block text-[10px] font-extrabold mb-1">当前要处理</span>
           <strong>{activeRows.length} 个待铺货商品</strong>
           <p>
             {activeRows.length > 0
@@ -333,28 +337,28 @@ export const DistributionExportPanel = ({
               : '当前没有可铺货商品，请先完成标题生成或把下方合适的复核项加入清单。'}
           </p>
         </div>
-        <div className="distribution-ready-hero-actions">
+        <div className="flex shrink-0 flex-wrap gap-[7px] justify-end">
           <button type="button" className="node-primary-button" disabled={!copyTextValue} onClick={() => setPreviewOpen(true)}>
             <FileText size={14} /> 查看并确认清单
           </button>
         </div>
       </section>
 
-      <div className="distribution-next-steps" aria-label="铺货操作步骤">
-        <span className="is-current"><b>1</b>确认商品</span>
+      <div className="flex items-center flex-wrap text-[10px] gap-1.5 mb-3 text-[var(--text-disabled)] [&>span]:inline-flex [&>span]:items-center [&>span]:gap-1 [&>b]:inline-flex [&>b]:items-center [&>b]:justify-center [&>b]:w-[18px] [&>b]:h-[18px] [&>b]:rounded-full [&>b]:bg-slate-500/20" aria-label="铺货操作步骤">
+        <span className="text-blue-200 font-extrabold [&>b]:bg-blue-600 [&>b]:text-white"><b>1</b>确认商品</span>
         <ChevronRight size={13} />
         <span><b>2</b>选择人工或自动铺货</span>
         <ChevronRight size={13} />
         <span><b>3</b>确认完成</span>
       </div>
 
-      <section className="distribution-method-grid" aria-label="选择铺货方式">
-        <article className="distribution-method-card manual">
+      <section className="grid grid-cols-2 gap-2.5 mb-3" aria-label="选择铺货方式">
+        <article className="grid content-between gap-3 min-w-0 p-3 border border-green-500/30 rounded-lg bg-green-900/10 [&>div>span]:text-[var(--text-muted)] [&>div>span]:block [&>div>span]:text-[10px] [&>div>span]:font-extrabold [&>div>span]:mb-[3px] [&>div>strong]:text-slate-100 [&>div>strong]:block [&>div>strong]:text-[13px]">
           <div>
             <span>人工铺货</span>
             <strong>复制清单后手动铺货</strong>
           </div>
-          <div className="distribution-method-actions">
+          <div className="flex flex-wrap gap-[7px]">
             <DistributionCopyButton label="人工复制铺货" disabled={!canManualCopy} onCopy={copyManualDistribution} format={copyFormat} onFormatChange={changeCopyFormat} successMessage={`已复制 ${activeRows.length} 条铺货内容，格式：${copyFormat.label}`} />
             <button type="button" className="node-secondary-button success" disabled={!manualCopyCurrent || !canRecordManualComplete || manualCompleteStatus.status === 'completing' || distributionJob?.status === 'submitting'} onClick={confirmManualDistributionComplete}>
               {manualCompleteStatus.status === 'completing' ? <RefreshCw size={13} className="animate-spin" /> : <Check size={13} />}
@@ -362,18 +366,18 @@ export const DistributionExportPanel = ({
             </button>
           </div>
           {copyValidation}
-          {!canRecordManualComplete && activeRows.length > 0 && <small className="distribution-method-warning">标记人工铺货完成前，清单仍需补齐链接和标题。</small>}
-          {manualCopiedText && !manualCopyCurrent && <small className="distribution-method-warning">清单已经修改，请重新复制最新内容后再确认完成。</small>}
-          {manualCompleteStatus.status !== 'copied' && manualCompleteStatus.message && (manualCopyCurrent || manualCompleteStatus.status === 'error') && <small role="status" className={`distribution-method-feedback ${manualCompleteStatus.status}`}>{manualCompleteStatus.message}</small>}
-          {manualCompleteStatus.status === 'error' && distributionSubmitError && <small className="distribution-method-feedback error">{distributionSubmitError}</small>}
+          {!canRecordManualComplete && activeRows.length > 0 && <small className="block text-[10px] leading-normal break-all text-amber-400">标记人工铺货完成前，清单仍需补齐链接和标题。</small>}
+          {manualCopiedText && !manualCopyCurrent && <small className="block text-[10px] leading-normal break-all text-amber-400">清单已经修改，请重新复制最新内容后再确认完成。</small>}
+          {manualCompleteStatus.status !== 'copied' && manualCompleteStatus.message && (manualCopyCurrent || manualCompleteStatus.status === 'error') && <small role="status" className={`block text-[10px] leading-normal break-all ${manualCompleteStatus.status === 'error' ? 'text-amber-400' : manualCompleteStatus.status === 'completing' ? 'text-blue-300' : 'text-green-300'}`}>{manualCompleteStatus.message}</small>}
+          {manualCompleteStatus.status === 'error' && distributionSubmitError && <small className="block text-[10px] leading-normal break-all text-amber-400">{distributionSubmitError}</small>}
         </article>
-        <article className="distribution-method-card automatic">
+        <article className="grid content-between gap-3 min-w-0 p-3 border border-blue-400/30 rounded-lg bg-blue-900/10 [&>div>span]:text-[var(--text-muted)] [&>div>span]:block [&>div>span]:text-[10px] [&>div>span]:font-extrabold [&>div>span]:mb-[3px] [&>div>strong]:text-slate-100 [&>div>strong]:block [&>div>strong]:text-[13px] [&>div>p]:text-[var(--text-muted)] [&>div>p]:text-[11px] [&>div>p]:leading-normal [&>div>p]:mt-[5px]">
           <div>
             <span>自动铺货</span>
             <strong>使用当前 Chrome 登录态</strong>
             <p>先检查 Chrome、登录状态和重复批次，再在清单预览中确认提交。</p>
           </div>
-          <div className="distribution-method-actions">
+          <div className="flex flex-wrap gap-[7px]">
             <button type="button" className="node-secondary-button" disabled={!copyTextValue || shopBusy} onClick={() => setPreviewOpen(true)}>
               {distributionCheck.status === 'loading' ? <RefreshCw size={13} className="animate-spin" /> : <Check size={13} />}
               选择店铺并检查
@@ -389,14 +393,14 @@ export const DistributionExportPanel = ({
         onControlJob={controlDistribution}
       />
 
-      <div className="review-summary-grid">
+      <div className="grid grid-cols-4 gap-2 [&>div]:min-w-0 [&>div]:border [&>div]:border-slate-800/90 [&>div]:rounded-lg [&>div]:bg-slate-900/60 [&>div]:p-[9px] [&>div>strong]:block [&>div>strong]:text-[var(--text-body)] [&>div>strong]:text-[18px] [&>div>strong]:leading-tight [&>div>span]:block [&>div>span]:mt-1 [&>div>span]:text-[var(--text-muted)] [&>div>span]:text-[10px]">
         <div><strong>{rows.length}</strong><span>清单项</span></div>
         <div><strong>{activeRows.length}</strong><span>将导出</span></div>
         <div><strong>{pendingBlockedRows.length}</strong><span>待人工加入</span></div>
         <div><strong>{copyTextValue ? '可复制' : '无内容'}</strong><span>清单状态</span></div>
       </div>
 
-      <div className="export-toolbar">
+      <div className="flex flex-wrap gap-2">
         <button type="button" className="node-secondary-button" onClick={() => setPreviewOpen(true)} disabled={!copyTextValue}>
           <FileText size={13} /> 打开清单预览
         </button>
@@ -427,15 +431,16 @@ export const DistributionExportPanel = ({
         </div>
       )}
 
-      <div className="export-row-list">
+      <div className="grid gap-[9px] max-h-[440px] overflow-auto pr-0.5">
         {exportStatus === 'loading' && <div className="artifact-empty"><RefreshCw size={13} className="animate-spin" /> 正在加载铺货清单...</div>}
         {exportStatus === 'error' && <div className="artifact-error">{exportError || '铺货清单加载失败'}</div>}
         {(exportStatus === 'ready' || exportStatus === 'empty') && rows.length === 0 && (
           <div className="artifact-empty">当前导出清单为空，通常表示前面的生成或复核没有产出可铺货商品。</div>
         )}
-        {rows.map((row) => (
+        {rows.map((row, index) => (
           <DistributionRow
             key={row.key}
+            index={index + 1}
             row={row}
             variant="workbench"
             isBlocked={false}
@@ -447,15 +452,16 @@ export const DistributionExportPanel = ({
         {reviewArtifactState.status === 'loading' && <div className="artifact-empty"><RefreshCw size={13} className="animate-spin" /> 正在读取拦截原因...</div>}
         {reviewArtifactState.status === 'error' && <div className="artifact-error">{reviewArtifactState.error || '拦截原因加载失败'}</div>}
         {pendingBlockedRows.length > 0 && (
-          <section className="export-blocked-section">
+          <section className="grid gap-[9px] mt-1 border-t border-slate-700/70 pt-3">
             <div className="node-workbench-head">
               <strong>被拦截但可人工判断</strong>
               <span>{pendingBlockedRows.length} 条</span>
             </div>
-            <div className="export-row-list compact">
-              {pendingBlockedRows.map((row) => (
+            <div className="grid gap-[9px] max-h-[360px] overflow-auto pr-0.5">
+              {pendingBlockedRows.map((row, index) => (
                 <DistributionRow
                   key={row.key}
+                  index={index + 1 + rows.length}
                   row={row}
                   variant="workbench"
                   isBlocked={true}
@@ -470,7 +476,7 @@ export const DistributionExportPanel = ({
 
       {previewOpen && (
         <div className="workflow-modal-backdrop" role="presentation" onClick={() => setPreviewOpen(false)}>
-          <section className="workflow-modal export-preview-modal" role="dialog" aria-modal="true" aria-label="导出清单预览" onClick={(event) => event.stopPropagation()}>
+          <section className="workflow-modal flex flex-col overflow-y-auto" role="dialog" aria-modal="true" aria-label="导出清单预览" onClick={(event) => event.stopPropagation()}>
             <div className="workflow-modal-head">
               <div>
                 <strong>导出清单预览</strong>

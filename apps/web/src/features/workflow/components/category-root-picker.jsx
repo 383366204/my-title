@@ -37,42 +37,42 @@ export function CategoryRootPicker({ rootsText, onCancel, onAdd }) {
     const count = descendants.filter(child => selected.has(child.key)).length;
     const open = expanded.has(node.key);
     return <li key={node.key}>
-      <div className="category-root-row">
+      <div className="flex items-center gap-1.5 min-h-[32px] text-xs [&>span]:break-words [&>input[type=checkbox]]:w-4 [&>input[type=checkbox]]:h-4 [&>input[type=checkbox]]:shrink-0 [&>input[type=checkbox]]:m-0 [&>button]:inline-flex [&>button]:items-center [&>button]:justify-center [&>button]:w-[26px] [&>button]:h-7 [&>button]:shrink-0 [&>button]:border-0 [&>button]:bg-transparent [&>button]:text-slate-300 [&>button]:cursor-pointer [&>button:hover]:bg-slate-700">
         <input type="checkbox" aria-label={node.path.join(' / ')} checked={selected.has(node.key)} onChange={event => toggle([node.key], event.target.checked)} />
         {node.children.length > 0 ? <button type="button" aria-label={`${open ? '收起' : '展开'}${node.path.join(' / ')}`} aria-expanded={open}
           onClick={() => setExpanded(previous => { const next = new Set(previous); next.has(node.key) ? next.delete(node.key) : next.add(node.key); return next; })}>
           {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-        </button> : <span className="category-root-spacer" />}
+        </button> : <span className="w-[26px] shrink-0" />}
         <span>{node.name}</span>
         {parseRootKeywords(node.name).every(word => existing.has(word.replace(/\s+/g, '').toLowerCase())) && <small>已在输入框</small>}
       </div>
       {node.children.length > 0 && open && <>
-        <button type="button" className="category-root-bulk" onClick={() => toggle(descendants.map(child => child.key), count !== descendants.length)}>
+        <button type="button" className="ml-[22px] bg-transparent text-sky-300 border-0 p-1.5 cursor-pointer" onClick={() => toggle(descendants.map(child => child.key), count !== descendants.length)}>
           {count === descendants.length ? '取消全选' : '全选子类目'}（{count}/{descendants.length}）
         </button>
         <ul>{renderNodes(node.children)}</ul>
       </>}
     </li>;
   });
-  return <section className="category-root-picker" aria-label="类目词选择">
+  return <section className="flex flex-col gap-3 min-w-0 text-slate-200 [&>header]:flex [&>header]:items-center [&>header]:gap-2.5 [&>header]:flex-wrap [&>footer]:flex [&>footer]:items-center [&>footer]:gap-2.5 [&>footer]:flex-wrap [&>footer]:justify-end [&_small]:text-slate-400" aria-label="类目词选择">
     <header><button type="button" className="node-secondary-button" onClick={onCancel}><ArrowLeft size={14} />返回</button><strong>类目词</strong><small>快照 {snapshot.snapshotDate}</small></header>
     <input autoFocus className="node-field-input" aria-label="搜索类目" placeholder="搜索类目或路径" value={query} onChange={event => {
       setQuery(event.target.value);
       if (event.target.value.trim()) setExpanded(new Set(all.filter(node => node.children.length).map(node => node.key)));
       else setExpanded(new Set());
     }} />
-    <div className="category-root-tabs" role="tablist" aria-label="类目视图">
+    <div className="hidden max-[600px]:flex max-[600px]:gap-2 [&>button]:px-3 [&>button]:py-[7px] [&>button]:bg-transparent [&>button]:text-slate-200 [&>button]:border-0 [&>button]:border-b-2 [&>button]:border-transparent [&>button[aria-selected=true]]:border-b-sky-400" role="tablist" aria-label="类目视图">
       <button type="button" role="tab" aria-selected={tab === 'tree'} onClick={() => setTab('tree')}>类目</button>
       <button type="button" role="tab" aria-selected={tab === 'selected'} onClick={() => setTab('selected')}>已选 {chosen.length}</button>
     </div>
-    <div className="category-root-columns" data-tab={tab}>
-      <div className="category-root-tree"><ul>{renderNodes(tree)}</ul>{visible?.size === 0 && <p>没有匹配的类目</p>}</div>
-      <div className="category-root-selected"><header><strong>已选 {chosen.length}</strong><button type="button" className="node-secondary-button" disabled={!chosen.length} onClick={() => setSelected(new Set())}>清空选择</button></header>
-        {chosen.slice(0, shown).map(node => <div className="category-root-row" key={node.key}><span>{node.path.join(' / ')}</span><button type="button" aria-label={`移除${node.path.join(' / ')}`} onClick={() => toggle([node.key], false)}><X size={14} /></button></div>)}
+    <div className={`grid grid-cols-[minmax(0,3fr)_minmax(0,2fr)] h-[min(46vh,420px)] min-h-[180px] border-y border-slate-600 max-[600px]:grid-cols-[minmax(0,1fr)]`} data-tab={tab}>
+      <div className={`overflow-auto min-w-0 p-2 [&>ul]:list-none [&>ul]:m-0 [&>ul]:pl-4 [&>ul>ul]:pl-4 ${tab === 'selected' ? 'max-[600px]:hidden' : ''}`}><ul>{renderNodes(tree)}</ul>{visible?.size === 0 && <p>没有匹配的类目</p>}</div>
+      <div className={`overflow-auto min-w-0 p-2 border-l border-slate-600 max-[600px]:border-l-0 ${tab === 'tree' ? 'max-[600px]:hidden' : ''}`}><header><strong>已选 {chosen.length}</strong><button type="button" className="node-secondary-button" disabled={!chosen.length} onClick={() => setSelected(new Set())}>清空选择</button></header>
+        {chosen.slice(0, shown).map(node => <div className="flex items-center gap-1.5 min-h-[32px] text-xs [&>span]:break-words [&>input[type=checkbox]]:w-4 [&>input[type=checkbox]]:h-4 [&>input[type=checkbox]]:shrink-0 [&>input[type=checkbox]]:m-0 [&>button]:inline-flex [&>button]:items-center [&>button]:justify-center [&>button]:w-[26px] [&>button]:h-7 [&>button]:shrink-0 [&>button]:border-0 [&>button]:bg-transparent [&>button]:text-slate-300 [&>button]:cursor-pointer [&>button:hover]:bg-slate-700" key={node.key}><span>{node.path.join(' / ')}</span><button type="button" aria-label={`移除${node.path.join(' / ')}`} onClick={() => toggle([node.key], false)}><X size={14} /></button></div>)}
         {chosen.length > shown && <button type="button" className="node-secondary-button" onClick={() => setShown(shown + 100)}>显示更多</button>}
       </div>
     </div>
-    <div className="category-root-preview"><strong>新增 {preview.added.length} 个词根 · 已有 {preview.duplicateCount} 个重复词根</strong>
+    <div className="text-xs [&>textarea]:box-border [&>textarea]:w-full [&>textarea]:bg-gray-900 [&>textarea]:text-slate-100 [&>textarea]:border [&>textarea]:border-slate-600 [&>textarea]:rounded [&>textarea]:mt-1.5 [&>textarea]:p-2 [&>textarea]:resize-y"><strong>新增 {preview.added.length} 个词根 · 已有 {preview.duplicateCount} 个重复词根</strong>
       {preview.split.length > 0 && <p role="status">{preview.split.length} 个组合名称将按现有分隔规则拆分，请核对下方词根。</p>}
       <textarea aria-label="将添加的词根" readOnly value={preview.added.join('\n')} rows={3} />
     </div>
