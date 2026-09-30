@@ -178,8 +178,9 @@ export function useWorkflowSession({
       } else if (run.logs && !preserveLogs) {
         setLogs(run.logs);
       }
+      return run;
     } catch (err) {
-      if (request !== historyRequestRef.current) return;
+      if (request !== historyRequestRef.current) return null;
       console.error('加载历史记录失败', err);
       setCurrentRunId(null);
       setRunStatus('failed');
@@ -188,6 +189,7 @@ export function useWorkflowSession({
         level: 'error',
         message: `加载历史记录失败: ${err.message}`
       }]);
+      return null;
     }
   };
 

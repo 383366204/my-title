@@ -39,10 +39,17 @@ export function useDistributionCompletion({
   currentRunIdRef.current = currentRunId;
 
   const updateDistributionNodeJob = useCallback((job) => {
-    // P1 fix: verify the job belongs to the current run before mutating state.
+    // Verify the job belongs to the current run before mutating state.
+    // When activeRunId is null (new template, no run started), any job with
+    // a workflowRunId is stale and must be ignored.
     const jobRunId = job?.workflowRunId || null;
     const activeRunId = currentRunIdRef.current;
-    if (jobRunId && activeRunId && jobRunId !== activeRunId) return;
+    if (!activeRunId) {
+      // No active run — only allow jobs without a runId (defensive)
+      if (jobRunId) return;
+    } else if (jobRunId && jobRunId !== activeRunId) {
+      return;
+    }
 
     setNodes((currentNodes) => currentNodes.map((node) => (
       node.id === 'export'
@@ -64,13 +71,15 @@ export function useDistributionCompletion({
           : '自动铺货已确认完成，流水线正在进入完成节点。'
       }]);
       Promise.resolve().then(async () => {
-        try {
-          await reloadRun(workflowRunId, { preserveLogs: true });
-          await fetchHistoryRuns();
-        } catch {
-          // Rollback dedup so the next completion notification can retry.
+        // loadHistoryRun returns the run object on success, null on failure.
+        // It catches errors internally, so we check the return value instead
+        // of relying on try/catch.
+        const loaded = await reloadRun(workflowRunId, { preserveLogs: true });
+        if (!loaded) {
           completedDistributionJobsRef.current.delete(job.jobId);
+          return;
         }
+        await fetchHistoryRuns();
       });
     }
   }, [closeOverlay, fetchHistoryRuns, reloadRun, setLogs, setNodes]);
