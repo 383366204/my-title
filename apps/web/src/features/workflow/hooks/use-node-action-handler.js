@@ -1,5 +1,5 @@
 import { showToast } from '../toast.js';
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import { getWorkflowOperationMessage } from '../workflow-node-actions.js';
 import {
   getWorkflowCommandAction,
@@ -40,6 +40,10 @@ export function useNodeActionHandler({
   updateDistributionNodeJob,
   nodes
 }) {
+  // Track currentRunId via ref so async callbacks can detect stale responses.
+  const currentRunIdRef = useRef(currentRunId);
+  currentRunIdRef.current = currentRunId;
+
   const runWorkflowOperation = useCallback(async (action, nodeId = null) => {
     return runRemoteOperation(action, nodeId);
   }, [runRemoteOperation]);
@@ -67,8 +71,12 @@ export function useNodeActionHandler({
     if (action === 'pause-distribution') {
       const job = nodes.find((node) => node.id === nodeId)?.data?.distributionJob;
       if (!job?.jobId || job.status !== 'submitting' || job.requestedAction === 'pause') return;
+      // Capture the run ID at request time to detect stale responses.
+      const requestRunId = currentRunId;
       try {
         const nextJob = await controlDistributionRun(job.jobId, 'pause');
+        // If the user switched runs while the request was in flight, discard the result.
+        if (requestRunId && currentRunIdRef.current !== requestRunId) return;
         updateDistributionNodeJob(nextJob);
         setLogs((prev) => [...prev, {
           timestamp: new Date().toISOString(),
@@ -76,6 +84,7 @@ export function useNodeActionHandler({
           message: '已请求暂停铺货：当前批次完成后将停止后续商品提交。'
         }]);
       } catch (error) {
+        if (requestRunId && currentRunIdRef.current !== requestRunId) return;
         const message = `暂停铺货失败：${error.message}`;
         setLogs((prev) => [...prev, {
           timestamp: new Date().toISOString(),

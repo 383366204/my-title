@@ -74,7 +74,7 @@ export function useDistributionCompletion({
         // loadHistoryRun returns the run object on success, null on failure.
         // It catches errors internally, so we check the return value instead
         // of relying on try/catch.
-        const loaded = await reloadRun(workflowRunId, { preserveLogs: true });
+        const loaded = await reloadRun(workflowRunId, { preserveLogs: true, backgroundRefresh: true });
         if (!loaded) {
           completedDistributionJobsRef.current.delete(job.jobId);
           return;

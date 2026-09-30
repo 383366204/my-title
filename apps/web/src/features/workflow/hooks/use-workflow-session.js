@@ -131,7 +131,7 @@ export function useWorkflowSession({
   };
 
 
-  const loadHistoryRun = async (runId, { preserveLogs = false } = {}) => {
+  const loadHistoryRun = async (runId, { preserveLogs = false, backgroundRefresh = false } = {}) => {
     const request = ++historyRequestRef.current;
     try {
       disconnectRunEvents();
@@ -182,13 +182,18 @@ export function useWorkflowSession({
     } catch (err) {
       if (request !== historyRequestRef.current) return null;
       console.error('加载历史记录失败', err);
-      setCurrentRunId(null);
-      setRunStatus('failed');
-      setLogs([{
-        timestamp: new Date().toISOString(),
-        level: 'error',
-        message: `加载历史记录失败: ${err.message}`
-      }]);
+      if (!backgroundRefresh) {
+        // User-initiated history load: clear state and show error.
+        setCurrentRunId(null);
+        setRunStatus('failed');
+        setLogs([{
+          timestamp: new Date().toISOString(),
+          level: 'error',
+          message: `加载历史记录失败: ${err.message}`
+        }]);
+      }
+      // Background refresh (e.g. distribution completion): preserve current
+      // run so the next completion notification is not rejected by ownership check.
       return null;
     }
   };
