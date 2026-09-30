@@ -63,7 +63,7 @@ try {
   assert.equal(await select.inputValue(), '');
   const copy = page.getByRole('button', { name: '复制铺货内容', exact: true });
   assert.equal(await copy.isDisabled(), true);
-  await page.getByRole('button', { name: '获取类目', exact: true }).click();
+  await page.getByRole('button', { name: '补全缺失类目', exact: true }).click();
   await page.getByRole('button', { name: '暂停获取', exact: true }).click();
   await page.getByRole('button', { name: '继续获取', exact: true }).click();
   assert.deepEqual(actions.map(row => row.action), ['query', 'pause', 'resume']);
