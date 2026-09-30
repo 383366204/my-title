@@ -166,7 +166,7 @@ export function ManualWorkflowInputPanel({ initialDefaultKeyword = '', initialIt
           <button type="button" className="node-secondary-button" onClick={applyDefaultKeyword}><Check size={13} /> 应用到空白行</button>
         </div>
 
-        <div className="min-h-0 max-h-[min(360px,42vh)] border border-[#26344d] rounded-[6px] overflow-x-hidden overflow-y-auto overscroll-contain scrollbar-gutter-stable" role="table" aria-label="关键词与1688链接">
+        <div data-testid="manual-input-table" className="min-h-0 max-h-[min(360px,42vh)] border border-[#26344d] rounded-[6px] overflow-x-hidden overflow-y-auto overscroll-contain scrollbar-gutter-stable" role="table" aria-label="关键词与1688链接">
           <div className="grid grid-cols-[minmax(180px,0.8fr)_minmax(360px,1.7fr)_44px] items-center gap-[10px] py-[9px] px-[10px] border-t border-[#1f2a40] first:border-t-0 sticky top-0 z-[1] text-[var(--text-muted)] bg-[#111d31] text-[11px] font-bold max-md:hidden" role="row">
             <span>关键词（可选）</span><span>商品链接或分享口令</span><span>操作</span>
           </div>

@@ -50,7 +50,7 @@ try {
     for (const template of templates) {
       await page.locator('#workflow-template-select').selectOption(template.id);
       await page.waitForFunction(count => document.querySelectorAll('.react-flow__node').length === count, template.workflow.nodes.length);
-      assert.equal(await page.locator('.workflow-order-step').count(), template.workflow.nodes.length);
+      assert.equal(await page.locator('[data-testid="workflow-order-step"]').count(), template.workflow.nodes.length);
     }
     await page.locator('#workflow-template-select').selectOption(templates[0].id);
     await page.getByRole('button', { name: '收起选品流水线', exact: true }).click();
@@ -66,7 +66,7 @@ try {
     const configBounds = await configuration.boundingBox();
     assert.ok(configBounds.x >= 0 && configBounds.x + configBounds.width <= viewport.width + 1);
     await configuration.getByRole('button', { name: '保存配置', exact: true }).click();
-    await page.locator('.workflow-order-step').first().click();
+    await page.locator('[data-testid="workflow-order-step"]').first().click();
     await page.getByRole('button', { name: '展开节点诊断', exact: true }).click();
     await page.screenshot({ path: path.join(output, `diagnostics-${viewport.width}.png`), animations: 'disabled' });
     if (!process.env.ECOM_CAPTURE_ONLY) {
@@ -88,7 +88,7 @@ try {
       assert.ok(geometry.runLeft >= 0 && geometry.runRight <= geometry.viewportWidth, JSON.stringify(geometry));
     }
     await page.getByRole('button', { name: '展开选品流水线', exact: true }).click();
-    await page.locator('.monitor-run-card').click();
+    await page.locator('[data-testid="monitor-run-card"]').click();
     await page.waitForFunction(() => document.querySelector('.workflow-top-context').textContent.includes('fixture-history'));
     await page.getByRole('button', { name: '收起选品流水线', exact: true }).click();
     const mine = page.locator('.react-flow__node[data-id="mine"]');
@@ -111,7 +111,7 @@ try {
     const manual = page.getByRole('dialog', { name: '录入1688链接' });
     await manual.waitFor();
     for (let i = 0; i < 8; i++) await manual.getByRole('button', { name: '添加一行' }).click();
-    const table = manual.locator('.manual-input-table');
+    const table = manual.locator('[data-testid="manual-input-table"]');
     assert.ok(await table.evaluate(el => el.scrollHeight > el.clientHeight));
     await table.evaluate(el => { el.scrollTop = el.scrollHeight; });
     assert.ok(await table.evaluate(el => el.scrollTop > 0));

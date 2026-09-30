@@ -35,6 +35,7 @@ export function WorkflowHistory({ currentRunId, deletingRunId, error, loading, r
               <div className="flex items-stretch gap-1.5" key={item.runId}>
                 <button
                   type="button"
+                  data-testid="monitor-run-card"
                   onClick={() => onOpen(item.runId)}
                   className={`flex-1 text-left p-2.5 rounded-lg border text-xs transition-all duration-[160ms] ease-in-out ${
                     isActive

@@ -20,7 +20,7 @@ export function CategoryControl({ row, actions, onUpdateEdit, compact }) {
   if (record?.queryWord) infoParts.push(`查询词：${record.queryWord}`);
   if (record?.source1688Category) infoParts.push(`1688类目：${record.source1688Category}`);
   if (record?.collectedAt) infoParts.push(new Date(record.collectedAt).toLocaleString('zh-CN'));
-  if (record?.legacyCategory) infoParts.push(`历史：${record.legacyCategory}`);
+  if (record?.legacyCategory) infoParts.push(`历史类目来源未确认：${record.legacyCategory}`);
 
   const handleSelectChange = (event) => {
     const value = event.target.value;
@@ -38,7 +38,7 @@ export function CategoryControl({ row, actions, onUpdateEdit, compact }) {
 
   if (compact) {
     return <div className="flex items-center gap-1.5 min-w-0 flex-1">
-      <select aria-label="铺货类目" disabled={disabled} value={selectValue}
+      <select aria-label="铺货类目（生意参谋）" disabled={disabled} value={selectValue}
         onChange={handleSelectChange}
         style={{ fontSize: '11px' }}
         className={`${isCustom ? 'flex-1' : 'flex-[2]'} min-w-[80px] py-0.5 px-[7px] border border-slate-700 rounded-[5px] bg-[#18212f] text-slate-200 font-normal leading-[1.4]`}>
@@ -57,7 +57,7 @@ export function CategoryControl({ row, actions, onUpdateEdit, compact }) {
   return <div className="grid gap-1 min-w-0 text-[11px]">
     <div className="flex items-center gap-1.5 min-w-0">
       <span className="shrink-0 w-[56px] text-slate-400 text-[11px] font-bold whitespace-nowrap">铺货类目</span>
-      <select aria-label="铺货类目" disabled={disabled} value={selectValue}
+      <select aria-label="铺货类目（生意参谋）" disabled={disabled} value={selectValue}
         onChange={handleSelectChange}
         style={{ fontSize: '11px' }}
         className={`${isCustom ? 'flex-1' : 'flex-[3]'} min-w-[120px] py-1 px-[7px] border border-slate-700 rounded-[5px] bg-[#18212f] text-slate-200 font-normal leading-[1.4]`}>

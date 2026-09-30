@@ -97,8 +97,8 @@ export function ExecutionPanel({
           const resultType = row.status === '成功' ? 'success' : row.status === '失败' ? 'failed' : 'pending';
           return (
             <div key={row.offerId} className="distribution-confirmation-row" style={{ '--result-color': RESULT_COLORS[resultType] }}>
-              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                <strong><span className="text-[var(--result-color)]">{row.status}</span> · {row.title || '商品'}</strong>
+              <div className="distribution-confirmation-heading flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                <strong><span className="distribution-result-label text-[var(--result-color)]">{row.status}</span> · {row.title || '商品'}</strong>
                 <span className="text-xs text-[var(--text-subtle)] whitespace-nowrap">ID：{row.offerId}</span>
               </div>
               {row.details.map(detail => <div key={detail.shopName}>
