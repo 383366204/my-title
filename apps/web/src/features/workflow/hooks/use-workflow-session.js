@@ -134,17 +134,25 @@ export function useWorkflowSession({
   const loadHistoryRun = async (runId, { preserveLogs = false, backgroundRefresh = false } = {}) => {
     const request = ++historyRequestRef.current;
     try {
-      disconnectRunEvents();
-      setSelectedNodeId(null);
-      if (!preserveLogs) setLogs([]);
-      setRunStatus('pending');
-      setCurrentRunId(runId);
-      closeOverlay();
-
-      const run = await getWorkflowRun(runId);
-      if (request !== historyRequestRef.current) return;
-      if (!run || typeof run !== 'object') {
-        throw new Error('历史运行记录为空或已被删除');
+      let run;
+      if (backgroundRefresh) {
+        // Background refresh: fetch first, mutate state only on success.
+        run = await getWorkflowRun(runId);
+        if (request !== historyRequestRef.current) return null;
+        if (!run || typeof run !== 'object') throw new Error('历史运行记录为空或已被删除');
+        disconnectRunEvents();
+        if (!preserveLogs) setLogs([]);
+      } else {
+        // User-initiated: apply side effects immediately, then fetch.
+        disconnectRunEvents();
+        setSelectedNodeId(null);
+        if (!preserveLogs) setLogs([]);
+        setRunStatus('pending');
+        setCurrentRunId(runId);
+        closeOverlay();
+        run = await getWorkflowRun(runId);
+        if (request !== historyRequestRef.current) return null;
+        if (!run || typeof run !== 'object') throw new Error('历史运行记录为空或已被删除');
       }
       const defaultWorkflow = normalizeWorkflowForCanvas(run.workflow || { nodes: [], edges: [] });
 
