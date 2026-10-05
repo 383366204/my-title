@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { FileSpreadsheet, Upload } from 'lucide-react';
 
 import { regroupReviewSource, uploadReviewSource } from '../../../api/review-api.js';
-import { applyPastedOrders, parsePastedOrders } from '../review-paste-parser.js';
+import { parsePastedOrder } from '../review-paste-parser.js';
 import { REVIEW_GROUP_FIELDS } from '../review-group-fields.js';
 
 // 没有订单号时按这个粒度切分订单组
@@ -16,8 +16,8 @@ export function ReviewSourceUploadPanel({ node, onDone, onUpdateField, readOnly 
   const [uploading, setUploading] = useState(false);
   const [regrouping, setRegrouping] = useState(false);
   const [error, setError] = useState('');
-  const [pasteText, setPasteText] = useState('');
   const [pasteNotice, setPasteNotice] = useState('');
+  const [pasteValues, setPasteValues] = useState({});
 
   const updateGroups = (nextGroups) => onUpdateField(node.id, 'groups', nextGroups);
   const updateGroup = (index, field, value) => updateGroups(groups.map((group, current) => (
@@ -39,6 +39,7 @@ export function ReviewSourceUploadPanel({ node, onDone, onUpdateField, readOnly 
         skippedSheets: result.skippedSheets || []
       });
       onUpdateField(node.id, 'groups', result.groups || []);
+      setPasteValues({});
     } catch (uploadError) {
       setError(uploadError.message || '刷单表上传失败');
     } finally {
@@ -61,6 +62,7 @@ export function ReviewSourceUploadPanel({ node, onDone, onUpdateField, readOnly 
         skippedSheets: result.skippedSheets || []
       });
       onUpdateField(node.id, 'groups', result.groups || []);
+      setPasteValues({});
     } catch (regroupError) {
       setError(regroupError.message || '重新分组失败');
     } finally {
@@ -68,20 +70,39 @@ export function ReviewSourceUploadPanel({ node, onDone, onUpdateField, readOnly 
     }
   };
 
-  const handlePasteFill = () => {
+  // 按订单粘贴识别：粘贴哪一单的文本就填哪一单，识别到的字段直接更新
+  const fillFromPastedText = (index, text) => {
     setPasteNotice('');
-    const records = parsePastedOrders(pasteText);
-    if (records.length === 0) {
-      setPasteNotice('没有识别到订单信息，请确认每行都是「订单编号：xxx」这类格式');
-      return;
+    const record = parsePastedOrder(text);
+    if (!record) {
+      setPasteNotice('未识别到订单编号 / 买家旺旺 / 收货电话，请检查粘贴内容格式（例：订单编号：xxx）');
+      return false;
     }
-    const result = applyPastedOrders(groups, records);
-    updateGroups(result.groups);
-    const parts = [];
-    if (result.summary.byOrderNumber > 0) parts.push(`按订单号匹配 ${result.summary.byOrderNumber} 单`);
-    if (result.summary.sequential > 0) parts.push(`按顺序填充 ${result.summary.sequential} 单`);
-    if (result.summary.skipped > 0) parts.push(`${result.summary.skipped} 单没有可填的分组`);
-    setPasteNotice(`识别到 ${records.length} 单${parts.length > 0 ? `：${parts.join('，')}` : ''}。只补空字段，不会覆盖已填内容。`);
+    const filled = [];
+    if (record.orderNumber) filled.push('订单号');
+    if (record.buyerName) filled.push('买家旺旺');
+    if (record.buyerPhone) filled.push('收货电话');
+    updateGroups(groups.map((group, current) => (
+      current === index
+        ? {
+          ...group,
+          orderNumber: record.orderNumber || group.orderNumber,
+          buyerName: record.buyerName || group.buyerName,
+          buyerPhone: record.buyerPhone || group.buyerPhone
+        }
+        : group
+    )));
+    setPasteNotice(`订单组 ${index + 1} 已识别填充：${filled.join('、')}`);
+    return true;
+  };
+
+  // 点击按钮才识别填入；识别成功后清空粘贴框，失败保留内容便于修改
+  const handleParseClick = (index) => {
+    const text = String(pasteValues[index] || '').trim();
+    if (!text) return;
+    if (fillFromPastedText(index, text)) {
+      setPasteValues((current) => ({ ...current, [index]: '' }));
+    }
   };
     const missingCount = groups.reduce((total, group) => total + REVIEW_GROUP_FIELDS.filter(({ field, required }) => (
     required && !String(group[field] || '').trim()
@@ -113,23 +134,7 @@ export function ReviewSourceUploadPanel({ node, onDone, onUpdateField, readOnly 
           <span>{data.uploadSummary ? `${data.uploadSummary.parsedSheetCount} 个订单组 · ${data.uploadSummary.productCount} 个商品 · 每组 ${groupSize} 件` : '仅支持 .xlsx，最大 12 MB'}</span>
         </label>
         {error && <div className="artifact-error">{error}</div>}
-        {groups.length > 0 && !readOnly && (
-          <details className="rounded-[7px] border border-slate-600/[0.68] bg-slate-900/[0.56] px-3 py-2.5 [&>summary]:cursor-pointer [&>summary]:text-xs [&>summary]:font-bold [&>summary]:text-slate-300 [&>textarea]:mt-2 [&>textarea]:min-h-[118px] [&>textarea]:w-full [&>textarea]:resize-y [&>textarea]:rounded-[6px] [&>textarea]:border [&>textarea]:border-slate-600/70 [&>textarea]:bg-slate-950/[0.72] [&>textarea]:px-2.5 [&>textarea]:py-2 [&>textarea]:text-xs [&>textarea]:leading-[1.7] [&>textarea]:text-slate-200 [&>textarea:focus]:border-sky-400/60 [&>textarea:focus]:outline-none" open={groups.some(group => !group.buyerName || !group.buyerPhone)}>
-            <summary>粘贴订单信息自动填充旺旺、手机号和订单号</summary>
-            <textarea
-              rows="6"
-              value={pasteText}
-              onChange={(event) => setPasteText(event.target.value)}
-              placeholder={'订单编号：3316868653089013989\n买家旺旺：penguin玄珠\n收货电话：14727236390-8997\n\n可一次粘贴多单：同一字段再次出现会自动拆分成下一单'}
-            />
-            <div className="mt-2 flex gap-2 [&>button]:cursor-pointer [&>button]:rounded-[6px] [&>button]:border [&>button]:border-sky-400/[0.42] [&>button]:bg-sky-400/[0.14] [&>button]:px-3 [&>button]:py-1.5 [&>button]:text-xs [&>button]:text-sky-300 [&>button:disabled]:cursor-not-allowed [&>button:disabled]:opacity-45">
-              <button type="button" disabled={uploading || regrouping} onClick={handlePasteFill}>识别并填充</button>
-              <button type="button" disabled={uploading || regrouping || !pasteText} onClick={() => { setPasteText(''); setPasteNotice(''); }}>清空</button>
-            </div>
-            {pasteNotice && <div className="mt-2 rounded-[5px] bg-sky-400/10 px-[9px] py-1.5 text-[11px] text-sky-300">{pasteNotice}</div>}
-          </details>
-        )}
-
+        {pasteNotice && <div className="rounded-[5px] bg-sky-400/10 px-[9px] py-1.5 text-[11px] text-sky-300">{pasteNotice}</div>}
         {groups.length > 0 && (
           <div className="grid gap-2.5">
             <div className="flex items-center justify-between gap-2 [&>b]:whitespace-nowrap [&>b]:rounded-[5px] [&>b]:px-[7px] [&>b]:py-[5px] [&>b]:text-[10px] [&>b]:text-emerald-300 [&>b.is-missing]:bg-amber-500/[0.14] [&>b.is-missing]:text-yellow-300 [&>div]:grid [&>div]:min-w-0 [&>div]:gap-[3px]">
@@ -141,6 +146,28 @@ export function ReviewSourceUploadPanel({ node, onDone, onUpdateField, readOnly 
                 <div className="flex min-w-0 items-center justify-between gap-2">
                   <strong>{group.sourceSheet || `订单组 ${index + 1}`}</strong>
                   <span className="text-[10px] text-slate-400">{group.products?.length || 0} 个商品 · {group.inferred ? '按工作表推断' : '按订单号识别'}</span>
+                </div>
+                <div className="grid gap-1.5">
+                  <textarea
+                    rows="3"
+                    className="w-full cursor-text resize-y rounded-[6px] border border-dashed border-sky-400/40 bg-sky-400/[0.06] px-2.5 py-1.5 text-xs leading-relaxed text-sky-200/90 placeholder:text-slate-500 focus:border-sky-400/70 focus:outline-none"
+                    placeholder={'粘贴本单订单信息（订单编号 / 买家旺旺 / 收货电话），\n支持直接粘贴多行内容'}
+                    value={pasteValues[index] || ''}
+                    onChange={(event) => setPasteValues((current) => ({ ...current, [index]: event.target.value }))}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) handleParseClick(index);
+                    }}
+                  />
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      className="node-primary-button"
+                      disabled={!String(pasteValues[index] || '').trim()}
+                      onClick={() => handleParseClick(index)}
+                    >
+                      粘贴并识别
+                    </button>
+                  </div>
                 </div>
                 <div className="grid grid-cols-2 gap-2 max-md:grid-cols-1 [&>.node-field:first-child]:col-span-full [&>.node-field:first-child]:max-w-[220px] max-md:[&>.node-field:first-child]:col-auto">
                   {REVIEW_GROUP_FIELDS.map(({ field, label, type, required }) => (
