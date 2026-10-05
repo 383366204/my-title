@@ -623,8 +623,12 @@ async function llmReviews(products, options = {}) {
     }
   );
   const parsed = parseJsonFromLLM(response.data?.choices?.[0]?.message?.content || '');
-  if (!Array.isArray(parsed) || parsed.length !== products.length) throw new Error('评价生成数量与商品数量不一致');
-  return parsed.map(value => String(value || '').trim());
+  if (!Array.isArray(parsed)) throw new Error('评价返回格式不是 JSON 数组');
+  // LLM 计数不可靠（要求 20 条常返回 18 条）：按商品数对齐——
+  // 返回不足的位次补 null（上层走本地模板），多余的截断，绝不能因数量差异丢弃整批结果
+  return Array.from({ length: products.length }, (unused, index) => (
+    parsed[index] != null ? String(parsed[index]).trim() : null
+  ));
 }
 
 async function generateReviewDrafts(options = {}) {
@@ -636,6 +640,7 @@ async function generateReviewDrafts(options = {}) {
   const replaced = new Array(products.length).fill(false);
   let degraded = false;
   let titleEchoFixed = 0;
+  const degradedReasons = [];
   const batchSize = 20;
   for (let start = 0; start < products.length; start += batchSize) {
     const batch = products.slice(start, start + batchSize);
@@ -647,9 +652,11 @@ async function generateReviewDrafts(options = {}) {
       }
       batchReviews.forEach((review, offset) => {
         const index = start + offset;
-        const text = String(review || '').trim();
+        const text = review == null ? '' : String(review).trim();
+        // AI 漏生成的条目保持 null，走本地模板兜底
+        if (!text) return;
         // 模型仍然复述标题时不采纳该条，换成无标题模板并标记，供人工复核时留意
-        if (!text || mentionsTitle(text, batch[offset].title)) {
+        if (mentionsTitle(text, batch[offset].title)) {
           generated[index] = titleFreeReview(index);
           replaced[index] = true;
           titleEchoFixed += 1;
@@ -657,8 +664,9 @@ async function generateReviewDrafts(options = {}) {
         }
         generated[index] = text;
       });
-    } catch (_error) {
+    } catch (error) {
       degraded = true;
+      degradedReasons.push(error.message || 'LLM 请求失败');
     }
   }
   fs.writeFileSync(files.reviewDrafts, '', 'utf8');
@@ -680,7 +688,9 @@ async function generateReviewDrafts(options = {}) {
   context.run.counts.reviewDrafts = drafts.length;
   context.run.reviewGeneration = {
     degraded,
+    degradedReasons,
     titleEchoFixed,
+    aiReviews: drafts.filter(row => row.origin === 'llm').length,
     provider: getLLMProviderInfo({ provider: options.llmProvider }).provider
   };
   writeRun(context.runDir, context.run);

@@ -100,6 +100,31 @@ test('autosaves review edits without advancing status and confirm reuses cached 
   const confirmedRow = confirmed.drafts.find((row) => row.id === persisted[0].id);
   assert.equal(confirmedRow.reviewContent, '人工修改后的评价');
 });
+test('aligns short LLM responses instead of dropping the whole batch', async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'review-align-'));
+  const upload = await saveReviewSourceUpload({ buffer: await fixtureBuffer(), fileName: '刷单表.xlsx', dataDir });
+  const groups = upload.groups.map((group, index) => ({
+    ...group,
+    buyerName: `买家${index + 1}`,
+    orderNumber: `ORDER-${index + 1}`
+  }));
+  await importReviewSource({ dataDir, runId: 'test-review-align', uploadId: upload.uploadId, groups });
+  // 模拟 glm 数数不准：商品 3 个只返回 2 条评价（用 openai-compatible 供应商便于注入测试 key）
+  const previousKey = process.env.LLM_API_KEY;
+  process.env.LLM_API_KEY = 'test-key-for-alignment';
+  try {
+  const request = async () => ({ data: { choices: [{ message: { content: '["AI 评价一", "AI 评价二"]' } }] } });
+  const result = await generateReviewDrafts({ dataDir, runId: 'test-review-align', useAI: true, llmProvider: 'openai-compatible', request });
+  const drafts = readJsonl(path.join(result.runDir, 'review-drafts.jsonl'));
+  const origins = drafts.map(row => row.origin);
+  assert.equal(origins.filter(origin => origin === 'llm').length, 2, '返回的 2 条应被采用');
+  assert.equal(origins.filter(origin => origin === 'template').length, 1, '缺失的 1 条应走模板兜底');
+  assert.equal(result.degraded, false, '数量不足不应把整批判成降级');
+  } finally {
+    if (previousKey === undefined) delete process.env.LLM_API_KEY;
+    else process.env.LLM_API_KEY = previousKey;
+  }
+});
 test('normalizes typed Excel dates before showing editable order groups', async () => {
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet('日期订单');
