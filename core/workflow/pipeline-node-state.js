@@ -96,6 +96,14 @@ function statusPlanForSummary(summary) {
     return memo;
   }, {});
   const mode = summary.runtime?.mode || summary.options?.mode || '';
+  if (mode === 'daily' && summary.runtime?.steps?.includes(WORKFLOW_NODE_IDS.inspire)) {
+    states[WORKFLOW_NODE_IDS.start] = 'completed';
+    for (const step of summary.runtime.steps) {
+      states[step] = nodeStatusFromRuntimeProgress(summary.runtime.progress?.[step]) || 'idle';
+    }
+    if (status === 'workflow_complete') states[WORKFLOW_NODE_IDS.end] = 'completed';
+    return states;
+  }
   if (mode === 'keyword' && ['created', 'mined'].includes(status)) {
     states[WORKFLOW_NODE_IDS.start] = 'completed';
     states[WORKFLOW_NODE_IDS.select] = 'running';

@@ -64,6 +64,7 @@ try {
     await frontend.listen();
     console.log('\n开发页面（请打开下方地址；前端热更新，后端修改后重启 npm run dev）：');
     frontend.printUrls();
+    console.log(`API 代理目标：http://127.0.0.1:${port}（后端代码修改后需重启此开发入口）`);
     process.send?.({ type: 'dev-ready', backendPort: port, frontendUrl: frontend.resolvedUrls.local[0] });
   } else await frontend.close();
 } catch (error) {

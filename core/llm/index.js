@@ -2,37 +2,22 @@ const LLMClient = require('../llm-client');
 
 const DEFAULTS = {
   glm: {
-    apiKeyEnv: 'GLM_API_KEY',
-    apiBaseEnv: 'GLM_API_BASE',
-    modelEnv: 'GLM_API_MODEL',
     apiBase: 'https://open.bigmodel.cn/api/paas/v4',
     model: 'glm-4-flash'
   },
   volc: {
-    apiKeyEnv: 'VOLC_API_KEY',
-    apiBaseEnv: 'VOLC_API_BASE',
-    modelEnv: 'VOLC_MODEL',
     apiBase: 'https://ark.cn-beijing.volces.com/api/plan/v3',
     model: 'doubao-seed-2-0-lite-260428'
   },
   deepseek: {
-    apiKeyEnv: 'DEEPSEEK_API_KEY',
-    apiBaseEnv: 'DEEPSEEK_API_BASE',
-    modelEnv: 'DEEPSEEK_MODEL',
     apiBase: 'https://api.deepseek.com',
     model: 'deepseek-v4-flash'
   },
   minimax: {
-    apiKeyEnv: 'MINIMAX_API_KEY',
-    apiBaseEnv: 'MINIMAX_API_BASE',
-    modelEnv: 'MINIMAX_MODEL',
     apiBase: 'https://api.minimaxi.com/v1',
     model: 'MiniMax-M3'
   },
   'openai-compatible': {
-    apiKeyEnv: 'LLM_API_KEY',
-    apiBaseEnv: 'LLM_API_BASE',
-    modelEnv: 'LLM_MODEL',
     apiBase: 'https://api.openai.com/v1',
     model: 'gpt-4o-mini'
   }
@@ -55,31 +40,23 @@ function normalizeProvider(provider) {
 
 /**
  * 解析指定 provider 的配置。
- * 对于 glm provider：若调用方未显式传入 apiKey 且存在 VOLC_API_KEY，
- * 则自动切换到火山引擎配置（向后兼容旧的 VOLC_API_KEY 用法）。
- * 若调用方显式传入了 apiKey/apiBase，则尊重显式配置，不做自动切换。
+ * 所有服务商统一使用 LLM_* 环境变量，显式配置优先。
  *
  * @param {string} provider - 已标准化的 provider 名称
  * @param {object} [config] - 调用方显式传入的配置
  * @returns {object} 解析后的完整配置
  */
 function readProviderConfig(provider, config = {}) {
-  // glm provider 的 VOLC_API_KEY 自动检测：仅在未显式传入 apiKey 时触发
-  let effectiveProvider = provider;
-  if (provider === 'glm' && !config.apiKey && !config.apiBase && process.env.VOLC_API_KEY) {
-    effectiveProvider = 'volc';
-  }
-
-  const preset = DEFAULTS[effectiveProvider];
+  const preset = DEFAULTS[provider];
   if (!preset) {
-    throw new Error(`Unsupported LLM provider: ${effectiveProvider}`);
+    throw new Error(`Unsupported LLM provider: ${provider}`);
   }
 
   return {
-    provider: effectiveProvider,
-    apiKey: config.apiKey || process.env[preset.apiKeyEnv] || process.env.LLM_API_KEY,
-    apiBase: config.apiBase || process.env[preset.apiBaseEnv] || process.env.LLM_API_BASE || preset.apiBase,
-    model: config.model || process.env[preset.modelEnv] || process.env.LLM_MODEL || preset.model,
+    provider,
+    apiKey: config.apiKey || process.env.LLM_API_KEY,
+    apiBase: config.apiBase || process.env.LLM_API_BASE || preset.apiBase,
+    model: config.model || process.env.LLM_MODEL || preset.model,
     timeout: config.timeout || process.env.LLM_TIMEOUT,
     longTimeout: config.longTimeout || process.env.LLM_LONG_TIMEOUT
   };
@@ -136,7 +113,6 @@ function createLLMClient(config = {}) {
 function getLLMProviderInfo(config = {}) {
   const requestedProvider = normalizeProvider(config.provider);
   const providerConfig = readProviderConfig(requestedProvider, config);
-  // 使用解析后的实际 provider（可能与请求的不同，如 glm → volc 自动切换）
   const actualProvider = providerConfig.provider;
   const providerDefaultTimeoutMs = actualProvider === 'minimax' ? 180000 : 120000;
   const configuredTimeoutMs = parseInt(

@@ -194,7 +194,8 @@ if (mode === 'watermark-removal') {
   }
   return withSteps(positionNodes([
     { id: WORKFLOW_NODE_IDS.start, type: 'production-start', data: startData },
-    { id: WORKFLOW_NODE_IDS.mine, type: 'pipeline-mine', data: { label: '灵感选词与拓词', description: '收集灵感、生成商品词根并查询关联词', discoveryMode: 'inspiration' } },
+    { id: WORKFLOW_NODE_IDS.inspire, type: 'task', data: { label: '灵感选词', description: '收集素材并由 AI 生成待验证词根', discoveryMode: 'inspiration' } },
+    { id: WORKFLOW_NODE_IDS.mine, type: 'pipeline-mine', data: { label: '生意参谋拓词', description: '读取已保存词根，查询热词与蓝海词', discoveryMode: 'inspiration' } },
     { id: WORKFLOW_NODE_IDS.keywordReview, type: 'pipeline-keyword-review', data: { label: '关键词确认', description: '查看机会评分并人工筛词，未通过项可确认风险后放行' } },
     { id: WORKFLOW_NODE_IDS.select, type: 'pipeline-select', data: { label: '货源选品', description: '搜索1688货源并评分筛选' } },
     { id: WORKFLOW_NODE_IDS.generate, type: 'pipeline-generate', data: { label: '标题生成', description: '基于已选货源生成铺货标题' } },
@@ -248,7 +249,7 @@ function workflowEdges(mode = 'daily') {
         [WORKFLOW_NODE_IDS.export, WORKFLOW_NODE_IDS.end]
       ]
       : [
-        [WORKFLOW_NODE_IDS.start, WORKFLOW_NODE_IDS.mine],
+        ...(mode === 'daily' ? [[WORKFLOW_NODE_IDS.start, WORKFLOW_NODE_IDS.inspire], [WORKFLOW_NODE_IDS.inspire, WORKFLOW_NODE_IDS.mine]] : [[WORKFLOW_NODE_IDS.start, WORKFLOW_NODE_IDS.mine]]),
         [WORKFLOW_NODE_IDS.mine, WORKFLOW_NODE_IDS.keywordReview],
         [WORKFLOW_NODE_IDS.keywordReview, WORKFLOW_NODE_IDS.select],
         [WORKFLOW_NODE_IDS.select, WORKFLOW_NODE_IDS.generate],

@@ -81,9 +81,9 @@ export const ManualProductSelectionPanel = ({ artifactState, currentRunId, onCon
             const title = row.sourceTitle || row.title || product['链接原标题'] || product.title || '未命名商品';
             const key = rowKey(row, index);
             return (
-              <label className="grid gap-2 p-[9px] border border-slate-800/[0.86] rounded-lg bg-slate-900/[0.62] grid-cols-[18px_minmax(0,1fr)] items-center px-[9px] py-1.5 cursor-pointer" key={key}>
+              <label data-testid="manual-product-choice" className="grid gap-2 p-[9px] border border-slate-800/[0.86] rounded-lg bg-slate-900/[0.62] grid-cols-[18px_minmax(0,1fr)] items-center px-[9px] py-1.5 cursor-pointer" key={key}>
                 <input type="checkbox" checked={Boolean(selected[key])} onChange={() => toggle(key)} className="w-4 h-4 m-0 p-0 justify-self-start accent-blue-500" />
-                <div className="min-w-0 grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1.5fr)] items-center gap-2.5 leading-5 flex-wrap">
+                <div className="min-w-0 grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1.5fr)] items-center gap-2.5 leading-5">
                   <strong title={title} className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[var(--text-body)] text-xs">{title}</strong>
                   <span title={`关联关键词：${row.keyword || '手动货源'}；类目：${row.recommendedCategory || '未获取，铺货前需补充'}`} className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[var(--text-muted)] text-[10px]">{row.keyword || '手动货源'} · {row.recommendedCategory || '类目未获取'}</span>
                   <a href={url} title={url} target="_blank" rel="noreferrer" onClick={event => event.stopPropagation()} className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-blue-400 underline underline-offset-[3px] transition-colors duration-[120ms] hover:text-blue-300 focus-visible:text-blue-300 focus-visible:outline-2 focus-visible:outline-blue-400 focus-visible:-outline-offset-2">{url}</a>
@@ -112,7 +112,7 @@ export const ManualProductSelectionPanel = ({ artifactState, currentRunId, onCon
         />
         <button type="button" className="node-secondary-button" disabled={busy || !directUrls.trim()} onClick={importProducts}><Plus size={13} />{busy ? '处理中…' : '加入列表'}</button>
         <div className="max-h-[420px] overflow-y-auto min-h-0">
-          {manualProducts.map((product, index) => <div className="py-3 border-b border-[var(--border-color,#374151)] [&_input]:min-w-0 [&_input]:w-full [&_input]:box-border" key={product.url}>
+          {manualProducts.map((product, index) => <div data-testid="supplemental-product-row" className="py-3 border-b border-[var(--border-color,#374151)] [&_input]:min-w-0 [&_input]:w-full [&_input]:box-border" key={product.url}>
             <div className="flex items-center justify-between gap-2.5"><a href={product.url} target="_blank" rel="noreferrer" className="min-w-0 text-[var(--text-body)] text-xs">商品 {index + 1}</a><button type="button" className="node-icon-button danger" title={`移除补充货源 ${index + 1}`} disabled={busy} onClick={() => setManualProducts(current => current.filter((_, i) => i !== index))}><Trash2 size={14} /></button></div>
             {[[ 'title', '商品标题' ], [ 'keyword', '关联关键词' ], [ 'category', '铺货类目（淘宝／生意参谋）' ]].map(([key, label]) => <label className="node-field" key={key}><span>{label}</span><input disabled={busy} value={product[key]} onChange={event => updateProduct(index, key, event.target.value)} /></label>)}
           </div>)}

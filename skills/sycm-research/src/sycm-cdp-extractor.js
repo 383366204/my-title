@@ -7,6 +7,7 @@ var http = require('http');
 var path = require('path');
 var WebSocket = require('ws');
 var { runWithPlatformGuard } = require('../../../core/platform-access-guard');
+var { SEARCH_PERIOD_VERSION, recentSevenDayRange, verifySevenDayPeriod } = require('./search-period');
 
 var DEFAULT_PORT = 9222;
 var DEFAULT_MAX_PAGES = 1;
@@ -29,7 +30,7 @@ var DEFAULT_PAGE_FILTERS = {
 
 // CLI/MCP 时间周期参数 → SYCM URL 参数映射
 var PERIOD_URL_MAP = {
-  '7d':   { dateType: 'day' },
+  '7d':   { dateType: 'recent7' },
   '30d':  { dateType: 'day' },
   'day':  { dateType: 'day' },
   'week': { dateType: 'week' },
@@ -539,8 +540,7 @@ function _computeDateRange(period) {
 
   switch (period) {
     case '7d':
-      var weekAgo = new Date(now.getTime() - 7 * 86400000);
-      return _formatDate(weekAgo) + '|' + _formatDate(now);
+      return recentSevenDayRange(now);
     case '30d':
       var monthAgo = new Date(now.getTime() - 30 * 86400000);
       return _formatDate(monthAgo) + '|' + _formatDate(now);
@@ -661,7 +661,7 @@ async function _rawExtractSycmData(keyword, options) {
       await new Promise(function(r) { setTimeout(r, 3000); });
     }
     
-    // 页面筛选参数已通过 URL 设置，记录应用状态
+    // 记录请求值，七天证据必须等到提取前校验实际地址后才标记为已验证。
     var pageFiltersApplied = {
       compareType: pfCompare,
       timePeriod: pfPeriod
@@ -737,6 +737,7 @@ async function _rawExtractSycmData(keyword, options) {
     // 提取第 1 页（含关键词校验，防止 SPA 缓存返回旧数据）
     onProgress('[5/6] Extracting page 1/' + totalPages + '...');
     await _throwIfManualBlocker(cdp, options, onProgress, 'before_extract_page_1');
+    if (pfPeriod === '7d') Object.assign(pageFiltersApplied, verifySevenDayPeriod(await cdp.evaluate('window.location.href', 5000), dateRangeStr));
     var result = await cdp.evaluate(_buildExtractScript(), 25000);
     var parsed = (typeof result === 'string') ? JSON.parse(result) : null;
     var allData = parsed ? parsed.d : [];
@@ -776,6 +777,7 @@ async function _rawExtractSycmData(keyword, options) {
         );
         await new Promise(function(r) { setTimeout(r, COLUMN_POLL_INTERVAL); });
         // 重新提取
+        if (pfPeriod === '7d') verifySevenDayPeriod(await cdp.evaluate('window.location.href', 5000), dateRangeStr);
         result = await cdp.evaluate(_buildExtractScript(), 25000);
         parsed = (typeof result === 'string') ? JSON.parse(result) : null;
         allData = parsed ? parsed.d : [];
@@ -800,6 +802,7 @@ async function _rawExtractSycmData(keyword, options) {
       await new Promise(function(r) { setTimeout(r, PAGE_WAIT_MS); });
 
       var pr = await cdp.evaluate(_buildExtractScript(), 25000);
+      if (pfPeriod === '7d') verifySevenDayPeriod(await cdp.evaluate('window.location.href', 5000), dateRangeStr);
       var pd = (typeof pr === 'string') ? JSON.parse(pr) : null;
 
       if (pd && pd.d && pd.d.length > 0) {
@@ -964,6 +967,8 @@ async function extractSycmData(keyword, options) {
   var pageFilters = options.pageFilters || DEFAULT_PAGE_FILTERS;
   return runWithPlatformGuard('sycm', {
     cacheKey: {
+      periodVersion: SEARCH_PERIOD_VERSION,
+      dateRange: (pageFilters.timePeriod || DEFAULT_PAGE_FILTERS.timePeriod) === '7d' ? recentSevenDayRange() : undefined,
       keyword: keyword,
       mode: options.mode || 'blue',
       maxPages: options.maxPages || DEFAULT_MAX_PAGES,

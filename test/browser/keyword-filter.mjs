@@ -9,8 +9,8 @@ const { chromium } = require(process.env.ECOM_PLAYWRIGHT_MODULE || 'playwright')
 const { scoreRootReviewCandidate } = require('../../skills/pipeline-flow/src/root-opportunity-review');
 const defaults = { demandSupplyRatio: { enabled: true, value: 1 }, searchPopularity: { enabled: true, value: 50 }, conversionRate: { enabled: true, value: 1 }, tmallClickShare: { enabled: true, value: 50 } };
 const source = [
-  { keyword: '杯垫', sycmData: { searchPopularity: 100, demandSupplyRatio: 2, conversionRate: '2%', tmallClickShare: '20%' } },
-  { keyword: '茶托', sycmData: { searchPopularity: 10, demandSupplyRatio: 2, conversionRate: '2%', tmallClickShare: '60%' } }
+  { keyword: '杯垫', root: '垫子', sycmData: { searchPopularity: 100, demandSupplyRatio: 2, conversionRate: '2%', tmallClickShare: '20%' } },
+  { keyword: '茶托', root: '茶具', sycmData: { searchPopularity: 10, demandSupplyRatio: 2, conversionRate: '2%', tmallClickShare: '60%' } }
 ];
 const artifact = config => ({ combinedOpportunityReview: true, keywordFilter: config, rows: source.map(row => scoreRootReviewCandidate(row, config)) });
 const harness = `import React from 'react';import {createRoot} from 'react-dom/client';
@@ -60,7 +60,27 @@ try {
   });
   const url = `http://127.0.0.1:${server.httpServer.address().port}/__filter`;
   await page.goto(url);
-  await page.getByRole('checkbox', { name: '采用 茶托' }).check();
+  const left = page.getByRole('region', { name: '不符合 / 待判断', exact: true });
+  const right = page.getByRole('region', { name: '符合条件 / 已保留', exact: true });
+  assert.equal(await left.getByText('茶托', { exact: true }).count(), 1);
+  assert.equal(await right.getByText('杯垫', { exact: true }).count(), 1);
+  assert.equal(await page.locator('.keyword-transfer-row').getByText(/^(不符合条件|符合条件)$/).count(), 0);
+  assert.equal(await page.locator('.keyword-transfer-row details[open]').count(), 2);
+  assert.equal(await right.locator('.keyword-check-passed').count(), 4);
+  assert.equal(await left.locator('.keyword-check-failed').count(), 2);
+  assert.equal(await right.locator('.keyword-check-passed').first().evaluate(el => getComputedStyle(el).color), 'rgb(110, 231, 183)');
+  assert.equal(await left.locator('.keyword-check-failed').first().evaluate(el => getComputedStyle(el).color), 'rgb(248, 113, 113)');
+  const heading = right.locator('.keyword-transfer-heading');
+  assert.equal(await heading.getByText('词根：垫子', { exact: true }).count(), 1);
+  assert.equal(await heading.getByText('人气 100', { exact: true }).count(), 1);
+  const headingTops = await heading.locator(':scope > *').evaluateAll(elements => elements.map(element => element.getBoundingClientRect().top));
+  assert.ok(Math.max(...headingTops) - Math.min(...headingTops) < 5);
+  await left.getByRole('checkbox', { name: '选择 茶托', exact: true }).check();
+  await left.getByRole('button', { name: '保留所选 1', exact: true }).click();
+  assert.equal(await right.getByText('茶托', { exact: true }).count(), 1);
+  await page.getByRole('button', { name: '确认 2 个词并继续' }).click();
+  await page.getByRole('alertdialog', { name: '确认人工放行' }).waitFor();
+  await page.getByRole('button', { name: '返回调整', exact: true }).click();
   await page.getByRole('button', { name: '筛选条件', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: '关键词筛选条件' });
   await dialog.getByRole('button', { name: '应用并重新筛选' }).waitFor();
@@ -74,8 +94,16 @@ try {
   assert.deepEqual(posts[0].decisions, { 茶托: 'approved' });
   assert.equal(await page.evaluate(() => window.submissions), 0);
   await dialog.getByRole('button', { name: '关闭', exact: true }).click();
-  assert.equal(await page.getByRole('checkbox', { name: '采用 茶托' }).isChecked(), true);
-  assert.equal(await page.getByRole('checkbox', { name: '采用 杯垫' }).isChecked(), false);
+  assert.equal(await right.getByText('茶托', { exact: true }).count(), 1);
+  assert.equal(await left.getByText('杯垫', { exact: true }).count(), 1);
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
+    const a = await left.boundingBox(), b = await right.boundingBox();
+    assert.ok(a.x + a.width <= b.x);
+    await page.screenshot({ path: `/tmp/keyword-transfer-${width}.png`, fullPage: true });
+  }
+  await page.setViewportSize({ width: 1280, height: 900 });
   await page.getByRole('button', { name: '筛选条件', exact: true }).click();
   assert.equal(await dialog.getByRole('spinbutton', { name: '搜索人气', exact: true }).inputValue(), '200');
   await dialog.getByRole('button', { name: '恢复默认' }).click();
@@ -94,6 +122,13 @@ try {
   assert.ok(Math.abs(box.x + box.width / 2 - 195) < 2);
   assert.ok(Math.abs(box.y + box.height / 2 - 422) < 2);
   assert.ok(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth));
+  const toggle = await dialog.locator('.keyword-filter-toggle').first().evaluate(label => {
+    const input = label.querySelector('input').getBoundingClientRect();
+    const text = label.querySelector('span').getBoundingClientRect();
+    return { width: input.width, gap: text.left - input.right, center: Math.abs((input.top + input.bottom - text.top - text.bottom) / 2) };
+  });
+  assert.equal(toggle.width, 16);
+  assert.ok(toggle.gap >= 0 && toggle.gap <= 10 && toggle.center < 2, JSON.stringify(toggle));
   await page.screenshot({ path: 'output/keyword-filter-qa/mobile.png' });
   conflict = true;
   await dialog.getByRole('button', { name: '应用并重新筛选' }).click();

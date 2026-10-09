@@ -131,20 +131,28 @@ export function useWorkflowSession({
   };
 
 
-  const loadHistoryRun = async (runId, { preserveLogs = false } = {}) => {
+  const loadHistoryRun = async (runId, { preserveLogs = false, backgroundRefresh = false } = {}) => {
     const request = ++historyRequestRef.current;
     try {
-      disconnectRunEvents();
-      setSelectedNodeId(null);
-      if (!preserveLogs) setLogs([]);
-      setRunStatus('pending');
-      setCurrentRunId(runId);
-      closeOverlay();
-
-      const run = await getWorkflowRun(runId);
-      if (request !== historyRequestRef.current) return;
-      if (!run || typeof run !== 'object') {
-        throw new Error('历史运行记录为空或已被删除');
+      let run;
+      if (backgroundRefresh) {
+        // Background refresh: fetch first, mutate state only on success.
+        run = await getWorkflowRun(runId);
+        if (request !== historyRequestRef.current) return null;
+        if (!run || typeof run !== 'object') throw new Error('历史运行记录为空或已被删除');
+        disconnectRunEvents();
+        if (!preserveLogs) setLogs([]);
+      } else {
+        // User-initiated: apply side effects immediately, then fetch.
+        disconnectRunEvents();
+        setSelectedNodeId(null);
+        if (!preserveLogs) setLogs([]);
+        setRunStatus('pending');
+        setCurrentRunId(runId);
+        closeOverlay();
+        run = await getWorkflowRun(runId);
+        if (request !== historyRequestRef.current) return null;
+        if (!run || typeof run !== 'object') throw new Error('历史运行记录为空或已被删除');
       }
       const defaultWorkflow = normalizeWorkflowForCanvas(run.workflow || { nodes: [], edges: [] });
 
@@ -178,16 +186,23 @@ export function useWorkflowSession({
       } else if (run.logs && !preserveLogs) {
         setLogs(run.logs);
       }
+      return run;
     } catch (err) {
-      if (request !== historyRequestRef.current) return;
+      if (request !== historyRequestRef.current) return null;
       console.error('加载历史记录失败', err);
-      setCurrentRunId(null);
-      setRunStatus('failed');
-      setLogs([{
-        timestamp: new Date().toISOString(),
-        level: 'error',
-        message: `加载历史记录失败: ${err.message}`
-      }]);
+      if (!backgroundRefresh) {
+        // User-initiated history load: clear state and show error.
+        setCurrentRunId(null);
+        setRunStatus('failed');
+        setLogs([{
+          timestamp: new Date().toISOString(),
+          level: 'error',
+          message: `加载历史记录失败: ${err.message}`
+        }]);
+      }
+      // Background refresh (e.g. distribution completion): preserve current
+      // run so the next completion notification is not rejected by ownership check.
+      return null;
     }
   };
 

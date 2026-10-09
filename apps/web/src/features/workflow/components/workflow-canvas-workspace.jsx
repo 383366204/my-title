@@ -119,6 +119,7 @@ export function WorkflowCanvasWorkspace({
                 <button
                   type="button"
                   key={node.id}
+                  data-testid="workflow-order-step"
                   className={`shrink-0 inline-flex items-center gap-[7px] min-h-[30px] max-w-[180px] py-[5px] px-[9px] border rounded-lg bg-slate-900/80 transition-colors duration-[160ms] ${
                     isActive
                       ? 'border-blue-500/75 bg-blue-900/[0.28] text-[#e2e8f0]'

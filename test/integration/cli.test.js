@@ -9,7 +9,7 @@ function runCli(args, env = {}) {
     const defaultEnv = {
       ...process.env,
       NODE_ENV: 'test',
-      GLM_API_KEY: 'test-key',
+      LLM_API_KEY: 'test-key',
       ALI_1688_AK: 'test-ak'
     };
     const cliEnv = { ...defaultEnv, ...env };

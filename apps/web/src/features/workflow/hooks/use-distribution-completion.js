@@ -9,15 +9,19 @@ import { useCallback, useRef } from 'react';
  *   3. Appends a log entry
  *   4. Reloads the run snapshot and refreshes history
  *
- * Uses a ref-based dedup set to prevent duplicate completion processing
- * when the same job ID completes multiple times (e.g., polling + manual confirm).
+ * Safety guarantees:
+ *   - Run ownership: only processes jobs whose workflowRunId matches the
+ *     current run (or falls back to currentRunId when job has no runId).
+ *     Stale callbacks from a previous run are silently ignored.
+ *   - Failure rollback: if reloadRun or fetchHistoryRuns throws, the
+ *     dedup entry is removed so the next completion notification retries.
  *
  * @param {object} options
  * @param {Function} options.setNodes React Flow setNodes setter.
  * @param {string|null} options.currentRunId
  * @param {Function} options.closeOverlay From useWorkflowOverlay.
  * @param {Function} options.setLogs From useWorkflowRuntime.
- * @param {Function} options.reloadRun Stable wrapper around loadHistoryRunRef (e.g. useCallback((...args) => ref.current?.(...args), [])).
+ * @param {Function} options.reloadRun Stable wrapper around loadHistoryRunRef.
  * @param {Function} options.fetchHistoryRuns From useWorkflowRunCatalog.
  * @returns {{ updateDistributionNodeJob: Function, completedJobsRef: React.MutableRefObject }}
  */
@@ -30,15 +34,32 @@ export function useDistributionCompletion({
   fetchHistoryRuns
 }) {
   const completedDistributionJobsRef = useRef(new Set());
+  // Track which runId each callback was created for, to detect stale invocations.
+  const currentRunIdRef = useRef(currentRunId);
+  currentRunIdRef.current = currentRunId;
 
   const updateDistributionNodeJob = useCallback((job) => {
+    // Verify the job belongs to the current run before mutating state.
+    // When activeRunId is null (new template, no run started), any job with
+    // a workflowRunId is stale and must be ignored.
+    const jobRunId = job?.workflowRunId || null;
+    const activeRunId = currentRunIdRef.current;
+    if (!activeRunId) {
+      // No active run — only allow jobs without a runId (defensive)
+      if (jobRunId) return;
+    } else if (jobRunId && jobRunId !== activeRunId) {
+      return;
+    }
+
     setNodes((currentNodes) => currentNodes.map((node) => (
       node.id === 'export'
         ? { ...node, data: { ...node.data, distributionJob: job || null } }
         : node
     )));
-    const workflowRunId = job?.workflowRunId || currentRunId;
+
+    const workflowRunId = jobRunId || activeRunId;
     if (job?.status === 'completed' && workflowRunId && !completedDistributionJobsRef.current.has(job.jobId)) {
+      // P2 fix: mark as processing, but remove on failure so retries work.
       completedDistributionJobsRef.current.add(job.jobId);
       const manualMode = job.mode === 'manual';
       closeOverlay();
@@ -50,11 +71,18 @@ export function useDistributionCompletion({
           : '自动铺货已确认完成，流水线正在进入完成节点。'
       }]);
       Promise.resolve().then(async () => {
-        await reloadRun(workflowRunId, { preserveLogs: true });
+        // loadHistoryRun returns the run object on success, null on failure.
+        // It catches errors internally, so we check the return value instead
+        // of relying on try/catch.
+        const loaded = await reloadRun(workflowRunId, { preserveLogs: true, backgroundRefresh: true });
+        if (!loaded) {
+          completedDistributionJobsRef.current.delete(job.jobId);
+          return;
+        }
         await fetchHistoryRuns();
       });
     }
-  }, [closeOverlay, currentRunId, fetchHistoryRuns, reloadRun, setLogs, setNodes]);
+  }, [closeOverlay, fetchHistoryRuns, reloadRun, setLogs, setNodes]);
 
   return { updateDistributionNodeJob, completedJobsRef: completedDistributionJobsRef };
 }

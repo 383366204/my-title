@@ -19,6 +19,7 @@ const { researchPolicy } = require('./research-policy');
 const { researchRoot, discoverySnapshot, ROOT_RESEARCH_COOLDOWN_MS } = require('./root-research-store');
 const { randomUUID } = require('crypto');
 const { normalizeSycmMetrics } = require('../../sycm-research/src/metric-parser');
+const { SEARCH_PERIOD_VERSION } = require('../../sycm-research/src/search-period');
 const { buildRootQueryPlan } = require('./root-query-plan');
 
 const CANDIDATES_FILE = 'candidates.jsonl';
@@ -384,7 +385,7 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
         const filterConditions = keywordFilter
           ? require('../../pipeline-flow/src/keyword-metric-filter').keywordFilterConditions(keywordFilter)
           : sycmMode === 'blue' ? require('../../sycm-research/src/sycm-cdp-extractor').DEFAULT_FILTER_CONDITIONS : null;
-        const queryContext = { mode: sycmMode, period: '7d', compareType: 'cycle', maxPages, filterConditions };
+        const queryContext = { periodVersion: SEARCH_PERIOD_VERSION, mode: sycmMode, period: '7d', compareType: 'cycle', maxPages, filterConditions };
         const extract = () => extractor(query, {
           shouldStop,
           ...(effectiveSource === 'inspiration' || keywordFilter ? { guardCache: false } : {}),
@@ -442,6 +443,7 @@ async function mineKeywords({ count = 50, dataDir = DEFAULT_DATA_DIR, maxSeeds =
               filterConditions: sycmRes.filterConditions || null, filterApplied: sycmRes.filterApplied === true,
               keyword: item.keyword, root: query, mode: sycmMode, querySources: seed.querySources || [],
               period: queryContext.period, compareType: queryContext.compareType,
+              pageFiltersApplied: sycmRes.pageFiltersApplied || null,
               collectedAt: researched.cycle?.completedAt || new Date().toISOString(),
               maxPages: queryContext.maxPages, researchScopeId, raw: item
             },

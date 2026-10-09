@@ -8,7 +8,7 @@ import { StartConfigurationPanel } from './start-configuration-panel.jsx';
  * @param {object} props 当前节点、保存与关闭回调。
  * @returns {import('react').JSX.Element} 选词来源表单。
  */
-export function SelectionSourcePanel({ node, readOnly, onSave, onClose }) {
+export function SelectionSourcePanel({ node, saveAsNew = false, onSave, onClose }) {
   const [draft, setDraft] = useState(() => ({ ...node.data }));
   const [error, setError] = useState('');
   const mode = node.data.selectionMode;
@@ -20,15 +20,14 @@ export function SelectionSourcePanel({ node, readOnly, onSave, onClose }) {
   };
   return <div className="selection-source-panel">
     <div className="selection-source-scroll">
-      <StartConfigurationPanel mode={mode} node={{ ...node, data: draft }} readOnly={readOnly}
+      <StartConfigurationPanel mode={mode} node={{ ...node, data: draft }} showFooter={false}
         modeHint={SELECTION_MODES.find(item => item.mode === mode)?.label}
         onDone={onClose}
         onUpdateField={(_id, field, value) => { setDraft(current => ({ ...current, [field]: value })); setError(''); }} />
     </div>
     <footer className="selection-source-footer">
       {error && <span role="alert">{error}</span>}
-      <button type="button" className="node-secondary-button" onClick={onClose}>{readOnly ? '关闭' : '取消'}</button>
-      {!readOnly && <button type="button" className="node-primary-button" onClick={save}>保存配置</button>}
+      <button type="button" className="node-primary-button" onClick={save}>{saveAsNew ? '保存为新流程' : '保存配置'}</button>
     </footer>
   </div>;
 }

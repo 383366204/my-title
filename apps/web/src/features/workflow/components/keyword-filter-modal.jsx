@@ -115,8 +115,8 @@ export function KeywordFilterModal({ runId, initialConfig, decisions, onSaveDraf
       {loading ? <p role="status">正在读取本次运行的筛选条件…</p> : <form className="min-h-0 overflow-y-auto" onSubmit={save}>
         <fieldset className="border-0 p-0 m-0 min-w-0" disabled={!editable || saving}>
           {KEYWORD_FILTER_FIELDS.map(field => <div className="grid grid-cols-[minmax(0,1fr)_32px_minmax(90px,120px)] items-center gap-3 py-3.5 border-b border-[var(--border-color,var(--border-default))] text-[13px] max-[480px]:grid-cols-[minmax(0,1fr)_28px_88px] max-[480px]:gap-1.5" key={field.key}>
-            <label className="flex items-center gap-2 break-words"><input type="checkbox" className="shrink-0 w-4 h-4 m-0 p-0" aria-label={`启用${field.label}`} checked={draft[field.key].enabled}
-              onChange={event => { setSaved(false); setDraft(current => ({ ...current, [field.key]: { ...current[field.key], enabled: event.target.checked } })); }} />{field.label}</label>
+            <label className="keyword-filter-toggle"><input type="checkbox" aria-label={`启用${field.label}`} checked={draft[field.key].enabled}
+              onChange={event => { setSaved(false); setDraft(current => ({ ...current, [field.key]: { ...current[field.key], enabled: event.target.checked } })); }} /><span>{field.label}</span></label>
             <span>{field.operator === '>' ? '大于' : '小于'}</span>
             <div className="flex items-center gap-1"><input type="number" className="w-full min-w-0 p-2 rounded-md bg-[var(--bg-secondary,#111c31)] text-inherit border border-[var(--border-color,#475569)] disabled:opacity-55" aria-label={field.label} min="0" max={field.max} step={field.step}
               required disabled={!draft[field.key].enabled} value={draft[field.key].value}

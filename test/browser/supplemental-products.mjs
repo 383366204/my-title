@@ -10,7 +10,8 @@ import React, { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ManualProductSelectionPanel } from '/src/features/workflow/components/manual-product-selection-panel.jsx';
 import { DistributionShopPicker } from '/src/features/workflow/components/distribution/shop-picker.jsx';
-import '/src/styles/node-workbench.css';
+import '/src/index.css';
+import '/src/App.css';
 const artifactState = { artifact: { items: [{ status: 'selected', url: 'https://detail.1688.com/offer/456.html', title: '测试商品长标题'.repeat(10), keyword: '项链', recommendedCategory: '饰品 > 项链' }] } };
 function App() {
  const [shops, setShops] = useState(null);
@@ -55,19 +56,20 @@ try {
  assert.equal(await page.getByText('勾选 1688 货源', { exact: true }).count(), 0);
  for (const width of [1000, 390]) {
   await page.setViewportSize({ width, height: 800 });
-  const boxes = await page.locator('.manual-product-choice > div > *').evaluateAll(elements => elements.map(el => { const box = el.getBoundingClientRect(); return { top: box.top, right: box.right }; }));
-  assert.equal(new Set(boxes.map(box => box.top)).size, 1, 'title, category and URL share one line');
+  const boxes = await page.locator('[data-testid="manual-product-choice"] > div > *').evaluateAll(elements => elements.map(el => { const box = el.getBoundingClientRect(); return { top: box.top, right: box.right }; }));
+  const tops = boxes.map(box => box.top);
+  assert.ok(Math.max(...tops) - Math.min(...tops) <= 2, 'title, category and URL share one line (±2px for font baseline)');
   assert.ok(boxes.every(box => box.right <= width), 'row stays within viewport');
-  assert.ok((await page.locator('.manual-product-choice').boundingBox()).height <= 36);
+  assert.ok((await page.locator('[data-testid="manual-product-choice"]').boundingBox()).height <= 36);
  }
- assert.equal(await page.locator('.manual-product-choice input').isChecked(), true);
+ assert.equal(await page.locator('[data-testid="manual-product-choice"] input').isChecked(), true);
  await page.getByText('1 个已选 / 1 个商品', { exact: true }).waitFor();
  assert.deepEqual(await page.evaluate(() => window.shops.map(shop => shop.id)), ['b']);
  await page.getByLabel('补充货源链接').fill('link\nlink\ninvalid');
  await page.getByRole('button', { name: '加入列表', exact: true }).click();
  await page.getByText(/忽略 1 个重复链接/).waitFor();
  assert.equal(await page.getByLabel('补充货源链接').inputValue(), 'invalid');
- assert.equal(await page.locator('.supplemental-product-row').count(), 1);
+ assert.equal(await page.locator('[data-testid="supplemental-product-row"]').count(), 1);
  await page.getByLabel('补充货源链接').fill('');
  await page.getByRole('button', { name: '确认并继续生成标题' }).click();
  await page.getByText(/请补全第 1 个/).waitFor();

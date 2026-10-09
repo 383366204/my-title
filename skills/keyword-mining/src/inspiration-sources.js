@@ -1,4 +1,6 @@
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const axios = require('axios');
 const { XMLParser } = require('fast-xml-parser');
 const { normalizeKeyword } = require('./seed-store');
@@ -90,25 +92,51 @@ function parseFeedItems(xml, sourceUrl = '') {
 }
 
 /**
- * Fetch configured news feeds serially with per-source error isolation.
+ * Fetch news with bounded concurrency, a total time budget and optional cache.
  * @param {string[]} urls Feed URLs.
  * @param {object} [options] Fetch options.
  * @returns {Promise<{items:Array<object>,errors:Array<object>}>} Feed rows and source errors.
  */
-async function fetchNewsFeeds(urls = [], { timeoutMs = 8000, fetcher = axios.get } = {}) {
+async function fetchNewsFeeds(urls = [], { timeoutMs = 8000, fetcher = axios.get, cacheDir, onProgress, shouldStop, budgetMs = 16000 } = {}) {
   const items = [];
   const errors = [];
-  for (const url of urls.filter(Boolean)) {
+  const sources = [...new Set(urls.filter(Boolean))];
+  const deadline = Date.now() + budgetMs;
+  let completed = 0;
+  const fetchOne = async url => {
     try {
+      if (shouldStop?.()) throw new Error('已请求停止新闻采集');
+      const file = cacheDir && path.join(cacheDir, `${stableHash(url)}.json`);
+      if (file && fs.existsSync(file)) {
+        try {
+          const cached = JSON.parse(fs.readFileSync(file, 'utf8'));
+          if (Date.now() - cached.savedAt < 6 * 3600000 && Array.isArray(cached.items)) {
+            items.push(...cached.items);
+            return;
+          }
+        } catch (_) { /* 损坏缓存重新获取。 */ }
+      }
+      if (Date.now() >= deadline) throw new Error('新闻采集达到总时间预算');
       const response = await fetcher(url, {
-        timeout: timeoutMs,
+        timeout: Math.max(1, Math.min(timeoutMs, deadline - Date.now())),
         maxContentLength: 2 * 1024 * 1024,
         headers: { 'User-Agent': 'ecom-ai-tools inspiration collector' }
       });
-      items.push(...parseFeedItems(response.data, url).slice(0, 30));
+      const rows = parseFeedItems(response.data, url).slice(0, 30);
+      items.push(...rows);
+      if (file) {
+        fs.mkdirSync(cacheDir, { recursive: true });
+        fs.writeFileSync(file, JSON.stringify({ savedAt: Date.now(), items: rows }));
+      }
     } catch (error) {
       errors.push({ url, error: error.message });
+    } finally {
+      completed += 1;
+      onProgress?.({ current: completed, total: sources.length, message: `新闻源 ${completed}/${sources.length}，已获取 ${items.length} 条素材` });
     }
+  };
+  for (let index = 0; index < sources.length; index += 2) {
+    await Promise.all(sources.slice(index, index + 2).map(fetchOne));
   }
   return { items, errors };
 }
@@ -178,12 +206,12 @@ async function collectInspirations({
   dictionaryWords = DEFAULT_DICTIONARY_WORDS,
   trendItems = [],
   sourceLimits = { news: 20, dictionary: 20, calendar: 10, trend: 10 },
-  fetcher
+  fetcher, cacheDir, onProgress, shouldStop
 } = {}) {
   const runSeed = `${date}:${String(runAttempt ?? 0)}`;
   const fetched = newsItems.length > 0
     ? { items: newsItems, errors: [] }
-    : await fetchNewsFeeds(newsFeedUrls, { fetcher });
+    : await fetchNewsFeeds(newsFeedUrls, { fetcher, cacheDir, onProgress, shouldStop });
   const month = Math.max(1, Math.min(12, Number(String(date).slice(5, 7)) || new Date().getMonth() + 1));
   const sourceRows = {
     news: deterministicSample(fetched.items, sourceLimits.news, `${runSeed}:news`),

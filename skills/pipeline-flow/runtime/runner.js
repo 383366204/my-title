@@ -5,8 +5,9 @@ const fs = require('fs');
 const path = require('path');
 const { normalizeExactKeywords } = require('../../../core/exact-keywords');
 const { normalizeRootKeywords } = require('../../../core/root-keywords');
-const { DEFAULT_FLOW_DIR, createRunId } = require('../src/run-store');
+const { DEFAULT_FLOW_DIR, createRunId, getRun, readJsonl } = require('../src/run-store');
 const { flowMine } = require('../src/keyword-mining-flow');
+const { flowDiscoverInspirations } = require('../src/inspiration-flow');
 const { flowExpandRootKeywords } = require('../src/root-keyword-expansion-flow');
 const { flowReviewCandidates } = require('../src/keyword-review-flow');
 const { flowVerify } = require('../src/keyword-verification-flow');
@@ -32,6 +33,7 @@ const {
   readRuntimeState,
   updateRuntimeState,
   readRuntimeControl,
+  requestRuntimePause,
   clearRuntimeControl,
   appendRuntimeEvent
 } = require('./store');
@@ -142,7 +144,7 @@ function createReporter({ dataDir, getRunId, step }) {
   };
 }
 
-function createDefaultStepFns({ dataDir, runId, params, mode = 'daily' }) {
+function createDefaultStepFns({ dataDir, runId, params, mode = 'daily', steps = [] }) {
   const keywordMode = mode === 'keyword';
   const rootKeywordMode = mode === 'root-keyword';
   const selectionMode = ['daily', 'keyword', 'root-keyword'].includes(mode);
@@ -166,12 +168,21 @@ function createDefaultStepFns({ dataDir, runId, params, mode = 'daily' }) {
   const shouldStop = () => readRuntimeControl({ dataDir, runId }).requestedAction;
 
   return {
+    inspire: async ({ reportProgress }) => flowDiscoverInspirations({ ...params, dataDir, runId, onProgress: reportProgress, shouldStop }),
     start: async ({ reportProgress }) => {
       reportProgress({ current: 0, total: keywordCount, message: keywordMode ? `准备 ${keywordCount} 个精确关键词` : '准备流程' });
       if (manualMode) return flowManualStart({ ...params, dataDir, runId });
       return flowKeywordStart({ ...params, dataDir, runId, keywords: exactKeywords });
     },
     mine: async ({ reportProgress }) => {
+      if (mode === 'daily' && steps.includes('inspire')) {
+        const { run } = getRun({ dataDir, runId });
+        const inspirationRoots = readJsonl(run.files.inspirationRoots);
+        const roots = inspirationRoots.flatMap(row => row.queryVariants || [row.rootKeyword]);
+        if (!roots.length) throw new Error('灵感词根为空，请先重试灵感选词节点');
+        return flowExpandRootKeywords({ ...params, dataDir, runId, roots, inspirationRoots, workflowMode: 'daily',
+          pages: params.inspirationSycmPages || 3, onProgress: reportProgress, shouldStop });
+      }
       if (rootKeywordMode) {
         const rootCount = normalizeRootKeywords(params.roots || params.rootsText).roots.length;
         reportProgress({ current: 0, total: rootCount, message: '开始按词根拓词' });
@@ -366,7 +377,7 @@ async function runPipelineRuntime(options = {}) {
     : null;
   const params = options.params == null ? (existingRuntime?.params || {}) : options.params;
   const mode = options.mode || existingRuntime?.mode || 'daily';
-  const configuredSteps = options.steps || (
+  const configuredSteps = options.steps || existingRuntime?.steps || (
     mode === 'keyword'
       ? KEYWORD_STEPS
       : mode === 'root-keyword'
@@ -379,10 +390,10 @@ async function runPipelineRuntime(options = {}) {
           ? REVIEW_SHEET_STEPS
           : mode === 'competitor-analysis'
             ? COMPETITOR_ANALYSIS_STEPS
-          : DEFAULT_STEPS
+          : (injectedStepFns && !injectedStepFns.inspire ? DEFAULT_STEPS : ['inspire', ...DEFAULT_STEPS])
   );
   const steps = configuredSteps;
-  const stepFns = injectedStepFns || createDefaultStepFns({ dataDir, runId, params, mode });
+  const stepFns = injectedStepFns || createDefaultStepFns({ dataDir, runId, params, mode, steps });
   const requestedStart = options.retryStep || options.resumeFromStep || existingRuntime?.activeStep || steps[0];
   const startStep = requestedStart;
   if (!steps.includes(startStep)) throw new Error(`当前模式不包含步骤 ${startStep}，请新建运行。`);
@@ -492,6 +503,10 @@ async function runPipelineRuntime(options = {}) {
         event: { event: stepBlocked ? 'step_blocked' : 'step_completed', step, status: stepBlocked ? 'blocked' : 'completed' }
       });
 
+      if (step === 'inspire' && params.reviewInspirationRoots && !stepBlocked && !lastResult.stepIncomplete
+        && !readRuntimeControl({ dataDir, runId }).requestedAction) {
+        requestRuntimePause({ dataDir, runId, reason: '请在灵感选词节点查看并修改词根，然后继续拓词' });
+      }
       const control = readRuntimeControl({ dataDir, runId });
       const nextStep = nextStepAfter(steps, step);
       if (control.requestedAction === 'cancel') {

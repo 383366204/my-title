@@ -844,6 +844,58 @@
   color: #93c5fd;
 }
 
+.keyword-filter-toggle {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  text-align: left;
+}
+.keyword-filter-toggle > input[type="checkbox"],
+.keyword-transfer-row > input[type="checkbox"] {
+  position: static;
+  width: 16px;
+  min-width: 16px;
+  max-width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  margin: 0;
+  padding: 0;
+  accent-color: #22a779;
+}
+.keyword-filter-toggle > span { min-width: 0; overflow-wrap: anywhere; }
+.keyword-transfer { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; min-width: 0; }
+.keyword-transfer-pane { min-width: 0; border: 1px solid var(--border-subtle, #475569); border-radius: 6px; overflow: hidden; }
+.keyword-transfer-pane > header { display: flex; justify-content: space-between; gap: 8px; padding: 12px; border-bottom: 1px solid var(--border-subtle, #475569); }
+.keyword-transfer-pane.is-approved > header { background: #123d30; color: #bbf7d0; }
+.keyword-transfer-pane.is-rejected > header { background: #3b3020; color: #fde68a; }
+.keyword-transfer-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 10px; font-size: 12px; }
+.keyword-transfer-list { height: min(46dvh, 440px); min-height: 200px; overflow: auto; }
+.keyword-transfer-row { display: grid; grid-template-columns: 16px minmax(0, 1fr) 30px; align-items: start; gap: 8px; padding: 8px 10px; border-top: 1px solid var(--border-subtle, #475569); }
+.keyword-transfer-content { display: grid; gap: 3px; min-width: 0; font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
+.keyword-transfer-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 10px; min-width: 0; }
+.keyword-transfer-heading > strong { font-size: 14px; }
+.keyword-transfer-heading > span { color: var(--text-muted, #94a3b8); }
+.keyword-transfer-content details summary { cursor: pointer; color: var(--text-muted, #94a3b8); }
+.keyword-transfer-content details p { margin: 2px 0; }
+.keyword-transfer-content .keyword-check-passed { color: #6ee7b7; }
+.keyword-transfer-content .keyword-check-failed { color: #f87171; }
+.keyword-transfer-content .keyword-check-review { color: #fcd34d; }
+.keyword-transfer-content .keyword-check-disabled { color: var(--text-muted, #94a3b8); }
+.keyword-status-warning { color: #fcd34d; }
+.keyword-transfer-arrow { display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 1px solid var(--border-subtle, #475569); border-radius: 4px; background: transparent; color: inherit; cursor: pointer; }
+.keyword-transfer-arrow:hover:not(:disabled) { background: #334155; border-color: #94a3b8; }
+.keyword-transfer-arrow:disabled { opacity: .4; cursor: not-allowed; }
+@media (max-width: 600px) {
+  .keyword-transfer { gap: 6px; }
+  .keyword-transfer-pane > header { flex-wrap: wrap; padding: 8px; font-size: 12px; }
+  .keyword-transfer-row { grid-template-columns: 16px minmax(0, 1fr); padding: 8px 6px; gap: 6px; }
+  .keyword-transfer-arrow { grid-column: 2; justify-self: end; }
+  .keyword-transfer-heading > strong { font-size: 12px; }
+}
 .keyword-review-row {
   grid-template-columns: 18px minmax(0, 1fr) auto;
   align-items: start;
@@ -1099,6 +1151,8 @@
 .selection-source-summary { font-size: 12px; overflow-wrap: anywhere; color: #d4d4d8; margin: 10px 0; }
 .selection-start-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .selection-start-actions button { font-size: 11px; padding: 7px; }
+.inspiration-root-review-toggle { display: flex; align-items: center; justify-content: flex-start; gap: 8px; margin-top: 12px; font-size: 14px; cursor: pointer; }
+.inspiration-root-review-toggle input[type="checkbox"] { width: 16px; height: 16px; flex: 0 0 16px; margin: 0; }
 .selection-source-panel { display: flex; flex-direction: column; min-height: 0; max-height: calc(100dvh - 180px); }
 .selection-source-scroll { overflow-y: auto; min-height: 0; padding: 2px 8px 12px 0; }
 .selection-source-panel .start-configuration-actions { display: none; }

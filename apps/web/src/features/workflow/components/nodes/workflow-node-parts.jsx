@@ -65,7 +65,7 @@ export const WorkflowNodeActionChip = ({ view, onAction }) => (
 );
 
 const ARTIFACT_NODE_IDS = new Set([
-  'mine', 'keywordReview', 'verify', 'select', 'generate', 'collectRank', 'generateSheet',
+  'inspire', 'mine', 'keywordReview', 'verify', 'select', 'generate', 'collectRank', 'generateSheet',
   'resolveShops', 'collectCompetitors', 'enrichCompetitors', 'analyzeCompetitors', 'competitorReport'
 ]);
 
@@ -83,7 +83,7 @@ export const WorkflowNodeArtifactButton = ({ data }) => {
     : output && typeof output === 'object'
       ? Object.keys(output).length > 0
       : Boolean(output);
-  const hasResult = ['completed', 'blocked', 'failed', 'retryable', 'needs_review', 'waiting_confirmation', 'waiting_manual'].includes(status)
+  const hasResult = (data.id === 'inspire' && ['running', 'paused'].includes(status)) || ['completed', 'blocked', 'failed', 'retryable', 'needs_review', 'waiting_confirmation', 'waiting_manual'].includes(status)
     && (hasOutput || status !== 'completed');
   if (!data?.onViewArtifact || !hasResult || !ARTIFACT_NODE_IDS.has(String(data.id || ''))) return null;
   return (

@@ -41,15 +41,17 @@ skill 路径：`~/.openclaw/workspace/skills/ecom-ai-tools/`
 cd ~/.openclaw/workspace/skills/ecom-ai-tools
 npm install
 cp .env.example .env
-# 编辑 .env，填入 GLM_API_KEY 和 ALI_1688_AK
+# 编辑 .env，填入 LLM_API_KEY 和 ALI_1688_AK
 ```
 
 ### 必填环境变量
 
 | 变量 | 说明 | 获取方式 |
 |------|------|----------|
-| `GLM_API_KEY` | 智谱 GLM API 密钥 | https://open.bigmodel.cn |
+| `LLM_API_KEY` | 当前 LLM 服务商的 API 密钥 | 对应服务商开放平台 |
 | `ALI_1688_AK` | 1688 AI 版 Access Key | 1688 开放平台 |
+
+通过 `LLM_PROVIDER` 选择服务商（glm、volc、deepseek、minimax、openai-compatible），地址和模型统一使用 `LLM_API_BASE`、`LLM_MODEL`。切换服务商时同时更新密钥、地址和模型，修改后重启服务。
 
 调用前先用 `read` 检查 `.env` 是否存在；不存在就先提示用户去配置。
 

@@ -10,6 +10,7 @@ const autoGroupOrderProducts = require('../../skills/order-sheet/src/order-group
 const { WORKFLOW_NODE_IDS, ARTIFACT_BY_NODE } = require('./pipeline-definition-common');
 const { scoreRootReviewCandidate } = require('../../skills/pipeline-flow/src/root-opportunity-review');
 const { normalizeKeywordFilter } = require('../../skills/pipeline-flow/src/keyword-metric-filter');
+const { inspirationReviewState } = require('../../skills/pipeline-flow/src/inspiration-root-review');
 
 /**
  * 读取 workflow 节点对应的 pipeline artifact。
@@ -96,6 +97,11 @@ function readWorkflowNodeArtifact(runIdOrOptions, nodeId, options = {}) {
     return null;
   }
   if (artifact.type === 'jsonl') {
+    if (normalized.nodeId === WORKFLOW_NODE_IDS.inspire) {
+      return { runId: summary.runId, nodeId: normalized.nodeId, file, type: 'jsonl',
+        rows: readArtifactJsonl(file, 'all'),
+        ...inspirationReviewState({ runId: summary.runId, dataDir: normalized.dataDir }) };
+    }
     if (normalized.nodeId === WORKFLOW_NODE_IDS.mine) {
       return {
         runId: summary.runId,

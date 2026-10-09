@@ -99,7 +99,7 @@ try {
   await page.getByRole('button', { name: '输入关键词', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: '选词来源', exact: true });
   await dialog.getByRole('textbox').fill('杯垫\n桌面收纳盒');
-  await dialog.getByRole('button', { name: '取消', exact: true }).click();
+  await dialog.getByRole('button', { name: '关闭选词来源', exact: true }).click();
   await page.getByRole('button', { name: '输入关键词', exact: true }).click();
   assert.equal(await dialog.getByRole('textbox').inputValue(), '');
   await dialog.getByRole('textbox').fill('杯垫\n桌面收纳盒');

@@ -2,6 +2,7 @@
 
 const WORKFLOW_NODE_IDS = {
   start: 'start',
+  inspire: 'inspire',
   mine: 'mine',
   keywordReview: 'keywordReview',
   verify: 'verify',
@@ -27,6 +28,7 @@ const NODE_ORDER = Object.values(WORKFLOW_NODE_IDS);
 const WORKFLOW_RUN_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
 
 const ARTIFACT_BY_NODE = {
+  [WORKFLOW_NODE_IDS.inspire]: { fileKey: 'inspirationRoots', type: 'jsonl' },
   [WORKFLOW_NODE_IDS.mine]: { fileKey: 'candidates', type: 'jsonl' },
   [WORKFLOW_NODE_IDS.keywordReview]: { fileKey: 'reviewedCandidates', type: 'jsonl' },
   [WORKFLOW_NODE_IDS.verify]: { fileKey: 'verifiedKeywords', type: 'jsonl' },

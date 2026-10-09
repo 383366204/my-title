@@ -182,14 +182,14 @@ export const NodeOperationPanel = ({
 
   return (
     <div className="node-operation-panel">
-      {copy && (
+      {copy && kind !== 'keyword-review' && (
         <div className="node-operation-panel-head">
           <h3>{copy.title}</h3>
           <p>{copy.description}</p>
           {resultHint && <p className="node-result-hint">{resultHint}</p>}
         </div>
       )}
-      <NodeResultSummaryCard nodeId={selectedNode?.id} state={selectedNode?.data || {}} />
+      {kind !== 'keyword-review' && <NodeResultSummaryCard nodeId={selectedNode?.id} state={selectedNode?.data || {}} />}
       {kind === 'keyword-mining' && (
         <KeywordMiningOperationPanel
           artifactState={artifactState}

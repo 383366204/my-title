@@ -11,6 +11,10 @@ const { WORKFLOW_NODE_IDS } = require('./pipeline-definition-common');
 function outputForNode(id, summary) {
   const counts = summary.counts || {};
   if (id === WORKFLOW_NODE_IDS.start) return { runId: summary.runId };
+  if (id === WORKFLOW_NODE_IDS.inspire) return {
+    count: Number(counts.selectedRoots || 0),
+    file: summary.files?.inspirationRoots || ''
+  };
   if (id === WORKFLOW_NODE_IDS.mine) return {
     count: Number(counts.candidates || 0),
     inspirationCount: Number(counts.inspirations || 0),

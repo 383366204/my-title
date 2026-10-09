@@ -13,6 +13,7 @@ const FINISHED_STATUSES = new Set(['completed', 'failed', 'cancelled']);
 export function useDistributionJob({ initialJobId = '', notifyCompletedOnRestore = false, onJobChange } = {}) {
   const [job, setJobState] = useState(null);
   const [error, setError] = useState('');
+  const [pendingAction, setPendingAction] = useState('');
   const [chromeStarting, setChromeStarting] = useState(false);
   const [chromeMessage, setChromeMessage] = useState('');
   const onJobChangeRef = useRef(onJobChange);
@@ -90,6 +91,7 @@ export function useDistributionJob({ initialJobId = '', notifyCompletedOnRestore
   const control = useCallback(async (action) => {
     if (!job?.jobId || actionPending.current) return null;
     actionPending.current = true;
+    setPendingAction(action);
     const requestedRevision = ++revision.current;
     setError('');
     try {
@@ -99,7 +101,7 @@ export function useDistributionJob({ initialJobId = '', notifyCompletedOnRestore
     } catch (controlError) {
       if (requestedRevision === revision.current) setError(controlError.message);
       return null;
-    } finally { actionPending.current = false; }
+    } finally { actionPending.current = false; setPendingAction(''); }
   }, [job?.jobId, setJob]);
 
   const startChrome = useCallback(async (input = {}) => {
@@ -109,5 +111,5 @@ export function useDistributionJob({ initialJobId = '', notifyCompletedOnRestore
     finally { setChromeStarting(false); }
   }, []);
 
-  return { job, error, chromeStarting, chromeMessage, setError, setJob, setChromeStarting, setChromeMessage, submit, completeManual, control, startChrome };
+  return { job, error, pendingAction, chromeStarting, chromeMessage, setError, setJob, setChromeStarting, setChromeMessage, submit, completeManual, control, startChrome };
 }
