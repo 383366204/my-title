@@ -293,13 +293,11 @@ Web UI 位于 `apps/web/`，后端 API 和 SSE 入口位于 `bin/server.js`。�
 ```markdown
 | 变量 | 必填 | 说明 |
 |------|------|------|
-| `GLM_API_KEY` | 是 | 智谱 GLM API 密钥 |
-| `GLM_API_BASE` | 否 | GLM API 地址，默认官方 |
-| `GLM_API_MODEL` | 否 | GLM 模型名称，默认 `glm-4-flash` |
+| `LLM_API_KEY` | 是 | 当前 LLM 服务商的 API 密钥 |
+| `LLM_API_BASE` | 否 | LLM API 基础地址，默认按服务商选择 |
+| `LLM_MODEL` | 否 | LLM 模型名称，默认按服务商选择 |
 | `ALI_1688_AK` | 是 | 1688 AI 版 Access Key |
 | `LLM_PROVIDER` | 否 | 标题生成 LLM 提供方：`glm`、`minimax`、`deepseek`、`openai-compatible` |
-| `MINIMAX_API_KEY` | 否 | `LLM_PROVIDER=minimax` 时使用 |
-| `DEEPSEEK_API_KEY` | 否 | `LLM_PROVIDER=deepseek` 时使用 |
 | `TAOBAO_NATIVE_PATH` | 否 | taobao-native CLI 路径，用于淘宝同行标题和图搜 |
 | `SYCM_LOGIN_MODE` | 否 | 当前仅支持 `manual`，复用人工登录态 |
 | `SYCM_CHROME_PROFILE_DIR` | 否 | 生意参谋 Chrome profile 目录 |

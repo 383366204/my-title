@@ -22,19 +22,44 @@ function clearProviderEnv() {
     'LLM_API_KEY',
     'LLM_API_BASE',
     'LLM_MODEL',
-    'DEEPSEEK_API_KEY',
-    'DEEPSEEK_API_BASE',
-    'DEEPSEEK_MODEL',
-    'MINIMAX_API_KEY',
-    'MINIMAX_API_BASE',
-    'MINIMAX_MODEL',
-    'VOLC_API_KEY'
+    'LLM_TIMEOUT',
+    'LLM_LONG_TIMEOUT',
+    'TITLE_GEN_RUN_TIMEOUT_MS',
+    'RUN_TIMEOUT'
   ]) {
     delete process.env[key];
   }
 }
 
 describe('LLM provider factory', () => {
+  it('gives explicit settings precedence over unified environment settings', () => {
+    clearProviderEnv();
+    Object.assign(process.env, { LLM_PROVIDER: 'minimax', LLM_API_KEY: 'env-key', LLM_API_BASE: 'https://env.test/v1', LLM_MODEL: 'env-model', LLM_TIMEOUT: '1000', LLM_LONG_TIMEOUT: '2000' });
+    const client = createLLMClient({ provider: 'deepseek', apiKey: 'explicit-key', apiBase: 'https://explicit.test/v1', model: 'explicit-model', timeout: 3000, longTimeout: 4000 });
+    assert.equal(client.provider, 'deepseek');
+    assert.equal(client.apiKey, 'explicit-key');
+    assert.equal(client.apiBase, 'https://explicit.test/v1');
+    assert.equal(client.model, 'explicit-model');
+    assert.equal(client._timeout, 3000);
+    assert.equal(client._longTimeout, 4000);
+  });
+
+  it('uses unified configuration for every supported provider without leaking the key', () => {
+    for (const provider of ['glm', 'volc', 'deepseek', 'minimax', 'openai-compatible']) {
+      clearProviderEnv();
+      Object.assign(process.env, { LLM_PROVIDER: provider, LLM_API_KEY: 'private-test-key', LLM_API_BASE: 'https://example.test/v1', LLM_MODEL: 'test-model' });
+      const client = createLLMClient();
+      assert.equal(client.provider, provider);
+      assert.equal(client.apiKey, 'private-test-key');
+      assert.equal(client.apiBase, 'https://example.test/v1');
+      assert.equal(client.model, 'test-model');
+      assert.equal(getLLMProviderInfo().configured, true);
+      assert.equal(JSON.stringify(getLLMProviderInfo()).includes('private-test-key'), false);
+      delete process.env.LLM_API_KEY;
+      assert.equal(getLLMProviderInfo().configured, false);
+    }
+  });
+
   it('normalizes provider aliases', () => {
     assert.equal(normalizeProvider('openai_compatible'), 'openai-compatible');
     assert.equal(normalizeProvider(' DeepSeek '), 'deepseek');
@@ -42,20 +67,20 @@ describe('LLM provider factory', () => {
 
   it('keeps glm as the default provider', () => {
     clearProviderEnv();
-    process.env.GLM_API_KEY = 'glm-test-key';
+    process.env.LLM_API_KEY = 'glm-test-key';
 
     const client = createLLMClient();
 
     assert.equal(client.provider, 'glm');
     assert.equal(client.apiKey, 'glm-test-key');
-    assert.equal(client.model, process.env.GLM_API_MODEL || 'glm-4-flash');
+    assert.equal(client.model, process.env.LLM_MODEL || 'glm-4-flash');
     assert.equal(typeof client.generateTitles, 'function');
   });
 
-  it('creates a DeepSeek OpenAI-compatible client from provider env vars', () => {
+  it('creates a DeepSeek OpenAI-compatible client from unified env vars', () => {
     clearProviderEnv();
     process.env.LLM_PROVIDER = 'deepseek';
-    process.env.DEEPSEEK_API_KEY = 'deepseek-test-key';
+    process.env.LLM_API_KEY = 'deepseek-test-key';
 
     const client = createLLMClient();
 
@@ -66,11 +91,11 @@ describe('LLM provider factory', () => {
     assert.equal(typeof client.extractCoreAndModifiers, 'function');
   });
 
-  it('creates a MiniMax OpenAI-compatible client from provider env vars', () => {
+  it('creates a MiniMax OpenAI-compatible client from unified env vars', () => {
     clearProviderEnv();
     process.env.LLM_PROVIDER = 'minimax';
-    process.env.MINIMAX_API_KEY = 'minimax-test-key';
-    process.env.MINIMAX_MODEL = 'MiniMax-test-model';
+    process.env.LLM_API_KEY = 'minimax-test-key';
+    process.env.LLM_MODEL = 'MiniMax-test-model';
 
     const client = createLLMClient();
 

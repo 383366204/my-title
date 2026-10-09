@@ -217,6 +217,7 @@ function safeRunFile(runDir, persistedPath, fallbackName) {
 
 function defaultFiles(runDir, files = {}) {
   return {
+    inspirationRoots: safeRunFile(runDir, files.inspirationRoots, 'inspiration-roots.jsonl'),
     inspirations: safeRunFile(runDir, files.inspirations, 'inspirations.jsonl'),
     rootCandidates: safeRunFile(runDir, files.rootCandidates, 'root-candidates.jsonl'),
     candidates: safeRunFile(runDir, files.candidates, 'candidates.jsonl'),

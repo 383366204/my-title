@@ -14,6 +14,7 @@ for (const script of [
   'supplemental-products.mjs',
   'unified-selection.mjs',
   'discovery-direction.mjs',
+  'inspiration-root-review.mjs',
   'distribution-completion-integration.mjs',
   'copy-text-fallback.mjs',
   'run-switch-isolation.mjs'

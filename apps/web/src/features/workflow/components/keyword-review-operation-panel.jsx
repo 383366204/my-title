@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Check, CheckCircle2, Plus, RefreshCw, Settings2, X } from 'lucide-react';
 import { KeywordFilterModal } from './keyword-filter-modal.jsx';
+import { KeywordReviewTransfer } from './keyword-review-transfer.jsx';
 
 import { artifactItems, candidateKeyword } from '../workflow-data.js';
 
@@ -93,7 +94,7 @@ export const KeywordReviewOperationPanel = ({
 
   return (
     <div className="grid gap-3">
-      <section className="grid gap-2.5 p-3 border border-slate-800/90 rounded-lg bg-slate-950/[0.42]">
+      <section className="grid gap-2.5 min-w-0">
         <div className="flex items-center justify-between gap-2.5">
           <strong>{combined ? '关键词确认' : '候选词筛选'}</strong>
           <span>已选 {approvedCount} / 共 {candidateRows.length} 个 · 排除 {rejectedCount} 个</span>
@@ -101,7 +102,7 @@ export const KeywordReviewOperationPanel = ({
         {combined && <div className="mt-2 rounded-lg border border-emerald-500/28 bg-emerald-900/18 text-emerald-200 text-[11px] font-extrabold leading-[1.35] px-2 py-[7px]">
           符合 {candidates.filter(row => row.metricFilter?.passed).length} · 待确认 {candidates.filter(row => row.metricFilter?.status === 'review').length} · 不符合 {candidates.filter(row => row.metricFilter?.status === 'failed').length}
         </div>}
-        <div className="flex gap-2 items-center my-2.5">
+        <div className="flex flex-wrap gap-2 items-center my-2.5">
           {combined && currentRunId && <button type="button" className="node-secondary-button" disabled={confirming} onClick={() => setFilterOpen(true)}>
             <Settings2 size={13} /> 筛选条件
           </button>}
@@ -130,7 +131,7 @@ export const KeywordReviewOperationPanel = ({
         {candidateRows.length > 0 && (
           <div className="flex flex-wrap gap-2">
             <input className="flex-1 min-h-8 px-2.5 bg-[#090f1f] border border-slate-600 rounded-md text-slate-200 min-w-[160px]" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索关键词或词根" aria-label="搜索候选关键词" />
-            <select className="min-h-8 px-2.5 bg-[#090f1f] border border-slate-600 rounded-md text-slate-200" value={filter} onChange={(event) => setFilter(event.target.value)} aria-label="筛选候选词">
+            {!combined && <select className="min-h-8 px-2.5 bg-[#090f1f] border border-slate-600 rounded-md text-slate-200" value={filter} onChange={(event) => setFilter(event.target.value)} aria-label="筛选候选词">
               <option value="all">全部候选词</option>
               <option value="recommended">{combined ? '符合筛选条件' : '推荐采用'}</option>
               {combined && <option value="pending">待人工判断</option>}
@@ -138,20 +139,21 @@ export const KeywordReviewOperationPanel = ({
               {!combined && <option value="high-confidence">高置信度</option>}
               <option value="missing">有缺失指标</option>
               <option value="rejected">已筛除</option>
-            </select>
+            </select>}
             {combined && <button type="button" className="node-secondary-button success" disabled={!canConfirm || confirming}
               onClick={() => setDecisions(Object.fromEntries(candidateRows.map(item => [item.key, item.reviewRecommended ? 'approved' : 'rejected'])))}>
               <Check size={13} /> 选择符合条件项
             </button>}
-            <button type="button" className="node-secondary-button success" disabled={!canConfirm || confirming} onClick={() => setAllDecisions('approved')}>
+            {!combined && <button type="button" className="node-secondary-button success" disabled={!canConfirm || confirming} onClick={() => setAllDecisions('approved')}>
               <Check size={13} /> 全部保留
-            </button>
-            <button type="button" className="node-secondary-button danger" disabled={!canConfirm || confirming} onClick={() => setAllDecisions('rejected')}>
+            </button>}
+            {!combined && <button type="button" className="node-secondary-button danger" disabled={!canConfirm || confirming} onClick={() => setAllDecisions('rejected')}>
               <X size={13} /> 全部筛除
-            </button>
+            </button>}
           </div>
         )}
-        <div className="grid gap-[7px] max-h-[250px] overflow-auto">
+        {combined ? <KeywordReviewTransfer rows={candidateRows} visibleRows={visibleRows} disabled={!canConfirm || confirming}
+          onMove={(keys, decision) => setDecisions(current => ({ ...current, ...Object.fromEntries(keys.map(key => [key, decision])) }))} /> : <div className="grid gap-[7px] max-h-[250px] overflow-auto">
           {visibleRows.slice(0, visibleLimit).map((item) => (
             <div className={`node-candidate-row keyword-review-row ${item.reviewDecision === 'rejected' ? 'is-rejected' : 'is-approved'}`} key={item.key}>
               <input type="checkbox" aria-label={`采用 ${item.keyword}`} checked={item.reviewDecision === 'approved'} disabled={!canConfirm || confirming}
@@ -203,8 +205,8 @@ export const KeywordReviewOperationPanel = ({
             </div>
           ))}
           {candidates.length === 0 && manualKeywords.length === 0 && <div className="artifact-empty">暂无候选词，可以先手动输入关键词。</div>}
-        </div>
-        {visibleRows.length > visibleLimit && (
+        </div>}
+        {!combined && visibleRows.length > visibleLimit && (
           <button type="button" className="node-secondary-button" onClick={() => setVisibleLimit((current) => current + 50)}>
             继续显示（剩余 {visibleRows.length - visibleLimit} 个）
           </button>

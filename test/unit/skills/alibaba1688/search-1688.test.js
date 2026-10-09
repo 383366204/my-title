@@ -3,7 +3,7 @@ const assert = require('assert');
 
 // Set required environment variable before loading modules
 process.env.ALI_1688_AK = 'test'.repeat(12);
-process.env.GLM_API_KEY = 'test-glm-key';
+process.env.LLM_API_KEY = 'test-glm-key';
 
 // Load the module under test (after env vars are set)
 const { searchAll, searchAndFilter, filterRelevantProducts } = require('../../../../skills/alibaba1688/src/search-1688');
@@ -32,8 +32,8 @@ before(() => {
   if (!process.env.ALI_1688_AK) {
     process.env.ALI_1688_AK = 'test'.repeat(12);
   }
-  if (!process.env.GLM_API_KEY) {
-    process.env.GLM_API_KEY = 'test-glm-key';
+  if (!process.env.LLM_API_KEY) {
+    process.env.LLM_API_KEY = 'test-glm-key';
   }
 });
 

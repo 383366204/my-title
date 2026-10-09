@@ -458,6 +458,20 @@ function buildAnalyzeCompetitorsView(artifact) {
   };
 }
 
+function buildInspirationView(artifact) {
+  const items = Array.isArray(artifact.rows) ? artifact.rows : [];
+  return {
+    kind: 'candidate-list', title: '待验证词根', emptyText: '暂无词根', text: '',
+    rows: items.map(item => ({
+      title: item.rootKeyword || item.keyword,
+      meta: item.source === 'manual' ? '人工补充 · 待验证' : '灵感生成 · 待验证',
+      metrics: (item.queryVariants || []).map(word => `查询词：${word}`),
+      description: item.relationReason || item.reason || '',
+      sourceUrl: item.inspiration?.sourceUrl || '', raw: item
+    }))
+  };
+}
+
 function buildMineView(artifact) {
   const items = Array.isArray(artifact.items) ? artifact.items : artifact.rows;
   if (!Array.isArray(items)) return null;
@@ -577,6 +591,7 @@ const ARTIFACT_HANDLERS = {
   collectCompetitors: [buildCollectCompetitorsView],
   enrichCompetitors: [buildEnrichCompetitorsView],
   analyzeCompetitors: [buildAnalyzeCompetitorsView],
+  inspire: [buildInspirationView],
   mine: [buildMineView],
   keywordReview: [buildKeywordReviewView],
   verify: [(a) => buildBusinessListView(a, 'verify')],

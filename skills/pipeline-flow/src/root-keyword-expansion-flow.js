@@ -5,6 +5,7 @@ const path = require('path');
 const { normalizeRootKeywords } = require('../../../core/root-keywords');
 const { buildCategoryEvidence } = require('./category-policy');
 const { extractSycmData } = require('../../sycm-research/src/sycm-cdp-extractor');
+const { SEARCH_PERIOD_VERSION } = require('../../sycm-research/src/search-period');
 const { normalizeSycmMetrics } = require('../../sycm-research/src/metric-parser');
 const { gateCandidate } = require('../../keyword-mining/src/candidate-gate');
 const { keywordSignature } = require('../../keyword-mining/src/keyword-signature');
@@ -13,6 +14,7 @@ const { appendJsonl, initRun, readJsonl, setRunStageMetrics, writeRun } = requir
 const { keywordFilterConditions } = require('./keyword-metric-filter');
 const { flowResponse } = require('./flow-context');
 const { waitInterruptibly } = require('./sycm-request-scheduler');
+const { researchRoot } = require('../../keyword-mining/src/root-research-store');
 
 function writeJson(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -110,6 +112,7 @@ function buildRootCandidate(row, root, result, options = {}) {
       root,
       mode: options.sycmMode || 'hot',
       period: options.period || '7d',
+      pageFiltersApplied: result.pageFiltersApplied || null,
       compareType: options.compareType || 'cycle',
       collectedAt,
       requestedFilterConditions: options.filterConditions,
@@ -171,7 +174,7 @@ async function flowExpandRootKeywords(options = {}) {
     keywordFilter: options.keywordFilter,
     keywordFilterDecisions: options.keywordFilterDecisions,
     options: {
-      mode: 'root-keyword',
+      mode: options.workflowMode || 'root-keyword',
       roots: normalized.roots,
       rootsText: normalized.roots.join('\n'),
       sycmMode: options.sycmMode || 'both',
@@ -190,11 +193,20 @@ async function flowExpandRootKeywords(options = {}) {
     updatedAt: new Date().toISOString()
   });
 
-  const previousQueue = readJson(files.queue, null);
+  const queryContext = {
+    periodVersion: SEARCH_PERIOD_VERSION,
+    roots: normalized.roots, period: options.period || '7d', compareType: options.compareType || 'cycle',
+    pages: Number(options.pages || options.sycmMaxPages || 3), filterConditions,
+    mode: options.sycmMode || 'both'
+  };
+  const savedQueue = readJson(files.queue, null);
+  const contextChanged = Boolean(savedQueue) && JSON.stringify(savedQueue.queryContext) !== JSON.stringify(queryContext);
+  const previousQueue = contextChanged ? null : savedQueue;
   const queryModes = ['hot', 'blue'].includes(options.sycmMode) ? [options.sycmMode] : ['hot', 'blue'];
   const previousByRoot = new Map((previousQueue?.items || []).map(item => [`${item.root}:${item.mode}`, item]));
   const queue = {
     version: 2,
+    queryContext,
     items: normalized.roots.flatMap(root => queryModes.map(mode => ({ root, mode }))).map(({ root, mode }, index) => {
       const previous = previousByRoot.get(`${root}:${mode}`);
       if (!previous) return { index, root, mode, status: 'pending', attempts: 0, candidateCount: 0 };
@@ -204,7 +216,8 @@ async function flowExpandRootKeywords(options = {}) {
   };
   writeJson(files.queue, queue);
 
-  const candidateMap = new Map(readJsonl(run.files.candidates).map(row => [String(row.keyword || '').replace(/\s+/g, '').toLowerCase(), row]));
+  const candidateMap = new Map((contextChanged ? [] : readJsonl(run.files.candidates)).map(row => [String(row.keyword || '').replace(/\s+/g, '').toLowerCase(), row]));
+  if (contextChanged) persistCandidates(run.files.candidates, candidateMap);
   const sycmExtractor = options.sycmExtractor || extractSycmData;
   const shouldStop = options.shouldStop || (() => null);
   const maxRetries = Math.max(0, Number(options.sycmMaxRetries ?? 2));
@@ -248,7 +261,7 @@ async function flowExpandRootKeywords(options = {}) {
       });
 
       try {
-        const result = await sycmExtractor(item.root, {
+        const extract = () => sycmExtractor(item.root, {
           guardCache: false,
           mode: item.mode,
           maxPages: Number(options.pages || options.sycmMaxPages || 3),
@@ -271,11 +284,28 @@ async function flowExpandRootKeywords(options = {}) {
             message: `${item.root}：${String(message || '').replace(/^\[[^\]]+\]\s*/, '')}`
           })
         });
+        let result;
+        if (options.workflowMode === 'daily') {
+          const researched = await researchRoot(item.root, {
+            dataDir: options.keywordDataDir || path.join(process.cwd(), 'data', 'keyword-mining'),
+            researchScopeId: options.researchScopeId || 'default', cycleId: run.runId, contextual: true,
+            queryContext: { periodVersion: SEARCH_PERIOD_VERSION, mode: item.mode, period: queryContext.period, compareType: queryContext.compareType,
+              pages: queryContext.pages, filterConditions }
+          }, extract);
+          if (researched.skipped) throw new Error('词根正由另一任务查询，请稍后重试');
+          result = researched.response;
+        } else result = await extract();
         if (!result || result.ok === false) throw new Error(result?.error || '未取得有效的平台查询响应');
         const rows = Array.isArray(result.data) ? result.data : [];
         for (const row of rows) {
           const candidate = buildRootCandidate(row, item.root, result, { ...options, filterConditions, sycmMode: item.mode });
           if (!candidate) continue;
+          const origin = options.inspirationRoots?.find(root => root.rootKeyword === item.root || root.queryVariants?.includes(item.root));
+          if (origin) {
+            candidate.rootKeyword = origin.rootKeyword;
+            candidate.inspiration = origin.inspiration;
+            candidate.relationReason = origin.relationReason;
+          }
           const key = String(candidate.keyword).replace(/\s+/g, '').toLowerCase();
           candidateMap.set(key, mergeCandidate(candidateMap.get(key), candidate));
         }
@@ -374,13 +404,16 @@ async function flowExpandRootKeywords(options = {}) {
     }
   }
 
-  run.status = candidateMap.size > 0 ? 'mined' : 'mining_empty';
+  failedCount = queue.items.filter(item => item.status === 'failed').length;
+  const incomplete = options.workflowMode === 'daily' && failedCount > 0;
+  run.status = incomplete ? 'mining_manual_action_required' : candidateMap.size > 0 ? 'mined' : 'mining_empty';
   run.counts.candidates = candidateMap.size;
   run.counts.rootQueries = queue.items.length;
   run.counts.rootQueriesCompleted = completedCount;
   run.counts.rootQueriesFailed = failedCount;
   run.discovery = {
-    mode: 'user_roots',
+    mode: options.workflowMode === 'daily' ? 'inspiration' : 'user_roots',
+    ...(incomplete ? { blocker: 'root_query_failed', blockerReason: `${failedCount} 个拓词任务失败，请重试；已完成结果会保留。` } : {}),
     stats: {
       inputRoots: normalized.roots.length + normalized.duplicates.length,
       uniqueRoots: normalized.roots.length,
@@ -400,13 +433,14 @@ async function flowExpandRootKeywords(options = {}) {
   options.onProgress?.({
     current: queue.items.length,
     total: queue.items.length,
-    message: `拓词完成，共发现 ${candidateMap.size} 个候选词`
+    message: incomplete ? run.discovery.blockerReason : `拓词完成，共发现 ${candidateMap.size} 个候选词`
   });
   return flowResponse({
     ok: candidateMap.size > 0,
     runId: run.runId,
     runDir,
     status: run.status,
+    stepIncomplete: incomplete || candidateMap.size === 0,
     candidates: [...candidateMap.values()],
     stats: run.discovery.stats,
     blockers: candidateMap.size > 0 ? [] : ['no_root_candidates']

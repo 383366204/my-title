@@ -1,8 +1,25 @@
 const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
 const { parseJsonFromLLM, retry } = require('../../../core/llm-utils');
 const { createLLMClient } = require('../../../core/llm');
 const { normalizeKeyword } = require('./seed-store');
 const { deterministicSample } = require('./inspiration-sources');
+
+const PRODUCTIZER_VERSION = 2;
+
+/**
+ * 灵感节点独立的模型配置，不改变标题生成客户端。
+ * @param {object} [client] 已注入客户端。
+ * @returns {object} 生效配置和缓存标识。
+ */
+function inspirationModelConfig(client) {
+  const resolved = client || createLLMClient({ model: process.env.INSPIRATION_LLM_MODEL || undefined });
+  const thinking = process.env.INSPIRATION_LLM_THINKING || 'disabled';
+  return { client: resolved, thinking,
+    identity: { version: PRODUCTIZER_VERSION, provider: resolved.provider, apiBase: resolved.apiBase, model: resolved.model, thinking } };
+}
 
 const LOCAL_ASSOCIATIONS = [
   { markers: ['高温', '炎热', '清凉', '降温', '夏天', '初夏'], roots: ['小风扇', '冰垫', '凉席', '冰袖', '遮阳帽'] },
@@ -44,8 +61,8 @@ function buildProductizationPrompt(inspirations, { maxRootsPerInspiration = 3 } 
     '- 保留完整商品词 rootKeyword；另外用 queryCore 提取其中连续出现的商品核心名词，用 queryAttributes 拆出原词中连续出现的材质 material、场景 scene、功能 function、人群 audience，各值为字符串数组。不要杜撰原词没有的属性。',
     '- 示例：硅藻土浴室吸水脚垫 → queryCore=脚垫，material=[硅藻土]，scene=[浴室]，function=[吸水]；无法可靠拆分时留空。',
     '- 禁止品牌、人物、影视动漫IP、灾难营销、医疗功效和夸张词。',
-    '- 关联理由必须说明灵感如何转化为商品需求。',
-    '- 不限固定商品目录。未知商品需给出实体形态 productForm、具体用途 productUse 及需求链；没有合理商品时返回空数组。',
+    '- 关联理由用一句话说明采购需求，最多25字。实体形态与用途各不超过12字。',
+    '- 不限固定商品目录。给出实体形态 productForm、具体用途 productUse；没有合理商品时返回 {"roots":[]}。不要输出额外分析或置信度。',
     '- 时事仅用于提出需求假设，不得编造新闻或搜索人气，市场表现留给生意参谋验证。',
     '',
     `每个灵感最多商品数: ${maxRootsPerInspiration}`,
@@ -74,9 +91,7 @@ function buildProductizationPrompt(inspirations, { maxRootsPerInspiration = 3 } 
         category: '商品类目',
         relationReason: '关联理由',
         productForm: '商品实体形态',
-        productUse: '商品具体用途',
-        hypothesis: { actor: '需求人群', task: '活动任务', scene: '使用场景', problem: '具体问题', purchaseJob: '采购目的' },
-        confidence: 80
+        productUse: '商品具体用途'
       }]
     })
   ].join('\n');
@@ -93,17 +108,99 @@ async function callProductizerLLM(client, inspirations, options) {
   const body = typeof client._buildChatPayload === 'function'
     ? client._buildChatPayload({ messages, temperature: 0.35 })
     : { model: client.model, messages, temperature: 0.35 };
-  const response = await retry(() => axios.post(
+  if (client.provider === 'minimax' && client.model === 'MiniMax-M3') {
+    body.thinking = { type: options.thinking === 'adaptive' ? 'adaptive' : 'disabled' };
+  }
+  const startedAt = Date.now();
+  const response = await retry(() => {
+    if (options.signal?.aborted || options.shouldStop?.()) throw Object.assign(new Error('已暂停灵感分析'), { code: 'INSPIRATION_STOPPED' });
+    return axios.post(
     `${String(client.apiBase || '').replace(/\/+$/, '')}/chat/completions`,
     body,
     {
       headers: { Authorization: `Bearer ${client.apiKey}`, 'Content-Type': 'application/json' },
-      timeout: client._longTimeout || client._timeout || 60000
+      timeout: options.requestTimeoutMs,
+      signal: options.signal
     }
-  ), 1, 1200);
+  ); }, 1, 1200, error => {
+    if (error.response?.status === 429) options.onRateLimit?.();
+    return !options.signal?.aborted && error.code !== 'INSPIRATION_STOPPED' && !isProductizerTimeout(error) && (error.response
+    ? error.response.status === 429 || error.response.status >= 500
+    : Boolean(error.code));
+  });
   const content = response.data?.choices?.[0]?.message?.content;
   if (!content) throw new Error('Invalid LLM response: missing productized roots');
-  return parseJsonFromLLM(String(content));
+  let result;
+  try {
+    const parsed = parseJsonFromLLM(String(content));
+    result = Array.isArray(parsed) ? { roots: parsed } : parsed;
+    if (!Array.isArray(result?.roots) || result.roots.some(row => !row || typeof row !== 'object' || Array.isArray(row))) {
+      throw new Error('Expected roots array containing objects');
+    }
+  } catch (cause) {
+    throw Object.assign(new Error('灵感选词的 AI 返回格式异常，未得到有效词根列表。请重试当前节点，已完成批次会保留。', { cause }), { code: 'INSPIRATION_LLM_FORMAT' });
+  }
+  return { ...result, telemetry: { durationMs: Date.now() - startedAt, usage: response.data?.usage || null } };
+}
+
+function isProductizerTimeout(error) {
+  return ['ECONNABORTED', 'ETIMEDOUT'].includes(error?.code) || /timeout.*exceeded/i.test(error?.message || '');
+}
+
+async function productizeBatch(client, batch, options) {
+  const { maxRootsPerInspiration, batchCacheDir, shouldStop, onProgress } = options;
+  if (shouldStop?.()) throw Object.assign(new Error('已暂停，继续时复用已完成 AI 批次'), { code: 'INSPIRATION_STOPPED' });
+  const key = crypto.createHash('sha256').update(JSON.stringify({ batch, maxRootsPerInspiration, ...options.identity })).digest('hex');
+  const cacheFile = batchCacheDir ? path.join(batchCacheDir, `${key}.json`) : null;
+  if (cacheFile && fs.existsSync(cacheFile)) {
+    options.onCacheHit?.();
+    return JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
+  }
+  const splitFile = cacheFile && `${cacheFile}.split`;
+  const split = async () => {
+    onProgress?.({ ...options.progress, message: `AI 请求超时，改为小批次继续（原批 ${batch.length} 条）；已完成结果保留` });
+    const middle = Math.ceil(batch.length / 2);
+    const left = await productizeBatch(client, batch.slice(0, middle), options);
+    const right = await productizeBatch(client, batch.slice(middle), options);
+    return { roots: [...(left?.roots || left || []), ...(right?.roots || right || [])] };
+  };
+  let result;
+  if (splitFile && fs.existsSync(splitFile)) result = await split();
+  else {
+    try {
+      const startedAt = Date.now();
+      const controller = new AbortController();
+      const stopTimer = setInterval(() => { if (shouldStop?.()) controller.abort(); }, 250);
+      const timer = setInterval(() => onProgress?.({
+        ...options.progress,
+        message: `AI 分析中（${batch.length} 条灵感），已等待 ${Math.floor((Date.now() - startedAt) / 1000)} 秒，单次上限 ${Math.ceil(options.requestTimeoutMs / 1000)} 秒；可暂停并保留已完成结果`
+      }), 10000);
+      try {
+        result = await retry(() => callProductizerLLM(client, batch, { ...options, maxRootsPerInspiration, signal: controller.signal }),
+          1, 1200, error => !controller.signal.aborted && !shouldStop?.() && error.code === 'INSPIRATION_LLM_FORMAT');
+      } finally {
+        clearInterval(timer);
+        clearInterval(stopTimer);
+      }
+    } catch (error) {
+      if (shouldStop?.() || error.code === 'ERR_CANCELED') throw Object.assign(new Error('已暂停，继续时复用已完成 AI 批次'), { code: 'INSPIRATION_STOPPED' });
+      if (!isProductizerTimeout(error)) throw error;
+      if (batch.length <= 1) {
+        throw Object.assign(new Error(`灵感选词的 AI 请求超时（${client.model || '当前模型'}，单条灵感，${Math.ceil(options.requestTimeoutMs / 1000)} 秒）。请检查模型服务或网络后重试，已完成批次会保留。`, { cause: error }), { code: 'INSPIRATION_LLM_TIMEOUT' });
+      }
+      if (splitFile) {
+        fs.mkdirSync(batchCacheDir, { recursive: true });
+        fs.writeFileSync(splitFile, 'split');
+      }
+      result = await split();
+    }
+  }
+  if (cacheFile) {
+    fs.mkdirSync(batchCacheDir, { recursive: true });
+    fs.writeFileSync(`${cacheFile}.tmp`, JSON.stringify(result));
+    fs.renameSync(`${cacheFile}.tmp`, cacheFile);
+  }
+  return result;
 }
 
 /**
@@ -166,7 +263,8 @@ function normalizeProductizedRoots(value, inspirationMap, maxRootsPerInspiration
       queryAttributes: Object.fromEntries(['material', 'scene', 'function', 'audience'].map(key => [key,
         Array.isArray(row.queryAttributes?.[key]) ? row.queryAttributes[key].filter(value => typeof value === 'string') : []])),
       relationReason: String(row.relationReason || row.reason || ''),
-      confidence: Math.max(0, Math.min(100, Number(row.confidence || 60))),
+      confidence: row.confidence != null && Number.isFinite(Number(row.confidence))
+        ? Math.max(0, Math.min(100, Number(row.confidence))) : null,
       productizer: row.productizer || 'llm',
       productForm: String(row.productForm || ''),
       productUse: String(row.productUse || ''),
@@ -186,41 +284,65 @@ function normalizeProductizedRoots(value, inspirationMap, maxRootsPerInspiration
 async function productizeInspirations(inspirations = [], {
   llmClient = null,
   maxRootsPerInspiration = 3,
-  batchSize = 20,
-  useLLM = true
+  batchSize = 1,
+  requestTimeoutMs = Number(process.env.INSPIRATION_LLM_TIMEOUT_MS || 180000),
+  concurrency = Number(process.env.INSPIRATION_LLM_CONCURRENCY || 2),
+  useLLM = true, onProgress, shouldStop, batchCacheDir
 } = {}) {
   const inspirationMap = new Map(inspirations.map(item => [item.id, item]));
   const values = [];
   const errors = [];
   let client = llmClient;
+  let modelConfig;
+  let cacheHits = 0;
+  let rateLimited = false;
   if (!client && useLLM) {
     try {
-      client = createLLMClient();
+      client = inspirationModelConfig().client;
     } catch (error) {
       errors.push({ offset: 0, error: error.message });
     }
   }
   if (useLLM && (client?.apiKey || typeof client?.productizeInspirations === 'function')) {
-    for (let offset = 0; offset < inspirations.length; offset += Math.max(1, Number(batchSize || 20))) {
-      const batch = inspirations.slice(offset, offset + Math.max(1, Number(batchSize || 20)));
-      try {
-        values.push(await callProductizerLLM(client, batch, { maxRootsPerInspiration }));
-      } catch (error) {
+    modelConfig = inspirationModelConfig(client);
+    const size = Math.max(1, Number(batchSize || 1));
+    const timeoutMs = Number.isFinite(requestTimeoutMs) && requestTimeoutMs > 0 ? requestTimeoutMs : 180000;
+    const width = Math.max(1, Math.min(2, Math.floor(concurrency) || 1));
+    for (let offset = 0; offset < inspirations.length;) {
+      if (shouldStop?.()) throw Object.assign(new Error('已暂停，继续时复用已完成 AI 批次'), { code: 'INSPIRATION_STOPPED' });
+      const waveWidth = rateLimited ? 1 : width;
+      const total = Math.ceil(inspirations.length / size);
+      const current = Math.floor(offset / size);
+      const batches = Array.from({ length: waveWidth }, (_, index) => inspirations.slice(offset + index * size, offset + (index + 1) * size)).filter(batch => batch.length);
+      onProgress?.({ current, total, message: `AI 分析 ${current + 1}/${total} 批，并发 ${batches.length}，缓存复用 ${cacheHits} 批` });
+      const settled = await Promise.allSettled(batches.map(batch => productizeBatch(client, batch, {
+        maxRootsPerInspiration, requestTimeoutMs: timeoutMs, batchCacheDir, shouldStop, onProgress,
+        ...modelConfig, onCacheHit: () => { cacheHits += 1; }, onRateLimit: () => { rateLimited = true; }, progress: { current, total }
+      })));
+      for (const result of settled) {
+        if (result.status === 'fulfilled') { values.push(result.value); continue; }
+        const error = result.reason;
+        if (batchCacheDir || error.code === 'INSPIRATION_STOPPED') throw error;
         errors.push({ offset, error: error.message });
       }
+      offset += batches.length * size;
     }
   }
   const llmRoots = normalizeProductizedRoots({ roots: values.flatMap(value => value?.roots || value || []) }, inspirationMap, maxRootsPerInspiration);
-  const covered = new Set(llmRoots.map(item => item.inspirationId));
-  const fallback = localProductize(inspirations.filter(item => !covered.has(item.id) && item.dimension !== 'direction'), maxRootsPerInspiration);
+  // 已启用 AI 时，空结果或失败不能悄悄用固定词表凑数。
+  const usedAI = useLLM && (client?.apiKey || typeof client?.productizeInspirations === 'function');
+  const fallback = localProductize(usedAI ? [] : inspirations.filter(item => item.dimension !== 'direction'), maxRootsPerInspiration);
   const roots = normalizeProductizedRoots(fallback, inspirationMap, maxRootsPerInspiration);
   return {
     roots: [...llmRoots, ...roots],
     meta: {
-      provider: llmRoots.length > 0 ? (client?.provider || 'llm') : 'local-fallback',
-      model: llmRoots.length > 0 ? (client?.model || '') : '',
+      provider: usedAI ? (client?.provider || 'llm') : 'local-fallback',
+      model: usedAI ? (client?.model || '') : '',
       generated: llmRoots.length + roots.length,
       fallbackGenerated: roots.length,
+      cacheHits,
+      rateLimited,
+      requests: values.map(value => value.telemetry).filter(Boolean),
       errors
     }
   };
@@ -228,6 +350,7 @@ async function productizeInspirations(inspirations = [], {
 
 module.exports = {
   LOCAL_ASSOCIATIONS,
+  inspirationModelConfig,
   buildProductizationPrompt,
   localProductize,
   normalizeProductizedRoots,

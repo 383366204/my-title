@@ -23,7 +23,7 @@ function registerSeedRoutes(app, {
   app.get('/api/status', (req, res) => {
     const stats = {
       env: {
-        hasGlmKey: !!process.env.GLM_API_KEY,
+        hasLlmKey: !!process.env.LLM_API_KEY,
         hasAliKey: !!process.env.ALI_1688_AK
       },
       files: {

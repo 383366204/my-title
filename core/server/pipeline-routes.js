@@ -186,7 +186,7 @@ function registerPipelineRoutes(app, {
     if (!isValidWorkflowRunIdParam(runId)) {
       return res.status(400).json({ ok: false, error: '无效的运行 ID。' });
     }
-    if (!['mine', 'review', 'keywordReview', 'verify', 'select', 'generate', 'export'].includes(step)) {
+    if (!['inspire', 'mine', 'review', 'keywordReview', 'verify', 'select', 'generate', 'export'].includes(step)) {
       return res.status(400).json({ ok: false, error: '不支持的流程步骤。' });
     }
     if (workbench.current) {
@@ -222,7 +222,7 @@ function registerPipelineRoutes(app, {
     if (!isValidWorkflowRunIdParam(runId)) {
       return res.status(400).json({ ok: false, error: '无效的运行 ID。' });
     }
-    if (!['mine', 'review', 'keywordReview', 'verify', 'select', 'generate', 'export'].includes(step)) {
+    if (!['inspire', 'mine', 'review', 'keywordReview', 'verify', 'select', 'generate', 'export'].includes(step)) {
       return res.status(400).json({ ok: false, error: '不支持的流程步骤。' });
     }
     if (workbench.current) {

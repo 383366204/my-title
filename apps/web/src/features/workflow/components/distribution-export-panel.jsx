@@ -111,6 +111,7 @@ export const DistributionExportPanel = ({
   const {
     job: distributionJob,
     error: distributionSubmitError,
+    pendingAction: distributionPendingAction,
     chromeStarting: distributionChromeStarting,
     chromeMessage: distributionChromeMessage,
     submit: submitDistributionJob,
@@ -238,7 +239,7 @@ export const DistributionExportPanel = ({
       </div>
       <div className="grid gap-2 min-w-0 relative">
         {targetShops.length > 0 && !targetsValid && <div role="alert" className="grid gap-0.5 border border-red-400/40 bg-red-900/15 text-red-200 px-2.5 py-2 rounded-md text-[11px] leading-normal break-all">请选择已启用且使用同一 Chrome 调试端口的店铺。</div>}
-        <ExecutionPanel distributionJob={distributionJob} activeRowsCount={activeRows.length} distributionSubmitError={distributionSubmitError} onControlJob={controlDistribution} />
+        <ExecutionPanel distributionJob={distributionJob} pendingAction={distributionPendingAction} activeRowsCount={activeRows.length} distributionSubmitError={distributionSubmitError} onControlJob={controlDistribution} />
         {copyValidation}
         {!canRecordManualComplete && activeRows.length > 0 && <div className="flex items-start gap-[7px] px-2.5 py-2 rounded-md text-[11px] leading-normal break-all border border-blue-400/30 bg-blue-900/15 text-blue-200">标记人工铺货完成前，清单仍需补齐链接和标题。</div>}
         {manualCopiedText && !manualCopyCurrent && <div className="grid gap-0.5 border border-red-400/40 bg-red-900/15 text-red-200 px-2.5 py-2 rounded-md text-[11px] leading-normal break-all">清单已经修改，请重新复制最新内容后再确认完成。</div>}
@@ -388,6 +389,7 @@ export const DistributionExportPanel = ({
 
       <ExecutionPanel
         distributionJob={distributionJob}
+        pendingAction={distributionPendingAction}
         activeRowsCount={activeRows.length}
         distributionSubmitError={distributionSubmitError}
         onControlJob={controlDistribution}

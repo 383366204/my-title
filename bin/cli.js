@@ -917,11 +917,9 @@ program
         version: process.version
       },
       env: {
-        ok: Boolean(process.env.GLM_API_KEY || process.env.MINIMAX_API_KEY || process.env.DEEPSEEK_API_KEY),
+        ok: Boolean(process.env.LLM_API_KEY),
         keys: {
-          GLM_API_KEY: Boolean(process.env.GLM_API_KEY),
-          MINIMAX_API_KEY: Boolean(process.env.MINIMAX_API_KEY),
-          DEEPSEEK_API_KEY: Boolean(process.env.DEEPSEEK_API_KEY),
+          LLM_API_KEY: Boolean(process.env.LLM_API_KEY),
           ALI_1688_AK: Boolean(process.env.ALI_1688_AK),
           TAOBAO_OPC_URL: Boolean(process.env.TAOBAO_OPC_URL)
         }

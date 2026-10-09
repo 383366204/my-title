@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { Clock, RefreshCw, Square } from 'lucide-react';
 import distributionModes from '../../../../../../../core/distribution-modes.json';
 
@@ -14,11 +15,15 @@ const RESULT_COLORS = { success: '#86efac', failed: '#fca5a5', pending: '#fcd34d
  */
 export function ExecutionPanel({
   distributionJob,
+  pendingAction = '',
   activeRowsCount = 0,
   distributionSubmitError,
   onControlJob
 }) {
+  const [resultFilter, setResultFilter] = useState('全部');
+  useEffect(() => { setResultFilter('全部'); }, [distributionJob?.jobId]);
   if (!distributionJob) return null;
+  const isRechecking = pendingAction === 'recheck' || distributionJob.status === 'checking_confirmation';
 
   const statusTitle = distributionJob.status === 'submitting'
     ? '正在自动铺货'
@@ -45,6 +50,7 @@ export function ExecutionPanel({
       const result = shop.perOfferId?.[item.offerId];
       return result && result.status !== 'unknown' ? [{
         shopName: shop.shopName,
+        color: RESULT_COLORS[result.status === 'success' ? 'success' : ['failed', 'skipped', 'stopped', 'cancelled'].includes(result.status) ? 'failed' : 'pending'],
         label: ({ success: '成功', failed: '失败', copying: '复制中', skipped: '已跳过', cancelled: '已取消', stopped: '已停止' })[result.status] || '待确认',
         reason: result.reason || '',
         failed: ['failed', 'skipped', 'stopped', 'cancelled'].includes(result.status)
@@ -53,6 +59,7 @@ export function ExecutionPanel({
   })) : [];
   const completedCount = confirmation ? resultRows.filter(row => row.status === '成功').length : distributionJob.completed || 0;
   const failedCount = confirmation ? resultRows.filter(row => row.status === '失败').length : distributionJob.failed || 0;
+  const visibleRows = resultFilter === '全部' ? resultRows : resultRows.filter(row => row.status === resultFilter);
 
   return (
     <section className={`distribution-execution-panel ${isBlockedStyle ? 'blocked' : ''}`}>
@@ -75,10 +82,10 @@ export function ExecutionPanel({
             </button>
           </div>
         )}
-        {distributionJob.status === 'completed_with_issues' && (
+        {(distributionJob.status === 'completed_with_issues' || isRechecking) && (
           <div className="flex flex-wrap justify-end gap-1.5">
-            <button type="button" className="node-secondary-button" onClick={() => onControlJob?.('recheck')}>
-              <RefreshCw size={13} /> 重新核对铺货结果
+            <button type="button" className="node-secondary-button disabled:opacity-60 disabled:cursor-wait" disabled={Boolean(pendingAction) || isRechecking} aria-busy={isRechecking} onClick={() => onControlJob?.('recheck')}>
+              <RefreshCw size={13} className={isRechecking ? 'animate-spin' : ''} /> {isRechecking ? '正在核对铺货结果…' : '重新核对铺货结果'}
             </button>
           </div>
         )}
@@ -93,7 +100,15 @@ export function ExecutionPanel({
       {confirmation?.reason && <p className={`text-[11px] m-0 !text-[#fecaca]`}>{confirmation.reason}</p>}
       {distributionSubmitError && <p className={`text-[11px] m-0 !text-[#fecaca]`}>{distributionSubmitError}</p>}
       {confirmation && <div aria-label="铺货核对明细">
-        {resultRows.map(row => {
+        <div className="distribution-result-tabs" role="group" aria-label="筛选铺货结果">
+          {['全部', '成功', '失败', '待确认'].map(label => (
+            <button key={label} type="button" aria-pressed={resultFilter === label} onClick={() => setResultFilter(label)}>
+              {label}（{label === '全部' ? resultRows.length : resultRows.filter(row => row.status === label).length}）
+            </button>
+          ))}
+        </div>
+        {visibleRows.length === 0 && <p role="status">暂无{resultFilter === '全部' ? '' : resultFilter}记录</p>}
+        {visibleRows.map(row => {
           const resultType = row.status === '成功' ? 'success' : row.status === '失败' ? 'failed' : 'pending';
           return (
             <div key={row.offerId} className="distribution-confirmation-row" style={{ '--result-color': RESULT_COLORS[resultType] }}>
@@ -102,7 +117,7 @@ export function ExecutionPanel({
                 <span className="text-xs text-[var(--text-subtle)] whitespace-nowrap">ID：{row.offerId}</span>
               </div>
               {row.details.map(detail => <div key={detail.shopName}>
-                <p>{detail.shopName}：{detail.label}</p>
+                <p className="distribution-shop-result" style={{ '--shop-result-color': detail.color }}>{detail.shopName}：{detail.label}</p>
                 {detail.failed && <p className="text-[#fca5a5] whitespace-pre-wrap break-all">失败原因：{detail.reason || '历史记录未保存具体原因，请点击"重新核对铺货结果"获取；若仍未返回，请查看平台复制日志。'}</p>}
               </div>)}
             </div>

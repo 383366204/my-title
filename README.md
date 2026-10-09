@@ -36,7 +36,7 @@ git clone <repo-url>
 cd my-title
 npm install
 cp .env.example .env
-# 编辑 .env，填入 GLM_API_KEY 和 ALI_1688_AK
+# 编辑 .env，选择 LLM_PROVIDER，填入 LLM_API_KEY 和 ALI_1688_AK
 ```
 
 Web UI 依赖位于 `apps/web/`：
@@ -177,18 +177,36 @@ React 节点实验 API 提供模板、校验、运行、取消、历史记录和
 
 | 变量 | 必填 | 说明 |
 |------|------|------|
-| `GLM_API_KEY` | 是 | 智谱 GLM API 密钥 |
-| `GLM_API_BASE` | 否 | GLM API 地址，默认官方 |
-| `GLM_API_MODEL` | 否 | GLM 模型名称，默认 `glm-4-flash` |
+| `LLM_API_KEY` | 是 | 当前服务商的 API 密钥，所有 LLM 功能共用 |
+| `LLM_API_BASE` | 否 | API 基础地址，不包含 `/chat/completions`；默认按服务商选择 |
+| `LLM_MODEL` | 否 | 模型名称，默认按服务商选择 |
 | `ALI_1688_AK` | 是 | 1688 AI 版 Access Key |
-| `LLM_PROVIDER` | 否 | 标题生成 LLM 提供方：`glm`、`minimax`、`deepseek`、`openai-compatible` |
-| `MINIMAX_API_KEY` | 否 | `LLM_PROVIDER=minimax` 时使用 |
-| `DEEPSEEK_API_KEY` | 否 | `LLM_PROVIDER=deepseek` 时使用 |
+| `LLM_PROVIDER` | 否 | `glm`、`volc`、`minimax`、`deepseek`、`openai-compatible`；未设置时为 `glm`，配置示例选用 `minimax` |
+| `LLM_TIMEOUT` | 否 | 普通请求超时（毫秒），兼容客户端默认 30000 |
+| `LLM_LONG_TIMEOUT` | 否 | 长请求超时（毫秒），默认普通请求的两倍 |
+| `INSPIRATION_LLM_TIMEOUT_MS` | 否 | 灵感选词单次请求超时（毫秒），默认 180000；独立于通用长请求超时 |
+| `INSPIRATION_LLM_MODEL` | 否 | 仅覆盖灵感节点模型，默认继承 `LLM_MODEL` |
+| `INSPIRATION_LLM_THINKING` | 否 | M3 灵感请求 `disabled`（默认）或 `adaptive`，其他模型不发送该参数 |
+| `INSPIRATION_LLM_CONCURRENCY` | 否 | 灵感请求并发 1–2，默认 2；收到 429 后本轮剩余请求降为串行 |
+| `INSPIRATION_MATERIAL_BUDGET` | 否 | 每次最多分析素材数，默认 48；达到有效词根目标提前结束，未达目标会明确提示 |
 | `TAOBAO_NATIVE_PATH` | 否 | taobao-native CLI 路径，用于淘宝同行标题和图搜 |
 | `SYCM_LOGIN_MODE` | 否 | 当前仅支持 `manual`，复用人工登录态 |
 | `SYCM_CHROME_PROFILE_DIR` | 否 | 生意参谋 Chrome profile 目录 |
 | `SYCM_REMOTE_DEBUGGING_PORT` | 否 | Chrome CDP 端口，默认 `9222` |
 | `TAOBAO_OPC_URL` | 否 | 淘宝图片优化 MCP 网关地址 |
+
+配置示例：
+
+```dotenv
+LLM_PROVIDER=minimax
+LLM_API_KEY=your_llm_api_key_here
+LLM_API_BASE=https://api.minimaxi.com/v1
+LLM_MODEL=MiniMax-M3
+```
+
+配置优先级：调用方显式参数 > `LLM_*` 环境变量 > 服务商默认值。旧的服务商专用环境变量不再读取。
+切换服务商时须同时更换密钥，并修改或清空 `LLM_API_BASE`、`LLM_MODEL`；仅修改 provider 不会清除旧地址或模型。
+修改 `.env` 后需重启后端；使用 `npm run dev` 时重启整个开发入口。密钥只保存在本地，不要提交 `.env`。
 
 ## 测试
 

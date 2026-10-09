@@ -53,6 +53,12 @@
 .distribution-execution-panel .distribution-execution-head .distribution-result-summary > span { display: inline; color: var(--result-color); }
 .distribution-confirmation-row { padding: 8px 12px; margin-top: 8px; border-left: 3px solid var(--result-color); border-bottom: 1px solid #475569; overflow-wrap: anywhere; }
 .distribution-confirmation-row .distribution-result-label { color: var(--result-color); }
+.distribution-execution-panel .distribution-confirmation-heading strong { color: var(--result-color); }
+.distribution-execution-panel .distribution-confirmation-row .distribution-shop-result { color: var(--shop-result-color); }
+.distribution-result-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 12px; border-bottom: 1px solid #475569; }
+.distribution-result-tabs button { padding: 8px 12px; color: var(--text-muted); background: transparent; border: 0; border-bottom: 2px solid transparent; cursor: pointer; }
+.distribution-result-tabs button:hover { color: var(--text-body); background: #ffffff0a; }
+.distribution-result-tabs button[aria-pressed="true"] { color: var(--text-body); border-bottom-color: #60a5fa; }
 .distribution-confirmation-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; }
 .distribution-confirmation-id { font-size: 12px; color: var(--text-subtle); white-space: nowrap; }
 .distribution-execution-panel .distribution-confirmation-reason { color: #fca5a5; white-space: pre-wrap; overflow-wrap: anywhere; }

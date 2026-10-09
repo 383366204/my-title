@@ -97,7 +97,7 @@ my-title/
 | 修改生意参谋 | `skills/sycm-research/src/sycm-cdp-extractor.js` | CDP 提取 |
 | 修改违禁词 | `skills/title-gen/data/banned-words.json` + `core/banned-words.js` | 数据 + 逻辑 |
 | 添加共享模块 | `core/` | LLM 客户端、工具函数 |
-| API 密钥设置 | `.env.example` → `.env` | GLM_API_KEY + ALI_1688_AK |
+| API 密钥设置 | `.env.example` → `.env` | LLM_API_KEY + ALI_1688_AK |
 
 ---
 
@@ -166,7 +166,7 @@ npm run test:workflow-browser
 
 # 初始设置
 cp .env.example .env
-# 编辑 .env 填入 GLM_API_KEY 和 ALI_1688_AK
+# 编辑 .env 填入 LLM_API_KEY 和 ALI_1688_AK
 ```
 
 ---
@@ -175,7 +175,7 @@ cp .env.example .env
 
 - **依赖项**: commander, axios, dotenv
 - **入口**: CLI 通过 `bin/cli.js`，MCP 通过 `bin/mcp-server.mjs`
-- **环境变量**: 需要 GLM_API_KEY 和 ALI_1688_AK
+- **环境变量**: 需要 LLM_API_KEY 和 ALI_1688_AK
 - **Skill 独立性**: 直接从各 skill 的 src 实现文件引入；有 MCP 入口的 skill 也可独立使用。纯转导出 index.js 已移除。
 - **导出约定**: 只导出本文件实现的符号，不使用 re-export 或聚合 barrel；调用方直接引用实现文件。
 - **编排层**: bin/ 是 thin shell，负责串联 skills/ 和 core/

@@ -201,6 +201,9 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
           setLogs((previous) => [...previous, { timestamp: new Date().toISOString(), level: 'info', message: `已准备 ${items.length} 个商品，启动后将获取商品资料、提取候选词并进行验真。` }]);
         }}
         onUpdateNodeData={updateNodeData} onSaveNodeFields={updateNodeFields}
+        onSaveStartConfiguration={(nodeId, fields) => currentRunId
+          ? prepareNewRunFromHistory({ nodeId, fields })
+          : updateNodeFields(nodeId, fields)}
         onKeywordFilterApplied={nodeOperationProps.onKeywordFilterApplied}
         onKeywordFilterRecollected={nodeOperationProps.onKeywordFilterRecollected}
         updateDistributionNodeJob={updateDistributionNodeJob}

@@ -43,6 +43,7 @@ describe('workflow pipeline adapter', () => {
   it('lists the fixed production workflow templates', () => {
     assert.deepEqual(WORKFLOW_NODE_IDS, {
       start: 'start',
+      inspire: 'inspire',
       mine: 'mine',
       keywordReview: 'keywordReview',
       verify: 'verify',
@@ -145,6 +146,7 @@ describe('workflow pipeline adapter', () => {
     }
     assert.deepEqual(templates[0].workflow.nodes.map(node => node.id), [
       WORKFLOW_NODE_IDS.start,
+      WORKFLOW_NODE_IDS.inspire,
       WORKFLOW_NODE_IDS.mine,
       WORKFLOW_NODE_IDS.keywordReview,
       WORKFLOW_NODE_IDS.select,
@@ -153,7 +155,8 @@ describe('workflow pipeline adapter', () => {
       WORKFLOW_NODE_IDS.end
     ]);
     assert.deepEqual(templates[0].workflow.edges.map(edge => `${edge.source}->${edge.target}`), [
-      'start->mine',
+      'start->inspire',
+      'inspire->mine',
       'mine->keywordReview',
       'keywordReview->select',
       'select->generate',
@@ -290,6 +293,7 @@ describe('workflow pipeline adapter', () => {
             ]
         : [
             WORKFLOW_NODE_IDS.start,
+            ...(template.mode === 'daily' ? [WORKFLOW_NODE_IDS.inspire] : []),
             WORKFLOW_NODE_IDS.mine,
             WORKFLOW_NODE_IDS.keywordReview,
             WORKFLOW_NODE_IDS.select,
@@ -459,6 +463,7 @@ describe('workflow pipeline adapter', () => {
       inspirationSycmPages: 3,
       candidateScreening: 'balanced',
       inspirationUseLLM: true,
+      reviewInspirationRoots: false,
       maxObservingSeeds: 10,
       maxObservingPoolSize: 24,
       maxNewSeeds: 0,

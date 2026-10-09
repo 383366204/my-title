@@ -128,6 +128,10 @@ export function getSheetConfigSummary(state = {}) {
 
 /** Per-node success label builders. Each receives (output, state) and returns a string or ''. */
 const SUCCESS_LABEL_HANDLERS = {
+  inspire(output) {
+    const count = Number(output.count || 0);
+    return count > 0 ? `已生成 ${count} 个词根` : '';
+  },
   mine(output, state) {
     const count = Number(output.count ?? state.count ?? 0);
     return count > 0 ? `成功 ${count} 个候选词` : '';
@@ -238,6 +242,7 @@ export function getWorkflowNodeSuccessLabel(nodeId, state = {}) {
 export function getWorkflowNodeResultLocation(nodeId, state = {}) {
   const output = state.output && typeof state.output === 'object' ? state.output : {};
   const normalized = String(nodeId || '');
+  if (normalized === 'inspire') return output.file || '';
   if (normalized === 'mine') return output.file || '';
   if (normalized === 'keywordReview') return output.file || '';
   if (normalized === 'verify') return output.file || '';
@@ -267,7 +272,8 @@ export function getWorkflowResultSummaryView(nodeId, state = {}) {
   const manualProductInput = normalized === 'select' && state.manualDirectInput === true;
   const sheetType = state.output?.sheetType === 'review' ? 'review' : 'order';
   const titles = {
-    mine: '灵感选词结果',
+    inspire: '待验证词根',
+    mine: '生意参谋拓词结果',
     keywordReview: '人工筛词结果',
     verify: '生意参谋校验结果',
     select: '货源选品结果',
@@ -286,6 +292,7 @@ export function getWorkflowResultSummaryView(nodeId, state = {}) {
   };
   if (manualProductInput) titles.select = '商品资料获取结果';
   const hints = {
+    inspire: '这些词根尚未经过生意参谋验证。',
     mine: '候选词及其灵感来源在下方预览，完整链路保存在运行产物中。',
     keywordReview: '保留与筛除结果会保存到运行记录，只有人工确认保留的词会进入后续流程。',
     verify: '验真通过词在下方结果列表中预览，完整内容保存在 verified-keywords.jsonl。',
@@ -307,6 +314,7 @@ export function getWorkflowResultSummaryView(nodeId, state = {}) {
   };
   if (manualProductInput) hints.select = '每个1688链接会独立读取商品标题、主图、类目和价格，失败项可从当前节点重试。';
   const actionLabels = {
+    inspire: '查看词根',
     mine: '查看候选词',
     keywordReview: '查看筛词结果',
     verify: '查看验真词',

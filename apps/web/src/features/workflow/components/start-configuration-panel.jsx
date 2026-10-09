@@ -48,7 +48,7 @@ const ORDER_SHEET_SORT_OPTIONS = [
   { value: 'sucRefundAmt', label: '成功退款金额' }
 ];
 
-export function StartConfigurationPanel({ mode, modeHint, node, onDone, onUpdateField, readOnly = false }) {
+export function StartConfigurationPanel({ mode, modeHint, node, onDone, onUpdateField, readOnly = false, showFooter = true }) {
   const [categoryOpen, setCategoryOpen] = useState(false);
   const [categoryMessage, setCategoryMessage] = useState('');
   const categoryTrigger = useRef(null);
@@ -99,9 +99,9 @@ export function StartConfigurationPanel({ mode, modeHint, node, onDone, onUpdate
             </label>
           </section>
         </fieldset>
-        <div className="sticky bottom-0 z-[2] flex justify-end -mx-0.5 -mb-0.5 px-0.5 pt-3 pb-0.5 border-t border-slate-700/[0.76] bg-[var(--bg-panel)]">
+        {showFooter && <div className="sticky bottom-0 z-[2] flex justify-end -mx-0.5 -mb-0.5 px-0.5 pt-3 pb-0.5 border-t border-slate-700/[0.76] bg-[var(--bg-panel)]">
           <button type="button" className="node-primary-button" onClick={onDone}>{readOnly ? '关闭' : '完成配置'}</button>
-        </div>
+        </div>}
       </div>
     );
   }
@@ -136,9 +136,9 @@ export function StartConfigurationPanel({ mode, modeHint, node, onDone, onUpdate
             onChange={(event) => onUpdateField(node.id, 'length', Number.parseInt(event.target.value, 10) || 60)}
           />
         </label>
-        <div className="sticky bottom-0 z-[2] flex justify-end -mx-0.5 -mb-0.5 px-0.5 pt-3 pb-0.5 border-t border-slate-700/[0.76] bg-[var(--bg-panel)]">
+        {showFooter && <div className="sticky bottom-0 z-[2] flex justify-end -mx-0.5 -mb-0.5 px-0.5 pt-3 pb-0.5 border-t border-slate-700/[0.76] bg-[var(--bg-panel)]">
           <button type="button" className="node-primary-button" onClick={onDone}>完成配置</button>
-        </div>
+        </div>}
       </div>
     );
   }
@@ -251,9 +251,9 @@ export function StartConfigurationPanel({ mode, modeHint, node, onDone, onUpdate
             </div>
           </details>
         </fieldset>
-        <div className="sticky bottom-0 z-[2] flex justify-end -mx-0.5 -mb-0.5 px-0.5 pt-3 pb-0.5 border-t border-slate-700/[0.76] bg-[var(--bg-panel)]">
+        {showFooter && <div className="sticky bottom-0 z-[2] flex justify-end -mx-0.5 -mb-0.5 px-0.5 pt-3 pb-0.5 border-t border-slate-700/[0.76] bg-[var(--bg-panel)]">
           <button type="button" className="node-primary-button" onClick={onDone}>{readOnly ? '关闭' : '完成配置'}</button>
-        </div>
+        </div>}
       </div>
     );
   }
@@ -417,9 +417,9 @@ export function StartConfigurationPanel({ mode, modeHint, node, onDone, onUpdate
         {customDate && <div className="m-0 border border-blue-500/30 rounded-[7px] bg-blue-900/[0.12] text-[#bfdbfe] text-[11px] leading-[1.55] p-2.5">自定义日期最少 1 天、最多 31 天，以生意参谋当前可选日期为准。</div>}
         </section>}
         </fieldset>
-        <div className="sticky bottom-0 z-[2] flex justify-end -mx-0.5 -mb-0.5 px-0.5 pt-3 pb-0.5 border-t border-slate-700/[0.76] bg-[var(--bg-panel)]">
+        {showFooter && <div className="sticky bottom-0 z-[2] flex justify-end -mx-0.5 -mb-0.5 px-0.5 pt-3 pb-0.5 border-t border-slate-700/[0.76] bg-[var(--bg-panel)]">
           <button type="button" className="node-primary-button" onClick={onDone}>{readOnly ? '关闭' : '完成配置'}</button>
-        </div>
+        </div>}
       </div>
     );
   }
@@ -461,9 +461,9 @@ export function StartConfigurationPanel({ mode, modeHint, node, onDone, onUpdate
         ))}
       </div>
       </details>
-      <div className="sticky bottom-0 z-[2] flex justify-end -mx-0.5 -mb-0.5 px-0.5 pt-3 pb-0.5 border-t border-slate-700/[0.76] bg-[var(--bg-panel)]">
+      {showFooter && <div className="sticky bottom-0 z-[2] flex justify-end -mx-0.5 -mb-0.5 px-0.5 pt-3 pb-0.5 border-t border-slate-700/[0.76] bg-[var(--bg-panel)]">
         <button type="button" className="node-primary-button" onClick={onDone}>完成配置</button>
-      </div>
+      </div>}
     </div>
   );
 }

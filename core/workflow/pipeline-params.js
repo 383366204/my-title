@@ -128,6 +128,7 @@ function sanitizeWorkflowParams(mode, raw = {}) {
       inspirationSycmPages: clampInt(raw.inspirationSycmPages, 3, 1, 10),
       candidateScreening: ['strict', 'balanced', 'explore'].includes(raw.candidateScreening) ? raw.candidateScreening : 'balanced',
       inspirationUseLLM: sanitizeBool(raw.inspirationUseLLM, true),
+      reviewInspirationRoots: sanitizeBool(raw.reviewInspirationRoots, false),
       maxObservingSeeds: clampInt(raw.maxObservingSeeds, 3, 0, 10),
       maxObservingPoolSize: clampInt(raw.maxObservingPoolSize, 24, 3, 100),
       maxNewSeeds: clampInt(raw.maxNewSeeds, 3, 0, 10),
@@ -516,7 +517,7 @@ function resolveProductionWorkflowLaunch(body = {}) {
     ...(body.params || {}),
     ...(body.options || {})
   };
-  for (const key of ['enabledDimensions', 'customInputs', 'candidateScreening', 'keywordFilter']) {
+  for (const key of ['enabledDimensions', 'customInputs', 'candidateScreening', 'keywordFilter', 'reviewInspirationRoots']) {
     if (Object.prototype.hasOwnProperty.call(body, key)) params[key] = body[key];
   }
   for (const key of ['keyword', 'keywords', 'roots', 'rootsText', 'sycmMode', 'period', 'compareType', 'sycmRiskProfile', 'sycmMinIntervalMs', 'sycmMaxIntervalMs', 'sycmBatchSize', 'sycmMinBatchCooldownMs', 'sycmMaxBatchCooldownMs', 'sycmMaxRetries', 'mine', 'discoveryMode', 'source', 'rootMode', 'rootLimit', 'rootCooldownDays', 'familyCooldownDays', 'inspirationSycmPages', 'inspirationUseLLM', 'maxObservingSeeds', 'maxObservingPoolSize', 'maxNewSeeds', 'autoReplenishSeeds', 'recordSeedFeedback', 'verify', 'select', 'generate', 'export', 'productsPerKeyword', 'length', 'port', 'pages', 'minBlueRows', 'fallbackHot', 'autoApproveKeywords', 'autoExpandVerify', 'verifyReserve', 'autoAllowReviewKeywords', 'reviewKeywordLimit', 'workRequirement', 'dateMode', 'startDate', 'endDate', 'orderDate', 'storeName', 'sheetType', 'sortMetric', 'productLimit', 'fileName', 'includeRawData', 'includeImages', 'amountMode', 'missingAmountPolicy', 'cartQuantity', 'rowSpan', 'orderNote', 'reviewGroupSize', 'includeSpacerRow', 'uploadId', 'uploadName', 'groups', 'reviewTone', 'reviewLength', 'useAI', 'inputMode', 'manualItems', 'manualItemsText', 'competitorText', 'competitorInputs', 'maxShops', 'hotLimit', 'newLimit', 'detailLimit', 'waitMs', 'compareHistory']) {

@@ -5,6 +5,7 @@ const { prepareKeywordSupplement } = require('../../skills/pipeline-flow/src/key
 const { getRun: getPipelineRun } = require('../../skills/pipeline-flow/src/run-store');
 const { readWorkflowNodeArtifact } = require('../workflow/pipeline-artifacts');
 const { getKeywordRecollectionRoots } = require('./keyword-filter-routes');
+const { saveInspirationRoots } = require('../../skills/pipeline-flow/src/inspiration-root-review');
 
 /**
  * 注册控制路由；共享占用与运行能力由应用注入，保留请求时动态取 runner。
@@ -41,6 +42,17 @@ function registerWorkflowControlRoutes(app, {
   originalError,
   dataDir
 }) {
+  app.post('/api/workflows/runs/:runId/inspiration-roots', (req, res) => {
+    if (!isValidWorkflowRunIdParam(req.params.runId)) return res.status(400).json({ ok: false, error: '无效的运行 ID' });
+    if (workbench.current) return res.status(409).json({ ok: false, error: '请先暂停运行' });
+    try {
+      const options = { runId: req.params.runId, dataDir, rootsText: req.body?.rootsText, revision: req.body?.revision };
+      const result = saveInspirationRoots(options);
+      return res.json({ ok: true, data: result });
+    } catch (error) {
+      return res.status(409).json({ ok: false, error: error.message });
+    }
+  });
   app.post('/api/workflows/runs/:runId/keyword-filter/recollect', (req, res) => {
     const sourceRunId = req.params.runId;
     if (!isValidWorkflowRunIdParam(sourceRunId)) return res.status(400).json({ ok: false, error: '无效的运行 ID。' });
@@ -215,13 +227,13 @@ function registerWorkflowControlRoutes(app, {
       }
       const runtime = readRuntimeState({ runId });
       if (runtime) {
-        if (!['mine', 'keywordReview', 'verify', 'select', 'generate', 'export', 'collectRank', 'generateSheet', 'resolveShops', 'collectCompetitors', 'enrichCompetitors', 'analyzeCompetitors', 'competitorReport'].includes(nodeId)) {
+        if (!['inspire', 'mine', 'keywordReview', 'verify', 'select', 'generate', 'export', 'collectRank', 'generateSheet', 'resolveShops', 'collectCompetitors', 'enrichCompetitors', 'analyzeCompetitors', 'competitorReport'].includes(nodeId)) {
           return res.status(400).json({ ok: false, error: '不支持的流程步骤。' });
         }
         const manualOrderSheetCollection = nodeId === 'collectRank'
           && runtime.mode === 'order-sheet'
           && runtime.params?.inputMode === 'manual';
-        if (nodeId === 'verify' || nodeId === 'collectRank' || (nodeId === 'mine' && runtime.mode === 'root-keyword')) {
+        if (nodeId === 'verify' || nodeId === 'collectRank' || (nodeId === 'mine' && ['root-keyword', 'daily'].includes(runtime.mode))) {
           const port = parsePositiveNumber(runtime.params?.port || process.env.SYCM_DEBUG_PORT || 9222, 9222);
           if (manualOrderSheetCollection) {
             const chromeReady = await getSycmChromeAvailabilityChecker()(port);

@@ -1,6 +1,6 @@
 /**
  * 共享常量定义
- * 从 extract-core.js 中提取，消除 glm-client ↔ extract-core 循环依赖
+ * 从 extract-core.js 中提取，消除 LLM 客户端与 extract-core 的循环依赖
  */
 
 const RIGIDITY_RULES_TEXT = `- 材质相关词（如"纯银"、"纯棉"、"真皮"）→ rigid

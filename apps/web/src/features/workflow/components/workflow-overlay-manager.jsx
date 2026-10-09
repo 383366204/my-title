@@ -3,6 +3,7 @@ import { X } from 'lucide-react';
 import { getWorkflowNodeDetailRows } from '../workflow-node-view.js';
 import { WORKFLOW_OVERLAYS } from '../workflow-action-registry.js';
 import { ArtifactPanel } from './artifact-panel.jsx';
+import { InspirationArtifactPanel } from './keyword-mining/inspiration-artifact-panel.jsx';
 import { DistributionExportPanel } from './distribution-export-panel.jsx';
 import { ManualProductSelectionPanel } from './manual-product-selection-panel.jsx';
 import { ManualWorkflowInputPanel } from './manual-workflow-input-panel.jsx';
@@ -59,6 +60,7 @@ export function WorkflowOverlayManager({
   onSaveManualInput,
   onUpdateNodeData,
   onSaveNodeFields,
+  onSaveStartConfiguration,
   onKeywordFilterApplied,
   onKeywordFilterRecollected,
   updateDistributionNodeJob
@@ -83,7 +85,7 @@ export function WorkflowOverlayManager({
   if (activeOverlay.type === WORKFLOW_OVERLAYS.START_CONFIG && node?.data?.selectionMode) {
     return <WorkflowOverlayShell label="选词来源" onClose={onClose} wide>
       <SelectionSourcePanel key={`${currentRunId || 'draft'}:${activeTemplateMode}`} node={node}
-        readOnly={Boolean(currentRunId)} onSave={onSaveNodeFields} onClose={onClose} />
+        saveAsNew={Boolean(currentRunId)} onSave={onSaveStartConfiguration} onClose={onClose} />
     </WorkflowOverlayShell>;
   }
 
@@ -172,11 +174,13 @@ if (activeOverlay.type === WORKFLOW_OVERLAYS.WATERMARK_STUDIO) {
       />
     );
   } else if (activeOverlay.type === WORKFLOW_OVERLAYS.ARTIFACT) {
-    content = <ArtifactPanel state={scopedArtifactState} />;
+    content = node?.id === 'inspire'
+      ? <InspirationArtifactPanel key={`${currentRunId}:${scopedArtifactState.status}:${scopedArtifactState.artifact?.revision}`} state={scopedArtifactState} />
+      : <ArtifactPanel state={scopedArtifactState} />;
   } else {
     content = (
       <>
-        {node && (
+        {node && node.id !== 'keywordReview' && (
           <div className="workflow-overlay-diagnostics">
             {getWorkflowNodeDetailRows(node).filter((row) => row.label !== '产物位置').map((row) => (
               <div key={row.label}><span>{row.label}</span><strong>{row.value}</strong></div>
@@ -191,7 +195,7 @@ if (activeOverlay.type === WORKFLOW_OVERLAYS.WATERMARK_STUDIO) {
   return (
     <WorkflowOverlayShell
       label={label}
-      description={defaultDescription}
+      description={node?.id === 'keywordReview' ? undefined : defaultDescription}
       onClose={onClose}
       wide={[WORKFLOW_OVERLAYS.DISTRIBUTION, WORKFLOW_OVERLAYS.NODE_WORKBENCH, WORKFLOW_OVERLAYS.PRODUCT_SELECT, WORKFLOW_OVERLAYS.SHEET_CONFIG, WORKFLOW_OVERLAYS.START_CONFIG].includes(activeOverlay.type)}
     >

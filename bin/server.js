@@ -296,6 +296,7 @@ async function runPipelineStep(step, runId, body = {}) {
     options.excludeSeen = body.excludeSeen !== false;
     options.recordSeen = body.recordSeen !== false;
   }
+  if (step === 'inspire') return require('../skills/pipeline-flow/src/inspiration-flow').flowDiscoverInspirations(options);
   if (step === 'mine') return flowMine(options);
   if (step === 'review' || step === 'keywordReview') return flowReviewCandidates(options);
   if (step === 'verify') return flowVerify(options);

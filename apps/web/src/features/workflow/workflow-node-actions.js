@@ -21,6 +21,7 @@ const LEGACY_TARGET_NODE = {
 
 const STEP_NODE = {
   start: "start",
+  inspire: "inspire",
   mine: "mine",
   keywordReview: "keywordReview",
   verify: "verify",

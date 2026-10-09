@@ -15,6 +15,11 @@ export function DiscoveryDimensionFields({ node, onUpdateField, readOnly }) {
         placeholder="例如：面向独居租房年轻人，寻找小户型厨房收纳、防潮用品，排除电器和大件家具"
         onChange={event => onUpdateField(node.id, 'customInputs', { direction: [event.target.value] })} />
     </label>
+    <label className="inspiration-root-review-toggle">
+      <input type="checkbox" disabled={readOnly} checked={data.reviewInspirationRoots === true}
+        onChange={event => onUpdateField(node.id, 'reviewInspirationRoots', event.target.checked)} />
+      <span>拓词前暂停，人工检查词根</span>
+    </label>
     <p className="start-configuration-hint">词根复查间隔：30 天。同类商品不统一禁查。</p>
   </section>;
 }
