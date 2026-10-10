@@ -31,6 +31,7 @@ export const WORKFLOW_ACTION_ROUTES = Object.freeze({
   'product-review': overlay(WORKFLOW_OVERLAYS.PRODUCT_SELECT),
   'open-review': overlay(WORKFLOW_OVERLAYS.DISTRIBUTION),
   'confirm-distribution': overlay(WORKFLOW_OVERLAYS.DISTRIBUTION),
+  'manual-complete-distribution': overlay(WORKFLOW_OVERLAYS.DISTRIBUTION),
   'review-drafts': overlay(WORKFLOW_OVERLAYS.NODE_WORKBENCH),
   artifact: overlay(WORKFLOW_OVERLAYS.ARTIFACT),
   blocked: overlay(WORKFLOW_OVERLAYS.NODE_WORKBENCH),

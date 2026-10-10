@@ -28,7 +28,7 @@ function filterKeywordMetrics(row = {}, config) {
     const failed = valid && (rule.operator === '>' ? metric.upper <= rule.threshold : metric.lower >= rule.threshold);
     const status = passed ? 'passed' : failed ? 'failed' : 'review';
     const reason = !rule.enabled ? '未启用' : passed ? '符合条件' : failed ? '未达到条件' : metric.status === 'missing' ? '缺少指标' : '指标不明确或区间跨越门槛';
-    return { ...rule, raw: metric.raw, status, reason, condition: `${rule.label} ${rule.operator} ${rule.display}` };
+    return { ...rule, raw: metric.raw, displayValue: metric.displayValue, trendRaw: metric.trendRaw, trendDirection: metric.trendDirection, status, reason, condition: `${rule.label} ${rule.operator} ${rule.display}` };
   });
   const status = checks.some(check => check.status === 'failed') ? 'failed'
     : checks.some(check => check.status === 'review') ? 'review' : 'passed';

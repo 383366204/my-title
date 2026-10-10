@@ -44,7 +44,7 @@ function parseSycmMetric(raw, { unit = 'number', numericPercent = true } = {}) {
   if (lower == null || upper == null || !Number.isFinite(lower) || !Number.isFinite(upper) || lower > upper) {
     return { ...result, status: 'ambiguous' };
   }
-  return { ...result, value: lower, lower, upper, status: range ? 'range' : 'exact' };
+  return { ...result, displayValue: text, value: lower, lower, upper, status: range ? 'range' : 'exact' };
 }
 
 const FIELDS = {
@@ -71,7 +71,16 @@ function normalizeSycmMetrics(row = {}) {
   for (const [field, [unit, ...aliases]] of Object.entries(FIELDS)) {
     const rawKey = aliases.find(key => row[key] != null && row[key] !== '');
     const existing = row.metricParserVersion === PARSER_VERSION && row.metrics?.[field];
-    metrics[field] = existing || parseSycmMetric(rawKey ? row[rawKey] : null, { unit });
+    metrics[field] = existing
+      ? { ...parseSycmMetric(existing.raw, { unit }), ...existing, displayValue: existing.displayValue ?? parseSycmMetric(existing.raw, { unit }).displayValue }
+      : parseSycmMetric(rawKey ? row[rawKey] : null, { unit });
+    if (!existing && rawKey && row[`${rawKey}_trend`] != null) {
+      const trendRaw = String(row[`${rawKey}_trend`]);
+      const direction = row[`${rawKey}_trendDirection`] || (trendRaw.startsWith('-') ? 'down' : trendRaw.startsWith('+') ? 'up' : null);
+      metrics[field] = { ...metrics[field], trendRaw, trendDirection: direction,
+        trendColor: row[`${rawKey}_trendColor`] || null,
+        trend: direction && Number.isFinite(parseFloat(trendRaw)) ? Math.abs(parseFloat(trendRaw)) / 100 * (direction === 'down' ? -1 : 1) : null };
+    }
     result[field] = metrics[field].value;
   }
   result.payConversionRate = result.conversionRate;

@@ -193,11 +193,11 @@ export const DistributionExportPanel = ({
   };
 
   const confirmManualDistributionComplete = async () => {
-    if (!manualCopyCurrent || !canRecordManualComplete || !currentRunId || manualCompleteStatus.status === 'completing') return;
+    if (!canRecordManualComplete || !currentRunId || manualCompleteStatus.status === 'completing' || ['checking', 'checking_confirmation', 'submitting', 'paused', 'completed'].includes(distributionJob?.status)) return;
     const categoryReminder = manualMissingCategoryCount > 0
       ? `其中 ${manualMissingCategoryCount} 条类目为空，请确认你已在人工铺货时选择了正确类目。\n\n`
       : '';
-    const confirmed = window.confirm(`${categoryReminder}确认已经按照刚复制的清单，${targetShops.length ? `在「${targetShops.map(shop => shop.name).join('、')}」` : ''}手动完成 ${activeRows.length} 个商品的铺货？确认后本次流水线将进入完成状态。`);
+    const confirmed = window.confirm(`${categoryReminder}确认当前清单中的 ${activeRows.length} 个商品${targetShops.length ? `在「${targetShops.map(shop => shop.name).join('、')}」` : ''}已由你人工核实完成？此操作不会提交商品或核对平台结果，将以人工确认方式结束本次流水线。`);
     if (!confirmed) return;
     setManualCompleteStatus({ status: 'completing', message: '正在记录人工铺货结果...' });
     const job = await completeManualDistributionJob({ input: copyTextValue, runId: currentRunId, ...selection });
@@ -225,7 +225,7 @@ export const DistributionExportPanel = ({
       <DistributionShopPicker key={currentRunId || 'new'} value={selectedShops} onChange={setSelectedShops} onEditingChange={setEditingShop} disabled={shopBusy} lockedShops={lockedShops} mode={distributionMode} onModeChange={setSelectedMode} />
       <div className="flex flex-wrap gap-2 relative z-[1]">
         <DistributionCopyButton label="复制铺货内容" primary disabled={!canManualCopy} onCopy={copyManualDistribution} format={copyFormat} onFormatChange={changeCopyFormat} successMessage={`已复制 ${activeRows.length} 条铺货内容，格式：${copyFormat.label}`} />
-        <button type="button" className="node-secondary-button success" disabled={!manualCopyCurrent || !canRecordManualComplete || manualCompleteStatus.status === 'completing' || distributionJob?.status === 'submitting'} onClick={confirmManualDistributionComplete}>
+        <button type="button" className="node-secondary-button success" disabled={!canRecordManualComplete || manualCompleteStatus.status === 'completing' || ['checking', 'checking_confirmation', 'submitting', 'paused', 'completed'].includes(distributionJob?.status)} onClick={confirmManualDistributionComplete}>
           {manualCompleteStatus.status === 'completing' ? <RefreshCw size={13} className="animate-spin" /> : <Check size={13} />}
           {manualCompleteStatus.status === 'completing' ? '正在确认' : '标记人工铺货完成'}
         </button>
@@ -361,7 +361,7 @@ export const DistributionExportPanel = ({
           </div>
           <div className="flex flex-wrap gap-[7px]">
             <DistributionCopyButton label="人工复制铺货" disabled={!canManualCopy} onCopy={copyManualDistribution} format={copyFormat} onFormatChange={changeCopyFormat} successMessage={`已复制 ${activeRows.length} 条铺货内容，格式：${copyFormat.label}`} />
-            <button type="button" className="node-secondary-button success" disabled={!manualCopyCurrent || !canRecordManualComplete || manualCompleteStatus.status === 'completing' || distributionJob?.status === 'submitting'} onClick={confirmManualDistributionComplete}>
+            <button type="button" className="node-secondary-button success" disabled={!canRecordManualComplete || manualCompleteStatus.status === 'completing' || ['checking', 'checking_confirmation', 'submitting', 'paused', 'completed'].includes(distributionJob?.status)} onClick={confirmManualDistributionComplete}>
               {manualCompleteStatus.status === 'completing' ? <RefreshCw size={13} className="animate-spin" /> : <Check size={13} />}
               {manualCompleteStatus.status === 'completing' ? '正在确认' : '标记人工铺货完成'}
             </button>

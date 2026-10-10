@@ -223,7 +223,11 @@ const WorkflowNodeSecondaryActions = ({ nodeId, data }) => {
         disabled: data.distributionJob.requestedAction === 'pause'
       }]
     : [];
-  const actions = [...distributionActions, ...runtimeActions, ...getWorkflowBlockerActions(nodeId, data)]
+  const manualActions = nodeId === 'export' && data?.workflowRunId
+    && ['needs_review', 'waiting_confirmation', 'waiting_manual', 'blocked', 'failed', 'paused'].includes(data.status)
+    && !['checking', 'checking_confirmation', 'submitting', 'paused', 'completed'].includes(data.distributionJob?.status)
+    ? [{ action: 'manual-complete-distribution', label: '手动完成', description: '打开清单，人工确认后将流程标记为完成，不会再次提交商品。' }] : [];
+  const actions = [...distributionActions, ...manualActions, ...runtimeActions, ...getWorkflowBlockerActions(nodeId, data)]
     .filter((action, index, list) => list.findIndex((item) => item.action === action.action) === index)
     .filter((action) => action.action !== getWorkflowNodeViewModel(nodeId, data).primaryAction.action)
     .slice(0, 3);

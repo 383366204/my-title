@@ -1,5 +1,21 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, ArrowRight } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ArrowUp, ArrowDown } from 'lucide-react';
+
+function metricPresentation(check, metric, fallback, legacyTrend, legacyDirection) {
+  let value = check?.displayValue ?? metric?.displayValue ?? check?.raw ?? metric?.raw ?? fallback;
+  let trendRaw = check?.trendRaw ?? metric?.trendRaw ?? legacyTrend;
+  const text = String(value ?? '').trim();
+  const match = text.match(/^(.*?)([+-]\d+(?:\.\d+)?%)$/)
+    || text.match(/^(.*?)\s+(\d+(?:\.\d+)?%)$/);
+  // 只拆完整指标后的变化率，不能把百分比区间的上界当作变化率。
+  if (match && /^[\d.]+(?:千|万|亿)?%?(?:\s*[~～至—–]\s*[\d.]+(?:千|万|亿)?%?)?$/.test(match[1].trim())) {
+    value = match[1].trim();
+    trendRaw ??= match[2];
+  }
+  const direction = check?.trendDirection ?? metric?.trendDirection ?? legacyDirection
+    ?? (String(trendRaw || '').startsWith('-') ? 'down' : String(trendRaw || '').startsWith('+') ? 'up' : null);
+  return { value, trendRaw, direction };
+}
 
 /**
  * 复核穿梭列表：移动只修改人工决定，不改写指标判断。
@@ -50,14 +66,22 @@ export function KeywordReviewTransfer({ rows, visibleRows, disabled, onMove }) {
               <div className="keyword-transfer-heading">
                 <strong>{row.keyword}</strong>
                 {(row.root || row.seed) && <span>词根：{row.root || row.seed}</span>}
-                {row.sycmData?.searchPopularity != null && <span>人气 {row.sycmData.searchPopularity}</span>}
-                {row.sycmData?.demandSupplyRatio != null && <span>供需 {row.sycmData.demandSupplyRatio}</span>}
+              </div>
+              <div className="keyword-transfer-metrics">
+                { [['searchPopularity', '人气'], ['demandSupplyRatio', '供需'], ['conversionRate', '转化'], ['tmallClickShare', '天猫占比']].map(([key, label]) => {
+                  const check = row.metricFilter?.checks?.find(item => item.key === key);
+                  const { value, trendRaw, direction } = metricPresentation(check, row.sycmData?.metrics?.[key], row.sycmData?.[key], row.sycmData?.[`${key}_trend`], row.sycmData?.[`${key}_trendDirection`]);
+                  const status = check?.enabled === false ? 'disabled' : check?.status || 'review';
+                  return <span key={key} className={`keyword-check-${status}`} title={check ? `${check.condition} · ${check.reason}` : '暂无筛选依据'}>
+                    {label} {value == null || value === '' ? '缺失' : String(value)}
+                    {trendRaw && <span className="keyword-metric-trend" style={{ color: direction === 'up' ? '#f87171' : direction === 'down' ? '#6ee7b7' : '#94a3b8' }} title={direction === 'up' ? '上涨' : direction === 'down' ? '下降' : '涨跌方向未知'}>
+                      {' '}{trendRaw}{direction === 'up' ? <ArrowUp size={12} aria-label="上涨" /> : direction === 'down' ? <ArrowDown size={12} aria-label="下降" /> : null}
+                    </span>}
+                    {!trendRaw && <span className="keyword-metric-trend text-slate-400" title="历史记录未保存变化率，需要重新采集生意参谋数据">-</span>}
+                  </span>;
+                })}
               </div>
               {!row.reviewRecommended && kept && <span className="keyword-status-warning">人工保留 · 未通过条件</span>}
-              <details open><summary>指标与筛选原因</summary>
-                {row.metricFilter?.checks?.map(check => <p key={check.key} className={`keyword-check-${check.enabled === false ? 'disabled' : check.status === 'passed' ? 'passed' : check.status === 'failed' ? 'failed' : 'review'}`}>{check.condition} · 当前值：{check.raw == null || check.raw === '' ? '缺失' : String(check.raw)} · {check.reason}</p>)}
-                {!row.metricFilter && <p>{row.reason || '暂无完整指标，需要人工判断'}</p>}
-              </details>
             </div>
             <button type="button" className="keyword-transfer-arrow" aria-label={`${kept ? '移出' : '保留'} ${row.keyword}`} title={kept ? '移出已保留' : '移入已保留'} disabled={disabled} onClick={() => move([row.key], target)}><Icon size={16} /></button>
           </div>)}

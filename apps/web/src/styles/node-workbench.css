@@ -878,14 +878,25 @@
 .keyword-transfer-content { display: grid; gap: 3px; min-width: 0; font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
 .keyword-transfer-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 10px; min-width: 0; }
 .keyword-transfer-heading > strong { font-size: 14px; }
+.keyword-transfer-metrics { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; min-width: 0; }
+.keyword-metric-trend { display: inline-flex; align-items: center; gap: 2px; margin-left: 4px; }
 .keyword-transfer-heading > span { color: var(--text-muted, #94a3b8); }
-.keyword-transfer-content details summary { cursor: pointer; color: var(--text-muted, #94a3b8); }
-.keyword-transfer-content details p { margin: 2px 0; }
 .keyword-transfer-content .keyword-check-passed { color: #6ee7b7; }
 .keyword-transfer-content .keyword-check-failed { color: #f87171; }
 .keyword-transfer-content .keyword-check-review { color: #fcd34d; }
 .keyword-transfer-content .keyword-check-disabled { color: var(--text-muted, #94a3b8); }
 .keyword-status-warning { color: #fcd34d; }
+.keyword-review-panel { display: flex; flex-direction: column; min-height: 0; max-height: 72dvh; }
+.keyword-review-scroll { min-height: 0; overflow: auto; padding-bottom: 12px; }
+.keyword-review-footer { flex-shrink: 0; margin: 0; padding: 12px 0; border-top: 1px solid var(--border-subtle, #475569); background: var(--bg-panel, #0f172a); }
+.workflow-node-overlay-body:has(.keyword-review-panel) { display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
+.workflow-node-overlay-body:has(.keyword-review-panel) > .node-operation-panel { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.workflow-node-overlay-body .keyword-review-panel { max-height: none; overflow: hidden; }
+.keyword-risk-dialog { position: fixed; inset: 0; margin: auto; width: min(460px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; padding: 20px; border: 1px solid #475569; border-radius: 8px; background: #0f172a; color: #e2e8f0; box-shadow: 0 24px 80px #0008; }
+.keyword-risk-dialog::backdrop { background: #020617b3; }
+.keyword-risk-dialog > strong { font-size: 16px; }
+.keyword-risk-dialog > p { margin: 12px 0 20px; font-size: 13px; line-height: 1.6; color: #cbd5e1; }
+.keyword-risk-dialog .node-product-actions { justify-content: flex-end; }
 .keyword-transfer-arrow { display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 1px solid var(--border-subtle, #475569); border-radius: 4px; background: transparent; color: inherit; cursor: pointer; }
 .keyword-transfer-arrow:hover:not(:disabled) { background: #334155; border-color: #94a3b8; }
 .keyword-transfer-arrow:disabled { opacity: .4; cursor: not-allowed; }
