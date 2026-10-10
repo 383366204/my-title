@@ -71,9 +71,16 @@ function normalizeSycmMetrics(row = {}) {
   for (const [field, [unit, ...aliases]] of Object.entries(FIELDS)) {
     const rawKey = aliases.find(key => row[key] != null && row[key] !== '');
     const existing = row.metricParserVersion === PARSER_VERSION && row.metrics?.[field];
-    metrics[field] = existing
-      ? { ...parseSycmMetric(existing.raw, { unit }), ...existing, displayValue: existing.displayValue ?? parseSycmMetric(existing.raw, { unit }).displayValue }
-      : parseSycmMetric(rawKey ? row[rawKey] : null, { unit });
+    if (existing) {
+      const reparsed = parseSycmMetric(existing.raw, { unit });
+      const merged = { ...reparsed, ...existing };
+      const dv = existing.displayValue ?? reparsed.displayValue;
+      if (dv != null) merged.displayValue = dv;
+      else delete merged.displayValue;
+      metrics[field] = merged;
+    } else {
+      metrics[field] = parseSycmMetric(rawKey ? row[rawKey] : null, { unit });
+    }
     if (!existing && rawKey && row[`${rawKey}_trend`] != null) {
       const trendRaw = String(row[`${rawKey}_trend`]);
       const direction = row[`${rawKey}_trendDirection`] || (trendRaw.startsWith('-') ? 'down' : trendRaw.startsWith('+') ? 'up' : null);
