@@ -9,10 +9,17 @@ const { chromium } = require(process.env.ECOM_PLAYWRIGHT_MODULE || 'playwright')
 const { scoreRootReviewCandidate } = require('../../skills/pipeline-flow/src/root-opportunity-review');
 const defaults = { demandSupplyRatio: { enabled: true, value: 1 }, searchPopularity: { enabled: true, value: 50 }, conversionRate: { enabled: true, value: 1 }, tmallClickShare: { enabled: true, value: 50 } };
 const source = [
-  { keyword: '杯垫', root: '垫子', sycmData: { searchPopularity: 100, demandSupplyRatio: 2, conversionRate: '2%', tmallClickShare: '20%' } },
-  { keyword: '茶托', root: '茶具', sycmData: { searchPopularity: 10, demandSupplyRatio: 2, conversionRate: '2%', tmallClickShare: '60%' } }
+  { keyword: '杯垫', root: '垫子', sycmData: { searchPopularity: 100, searchPopularity_trend: '35%', searchPopularity_trendDirection: 'up', demandSupplyRatio: 2, demandSupplyRatio_trend: '12%', demandSupplyRatio_trendDirection: 'down', conversionRate: '2%', conversionRate_trend: '8%', conversionRate_trendDirection: 'up', tmallClickShare: '20%', tmallClickShare_trend: '6%', tmallClickShare_trendDirection: 'down' } },
+  { keyword: '茶托', root: '茶具', sycmData: { searchPopularity: '20 ~ 50-35%', demandSupplyRatio: 2, conversionRate: '2%', tmallClickShare: '60%' } }
 ];
-const artifact = config => ({ combinedOpportunityReview: true, keywordFilter: config, rows: source.map(row => scoreRootReviewCandidate(row, config)) });
+const artifact = config => ({ combinedOpportunityReview: true, keywordFilter: config, rows: source.map(row => {
+  const scored = scoreRootReviewCandidate(row, config);
+  // 模拟未保存新版展示字段的历史筛选结果。
+  if (row.keyword === '茶托') for (const check of scored.metricFilter.checks) {
+    delete check.displayValue; delete check.trendRaw; delete check.trendDirection;
+  }
+  return scored;
+}) });
 const harness = `import React from 'react';import {createRoot} from 'react-dom/client';
 import '/src/index.css';import '/src/App.css';
 import {KeywordReviewOperationPanel} from '/src/features/workflow/components/keyword-review-operation-panel.jsx';
@@ -65,16 +72,30 @@ try {
   assert.equal(await left.getByText('茶托', { exact: true }).count(), 1);
   assert.equal(await right.getByText('杯垫', { exact: true }).count(), 1);
   assert.equal(await page.locator('.keyword-transfer-row').getByText(/^(不符合条件|符合条件)$/).count(), 0);
-  assert.equal(await page.locator('.keyword-transfer-row details[open]').count(), 2);
-  assert.equal(await right.locator('.keyword-check-passed').count(), 4);
-  assert.equal(await left.locator('.keyword-check-failed').count(), 2);
+  assert.equal(await page.locator('.keyword-transfer-row details').count(), 0);
+  assert.equal(await page.getByText('指标与筛选原因', { exact: true }).count(), 0);
+  assert.equal(await right.locator('.keyword-transfer-metrics .keyword-check-passed').count(), 4);
+  assert.equal(await left.locator('.keyword-transfer-metrics .keyword-check-failed').count(), 2);
   assert.equal(await right.locator('.keyword-check-passed').first().evaluate(el => getComputedStyle(el).color), 'rgb(110, 231, 183)');
   assert.equal(await left.locator('.keyword-check-failed').first().evaluate(el => getComputedStyle(el).color), 'rgb(248, 113, 113)');
   const heading = right.locator('.keyword-transfer-heading');
+  const legacyMetric = left.locator('.keyword-transfer-metrics > span').first();
+  assert.ok((await legacyMetric.innerText()).includes('人气 20 ~ 50'));
+  assert.equal(await legacyMetric.locator('.keyword-metric-trend').innerText(), '-35%');
+  assert.equal(await legacyMetric.locator('[aria-label="下降"]').count(), 1);
+  assert.equal(await legacyMetric.locator('.keyword-metric-trend').evaluate(el => getComputedStyle(el).color), 'rgb(110, 231, 183)');
   assert.equal(await heading.getByText('词根：垫子', { exact: true }).count(), 1);
-  assert.equal(await heading.getByText('人气 100', { exact: true }).count(), 1);
-  const headingTops = await heading.locator(':scope > *').evaluateAll(elements => elements.map(element => element.getBoundingClientRect().top));
-  assert.ok(Math.max(...headingTops) - Math.min(...headingTops) < 5);
+  const metrics = right.locator('.keyword-transfer-metrics');
+  assert.equal(await metrics.locator(':scope > span').count(), 4);
+  for (const [index, label, trend, direction] of [[0, '人气 100', '35%', '上涨'], [1, '供需 2', '12%', '下降'], [2, '转化 2%', '8%', '上涨'], [3, '天猫占比 20%', '6%', '下降']]) {
+    const item = metrics.locator(':scope > span').nth(index);
+    assert.ok((await item.innerText()).includes(label));
+    assert.equal((await item.locator('.keyword-metric-trend').innerText()).trim(), trend);
+    assert.equal(await item.locator(`[aria-label="${direction}"]`).count(), 1);
+  }
+  const headingBox = await heading.boundingBox();
+  const metricsBox = await metrics.boundingBox();
+  assert.ok(metricsBox.y >= headingBox.y + headingBox.height);
   await left.getByRole('checkbox', { name: '选择 茶托', exact: true }).check();
   await left.getByRole('button', { name: '保留所选 1', exact: true }).click();
   assert.equal(await right.getByText('茶托', { exact: true }).count(), 1);

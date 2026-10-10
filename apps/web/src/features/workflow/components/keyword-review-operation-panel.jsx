@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Check, CheckCircle2, Plus, RefreshCw, Settings2, X } from 'lucide-react';
 import { KeywordFilterModal } from './keyword-filter-modal.jsx';
 import { KeywordReviewTransfer } from './keyword-review-transfer.jsx';
@@ -45,6 +46,14 @@ export const KeywordReviewOperationPanel = ({
   }), [candidates, decisions, manualKeywords, combined]);
   const [confirming, setConfirming] = useState(false);
   const [riskConfirmation, setRiskConfirmation] = useState(false);
+  const riskDialog = useRef(null);
+  useEffect(() => {
+    if (!riskConfirmation) return;
+    const previous = document.activeElement;
+    const dialog = riskDialog.current;
+    dialog?.showModal();
+    return () => { dialog?.close(); previous?.focus?.(); };
+  }, [riskConfirmation]);
   const riskyCount = candidateRows.filter(row => row.reviewDecision === 'approved' && !row.reviewRecommended).length;
   const submitSelection = async () => {
     setConfirming(true);
@@ -93,8 +102,8 @@ export const KeywordReviewOperationPanel = ({
   };
 
   return (
-    <div className="grid gap-3">
-      <section className="grid gap-2.5 min-w-0">
+    <div className="keyword-review-panel">
+      <section className="keyword-review-scroll grid gap-2.5 min-w-0">
         <div className="flex items-center justify-between gap-2.5">
           <strong>{combined ? '关键词确认' : '候选词筛选'}</strong>
           <span>已选 {approvedCount} / 共 {candidateRows.length} 个 · 排除 {rejectedCount} 个</span>
@@ -211,24 +220,26 @@ export const KeywordReviewOperationPanel = ({
             继续显示（剩余 {visibleRows.length - visibleLimit} 个）
           </button>
         )}
-        <div className="node-product-actions">
+      </section>
+        <footer className="keyword-review-footer node-product-actions">
           <button type="button" className="node-primary-button" onClick={confirmSelection} disabled={confirming || !canConfirm || approvedCount === 0}>
             <CheckCircle2 size={14} /> {confirming ? '正在确认' : combined ? `确认 ${approvedCount} 个词并继续` : '确认筛词结果'}
           </button>
           <button type="button" className="node-secondary-button" onClick={onRetryMine} disabled={!canRetryMine}>
             <RefreshCw size={13} /> {retryLabel}
           </button>
-        </div>
-        {riskConfirmation && <section className="grid gap-2.5 p-3 border border-slate-800/90 rounded-lg bg-slate-950/[0.42]" role="alertdialog" aria-label="确认人工放行">
+        </footer>
+        {riskConfirmation && createPortal(<dialog ref={riskDialog} className="keyword-risk-dialog" role="alertdialog" aria-label="确认人工放行" aria-modal="true"
+          onCancel={event => { event.preventDefault(); if (!confirming) setRiskConfirmation(false); }}
+          onKeyDown={event => event.stopPropagation()}>
           <strong>确认人工放行 {riskyCount} 个关键词？</strong>
           <p>这些词未满足筛选条件或缺少指标。原始指标和筛选原因会保留，放行后可以继续货源选品。</p>
           <div className="node-product-actions">
-            <button type="button" className="node-secondary-button" disabled={confirming} onClick={() => setRiskConfirmation(false)}>返回调整</button>
-            <button type="button" className="node-primary-button" disabled={confirming || !canConfirm} onClick={submitSelection}>确认人工放行</button>
+            <button type="button" autoFocus className="node-secondary-button" disabled={confirming} onClick={() => setRiskConfirmation(false)}>返回调整</button>
+            <button type="button" className="node-primary-button" disabled={confirming || !canConfirm} onClick={submitSelection}>{confirming ? '正在确认' : '确认人工放行'}</button>
           </div>
-        </section>}
+        </dialog>, document.body)}
         <p className="node-workbench-note">{combined ? '按本次运行的筛选条件判断，人工放行保留原始指标。' : '确认后，只有"保留"的关键词会进入生意参谋校验；"筛除"的关键词会写入记录但不继续请求平台。'}</p>
-      </section>
       {filterOpen && <KeywordFilterModal runId={currentRunId} decisions={Object.fromEntries(Object.entries(decisions).filter(([key]) => candidates.some(row => candidateKeyword(row) === key)))}
         onRecollected={onKeywordFilterRecollected}
         onApplied={async result => { setRiskConfirmation(false); await onKeywordFilterApplied?.(result); }} onClose={() => setFilterOpen(false)} />}
