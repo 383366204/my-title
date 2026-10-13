@@ -58,7 +58,7 @@ export function StartConfigurationPanel({ mode, modeHint, node, onDone, onUpdate
   if (mode === 'competitor-analysis') {
     const parsed = parseCompetitorShareInputs(data.competitorText || '');
     return (
-      <div className="grid gap-4">
+      <div className="competitor-configuration-panel grid gap-4">
         <p className="m-0 border border-blue-500/30 rounded-[7px] bg-blue-900/[0.12] text-[#bfdbfe] text-[11px] leading-[1.55] p-2.5">{modeHint}</p>
         <fieldset className="grid gap-3.5 min-w-0 m-0 p-0 border-0 disabled:opacity-[0.72]" disabled={readOnly}>
           <section className="grid gap-2.5 border-b border-slate-700/[0.72] pb-3.5 last:border-b-0">
