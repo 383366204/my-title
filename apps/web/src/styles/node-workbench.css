@@ -343,6 +343,33 @@
   gap: 8px;
 }
 
+/* 节点快捷表单不继承画布字号，复选框不使用文本输入框的宽度。 */
+[aria-label="采集条件"] select,
+[aria-label="采集条件"] input:not([type="checkbox"]),
+[aria-label="评价生成设置"] select,
+[aria-label="评价生成设置"] input:not([type="checkbox"]) {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  padding: 4px 6px;
+  font-size: 11px;
+  line-height: 18px;
+}
+
+.sheet-configuration-panel input[type="checkbox"],
+.competitor-configuration-panel input[type="checkbox"],
+.order-sheet-append-toggle input[type="checkbox"],
+[aria-label="评价生成设置"] input[type="checkbox"] {
+  flex: 0 0 15px;
+  width: 15px;
+  min-width: 15px;
+  height: 15px;
+  margin: 0;
+  padding: 0;
+  accent-color: #2563eb;
+}
+
 .node-inline-form input,
 .node-wide-input,
 .node-field input,
