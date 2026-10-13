@@ -57,6 +57,16 @@ function createRuntimeView({ readRuntimeState, summarizePipelineRun, getWorkflow
         progress: { status: runtime.status === 'cancelled' ? 'cancelled' : 'running', current: 0, total: 0, percent: 0, message: '' }
       };
     }
+    if (runtime.activeStep && nodeStates[runtime.activeStep]) {
+      Object.assign(nodeStates[runtime.activeStep], {
+        blocker: runtime.blocker || null,
+        actionHint: runtime.actionHint || null,
+        manualAction: runtime.manualAction || null,
+        nextRecommendedAction: runtime.nextRecommendedAction || null,
+        platform: runtime.platform || null,
+        platformStatus: runtime.platformStatus || null
+      });
+    }
     return {
       runId,
       status: runtime.status || 'running',

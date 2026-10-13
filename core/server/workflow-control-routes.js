@@ -227,7 +227,7 @@ function registerWorkflowControlRoutes(app, {
       }
       const runtime = readRuntimeState({ runId });
       if (runtime) {
-        if (!['inspire', 'mine', 'keywordReview', 'verify', 'select', 'generate', 'export', 'collectRank', 'generateSheet', 'resolveShops', 'collectCompetitors', 'enrichCompetitors', 'analyzeCompetitors', 'competitorReport'].includes(nodeId)) {
+        if (!['start', 'inspire', 'mine', 'keywordReview', 'verify', 'select', 'generate', 'export', 'collectRank', 'generateSheet', 'resolveShops', 'collectCompetitors', 'enrichCompetitors', 'analyzeCompetitors', 'competitorReport'].includes(nodeId)) {
           return res.status(400).json({ ok: false, error: '不支持的流程步骤。' });
         }
         const manualOrderSheetCollection = nodeId === 'collectRank'
