@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Check, Copy, ExternalLink, X } from 'lucide-react';
 import { distributionRowUrl, rowSelectedKeyword } from './distribution-view-model.js';
 import { CategoryControl } from './category-control.jsx';
@@ -25,6 +26,7 @@ export function DistributionRow({
   onCopyText
 }) {
   const url = distributionRowUrl(row);
+  const [linkVisited, setLinkVisited] = useState(false);
   // 顶部展示原 1688 标题；上一步产物没匹配到时回退铺货标题
   const sourceTitle = String(row.sourceTitle || row.title || '未命名商品');
   const keyword = rowSelectedKeyword(row);
@@ -55,7 +57,7 @@ export function DistributionRow({
               <Check size={13} /> 加入当前清单
             </button>
             {url && (
-              <a className="node-secondary-button" href={url} target="_blank" rel="noreferrer">
+              <a className={`node-secondary-button ${linkVisited ? "!opacity-50" : ""}`} href={url} target="_blank" rel="noreferrer" onClick={() => setLinkVisited(true)}>
                 <ExternalLink size={13} /> 打开货源
               </a>
             )}
@@ -72,7 +74,7 @@ export function DistributionRow({
         <div className="flex items-center gap-1.5 min-w-0">
           <span className="shrink-0 w-[56px] text-slate-400 text-[11px] font-bold whitespace-nowrap">原标题</span>
           {url
-            ? <a href={url} target="_blank" rel="noreferrer" className="flex-auto min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-blue-400 hover:text-blue-300 underline underline-offset-2 text-[11px] leading-[1.35]" title={sourceTitle}>{sourceTitle}</a>
+            ? <a href={url} target="_blank" rel="noreferrer" onClick={() => setLinkVisited(true)} className={`flex-auto min-w-0 overflow-hidden text-ellipsis whitespace-nowrap underline underline-offset-2 text-[11px] leading-[1.35] ${linkVisited ? 'text-slate-500 hover:text-slate-400' : 'text-blue-400 hover:text-blue-300'}`} title={sourceTitle}>{sourceTitle}</a>
             : <strong className="block flex-auto min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-slate-200 text-[11px] leading-[1.35]" title={sourceTitle}>{sourceTitle}</strong>
           }
           <em className={`shrink-0 whitespace-nowrap rounded-full text-[10px] not-italic font-extrabold px-[7px] py-0.5 ${row.removed ? 'bg-[rgba(127,29,29,0.28)] text-rose-200' : 'bg-emerald-900/28 text-green-200'}`}>{row.removed ? '已移除' : '将导出'}</em>
@@ -135,7 +137,7 @@ export function DistributionRow({
             <Check size={13} /> 加入当前清单
           </button>
           {url && (
-            <a className="node-secondary-button" href={url} target="_blank" rel="noreferrer">
+            <a className={`node-secondary-button ${linkVisited ? "!opacity-50" : ""}`} href={url} target="_blank" rel="noreferrer" onClick={() => setLinkVisited(true)}>
               <ExternalLink size={13} /> 打开货源
             </a>
           )}
@@ -177,7 +179,7 @@ export function DistributionRow({
           {row.removed ? '恢复' : '移除'}
         </button>
         {url && (
-          <a className="node-secondary-button" href={url} target="_blank" rel="noreferrer">
+          <a className={`node-secondary-button ${linkVisited ? "!opacity-50" : ""}`} href={url} target="_blank" rel="noreferrer" onClick={() => setLinkVisited(true)}>
             <ExternalLink size={13} /> 打开货源
           </a>
         )}
