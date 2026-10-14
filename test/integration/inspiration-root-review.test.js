@@ -12,7 +12,7 @@ test('paused inspiration roots can be edited through API with conflict protectio
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'root-review-api-'));
   t.after(() => fs.rmSync(dataDir, { recursive: true, force: true }));
   const runId = 'api-review';
-  await runPipelineRuntime({ dataDir, runId, mode: 'daily', params: {
+  await runPipelineRuntime({ dataDir, runId, mode: 'daily', prepareBrowser: async () => ({ status: 'browser_ready' }), params: {
     reviewInspirationRoots: true, inspirationUseLLM: false, newsFeedUrls: [], keywordDataDir: path.join(dataDir, 'keywords')
   } });
   const artifact = readWorkflowNodeArtifact({ dataDir, runId, nodeId: 'inspire' });
