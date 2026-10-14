@@ -289,6 +289,7 @@ describe('pipeline runtime runner', () => {
     const result = await runPipelineRuntime({
       dataDir,
       mode: 'daily',
+      prepareBrowser: async () => ({ status: 'browser_ready' }),
       params: { mine: 5, discoveryMode: 'seed', source: 'local' },
       steps: ['mine']
     });
@@ -395,6 +396,7 @@ describe('pipeline runtime runner', () => {
     const result = await runPipelineRuntime({
       dataDir,
       mode: 'keyword',
+      prepareBrowser: async () => ({ status: 'browser_ready' }),
       params: { keywords },
       steps: ['start']
     });

@@ -1,5 +1,6 @@
 'use strict';
 const { prepareDistributionCategories } = require('../src/category-state');
+const { prepareSelectionBrowser } = require('./browser-preflight');
 
 const fs = require('fs');
 const path = require('path');
@@ -172,6 +173,7 @@ function createDefaultStepFns({ dataDir, runId, params, mode = 'daily', steps = 
     start: async ({ reportProgress }) => {
       reportProgress({ current: 0, total: keywordCount, message: keywordMode ? `准备 ${keywordCount} 个精确关键词` : '准备流程' });
       if (manualMode) return flowManualStart({ ...params, dataDir, runId });
+      if (!keywordMode) return { runId, status: 'browser_ready' };
       return flowKeywordStart({ ...params, dataDir, runId, keywords: exactKeywords });
     },
     mine: async ({ reportProgress }) => {
@@ -392,7 +394,10 @@ async function runPipelineRuntime(options = {}) {
             ? COMPETITOR_ANALYSIS_STEPS
           : (injectedStepFns && !injectedStepFns.inspire ? DEFAULT_STEPS : ['inspire', ...DEFAULT_STEPS])
   );
-  const steps = configuredSteps;
+  const needsBrowser = ['daily', 'keyword', 'root-keyword'].includes(mode)
+    && (!injectedStepFns || options.prepareBrowser);
+  const steps = needsBrowser && !configuredSteps.includes('start')
+    ? ['start', ...configuredSteps] : configuredSteps;
   const stepFns = injectedStepFns || createDefaultStepFns({ dataDir, runId, params, mode, steps });
   const requestedStart = options.retryStep || options.resumeFromStep || existingRuntime?.activeStep || steps[0];
   const startStep = requestedStart;
@@ -461,7 +466,19 @@ async function runPipelineRuntime(options = {}) {
         event: { event: 'step_started', step, status: 'running' }
       });
 
-      const stepFn = stepFns[step];
+      let stepFn = stepFns[step];
+      if (step === 'start' && needsBrowser) {
+        const originalStart = stepFn;
+        stepFn = async (context) => {
+          context.reportProgress({ current: 0, total: 1, message: '检测 CDP，不可用时自动启动 Chrome' });
+          const result = await (options.prepareBrowser || prepareSelectionBrowser)(params);
+          if (result.status !== 'browser_ready') return result;
+          const control = readRuntimeControl({ dataDir, runId });
+          if (control.requestedAction) return { status: control.requestedAction === 'cancel' ? 'cancelled' : 'paused', stepIncomplete: true };
+          context.reportProgress({ current: 1, total: 1, message: 'Chrome CDP 已就绪' });
+          return originalStart ? originalStart(context) : { runId, status: 'browser_ready' };
+        };
+      }
       if (!stepFn) throw new Error(`Unknown runtime step: ${step}`);
 
       lastResult = await stepFn({
@@ -561,7 +578,11 @@ async function runPipelineRuntime(options = {}) {
       patch: {
         status: runtimeStatus,
         platform: lastResult.platform,
-        manualAction: lastResult.manualAction
+        manualAction: lastResult.manualAction,
+        blocker: lastResult.blocker,
+        actionHint: lastResult.actionHint,
+        platformStatus: lastResult.platformStatus,
+        nextRecommendedAction: lastResult.nextRecommendedAction
       }
     });
     appendRuntimeEvent({

@@ -87,7 +87,7 @@ test('optional root review pauses before SYCM and prevents stale or active edits
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'root-review-'));
   t.after(() => fs.rmSync(dataDir, { recursive: true, force: true }));
   const options = { dataDir, runId: 'review-roots' };
-  const result = await runPipelineRuntime({ ...options, mode: 'daily', params: {
+  const result = await runPipelineRuntime({ ...options, mode: 'daily', prepareBrowser: async () => ({ status: 'browser_ready' }), params: {
     reviewInspirationRoots: true, inspirationUseLLM: false, newsFeedUrls: [],
     keywordDataDir: path.join(dataDir, 'keywords')
   } });
