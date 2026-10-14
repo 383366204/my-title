@@ -18,7 +18,7 @@ const { prepareKeywordSupplement } = require('../../../skills/pipeline-flow/src/
 function fixture(t) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'unified-selection-'));
   t.after(() => fs.rmSync(dataDir, { recursive: true, force: true }));
-  return { dataDir, runId: 'selection-test' };
+  return { dataDir, runId: 'selection-test', prepareBrowser: async () => ({ status: 'browser_ready' }) };
 }
 
 test('one selection entry validates and snapshots each concrete mode', () => {
