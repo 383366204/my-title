@@ -2,7 +2,7 @@
 
 const { WORKFLOW_NODE_IDS, localIsoDate } = require('./pipeline-definition-common');
 
-function workflowNodes(mode = 'daily') {
+function workflowNodes(mode = 'daily', options = {}) {
   const withSteps = (nodes) => nodes.map((node, index) => ({
     ...node,
     data: {
@@ -79,6 +79,67 @@ function workflowNodes(mode = 'daily') {
         length: 60,
         pages: 1
       };
+  if (mode === 'peer-discovery') {
+    const branch = options?.discoveryBranch || options?.branch || 'peer-analysis';
+    if (branch === 'image-selection') {
+      return withSteps(positionNodes([
+        {
+          id: WORKFLOW_NODE_IDS.start,
+          type: 'production-start',
+          data: {
+            label: '导入商品链接',
+            description: '输入淘宝商品链接，通过图搜寻找同款货源并铺货',
+            peerConfig: true,
+            discoveryBranch: 'image-selection',
+            links: '',
+            imagePriceRatioThreshold: '1',
+            searchMaxProducts: 10,
+            searchMaxPages: 1,
+            collectLimit: 40,
+            evidenceMaxAgeMs: 86400000,
+            allocationMethod: 'sequential',
+            port: 9222
+          }
+        },
+        { id: WORKFLOW_NODE_IDS.extractSources, type: 'pipeline-extract-sources', data: { label: '提取源商品', description: '打开商品页提取主图、标题、价格' } },
+        { id: WORKFLOW_NODE_IDS.findSimilarProducts, type: 'pipeline-find-similar', data: { label: '图搜找同款', description: '以主图搜索淘宝同款商品' } },
+        { id: WORKFLOW_NODE_IDS.collectPeerProducts, type: 'pipeline-collect-peer-products', data: { label: '采集同款商品', description: '从候选店铺采集同款商品' } },
+        { id: WORKFLOW_NODE_IDS.verifyImageSources, type: 'pipeline-verify-image-sources', data: { label: '1688货源验证', description: '图搜验证1688货源并保存证据' } },
+        { id: WORKFLOW_NODE_IDS.prepareListingDrafts, type: 'pipeline-prepare-listing-drafts', data: { label: '生成铺货草稿', description: '生成铺货标题与类目草稿' } },
+        { id: WORKFLOW_NODE_IDS.reviewPeerListings, type: 'pipeline-review-peer-listings', data: { label: '铺货复核与分发', description: '分配店铺、复核并提交' } },
+        { id: WORKFLOW_NODE_IDS.peerProductReport, type: 'pipeline-peer-product-report', data: { label: '生成选货报告', description: '输出图搜选货Excel报告', peerProductDownload: true } },
+        { id: WORKFLOW_NODE_IDS.end, type: 'production-end', data: { label: '完成', description: '查看选货铺货报告', peerProductDownload: true } }
+      ], { startX: 60, stepX: 250 }));
+    }
+    return withSteps(positionNodes([
+      {
+        id: WORKFLOW_NODE_IDS.start,
+        type: 'production-start',
+        data: {
+          label: '导入商品链接',
+          description: '输入淘宝商品链接，通过图搜发现高重合度同行店铺',
+          peerConfig: true,
+          discoveryBranch: 'peer-analysis',
+          links: '',
+          minProducts: 10,
+          minSourcing: 5,
+          minPayment: 10,
+          similarityThreshold: 0.45,
+          priceRatioThreshold: 0.7,
+          maxCandidateShops: 30,
+          searchMaxProducts: 10,
+          searchMaxPages: 1,
+          collectLimit: 40,
+          port: 9222
+        }
+      },
+      { id: WORKFLOW_NODE_IDS.extractSources, type: 'pipeline-extract-sources', data: { label: '提取源商品', description: '打开商品页提取主图、标题、价格' } },
+      { id: WORKFLOW_NODE_IDS.findSimilarProducts, type: 'pipeline-find-similar', data: { label: '图搜找同款', description: '以主图搜索淘宝同款商品' } },
+      { id: WORKFLOW_NODE_IDS.evaluateShops, type: 'pipeline-evaluate-shops', data: { label: '逐店评估', description: '采集销量榜、验证1688货源、判定同行' } },
+      { id: WORKFLOW_NODE_IDS.peerReport, type: 'pipeline-peer-report', data: { label: '生成报告', description: '输出同行店铺清单和Excel报告', peerDownload: true } },
+      { id: WORKFLOW_NODE_IDS.end, type: 'production-end', data: { label: '完成', description: '查看同行店铺清单', peerDownload: true } }
+    ], { startX: 90, stepX: 275 }));
+  }
   if (mode === 'competitor-analysis') {
     return withSteps(positionNodes([
       {
@@ -204,7 +265,34 @@ if (mode === 'watermark-removal') {
   ], { startX: 60, stepX: 260 }));
 }
 
-function workflowEdges(mode = 'daily') {
+function workflowEdges(mode = 'daily', options = {}) {
+  if (mode === 'peer-discovery') {
+    const branch = options?.discoveryBranch || options?.branch || 'peer-analysis';
+    const pairs = branch === 'image-selection'
+      ? [
+          [WORKFLOW_NODE_IDS.start, WORKFLOW_NODE_IDS.extractSources],
+          [WORKFLOW_NODE_IDS.extractSources, WORKFLOW_NODE_IDS.findSimilarProducts],
+          [WORKFLOW_NODE_IDS.findSimilarProducts, WORKFLOW_NODE_IDS.collectPeerProducts],
+          [WORKFLOW_NODE_IDS.collectPeerProducts, WORKFLOW_NODE_IDS.verifyImageSources],
+          [WORKFLOW_NODE_IDS.verifyImageSources, WORKFLOW_NODE_IDS.prepareListingDrafts],
+          [WORKFLOW_NODE_IDS.prepareListingDrafts, WORKFLOW_NODE_IDS.reviewPeerListings],
+          [WORKFLOW_NODE_IDS.reviewPeerListings, WORKFLOW_NODE_IDS.peerProductReport],
+          [WORKFLOW_NODE_IDS.peerProductReport, WORKFLOW_NODE_IDS.end]
+        ]
+      : [
+          [WORKFLOW_NODE_IDS.start, WORKFLOW_NODE_IDS.extractSources],
+          [WORKFLOW_NODE_IDS.extractSources, WORKFLOW_NODE_IDS.findSimilarProducts],
+          [WORKFLOW_NODE_IDS.findSimilarProducts, WORKFLOW_NODE_IDS.evaluateShops],
+          [WORKFLOW_NODE_IDS.evaluateShops, WORKFLOW_NODE_IDS.peerReport],
+          [WORKFLOW_NODE_IDS.peerReport, WORKFLOW_NODE_IDS.end]
+        ];
+    return pairs.map(([source, target]) => ({
+      id: `${source}-${target}`,
+      source,
+      target,
+      type: 'straight'
+    }));
+  }
   const pairs = mode === 'competitor-analysis'
     ? [
         [WORKFLOW_NODE_IDS.start, WORKFLOW_NODE_IDS.resolveShops],
@@ -276,8 +364,8 @@ function template(id, name, mode, description, meta = {}) {
     modeHint: meta.modeHint || '',
     production: true,
     workflow: {
-      nodes: workflowNodes(mode),
-      edges: workflowEdges(mode)
+      nodes: workflowNodes(mode, meta.options),
+      edges: workflowEdges(mode, meta.options)
     }
   };
 }
@@ -357,11 +445,17 @@ function listProductionWorkflowTemplates() {
       flowSummary: '流程：上传刷单表 → 解析订单组 → 生成并复核评价 → 导出评价表',
       modeHint: '上传实际使用过的 .xlsx 刷单表；订单号、手机号和旺旺只保存在本机。'
     }),
-    template('competitor-analysis-v1', '同行分析流水线', 'competitor-analysis', '进入同行店铺分析销量榜、新品榜和机会方向', {
-      entryLabel: '入口：同行分享链接',
+    template('competitor-analysis-v1', '指定店铺分析', 'competitor-analysis', '分析指定店铺的销量榜、新品榜和机会方向', {
+      entryLabel: '入口：指定店铺或店内商品分享链接',
       scenarioLabel: '适合：跟踪同行爆款和上新方向',
       flowSummary: '流程：录入同行 → 识别店铺 → 采集爆款与新品 → 补全商品链接 → 对比分析 → 导出报告',
       modeHint: '支持完整淘宝分享文案、短链接、商品链接和店铺链接；采集期间会使用当前淘宝客户端登录状态。'
+    }),
+    template('peer-discovery-v1', '以货找店', 'peer-discovery', '从淘宝商品出发发现相似店铺，也可切换图搜选货分支', {
+      entryLabel: '入口：淘宝商品链接',
+      scenarioLabel: '适合：寻找新同行或图搜选货',
+      flowSummary: '流程：提取商品 → 图搜同款 → 逐店评估/货源验证 → 导出报告',
+      modeHint: '以货找店输出候选店铺；图搜选货输出货源与铺货草稿。'
     })
   ];
 }
@@ -430,6 +524,20 @@ function templateForSummary(summary) {
   if (mode === 'manual' && manualVersion === 2) {
     return { id: 'manual-selection-v1', mode: 'manual', workflow: directInputManualWorkflowTemplate() };
   }
+  if (mode === 'peer-discovery') {
+    const branch = summary.runtime?.params?.discoveryBranch || summary.options?.discoveryBranch || 'peer-analysis';
+    const t = listProductionWorkflowTemplates().find(item => item.id === 'peer-discovery-v1');
+    if (branch === 'image-selection' && t) {
+      return {
+        ...t,
+        workflow: {
+          nodes: workflowNodes('peer-discovery', { discoveryBranch: 'image-selection' }),
+          edges: workflowEdges('peer-discovery', { discoveryBranch: 'image-selection' })
+        }
+      };
+    }
+    return t;
+  }
   const id = mode === 'manual'
       ? 'manual-selection-v2'
       : mode === 'order-sheet'
@@ -452,4 +560,10 @@ function listProductionWorkflowVariants() {
     ? item.selectionModes.map(variant => ({ ...item, ...variant })) : [item]);
 }
 
-module.exports = { listProductionWorkflowTemplates, listProductionWorkflowVariants, templateForSummary };
+module.exports = {
+  listProductionWorkflowTemplates,
+  listProductionWorkflowVariants,
+  templateForSummary,
+  workflowNodes,
+  workflowEdges
+};

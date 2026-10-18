@@ -83,6 +83,16 @@ export function getCompetitorConfigSummary(state = {}) {
     : '尚未录入同行链接';
 }
 
+export function getPeerConfigSummary(state = {}) {
+  const rawLinks = state.links ?? state.rawLinks ?? state.linksText ?? '';
+  const parsed = parseCompetitorShareInputs(rawLinks);
+  const branch = state.discoveryBranch === 'image-selection' ? '图搜选货' : '同行发现';
+  const count = parsed.links.length;
+  return count > 0
+    ? `${count} 条商品链接 · ${branch} · 采集上限 ${state.collectLimit ?? 40}`
+    : '尚未录入商品链接';
+}
+
 export function getRootKeywordConfigSummary(state = {}) {
   const roots = parseRootKeywords(state.rootsText ?? state.roots);
   const profile = state.sycmRiskProfile === 'conservative' ? '保守节奏' : state.sycmRiskProfile === 'custom' ? '自定义节奏' : '标准节奏';
@@ -595,7 +605,9 @@ export function getWorkflowNodeViewModel(nodeId, state = {}) {
     outputSummary: active ? '' : state.outputSummary || successLabel || '',
     successLabel,
     resultLocation,
-    configSummary: String(nodeId) === 'start' && state.reviewUpload === true
+    configSummary: String(nodeId) === 'start' && state.peerConfig === true
+      ? getPeerConfigSummary(state)
+      : String(nodeId) === 'start' && state.reviewUpload === true
       ? (state.uploadId ? `${state.uploadName || '刷单表'} · ${state.uploadSummary?.parsedSheetCount || state.groups?.length || 0} 个订单组 · ${state.uploadSummary?.productCount || 0} 个商品` : '尚未上传刷单表')
       : String(nodeId) === 'start' && state.orderSheetConfig === true
       ? getOrderSheetConfigSummary(state)

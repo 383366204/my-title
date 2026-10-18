@@ -21,6 +21,15 @@ const WORKFLOW_NODE_IDS = {
   enrichCompetitors: 'enrichCompetitors',
   analyzeCompetitors: 'analyzeCompetitors',
   competitorReport: 'competitorReport',
+  extractSources: 'extractSources',
+  findSimilarProducts: 'findSimilarProducts',
+  evaluateShops: 'evaluateShops',
+  peerReport: 'peerReport',
+  collectPeerProducts: 'collectPeerProducts',
+  verifyImageSources: 'verifyImageSources',
+  prepareListingDrafts: 'prepareListingDrafts',
+  reviewPeerListings: 'reviewPeerListings',
+  peerProductReport: 'peerProductReport',
   end: 'end'
 };
 
@@ -45,7 +54,16 @@ const ARTIFACT_BY_NODE = {
   [WORKFLOW_NODE_IDS.collectCompetitors]: { fileKey: 'competitorHotProducts', type: 'competitor-products' },
   [WORKFLOW_NODE_IDS.enrichCompetitors]: { fileKey: 'competitorProductDetails', type: 'jsonl' },
   [WORKFLOW_NODE_IDS.analyzeCompetitors]: { fileKey: 'competitorAnalysis', type: 'json' },
-  [WORKFLOW_NODE_IDS.competitorReport]: { fileKey: 'competitorReport', type: 'xlsx' }
+  [WORKFLOW_NODE_IDS.competitorReport]: { fileKey: 'competitorReport', type: 'xlsx' },
+  [WORKFLOW_NODE_IDS.extractSources]: { fileKey: 'sourceProducts', type: 'jsonl' },
+  [WORKFLOW_NODE_IDS.findSimilarProducts]: { fileKey: 'candidateShops', type: 'jsonl' },
+  [WORKFLOW_NODE_IDS.evaluateShops]: { fileKey: 'shopEvaluations', type: 'jsonl' },
+  [WORKFLOW_NODE_IDS.peerReport]: { fileKey: 'peerReport', type: 'xlsx' },
+  [WORKFLOW_NODE_IDS.collectPeerProducts]: { fileKey: 'peerProducts', type: 'jsonl' },
+  [WORKFLOW_NODE_IDS.verifyImageSources]: { fileKey: 'imageSourcingResults', type: 'jsonl' },
+  [WORKFLOW_NODE_IDS.prepareListingDrafts]: { fileKey: 'peerListingDrafts', type: 'jsonl' },
+  [WORKFLOW_NODE_IDS.reviewPeerListings]: { fileKey: 'peerSubmissionLedger', type: 'jsonl' },
+  [WORKFLOW_NODE_IDS.peerProductReport]: { fileKey: 'peerProductReport', type: 'xlsx' }
 };
 
 

@@ -165,6 +165,68 @@ function outputForNode(id, summary) {
       file: summary.files?.competitorReport || ''
     };
   }
+  if (id === WORKFLOW_NODE_IDS.extractSources) {
+    const count = Number(counts.sourceProducts ?? summary.runtime?.progress?.extractSources?.total ?? summary.runtime?.progress?.extractSources?.current ?? 0);
+    return {
+      count,
+      file: summary.files?.sourceProducts || ''
+    };
+  }
+  if (id === WORKFLOW_NODE_IDS.findSimilarProducts) {
+    const count = Number(counts.candidateShops ?? summary.runtime?.progress?.findSimilarProducts?.total ?? summary.runtime?.progress?.findSimilarProducts?.current ?? 0);
+    return {
+      count,
+      similarProductsCount: Number(counts.similarProducts ?? 0),
+      file: summary.files?.candidateShops || ''
+    };
+  }
+  if (id === WORKFLOW_NODE_IDS.evaluateShops) {
+    const count = Number(counts.shopEvaluations ?? summary.runtime?.progress?.evaluateShops?.total ?? summary.runtime?.progress?.evaluateShops?.current ?? 0);
+    return {
+      count,
+      qualifiedCount: Number(counts.qualifiedShops ?? summary.qualifiedCount ?? 0),
+      file: summary.files?.shopEvaluations || ''
+    };
+  }
+  if (id === WORKFLOW_NODE_IDS.peerReport) {
+    return {
+      file: summary.files?.peerReport || '',
+      jsonFile: summary.files?.peerDiscoveryResult || ''
+    };
+  }
+  if (id === WORKFLOW_NODE_IDS.collectPeerProducts) {
+    const count = Number(counts.peerProducts ?? summary.runtime?.progress?.collectPeerProducts?.collected ?? summary.runtime?.progress?.collectPeerProducts?.total ?? 0);
+    return {
+      count,
+      file: summary.files?.peerProducts || ''
+    };
+  }
+  if (id === WORKFLOW_NODE_IDS.verifyImageSources) {
+    const count = Number(counts.imageSourcingResults ?? summary.runtime?.progress?.verifyImageSources?.total ?? summary.runtime?.progress?.verifyImageSources?.current ?? 0);
+    return {
+      count,
+      file: summary.files?.imageSourcingResults || ''
+    };
+  }
+  if (id === WORKFLOW_NODE_IDS.prepareListingDrafts) {
+    const count = Number(counts.peerListingDrafts ?? summary.runtime?.progress?.prepareListingDrafts?.total ?? summary.runtime?.progress?.prepareListingDrafts?.current ?? 0);
+    return {
+      count,
+      file: summary.files?.peerListingDrafts || ''
+    };
+  }
+  if (id === WORKFLOW_NODE_IDS.reviewPeerListings) {
+    const count = Number(counts.peerSubmissions ?? summary.runtime?.progress?.reviewPeerListings?.total ?? summary.runtime?.progress?.reviewPeerListings?.current ?? 0);
+    return {
+      count,
+      file: summary.files?.peerSubmissionLedger || ''
+    };
+  }
+  if (id === WORKFLOW_NODE_IDS.peerProductReport) {
+    return {
+      file: summary.files?.peerProductReport || summary.files?.peerProductResult || ''
+    };
+  }
   if (id === WORKFLOW_NODE_IDS.review) {
     return { reviewFile: summary.reviewFile || summary.files?.distributionReview || '', mustReview: !!summary.mustReview };
   }

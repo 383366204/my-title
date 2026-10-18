@@ -193,6 +193,11 @@ export function getWorkflowLaunchParams(nodes = []) {
     delete params.keywordsText;
   }
 
+  if (params.linksText != null && (!params.links || (Array.isArray(params.links) && !params.links.length))) {
+    const res = parseCompetitorShareInputs(params.linksText);
+    params.links = res.links;
+  }
+
   if (params.maxLength != null && params.length == null) params.length = params.maxLength;
   delete params.maxLength;
   if (mine.mine != null || mine.count != null) params.mine = mine.mine ?? mine.count;
@@ -230,6 +235,21 @@ export function getWorkflowLaunchBlocker(mode, nodes = []) {
         status: 'blocked',
         error: message,
         logs: [{ timestamp: new Date().toISOString(), level: 'error', message: `[competitor_links_required] ${message}` }]
+      };
+    }
+    return null;
+  }
+  if (mode === 'peer-discovery') {
+    const rawLinks = params.links ?? params.rawLinks ?? params.linksText;
+    const hasLinks = Array.isArray(rawLinks)
+      ? rawLinks.length > 0
+      : (typeof rawLinks === 'string' && rawLinks.trim().length > 0);
+    if (!hasLinks) {
+      const message = '请先在开始节点输入至少一个淘宝商品链接';
+      return {
+        status: 'blocked',
+        error: message,
+        logs: [{ timestamp: new Date().toISOString(), level: 'error', message: `[peer_links_required] ${message}` }]
       };
     }
     return null;

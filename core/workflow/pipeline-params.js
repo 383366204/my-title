@@ -320,6 +320,18 @@ function sanitizeWorkflowParams(mode, raw = {}) {
       compareHistory: sanitizeBool(raw.compareHistory, true)
     };
   }
+  if (mode === 'peer-discovery') {
+    const rawLinks = raw.links ?? raw.rawLinks ?? raw.linksText;
+    const { normalizePeerDiscoveryParams } = require('../../skills/peer-discovery/src/params');
+    const params = normalizePeerDiscoveryParams({ ...raw, links: rawLinks });
+    const hasLinks = Array.isArray(params.links)
+      ? params.links.length > 0
+      : (typeof params.links === 'string' && params.links.trim().length > 0);
+    if (!hasLinks) {
+      throw new Error('请至少输入一个淘宝商品链接');
+    }
+    return params;
+  }
   throw new Error(`未知 workflow mode: ${mode}`);
 }
 
@@ -374,6 +386,27 @@ function buildPipelineCliArgs(mode, params = {}) {
     pushFlag(args, '--pages', clean.pages);
     pushFlag(args, '--min-blue-rows', clean.minBlueRows);
     if (!clean.fallbackHot) args.push('--no-hot-fallback');
+    args.push('--json');
+    return args;
+  }
+  if (mode === 'peer-discovery') {
+    const clean = sanitizeWorkflowParams(mode, params);
+    const linksArg = Array.isArray(clean.links) ? clean.links.join(',') : clean.links;
+    const args = ['bin/cli.js', 'discover-peers', '--links', linksArg];
+    pushFlag(args, '--discovery-branch', clean.discoveryBranch);
+    pushFlag(args, '--image-price-ratio-threshold', clean.imagePriceRatioThreshold);
+    pushFlag(args, '--min-products', clean.minProducts);
+    pushFlag(args, '--min-sourcing', clean.minSourcing);
+    pushFlag(args, '--min-payment', clean.minPayment);
+    pushFlag(args, '--similarity-threshold', clean.similarityThreshold);
+    pushFlag(args, '--price-ratio-threshold', clean.priceRatioThreshold);
+    pushFlag(args, '--max-shops', clean.maxCandidateShops);
+    pushFlag(args, '--search-max-products', clean.searchMaxProducts);
+    pushFlag(args, '--search-max-pages', clean.searchMaxPages);
+    pushFlag(args, '--collect-limit', clean.collectLimit);
+    pushFlag(args, '--port', clean.port);
+    if (clean.evidenceMaxAgeMs != null) pushFlag(args, '--evidence-max-age-ms', clean.evidenceMaxAgeMs);
+    pushFlag(args, '--allocation-method', clean.allocationMethod);
     args.push('--json');
     return args;
   }
@@ -494,6 +527,12 @@ function extractWorkflowRoots(workflow) {
   return normalizeRootKeywords(start?.data?.rootsText ?? start?.data?.roots ?? '').roots;
 }
 
+function extractWorkflowPeerLinks(workflow) {
+  const nodes = Array.isArray(workflow?.nodes) ? workflow.nodes : [];
+  const start = nodes.find(node => node?.id === WORKFLOW_NODE_IDS.start) || nodes[0];
+  return start?.data?.links || start?.data?.linksText || start?.data?.rawLinks || '';
+}
+
 /**
  * 从新旧 UI 请求体解析真实 pipeline 启动参数。
  * @param {object} body 请求体。
@@ -520,7 +559,7 @@ function resolveProductionWorkflowLaunch(body = {}) {
   for (const key of ['enabledDimensions', 'customInputs', 'candidateScreening', 'keywordFilter', 'reviewInspirationRoots']) {
     if (Object.prototype.hasOwnProperty.call(body, key)) params[key] = body[key];
   }
-  for (const key of ['keyword', 'keywords', 'roots', 'rootsText', 'sycmMode', 'period', 'compareType', 'sycmRiskProfile', 'sycmMinIntervalMs', 'sycmMaxIntervalMs', 'sycmBatchSize', 'sycmMinBatchCooldownMs', 'sycmMaxBatchCooldownMs', 'sycmMaxRetries', 'mine', 'discoveryMode', 'source', 'rootMode', 'rootLimit', 'rootCooldownDays', 'familyCooldownDays', 'inspirationSycmPages', 'inspirationUseLLM', 'maxObservingSeeds', 'maxObservingPoolSize', 'maxNewSeeds', 'autoReplenishSeeds', 'recordSeedFeedback', 'verify', 'select', 'generate', 'export', 'productsPerKeyword', 'length', 'port', 'pages', 'minBlueRows', 'fallbackHot', 'autoApproveKeywords', 'autoExpandVerify', 'verifyReserve', 'autoAllowReviewKeywords', 'reviewKeywordLimit', 'workRequirement', 'dateMode', 'startDate', 'endDate', 'orderDate', 'storeName', 'sheetType', 'sortMetric', 'productLimit', 'fileName', 'includeRawData', 'includeImages', 'amountMode', 'missingAmountPolicy', 'cartQuantity', 'rowSpan', 'orderNote', 'reviewGroupSize', 'includeSpacerRow', 'uploadId', 'uploadName', 'groups', 'reviewTone', 'reviewLength', 'useAI', 'inputMode', 'manualItems', 'manualItemsText', 'competitorText', 'competitorInputs', 'maxShops', 'hotLimit', 'newLimit', 'detailLimit', 'waitMs', 'compareHistory']) {
+  for (const key of ['keyword', 'keywords', 'roots', 'rootsText', 'sycmMode', 'period', 'compareType', 'sycmRiskProfile', 'sycmMinIntervalMs', 'sycmMaxIntervalMs', 'sycmBatchSize', 'sycmMinBatchCooldownMs', 'sycmMaxBatchCooldownMs', 'sycmMaxRetries', 'mine', 'discoveryMode', 'source', 'rootMode', 'rootLimit', 'rootCooldownDays', 'familyCooldownDays', 'inspirationSycmPages', 'inspirationUseLLM', 'maxObservingSeeds', 'maxObservingPoolSize', 'maxNewSeeds', 'autoReplenishSeeds', 'recordSeedFeedback', 'verify', 'select', 'generate', 'export', 'productsPerKeyword', 'length', 'port', 'pages', 'minBlueRows', 'fallbackHot', 'autoApproveKeywords', 'autoExpandVerify', 'verifyReserve', 'autoAllowReviewKeywords', 'reviewKeywordLimit', 'workRequirement', 'dateMode', 'startDate', 'endDate', 'orderDate', 'storeName', 'sheetType', 'sortMetric', 'productLimit', 'fileName', 'includeRawData', 'includeImages', 'amountMode', 'missingAmountPolicy', 'cartQuantity', 'rowSpan', 'orderNote', 'reviewGroupSize', 'includeSpacerRow', 'uploadId', 'uploadName', 'groups', 'reviewTone', 'reviewLength', 'useAI', 'inputMode', 'manualItems', 'manualItemsText', 'competitorText', 'competitorInputs', 'maxShops', 'hotLimit', 'newLimit', 'detailLimit', 'waitMs', 'compareHistory', 'links', 'rawLinks', 'linksText', 'discoveryBranch', 'imagePriceRatioThreshold', 'similarityThreshold', 'priceRatioThreshold', 'collectLimit', 'minProducts', 'minSourcing', 'minPayment', 'maxCandidateShops', 'searchMaxProducts', 'searchMaxPages', 'evidenceMaxAgeMs', 'allocationMethod', 'taobaoChannel']) {
     if (Object.prototype.hasOwnProperty.call(body, key)) params[key] = body[key];
   }
 
@@ -533,6 +572,10 @@ function resolveProductionWorkflowLaunch(body = {}) {
     const roots = extractWorkflowRoots(workflow);
     if (roots.length > 0) params.roots = roots;
   }
+  if (!params.links && !params.rawLinks && !params.linksText) {
+    const peerLinks = extractWorkflowPeerLinks(workflow);
+    if (peerLinks) params.links = peerLinks;
+  }
 
   let mode = body.mode || workflow?.mode || template?.mode || '';
   if (params.keywords && !hasExplicitMode && !hasExplicitTemplate) mode = params.items ? 'manual' : 'keyword';
@@ -540,6 +583,7 @@ function resolveProductionWorkflowLaunch(body = {}) {
   if (!mode && params.keywords) mode = params.items ? 'manual' : 'keyword';
   if (!mode && params.keyword) mode = 'keyword';
   if (mode === 'daily' && params.keyword && !body.mode && !template) mode = 'keyword';
+  if (!mode && (params.links || params.rawLinks || params.linksText)) mode = 'peer-discovery';
   if (!mode) {
     throw new Error('无法从工作流解析启动模式，请选择生产模板或提供关键词');
   }

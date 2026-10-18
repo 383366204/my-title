@@ -27,7 +27,12 @@ export function inferRunTitle(run = {}) {
   const workflowMode = String(run.workflow?.mode || run.mode || '').toLowerCase();
   if (SELECTION_MODES.some(item => item.mode === workflowMode)) return '选品铺货';
   if (workflowId === 'sycm-order-sheet-v1' || workflowMode === 'order-sheet') return '制作刷单表格流水线';
-  if (workflowId === 'competitor-analysis-v1' || workflowMode === 'competitor-analysis') return '同行分析流水线';
+  if (workflowId === 'competitor-analysis-v1' || workflowMode === 'competitor-analysis') return '指定店铺分析';
+  if (workflowId === 'peer-discovery-v1' || workflowMode === 'peer-discovery') {
+    const branch = run.params?.discoveryBranch || run.options?.discoveryBranch
+      || run.workflow?.nodes?.find(node => node.id === 'start')?.data?.discoveryBranch;
+    return branch === 'image-selection' ? '图搜选货' : '以货找店';
+  }
   const nodes = Array.isArray(run.workflow?.nodes) ? run.workflow.nodes : [];
   const start = nodes.find((node) => node.id === 'start') || nodes[0] || {};
   return String(start.data?.keyword || start.data?.label || run.runId || '未命名流程').trim();

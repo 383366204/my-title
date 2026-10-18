@@ -1,0 +1,711 @@
+{
+  "capturedAt": "2026-10-16T16:34:20.656Z",
+  "samples": [
+    {
+      "description": "919085178721 - 正常展开规格表，1PCS起批，逐项标价库存真实单件价",
+      "expectedVerified": true,
+      "data": {
+        "offerId": "919085178721",
+        "url": "https://detail.1688.com/offer/919085178721.html",
+        "title": "越南沙金光面龙骨项链仿黄金首饰品时尚布纹龙男士项链长款批发",
+        "dimensions": [
+          "颜色"
+        ],
+        "minimumOrderTexts": [
+          "1PCS起批"
+        ],
+        "minimumOrderQuantity": 1,
+        "unit": "PCS",
+        "skus": [
+          {
+            "specKey": "a8f4119817003536508092eba3db6bdd089e3a2fd6c4f08c585c58d564eb784b",
+            "specification": "4n60cm光面龙骨项链【30g】",
+            "skuPriceText": "28",
+            "rawPriceTexts": [
+              "¥28"
+            ],
+            "stockText": "库存5436PCS",
+            "priceText": "28",
+            "singlePiecePriceVerified": true,
+            "currency": "CNY",
+            "unit": "PCS",
+            "stockQuantity": 5436,
+            "available": true,
+            "imageUrl": "https://cbu01.alicdn.com/img/ibank/O1CN01Tw2qbn2EqAS1y2WK2_!!2213029988795-0-cib.jpg_sum.jpg",
+            "issues": []
+          },
+          {
+            "specKey": "0d6c708650fc2f2d8c4334a50acac752358519c8a373fe94058a2558f538e963",
+            "specification": "6n60cm光面龙骨项链【60g】",
+            "skuPriceText": "32",
+            "rawPriceTexts": [
+              "¥32"
+            ],
+            "stockText": "库存5399PCS",
+            "priceText": "32",
+            "singlePiecePriceVerified": true,
+            "currency": "CNY",
+            "unit": "PCS",
+            "stockQuantity": 5399,
+            "available": true,
+            "imageUrl": "https://cbu01.alicdn.com/img/ibank/O1CN01Ed4RWh2EqARvtYxCG_!!2213029988795-0-cib.jpg_sum.jpg",
+            "issues": []
+          },
+          {
+            "specKey": "6546e0199637cefb5b7c50e15382b6c3bcf59adfbd6e7f5ab0c63da572cb2849",
+            "specification": "8n60cm光面龙骨项链【100】",
+            "skuPriceText": "34",
+            "rawPriceTexts": [
+              "¥34"
+            ],
+            "stockText": "库存5412PCS",
+            "priceText": "34",
+            "singlePiecePriceVerified": true,
+            "currency": "CNY",
+            "unit": "PCS",
+            "stockQuantity": 5412,
+            "available": true,
+            "imageUrl": "https://cbu01.alicdn.com/img/ibank/O1CN01ZiYz0L2EqAS3zfMHP_!!2213029988795-0-cib.jpg_sum.jpg",
+            "issues": []
+          },
+          {
+            "specKey": "cd34a59337349a8e47dfc83923c14a43a54883ad9796a01883ab5d331ba9a663",
+            "specification": "8n70cm光面龙骨项链【126g】",
+            "skuPriceText": "36",
+            "rawPriceTexts": [
+              "¥36"
+            ],
+            "stockText": "库存5437PCS",
+            "priceText": "36",
+            "singlePiecePriceVerified": true,
+            "currency": "CNY",
+            "unit": "PCS",
+            "stockQuantity": 5437,
+            "available": true,
+            "imageUrl": "https://cbu01.alicdn.com/img/ibank/O1CN01qAAxvl2EqAS3CVWAq_!!2213029988795-0-cib.jpg_sum.jpg",
+            "issues": []
+          },
+          {
+            "specKey": "0b3d33e9ef31928e6635509cf60d5e2ebce508baa53d5825aa99e14e5fbe404e",
+            "specification": "10n60cm光面龙骨项链【150g】",
+            "skuPriceText": "40",
+            "rawPriceTexts": [
+              "¥40"
+            ],
+            "stockText": "库存5437PCS",
+            "priceText": "40",
+            "singlePiecePriceVerified": true,
+            "currency": "CNY",
+            "unit": "PCS",
+            "stockQuantity": 5437,
+            "available": true,
+            "imageUrl": "https://cbu01.alicdn.com/img/ibank/O1CN01MoRAs82EqAS2QaT6m_!!2213029988795-0-cib.jpg_sum.jpg",
+            "issues": []
+          },
+          {
+            "specKey": "130b845c3f39c1871d7260b771c7313d9c423c3913b91c1c8bcbbbc7640fe26f",
+            "specification": "10n70cm光面龙骨项链【170g】",
+            "skuPriceText": "45",
+            "rawPriceTexts": [
+              "¥45"
+            ],
+            "stockText": "库存5425PCS",
+            "priceText": "45",
+            "singlePiecePriceVerified": true,
+            "currency": "CNY",
+            "unit": "PCS",
+            "stockQuantity": 5425,
+            "available": true,
+            "imageUrl": "",
+            "issues": []
+          }
+        ],
+        "attributes": [
+          {
+            "name": "材质",
+            "value": "沙金"
+          },
+          {
+            "name": "处理工艺",
+            "value": "电镀"
+          },
+          {
+            "name": "链子样式",
+            "value": "常规链"
+          },
+          {
+            "name": "坠子材质",
+            "value": "沙金"
+          },
+          {
+            "name": "品牌",
+            "value": "红双禧"
+          },
+          {
+            "name": "流行元素",
+            "value": "龙"
+          },
+          {
+            "name": "造型",
+            "value": "动物/生肖"
+          },
+          {
+            "name": "货号",
+            "value": "XL129"
+          },
+          {
+            "name": "产地",
+            "value": "莆田"
+          },
+          {
+            "name": "是否多层",
+            "value": "否"
+          },
+          {
+            "name": "周长",
+            "value": "51cm(含)-60cm(含)"
+          },
+          {
+            "name": "主要下游平台",
+            "value": "淘宝,京东,ebay,PDD,亚马逊,wish,快手,LINIO,SHEIN,速卖通,天猫,独立站,LAZADA,拼多多,shopee,抖音"
+          },
+          {
+            "name": "颜色",
+            "value": "4n60cm光面龙骨项链【30g】,6n60cm光面龙骨项链【60g】,8n60cm光面龙骨项链【100】,8n70cm光面龙骨项链【126g】,10n60cm光面龙骨项链【150g】,10n70cm光面龙骨项链【170g】"
+          },
+          {
+            "name": "有可授权的自有品牌",
+            "value": "否"
+          },
+          {
+            "name": "是否跨境出口专供货源",
+            "value": "是"
+          },
+          {
+            "name": "上市年份/季节",
+            "value": "2025年春季"
+          },
+          {
+            "name": "风格",
+            "value": "时尚OL"
+          },
+          {
+            "name": "重量",
+            "value": "100"
+          },
+          {
+            "name": "风格分类",
+            "value": "时尚通勤"
+          },
+          {
+            "name": "主要销售地区",
+            "value": "非洲,欧洲,南美,东南亚,北美,东北亚,中东"
+          },
+          {
+            "name": "适用人群",
+            "value": "男式"
+          },
+          {
+            "name": "流行元素分类",
+            "value": "十二生肖"
+          }
+        ],
+        "promotionText": "",
+        "observedAt": 1792168455056,
+        "expiresAt": 1792254855056,
+        "parserVersion": "1688-visible-sku-v1",
+        "evidenceSource": "1688-detail-visible-sku"
+      }
+    },
+    {
+      "description": "981227737111 - 60天老客限价，存在定价限制条件，不能作为无条件可比单价",
+      "expectedVerified": false,
+      "data": {
+        "offerId": "981227737111",
+        "url": "https://detail.1688.com/offer/981227737111.html",
+        "title": "【承接代发】越南沙金男士嘻哈时尚霸气老板项链蛇骨链",
+        "dimensions": [
+          "颜色"
+        ],
+        "minimumOrderTexts": [
+          "1个起批60天老客价"
+        ],
+        "minimumOrderQuantity": 1,
+        "unit": "个",
+        "skus": [
+          {
+            "specKey": "e70df61991dbce2a8f914fa7f01fc53921cdaac4d91abc00ca6c3cc7d8ec4f98",
+            "specification": "【精品】男士小米星项链",
+            "skuPriceText": "7.5",
+            "rawPriceTexts": [
+              "¥7.5"
+            ],
+            "stockText": "库存49898个",
+            "priceText": null,
+            "singlePiecePriceVerified": false,
+            "currency": "CNY",
+            "unit": "个",
+            "stockQuantity": 49898,
+            "available": true,
+            "imageUrl": "https://cbu01.alicdn.com/img/ibank/O1CN01OnTprC2G5ZQXA410H_!!2219122228964-0-cib.jpg_sum.jpg",
+            "issues": [
+              "pricing_conditions_unverified"
+            ]
+          },
+          {
+            "specKey": "30ec393db66b5b64b255824b72f0826a2a9948f65990ef15f73f128efa11be48",
+            "specification": "【精品】老板项链",
+            "skuPriceText": "6.5",
+            "rawPriceTexts": [
+              "¥6.5"
+            ],
+            "stockText": "库存499962个",
+            "priceText": null,
+            "singlePiecePriceVerified": false,
+            "currency": "CNY",
+            "unit": "个",
+            "stockQuantity": 499962,
+            "available": true,
+            "imageUrl": "https://cbu01.alicdn.com/img/ibank/O1CN01wEhb9L2G5ZTJkw4E2_!!2219122228964-0-cib.jpg_sum.jpg",
+            "issues": [
+              "pricing_conditions_unverified"
+            ]
+          },
+          {
+            "specKey": "e841aa9bdcc90ca3fbb6516deb7cbc30d5b8ec4bcdaf0841a9177d1269c99acb",
+            "specification": "【精品】钱币项链",
+            "skuPriceText": "9.5",
+            "rawPriceTexts": [
+              "¥9.5"
+            ],
+            "stockText": "库存499727个",
+            "priceText": null,
+            "singlePiecePriceVerified": false,
+            "currency": "CNY",
+            "unit": "个",
+            "stockQuantity": 499727,
+            "available": true,
+            "imageUrl": "https://cbu01.alicdn.com/img/ibank/O1CN01m9TVAb2G5ZTKc4Mvt_!!2219122228964-0-cib.jpg_sum.jpg",
+            "issues": [
+              "pricing_conditions_unverified"
+            ]
+          },
+          {
+            "specKey": "c90ffee18d1ddaff41673e0eefb15bd230c8e3b7e14b4c25e689a942cb652b18",
+            "specification": "【精品】核桃项链",
+            "skuPriceText": "8.5",
+            "rawPriceTexts": [
+              "¥8.5"
+            ],
+            "stockText": "库存499562个",
+            "priceText": null,
+            "singlePiecePriceVerified": false,
+            "currency": "CNY",
+            "unit": "个",
+            "stockQuantity": 499562,
+            "available": true,
+            "imageUrl": "https://cbu01.alicdn.com/img/ibank/O1CN01fm6Ay62G5ZTJqzMBV_!!2219122228964-0-cib.jpg_sum.jpg",
+            "issues": [
+              "pricing_conditions_unverified"
+            ]
+          },
+          {
+            "specKey": "9ca6ef6ebccacf627f7873ffc21f78e1bbe239b3ae967a762a91399694b44184",
+            "specification": "【精品】关公牌+加长水波链",
+            "skuPriceText": "6",
+            "rawPriceTexts": [
+              "¥6"
+            ],
+            "stockText": "库存499993个",
+            "priceText": null,
+            "singlePiecePriceVerified": false,
+            "currency": "CNY",
+            "unit": "个",
+            "stockQuantity": 499993,
+            "available": true,
+            "imageUrl": "https://cbu01.alicdn.com/img/ibank/O1CN019T7FtJ2G5ZTLbYinY_!!2219122228964-0-cib.jpg_sum.jpg",
+            "issues": [
+              "pricing_conditions_unverified"
+            ]
+          },
+          {
+            "specKey": "19823908d612ef94f8c3a59924f71549b58853aee6cd825639b82a8b33e067ce",
+            "specification": "【精品】马牌+加长水波链",
+            "skuPriceText": "11",
+            "rawPriceTexts": [
+              "¥11"
+            ],
+            "stockText": "库存499995个",
+            "priceText": null,
+            "singlePiecePriceVerified": false,
+            "currency": "CNY",
+            "unit": "个",
+            "stockQuantity": 499995,
+            "available": true,
+            "imageUrl": "https://cbu01.alicdn.com/img/ibank/O1CN01Xzin0G2G5ZTKDfBoh_!!2219122228964-0-cib.jpg_sum.jpg",
+            "issues": [
+              "pricing_conditions_unverified"
+            ]
+          },
+          {
+            "specKey": "8efa3fe5cd30e07047114db12371bd27e6a0214ac723bfd9cd12215a5e73e46f",
+            "specification": "【精品】龙牌+加长水波链",
+            "skuPriceText": "5",
+            "rawPriceTexts": [
+              "¥5"
+            ],
+            "stockText": "库存499992个",
+            "priceText": null,
+            "singlePiecePriceVerified": false,
+            "currency": "CNY",
+            "unit": "个",
+            "stockQuantity": 499992,
+            "available": true,
+            "imageUrl": "https://cbu01.alicdn.com/img/ibank/O1CN01y1X5XW2G5ZTKABsRw_!!2219122228964-0-cib.jpg_sum.jpg",
+            "issues": [
+              "pricing_conditions_unverified"
+            ]
+          },
+          {
+            "specKey": "4ecdcecbbdab1c92300e10a2865f3631a0e05dafe7bf68aad1acf8169b9eee91",
+            "specification": "【精品】麻花项链",
+            "skuPriceText": "16",
+            "rawPriceTexts": [
+              "¥16"
+            ],
+            "stockText": "库存499997个",
+            "priceText": null,
+            "singlePiecePriceVerified": false,
+            "currency": "CNY",
+            "unit": "个",
+            "stockQuantity": 499997,
+            "available": true,
+            "imageUrl": "https://cbu01.alicdn.com/img/ibank/O1CN01ia4QJC2G5ZTK8LCQh_!!2219122228964-0-cib.jpg_sum.jpg",
+            "issues": [
+              "pricing_conditions_unverified"
+            ]
+          },
+          {
+            "specKey": "4df2e3330296a8f64f762047a9ebc39c6e8e0e669625c5035f913ab92f3f39b2",
+            "specification": "【精品】多宝项链01款",
+            "skuPriceText": "8",
+            "rawPriceTexts": [
+              "¥8"
+            ],
+            "stockText": "库存499800个",
+            "priceText": null,
+            "singlePiecePriceVerified": false,
+            "currency": "CNY",
+            "unit": "个",
+            "stockQuantity": 499800,
+            "available": true,
+            "imageUrl": "https://cbu01.alicdn.com/img/ibank/O1CN0185B6TU2G5ZTFOwNWC_!!2219122228964-0-cib.jpg_sum.jpg",
+            "issues": [
+              "pricing_conditions_unverified"
+            ]
+          },
+          {
+            "specKey": "d78a3a003f7ba36ad3260cad8fb3bbcc771ae23d0bad0acc3d5b1d406d8e7b1e",
+            "specification": "【精品】桶珠项链",
+            "skuPriceText": "11",
+            "rawPriceTexts": [
+              "¥11"
+            ],
+            "stockText": "库存499990个",
+            "priceText": null,
+            "singlePiecePriceVerified": false,
+            "currency": "CNY",
+            "unit": "个",
+            "stockQuantity": 499990,
+            "available": true,
+            "imageUrl": "https://cbu01.alicdn.com/img/ibank/O1CN01dJtLuC2G5ZTKCK94W_!!2219122228964-0-cib.jpg_sum.jpg",
+            "issues": [
+              "pricing_conditions_unverified"
+            ]
+          },
+          {
+            "specKey": "925d0c852d3f0d0ef5626be9ede24845bd695f894534d14bbd795d1691be7827",
+            "specification": "【精品】光珠项链6N",
+            "skuPriceText": "7.5",
+            "rawPriceTexts": [
+              "¥7.5"
+            ],
+            "stockText": "库存499992个",
+            "priceText": null,
+            "singlePiecePriceVerified": false,
+            "currency": "CNY",
+            "unit": "个",
+            "stockQuantity": 499992,
+            "available": true,
+            "imageUrl": "https://cbu01.alicdn.com/img/ibank/O1CN01O569Dl2G5ZTJkxoXQ_!!2219122228964-0-cib.jpg_sum.jpg",
+            "issues": [
+              "pricing_conditions_unverified"
+            ]
+          },
+          {
+            "specKey": "549c19e64db21d9e904f860826ea3153cff7fbff40c62e44f58e328404bbfbe9",
+            "specification": "【精品】光珠项链8N",
+            "skuPriceText": "9.5",
+            "rawPriceTexts": [
+              "¥9.5"
+            ],
+            "stockText": "库存499992个",
+            "priceText": null,
+            "singlePiecePriceVerified": false,
+            "currency": "CNY",
+            "unit": "个",
+            "stockQuantity": 499992,
+            "available": true,
+            "imageUrl": "https://cbu01.alicdn.com/img/ibank/O1CN01KZhHpl2G5ZTKAEE0j_!!2219122228964-0-cib.jpg_sum.jpg",
+            "issues": [
+              "pricing_conditions_unverified"
+            ]
+          },
+          {
+            "specKey": "98b6571f05ad4e7b34ef43e20a877e349efeed31642c4fe0f02af7b6bb55d697",
+            "specification": "【精品】双龙头项链",
+            "skuPriceText": "12",
+            "rawPriceTexts": [
+              "¥12"
+            ],
+            "stockText": "库存499824个",
+            "priceText": null,
+            "singlePiecePriceVerified": false,
+            "currency": "CNY",
+            "unit": "个",
+            "stockQuantity": 499824,
+            "available": true,
+            "imageUrl": "https://cbu01.alicdn.com/img/ibank/O1CN011bUKJJ2G5ZTKAGdlz_!!2219122228964-0-cib.jpg_sum.jpg",
+            "issues": [
+              "pricing_conditions_unverified"
+            ]
+          },
+          {
+            "specKey": "fdaff440947633e51d0c434d970b93117db6b02659d2e84030e5c406c22dbc87",
+            "specification": "【精品】福字大算盘",
+            "skuPriceText": "4",
+            "rawPriceTexts": [
+              "¥4"
+            ],
+            "stockText": "库存499997个",
+            "priceText": null,
+            "singlePiecePriceVerified": false,
+            "currency": "CNY",
+            "unit": "个",
+            "stockQuantity": 499997,
+            "available": true,
+            "imageUrl": "https://cbu01.alicdn.com/img/ibank/O1CN015VPihL2G5ZTFOzw1k_!!2219122228964-0-cib.jpg_sum.jpg",
+            "issues": [
+              "pricing_conditions_unverified"
+            ]
+          },
+          {
+            "specKey": "6f048942fda8214017aaef9d552bca50b71da5c71264af20a09d936d153b3077",
+            "specification": "【精品】帝王链",
+            "skuPriceText": "9",
+            "rawPriceTexts": [
+              "¥9"
+            ],
+            "stockText": "库存499848个",
+            "priceText": null,
+            "singlePiecePriceVerified": false,
+            "currency": "CNY",
+            "unit": "个",
+            "stockQuantity": 499848,
+            "available": true,
+            "imageUrl": "https://cbu01.alicdn.com/img/ibank/O1CN01baCsEB2G5ZTKADtKP_!!2219122228964-0-cib.jpg_sum.jpg",
+            "issues": [
+              "pricing_conditions_unverified"
+            ]
+          },
+          {
+            "specKey": "d5392ae2defdee19b8a22f5368cee1143d9e763ee1f4fb318fd0572b8b29ec81",
+            "specification": "男士扁橄榄珠项链",
+            "skuPriceText": "3.2",
+            "rawPriceTexts": [
+              "¥3.2"
+            ],
+            "stockText": "库存49631个",
+            "priceText": null,
+            "singlePiecePriceVerified": false,
+            "currency": "CNY",
+            "unit": "个",
+            "stockQuantity": 49631,
+            "available": true,
+            "imageUrl": "https://cbu01.alicdn.com/img/ibank/O1CN01EMAN742G5ZQWOFFYy_!!2219122228964-0-cib.jpg_sum.jpg",
+            "issues": [
+              "pricing_conditions_unverified"
+            ]
+          },
+          {
+            "specKey": "716153de89b95fc0f9c791c657725fc0590c9d27bbe71100ce71d5a67deac45a",
+            "specification": "男士福字扣项链",
+            "skuPriceText": "6.5",
+            "rawPriceTexts": [
+              "¥6.5"
+            ],
+            "stockText": "库存49971个",
+            "priceText": null,
+            "singlePiecePriceVerified": false,
+            "currency": "CNY",
+            "unit": "个",
+            "stockQuantity": 49971,
+            "available": true,
+            "imageUrl": "https://cbu01.alicdn.com/img/ibank/O1CN01YrLFWo2G5ZQVSzHrl_!!2219122228964-0-cib.jpg_sum.jpg",
+            "issues": [
+              "pricing_conditions_unverified"
+            ]
+          },
+          {
+            "specKey": "5c02ad80850302600a9288da8fc3e63a277717de3c44a69b879c26c8cd2b743f",
+            "specification": "男士蛇骨项链",
+            "skuPriceText": "3",
+            "rawPriceTexts": [
+              "¥3"
+            ],
+            "stockText": "库存49956个",
+            "priceText": null,
+            "singlePiecePriceVerified": false,
+            "currency": "CNY",
+            "unit": "个",
+            "stockQuantity": 49956,
+            "available": true,
+            "imageUrl": "https://cbu01.alicdn.com/img/ibank/O1CN0194dLmZ2G5ZQWEp6fo_!!2219122228964-0-cib.jpg_sum.jpg",
+            "issues": [
+              "pricing_conditions_unverified"
+            ]
+          },
+          {
+            "specKey": "ba5a1fca4c4d547fe83a5f3ed7f37c2aa1acd69cd5230ef38529191bb635b017",
+            "specification": "【礼盒10个】",
+            "skuPriceText": "5",
+            "rawPriceTexts": [
+              "¥5"
+            ],
+            "stockText": "库存999999个",
+            "priceText": null,
+            "singlePiecePriceVerified": false,
+            "currency": "CNY",
+            "unit": "个",
+            "stockQuantity": 999999,
+            "available": true,
+            "imageUrl": "https://cbu01.alicdn.com/img/ibank/O1CN01k9UGeiY4p8D1chua_!!2219122228964-0-cib.jpg_sum.jpg",
+            "issues": [
+              "pricing_conditions_unverified"
+            ]
+          },
+          {
+            "specKey": "d6c02eaf287cae50dcb6d8d68c7a39ab06b87125d9910b163803e6126d2efac8",
+            "specification": "【珍藏品礼盒10个】",
+            "skuPriceText": "7",
+            "rawPriceTexts": [
+              "¥7"
+            ],
+            "stockText": "库存1000000个",
+            "priceText": null,
+            "singlePiecePriceVerified": false,
+            "currency": "CNY",
+            "unit": "个",
+            "stockQuantity": 1000000,
+            "available": true,
+            "imageUrl": "https://cbu01.alicdn.com/img/ibank/O1CN01yxpHwibf24K2b8G8_!!2219122228964-0-cib.jpg_sum.jpg",
+            "issues": [
+              "pricing_conditions_unverified"
+            ]
+          }
+        ],
+        "attributes": [
+          {
+            "name": "材质",
+            "value": "合金"
+          },
+          {
+            "name": "处理工艺",
+            "value": "电镀"
+          },
+          {
+            "name": "链子样式",
+            "value": "蛇骨链"
+          },
+          {
+            "name": "坠子材质",
+            "value": "合金"
+          },
+          {
+            "name": "品牌",
+            "value": "无"
+          },
+          {
+            "name": "流行元素",
+            "value": "线条"
+          },
+          {
+            "name": "造型",
+            "value": "几何型"
+          },
+          {
+            "name": "产地",
+            "value": "广州"
+          },
+          {
+            "name": "是否多层",
+            "value": "否"
+          },
+          {
+            "name": "周长",
+            "value": "41cm(含)-50cm(含)"
+          },
+          {
+            "name": "主要下游平台",
+            "value": "淘宝,京东,快手,天猫,拼多多,抖音"
+          },
+          {
+            "name": "颜色",
+            "value": "【精品】男士小米星项链,【精品】老板项链,【精品】钱币项链,【精品】核桃项链,【精品】关公牌+加长水波链,【精品】马牌+加长水波链,【精品】龙牌+加长水波链,【精品】麻花项链,【精品】多宝项链01款,【精品】桶珠项链,【精品】光珠项链6N,【精品】光珠项链8N,【精品】双龙头项链,【精品】福字大算盘,【精品】帝王链,男士扁橄榄珠项链,男士福字扣项链,男士蛇骨项链,【礼盒10个】,【珍藏品礼盒10个】"
+          },
+          {
+            "name": "有可授权的自有品牌",
+            "value": "是"
+          },
+          {
+            "name": "是否跨境出口专供货源",
+            "value": "否"
+          },
+          {
+            "name": "上市年份/季节",
+            "value": "2023年冬季"
+          },
+          {
+            "name": "风格",
+            "value": "老钱风"
+          },
+          {
+            "name": "适用场景",
+            "value": "商务"
+          },
+          {
+            "name": "重量",
+            "value": "8"
+          },
+          {
+            "name": "风格分类",
+            "value": "时尚通勤"
+          },
+          {
+            "name": "适用人群",
+            "value": "男式"
+          },
+          {
+            "name": "流行元素分类",
+            "value": "几何"
+          }
+        ],
+        "promotionText": "",
+        "observedAt": 1792168460651,
+        "expiresAt": 1792254860651,
+        "parserVersion": "1688-visible-sku-v1",
+        "evidenceSource": "1688-detail-visible-sku"
+      }
+    }
+  ]
+}

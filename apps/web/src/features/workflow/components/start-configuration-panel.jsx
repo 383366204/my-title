@@ -106,6 +106,221 @@ export function StartConfigurationPanel({ mode, modeHint, node, onDone, onUpdate
     );
   }
 
+  if (mode === 'peer-discovery' || data.peerConfig === true) {
+    const rawLinksText = data.linksText ?? (Array.isArray(data.links) ? data.links.join('\n') : (data.links || ''));
+    const parsed = parseCompetitorShareInputs(rawLinksText);
+    const branch = data.discoveryBranch || 'peer-analysis';
+    const channel = data.taobaoChannel || 'auto';
+
+    const handleLinksChange = (text) => {
+      onUpdateField(node.id, 'linksText', text);
+      const res = parseCompetitorShareInputs(text);
+      onUpdateField(node.id, 'links', res.links);
+    };
+
+    return (
+      <div className="grid gap-4">
+        <p className="m-0 border border-blue-500/30 rounded-[7px] bg-blue-900/[0.12] text-[#bfdbfe] text-[11px] leading-[1.55] p-2.5">
+          {modeHint || (branch === 'image-selection' ? '输入淘宝商品链接，通过图搜寻找同款货源并铺货' : '输入淘宝商品链接，通过图搜发现高重合度同行店铺')}
+        </p>
+        <fieldset className="grid gap-3.5 min-w-0 m-0 p-0 border-0 disabled:opacity-[0.72]" disabled={readOnly}>
+          <section className="grid gap-2.5 border-b border-slate-700/[0.72] pb-3.5 last:border-b-0">
+            <h3>任务目标</h3>
+            <div className="node-segmented grid-cols-2 max-w-[420px]" role="group" aria-label="任务目标">
+              <button
+                type="button"
+                className={branch === 'image-selection' ? 'active' : ''}
+                aria-pressed={branch === 'image-selection'}
+                onClick={() => onUpdateField(node.id, 'discoveryBranch', 'image-selection')}
+              >
+                图搜选货
+              </button>
+              <button
+                type="button"
+                className={branch === 'peer-analysis' ? 'active' : ''}
+                aria-pressed={branch === 'peer-analysis'}
+                onClick={() => onUpdateField(node.id, 'discoveryBranch', 'peer-analysis')}
+              >
+                以货找店
+              </button>
+            </div>
+          </section>
+
+          <section className="grid gap-2.5 border-b border-slate-700/[0.72] pb-3.5 last:border-b-0">
+            <h3>淘宝商品链接</h3>
+            <label className="node-field">
+              <span>淘宝分享文案或商品链接</span>
+              <textarea
+                className="node-field-textarea"
+                rows="8"
+                value={rawLinksText}
+                onChange={(event) => handleLinksChange(event.target.value)}
+                placeholder={'每行一个淘宝商品链接或分享文案，例如：\nhttps://item.taobao.com/item.htm?id=748392010293\n【淘宝】https://m.tb.cn/h.xxxxx'}
+              />
+              <small>支持淘宝、天猫商品链接及分享文案，自动解析并提取有效链接。</small>
+            </label>
+            <div className="order-sheet-parse-summary" role="status">
+              <strong>{parsed.links.length} 条有效链接</strong>
+              {parsed.duplicateCount > 0 && <span className="min-w-0 text-amber-400 break-all">{parsed.duplicateCount} 条重复链接已合并</span>}
+              {parsed.invalidCount > 0 && <span className="text-red-300">{parsed.invalidCount} 条非淘宝链接已忽略</span>}
+            </div>
+          </section>
+
+          <section className="grid gap-2.5 border-b border-slate-700/[0.72] pb-3.5 last:border-b-0">
+            <h3>采集与通道设置</h3>
+            <div className="grid grid-cols-2 gap-3 max-sm:grid-cols-1">
+              <label className="node-field">
+                <span>淘宝采集通道</span>
+                <select
+                  value={channel}
+                  onChange={(event) => onUpdateField(node.id, 'taobaoChannel', event.target.value)}
+                >
+                  <option value="auto">自动（客户端优先）</option>
+                  <option value="native">客户端通道 (native)</option>
+                  <option value="web" disabled>网页通道（暂不支持淘宝图搜找同款）</option>
+                </select>
+                <small className="text-zinc-400">淘宝图搜找同款需要客户端 (native) 支持；网页端暂未开放图搜能力。</small>
+              </label>
+              <label className="node-field">
+                <span>Chrome 调试端口</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="65535"
+                  value={data.port ?? 9222}
+                  onChange={(event) => onUpdateField(node.id, 'port', Number.parseInt(event.target.value, 10) || 9222)}
+                />
+              </label>
+            </div>
+          </section>
+
+          {branch === 'image-selection' ? (
+            <section className="grid gap-2.5 border-b border-slate-700/[0.72] pb-3.5 last:border-b-0">
+              <h3>选货与铺货参数</h3>
+              <div className="grid grid-cols-2 gap-3 max-sm:grid-cols-1">
+                <label className="node-field">
+                  <span>1688价格比例上限</span>
+                  <input
+                    type="text"
+                    value={data.imagePriceRatioThreshold ?? '1'}
+                    onChange={(event) => onUpdateField(node.id, 'imagePriceRatioThreshold', event.target.value)}
+                    placeholder="如 1 或 0.8"
+                  />
+                  <small>1688采购价 / 淘宝售价，不超过此比例才视为有效货源</small>
+                </label>
+                <label className="node-field">
+                  <span>铺货分配策略</span>
+                  <select
+                    value={data.allocationMethod || 'sequential-average'}
+                    onChange={(event) => onUpdateField(node.id, 'allocationMethod', event.target.value)}
+                  >
+                    <option value="sequential-average">顺序平均分配</option>
+                    <option value="random-average">随机平均分配</option>
+                    <option value="random">纯随机分配</option>
+                    <option value="repeat">多店全量铺货</option>
+                  </select>
+                </label>
+                <label className="node-field">
+                  <span>店铺采集上限</span>
+                  <input
+                    type="number"
+                    min="10"
+                    max="50"
+                    value={data.collectLimit ?? 40}
+                    onChange={(event) => onUpdateField(node.id, 'collectLimit', Number.parseInt(event.target.value, 10) || 40)}
+                  />
+                </label>
+                <label className="node-field">
+                  <span>图搜单次数量</span>
+                  <input
+                    type="number"
+                    min="1"
+                    max="50"
+                    value={data.searchMaxProducts ?? 10}
+                    onChange={(event) => onUpdateField(node.id, 'searchMaxProducts', Number.parseInt(event.target.value, 10) || 10)}
+                  />
+                </label>
+              </div>
+            </section>
+          ) : (
+            <section className="grid gap-2.5 border-b border-slate-700/[0.72] pb-3.5 last:border-b-0">
+              <h3>同行分析参数</h3>
+              <div className="grid grid-cols-2 gap-3 max-sm:grid-cols-1">
+                <label className="node-field">
+                  <span>最少同款商品数</span>
+                  <input
+                    type="number"
+                    min="1"
+                    max="50"
+                    value={data.minProducts ?? 10}
+                    onChange={(event) => onUpdateField(node.id, 'minProducts', Number.parseInt(event.target.value, 10) || 10)}
+                  />
+                </label>
+                <label className="node-field">
+                  <span>最少低价货源数</span>
+                  <input
+                    type="number"
+                    min="1"
+                    max="50"
+                    value={data.minSourcing ?? 5}
+                    onChange={(event) => onUpdateField(node.id, 'minSourcing', Number.parseInt(event.target.value, 10) || 5)}
+                  />
+                </label>
+                <label className="node-field">
+                  <span>最低付款人数门槛</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max="10000"
+                    value={data.minPayment ?? 10}
+                    onChange={(event) => onUpdateField(node.id, 'minPayment', Number.parseInt(event.target.value, 10) || 0)}
+                  />
+                </label>
+                <label className="node-field">
+                  <span>价格比例门槛</span>
+                  <input
+                    type="number"
+                    step="0.05"
+                    min="0"
+                    max="10"
+                    value={data.priceRatioThreshold ?? 0.7}
+                    onChange={(event) => onUpdateField(node.id, 'priceRatioThreshold', Number.parseFloat(event.target.value) || 0.7)}
+                  />
+                </label>
+                <label className="node-field">
+                  <span>相似度门槛</span>
+                  <input
+                    type="number"
+                    step="0.05"
+                    min="0"
+                    max="1"
+                    value={data.similarityThreshold ?? 0.45}
+                    onChange={(event) => onUpdateField(node.id, 'similarityThreshold', Number.parseFloat(event.target.value) || 0.45)}
+                  />
+                </label>
+                <label className="node-field">
+                  <span>最多候选店铺数</span>
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    value={data.maxCandidateShops ?? 30}
+                    onChange={(event) => onUpdateField(node.id, 'maxCandidateShops', Number.parseInt(event.target.value, 10) || 30)}
+                  />
+                </label>
+              </div>
+            </section>
+          )}
+        </fieldset>
+        {showFooter && (
+          <div className="sticky bottom-0 z-[2] flex justify-end -mx-0.5 -mb-0.5 px-0.5 pt-3 pb-0.5 border-t border-slate-700/[0.76] bg-[var(--bg-panel)]">
+            <button type="button" className="node-primary-button" onClick={onDone}>{readOnly ? '关闭' : '完成配置'}</button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   if (mode === 'keyword') {
     const keywordText = data.keywordsText
       ?? (Array.isArray(data.keywords) ? data.keywords.join('\n') : data.keyword || '');

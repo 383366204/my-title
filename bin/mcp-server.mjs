@@ -18,6 +18,14 @@ const { generateTitlePipeline } = require('../skills/title-gen/src/pipeline');
 const { searchAll } = require('../skills/alibaba1688/src/search-1688');
 const { getRateLimiter, RateLimitError } = require('../skills/alibaba1688/src/rate-limiter');
 const taobaoOpc = require('../skills/taobao-opc/src/mcp-client');
+const {
+  initializePeerTask,
+  enqueuePeerTask,
+  requirePublishedPeerTask,
+  readPeerTaskStatus,
+  requestPeerTaskCancel
+} = require('../skills/peer-discovery/src/peer-task-coordinator');
+const { normalizePeerDiscoveryParams } = require('../skills/peer-discovery/src/params');
 
 const searchProductsAdapter = ({ coreWord, blueOceanWord, modifiers, semanticGroups, searchMode, webFilters, port, maxProducts, maxPages, maxResolveLinks, scrollLoad, scrollSteps }) =>
   searchAll(coreWord, blueOceanWord, modifiers, semanticGroups, {
@@ -1348,6 +1356,105 @@ server.tool(
         }),
       }],
     };
+  }
+);
+
+server.tool(
+  'discover_peers',
+  '以货找店：从淘宝商品链接发现同行店铺或图搜选货铺货（异步，返回 taskId）',
+  {
+    discoveryBranch: z.enum(['peer-analysis', 'image-selection']).optional().default('peer-analysis').describe('任务目标：同行店铺发现(peer-analysis) 或 图搜选货铺货(image-selection)'),
+    imagePriceRatioThreshold: z.union([z.number(), z.string()]).optional().default('1').describe('图搜分支价格比例阈值（严格小于判定，最多6位小数的正十进制数，如 1 或 0.8）'),
+    links: z.string().describe('淘宝商品链接，逗号分隔'),
+    minProducts: z.number().optional().default(10).describe('合格店铺最低在售商品数'),
+    minSourcing: z.number().optional().default(5).describe('合格店铺最低有1688货源商品数'),
+    minPayment: z.number().optional().default(10).describe('最低付款人数过滤线'),
+    similarityThreshold: z.number().optional().default(0.45).describe('标题相似度阈值'),
+    priceRatioThreshold: z.number().optional().default(0.7).describe('货源价格比例阈值（1688价/淘宝价）'),
+    maxCandidateShops: z.number().optional().default(30).describe('最大候选店铺数'),
+    searchMaxProducts: z.number().optional().default(10).describe('单品图搜同款数量上限'),
+    searchMaxPages: z.number().optional().default(1).describe('图搜最大翻页数'),
+    collectLimit: z.number().optional().default(40).describe('单店采集上限10-50件，最多滚动3次，不保证采满'),
+    port: z.number().optional().default(9222).describe('Chrome CDP 端口'),
+    evidenceMaxAgeMs: z.union([z.number(), z.string()]).optional().default(86400000).describe('图搜分支证据有效期（安全正整数，单位毫秒，默认24h）'),
+    allocationMethod: z.enum(['sequential', 'sequential-average', 'random-average', 'random', 'duplicate', 'repeat']).optional().default('sequential-average').describe('多店铺分配方式')
+  },
+  async ({ links, ...rawParams }) => {
+    try {
+      const params = normalizePeerDiscoveryParams({ links, ...rawParams });
+      const task = await initializePeerTask(params);
+      await enqueuePeerTask(task);
+      const snapshot = await readPeerTaskStatus(task);
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify(snapshot, null, 2)
+        }]
+      };
+    } catch (err) {
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({ ok: false, error: err.message, code: err.code || 'TASK_START_FAILED' }, null, 2)
+        }],
+        isError: true
+      };
+    }
+  }
+);
+
+server.tool(
+  'get_peer_discovery_status',
+  '查询同行发现任务进度',
+  {
+    taskId: z.string().describe('discover_peers 返回的任务 ID')
+  },
+  async ({ taskId }) => {
+    try {
+      const task = await requirePublishedPeerTask(taskId);
+      const snapshot = await readPeerTaskStatus(task);
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify(snapshot, null, 2)
+        }]
+      };
+    } catch (err) {
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({ ok: false, error: err.message, code: err.code || 'TASK_QUERY_FAILED' }, null, 2)
+        }],
+        isError: true
+      };
+    }
+  }
+);
+
+server.tool(
+  'cancel_peer_discovery',
+  '取消运行中的同行发现任务',
+  {
+    taskId: z.string().describe('要取消的任务 ID')
+  },
+  async ({ taskId }) => {
+    try {
+      const snapshot = await requestPeerTaskCancel(taskId);
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify(snapshot, null, 2)
+        }]
+      };
+    } catch (err) {
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({ ok: false, error: err.message, code: err.code || 'TASK_CANCEL_FAILED' }, null, 2)
+        }],
+        isError: true
+      };
+    }
   }
 );
 

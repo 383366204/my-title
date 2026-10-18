@@ -1,0 +1,15 @@
+.peer-review-panel { display: grid; gap: 16px; min-width: 0; font-size: 13px; }
+.peer-review-toolbar, .peer-review-panel footer { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.peer-review-panel button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 10px; border: 1px solid #697586; border-radius: 6px; }
+.peer-review-panel button:not(:disabled):hover { background: #334155; }
+.peer-review-panel button:disabled { opacity: .5; cursor: not-allowed; }
+.peer-review-panel fieldset { display: flex; flex-wrap: wrap; gap: 12px; border: 1px solid #697586; padding: 12px; }
+.peer-review-panel label { display: inline-flex; align-items: center; gap: 6px; }
+.peer-review-panel input[type="checkbox"], .peer-review-panel input[type="radio"] { width: 16px; height: 16px; flex: 0 0 16px; margin: 0; }
+.peer-review-table-wrap { overflow: auto; max-height: 45vh; }
+.peer-review-panel table { width: 100%; border-collapse: collapse; min-width: 650px; }
+.peer-review-panel th, .peer-review-panel td { padding: 8px; text-align: left; border-bottom: 1px solid #697586; }
+.peer-review-panel td input:not([type="checkbox"]) { width: 100%; min-width: 120px; box-sizing: border-box; font-size: 13px; }
+.peer-review-panel a { color: #60a5fa; text-decoration: underline; }
+.peer-review-error { color: #f87171; white-space: pre-wrap; }
+.peer-review-panel footer { position: sticky; bottom: 0; padding: 12px 0; background: var(--bg-panel, #111827); }

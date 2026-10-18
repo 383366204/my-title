@@ -6,6 +6,7 @@ export const WORKFLOW_ACTION_KINDS = Object.freeze({
 
 export const WORKFLOW_OVERLAYS = Object.freeze({
   ARTIFACT: 'artifact',
+  PEER_REVIEW: 'peer-review',
   KEYWORD_FILTER: 'keyword-filter',
   DISTRIBUTION: 'distribution',
   NODE_WORKBENCH: 'node-workbench',
@@ -20,6 +21,7 @@ const select = Object.freeze({ kind: WORKFLOW_ACTION_KINDS.SELECT });
 const overlay = (target) => Object.freeze({ kind: WORKFLOW_ACTION_KINDS.OVERLAY, overlay: target });
 
 export const WORKFLOW_ACTION_ROUTES = Object.freeze({
+  'peer-review': overlay(WORKFLOW_OVERLAYS.PEER_REVIEW),
   'manual-input': overlay(WORKFLOW_OVERLAYS.START_CONFIG),
   'open-watermark-studio': overlay(WORKFLOW_OVERLAYS.WATERMARK_STUDIO),
   'configure-sheet': overlay(WORKFLOW_OVERLAYS.SHEET_CONFIG),

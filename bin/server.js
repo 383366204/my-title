@@ -14,6 +14,7 @@ const { registerCategoryRoutes } = require('../core/server/category-routes');
 
 const { registerWorkflowQueryRoutes } = require('../core/server/workflow-query-routes');
 const { registerOrderSheetDraftRoutes } = require('../core/server/order-sheet-draft-routes');
+const { registerPeerReviewRoutes } = require('../core/server/peer-review-routes');
 const { createWorkbenchCoordinator } = require('../core/server/workbench-coordinator');
 const { registerPipelineRoutes } = require('../core/server/pipeline-routes');
 const { registerWorkflowControlRoutes } = require('../core/server/workflow-control-routes');
@@ -485,6 +486,7 @@ app.post('/api/workflows/runs/:runId/review-confirm', (req, res) => {
 });
 
 registerOrderSheetDraftRoutes(app, { readRuntimeState, getOrderSheetDraft, saveOrderSheetDraft });
+registerPeerReviewRoutes(app);
 
 function handleConfirmOrderSheet(req, res) {
   if (workbench.current) {

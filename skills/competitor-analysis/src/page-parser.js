@@ -152,6 +152,7 @@ module.exports = {
   cleanLines,
   firstElementIndex,
   parseCompactNumber,
+  parseShopKey,
   parseShopPage,
   parseSortedProducts,
   paymentSignal

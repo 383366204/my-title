@@ -2160,4 +2160,68 @@ program
     }
   });
 
+program
+  .command('discover-peers')
+  .description('以货找店：从淘宝商品链接发现同行店铺')
+  .requiredOption('-l, --links <links>', '淘宝商品链接（逗号分隔或文件路径）')
+  .option('--discovery-branch <branch>', 'peer-analysis 或 image-selection', 'peer-analysis')
+  .option('--image-price-ratio-threshold <ratio>', '图搜分支严格价格比上限，默认1', '1')
+  .option('--min-products <n>', '达标商品数量闸门', '10')
+  .option('--min-sourcing <n>', '有货源商品数量闸门', '5')
+  .option('--min-payment <n>', '付款人数下界', '10')
+  .option('--similarity-threshold <n>', '标题相似度阈值', '0.45')
+  .option('--price-ratio-threshold <n>', '价格比阈值', '0.7')
+  .option('--max-shops <n>', '候选店铺上限', '30')
+  .option('--search-max-products <n>', '1688搜索每页商品数', '10')
+  .option('--search-max-pages <n>', '1688搜索最大页数', '1')
+  .option('--collect-limit <n>', '单店采集上限（10-50件，最多滚动3次，不保证采满）', '40')
+  .option('--port <n>', 'Chrome CDP 端口', '9222')
+  .option('--evidence-max-age-ms <ms>', '图搜分支证据有效期（毫秒，默认86400000=24h）')
+  .option('--allocation-method <method>', '多店铺分配方式: sequential/random-average/random/duplicate', 'sequential')
+  .option('--json', '仅输出 JSON')
+  .action(async (opts) => {
+    const { runPipelineRuntime } = require('../skills/pipeline-flow/runtime/runner');
+    const { normalizePeerDiscoveryParams } = require('../skills/peer-discovery/src/params');
+    try {
+      const params = normalizePeerDiscoveryParams({
+        discoveryBranch: opts.discoveryBranch,
+        imagePriceRatioThreshold: opts.imagePriceRatioThreshold,
+        links: opts.links,
+        minProducts: opts.minProducts,
+        minSourcing: opts.minSourcing,
+        minPayment: opts.minPayment,
+        similarityThreshold: opts.similarityThreshold,
+        priceRatioThreshold: opts.priceRatioThreshold,
+        maxShops: opts.maxShops,
+        searchMaxProducts: opts.searchMaxProducts,
+        searchMaxPages: opts.searchMaxPages,
+        collectLimit: opts.collectLimit,
+        port: opts.port,
+        evidenceMaxAgeMs: opts.evidenceMaxAgeMs,
+        allocationMethod: opts.allocationMethod
+      });
+      const result = await runPipelineRuntime({ mode: 'peer-discovery', params });
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.log('\n[同行发现/选货流水线执行完成]');
+        console.log(`运行 ID: ${result.runId}`);
+        console.log(`运行状态: ${result.status}`);
+        if (params.discoveryBranch === 'image-selection') {
+          console.log(`草稿生成: ${result.totalDrafts ?? 0} 个`);
+        } else {
+          console.log(`合格店铺: ${result.qualifiedCount ?? 0} 家`);
+        }
+      }
+    } catch (error) {
+      if (opts.json) {
+        console.log(JSON.stringify({ ok: false, error: error.message }, null, 2));
+      } else {
+        console.error('\n❌ 错误:', error.message);
+      }
+      process.exit(1);
+    }
+  });
+
 program.parse();
+
