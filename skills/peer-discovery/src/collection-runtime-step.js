@@ -52,11 +52,18 @@ async function runPeerExtractStep(options) {
     });
     checkControl();
     if (requestedAction) return interrupted();
+    const products = result.products || result.sourceProducts || [];
+    if (result.ok === false || result.status === 'manual_action_required' || products.length === 0) {
+      const reason = (result.errors || []).map(error => error.message).filter(Boolean).join('；');
+      return blocked(reason || result.message || '未提取到有效源商品，请检查商品链接后重试', {
+        errors: result.errors || [], sourceProducts: products, validCount: products.length,
+      });
+    }
     return {
       status: 'completed',
-      sourceProducts: result.sourceProducts || [],
-      validCount: result.validCount || 0,
-      total: result.total || 0,
+      sourceProducts: products,
+      validCount: products.length,
+      total: result.total || products.length,
       errors: result.errors || []
     };
   } catch (error) {
@@ -105,6 +112,7 @@ async function runPeerSimilarStep(options) {
       runId: options.runId,
       maxCandidateShops: options.params?.maxCandidateShops ?? options.maxCandidateShops ?? 30,
       channel: options.params?.taobaoChannel || options.channel || 'auto',
+      port: options.params?.port || options.port,
       imageSearcher: options.imageSearcher,
       signal: controller.signal,
       onProgress: progress => options.reportProgress?.({
@@ -115,6 +123,11 @@ async function runPeerSimilarStep(options) {
     });
     checkControl();
     if (requestedAction) return interrupted();
+    if (result.ok === false || result.status === 'manual_action_required') {
+      return blocked(result.message || (result.errors || []).map(error => error.message).filter(Boolean).join('；') || '同款搜索失败，请重试', {
+        errors: result.errors || [],
+      });
+    }
     return {
       status: 'completed',
       candidates: result.candidates || [],

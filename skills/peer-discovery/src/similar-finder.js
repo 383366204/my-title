@@ -6,6 +6,7 @@ const { parseShopKey, canonicalShopUrl } = require('../../competitor-analysis/sr
 const { imageSearchSingleRaw } = require('../../title-gen/src/search-taobao-image');
 const { normalizeTaobaoWebCards } = require('./taobao-web-cards');
 const { isPlatformBlocker } = require('./sourcing-matcher');
+const { searchTaobaoWebImage } = require('./taobao-web-image-search');
 
 /**
  * Standardize one candidate similar product from native or web image search results.
@@ -108,11 +109,6 @@ async function findSimilarProducts(options = {}) {
   const errors = [];
   // 统计真正完成的图搜次数（含返回 0 条），用于区分"无同款"与"全部失败"
   const channel = options.channel || options.params?.resolvedTaobaoChannel || (options.params?.taobaoChannel === 'web' ? 'web' : 'native');
-  if (channel === 'web' && typeof options.imageSearcher !== 'function') {
-    const error = new Error('淘宝网页端通道暂不支持图搜同款，请选择客户端通道 (native) 或自动模式');
-    error.code = 'ERR_WEB_CHANNEL_IMAGE_SEARCH_UNSUPPORTED';
-    throw error;
-  }
 
   let searchesCompleted = 0;
   let searchesFailed = 0;
@@ -135,6 +131,9 @@ async function findSimilarProducts(options = {}) {
       if (typeof options.imageSearcher === 'function') {
         const res = await options.imageSearcher(source, { signal });
         rawItems = Array.isArray(res) ? res : (res?.products || parseNativeProducts(res));
+      } else if (channel === 'web') {
+        const response = await (options.webImageSearcher || searchTaobaoWebImage)(source, { port: options.port, signal, onProgress, guardOptions: options.guardOptions });
+        rawItems = response.products;
       } else {
         // 默认 Native CLI 图搜
         const rawOutput = await imageSearchSingleRaw(source.mainImageUrl, source.itemId, { signal, timeout: 30000 });

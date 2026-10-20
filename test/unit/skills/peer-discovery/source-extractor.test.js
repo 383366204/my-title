@@ -89,3 +89,38 @@ test('extractSourceProducts respects AbortSignal', async () => {
     { name: 'AbortError' }
   );
 });
+
+test('share links resolve item identity after navigation and failed retries clear stale products', async t => {
+  const runDir = await fs.mkdtemp(path.join(os.tmpdir(), 'source-share-'));
+  t.after(() => fs.rm(runDir, { recursive: true, force: true }));
+  const inputs = ['https://e.tb.cn/h.example'];
+  const result = await extractSourceProducts({ inputs, runDir, extractor: async () => ({
+    resolvedUrl: 'https://item.taobao.com/item.htm?id=123', title: '商品', mainImageUrl: 'https://img.alicdn.com/test.jpg'
+  }) });
+  assert.equal(result.products[0].itemId, '123');
+  const failed = await extractSourceProducts({ inputs, runDir, extractor: async () => ({ resolvedUrl: inputs[0] }) });
+  assert.equal(failed.ok, false);
+  assert.equal(await fs.readFile(path.join(runDir, 'source-products.jsonl'), 'utf8'), '');
+  await fs.writeFile(path.join(runDir, 'source-products.jsonl'), '{"stale":true}\n');
+  await extractSourceProducts({ inputs: [], runDir });
+  assert.equal(await fs.readFile(path.join(runDir, 'source-products.jsonl'), 'utf8'), '');
+});
+
+test('DOM extraction rejects generic images and open-shop links', () => {
+  const vm = require('node:vm');
+  const { DOM_EXTRACT_EXPRESSION } = require('../../../../skills/peer-discovery/src/source-extractor');
+  const state = vm.runInNewContext(DOM_EXTRACT_EXPRESSION, {
+    URL, location: { href: 'https://item.taobao.com/item.htm?id=123' },
+    document: {
+      title: '商品',
+      querySelectorAll: selector => selector === 'a[href]' ? [
+        { href: 'https://ishop.taobao.com/openshop/tb_open_shop_landing.htm' },
+        { href: 'https://shop123.taobao.com/category.htm' },
+      ] : [],
+      querySelector: selector => selector.includes('priceInt') ? { textContent: '￥ 29.80' } : null,
+    },
+  });
+  assert.equal(state.mainImageUrl, '');
+  assert.equal(state.shopUrl, 'https://shop123.taobao.com/category.htm');
+  assert.equal(state.price, 29.8);
+});

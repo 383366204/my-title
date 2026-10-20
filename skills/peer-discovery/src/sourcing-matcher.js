@@ -125,6 +125,7 @@ function isPlatformBlocker(err) {
   const msg = err.message || '';
   const code = err.code || err.status || '';
   return code === 'PLATFORM_ACCESS_BLOCKED' ||
+    code === 'capability_unavailable' ||
     code === 'PLATFORM_ACCESS_LOCK_TIMEOUT' ||
     code === 'login_required' ||
     code === 'captcha_required' ||

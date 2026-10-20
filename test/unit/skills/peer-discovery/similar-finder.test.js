@@ -118,14 +118,20 @@ test('findSimilarProducts handles maxCandidateShops limit and empty sources', as
   assert.equal(result.candidates.length, 3);
 });
 
-test('findSimilarProducts rejects web channel when imageSearcher is not provided', async () => {
+test('findSimilarProducts routes explicit web channel to the web provider', async () => {
   const sourceProducts = [
     { itemId: 's1', title: '商品', mainImageUrl: 'https://img.alicdn.com/s1.jpg' }
   ];
-  await assert.rejects(
-    async () => findSimilarProducts({ sourceProducts, channel: 'web' }),
-    { code: 'ERR_WEB_CHANNEL_IMAGE_SEARCH_UNSUPPORTED' }
-  );
+  let called = false;
+  const result = await findSimilarProducts({ sourceProducts, channel: 'web', port: 9333,
+    webImageSearcher: async (source, options) => {
+      called = true;
+      assert.equal(options.port, 9333);
+      return { products: [{ itemId: '12', title: '同款', shopUrl: 'https://shop123.taobao.com/' }] };
+    },
+  });
+  assert.equal(called, true);
+  assert.equal(result.candidates.length, 1);
 });
 
 test('findSimilarProducts unconditionally overwrites candidate-shops.jsonl on zero results rerun', async t => {

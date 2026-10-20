@@ -4,7 +4,7 @@ const fs = require('node:fs/promises');
 const fsSync = require('node:fs');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
-const { collectShopCandidates, parsePaymentLowerBound } = require('./shared-shop-collector');
+const { collectShopCandidates, parsePaymentSignal } = require('./shared-shop-collector');
 const { matchSourcing, isPlatformBlocker } = require('./sourcing-matcher');
 const { enrichCompetitorProduct } = require('../../competitor-analysis/src/collector');
 
@@ -26,7 +26,7 @@ async function collectQualifiedProducts(shop, options = {}) {
   const minProducts = options.minProducts ?? 10;
   const snapshot = await collectShopCandidates(shop, options);
   const qualified = snapshot.products || [];
-  const collectionCompleteness = snapshot.collectionCompleteness || 'uncertain';
+  const collectionCompleteness = snapshot.completeness || 'uncertain';
 
   if (qualified.length < minProducts) {
     return {
@@ -44,7 +44,7 @@ async function collectQualifiedProducts(shop, options = {}) {
     ...p,
     taobaoPrice: p.taobaoPrice ?? p.price ?? null,
     title: p.detailTitle || p.title,
-    paymentLowerBound: parsePaymentLowerBound(p.paymentText)
+    paymentLowerBound: parsePaymentSignal(p.paymentText).value
   }));
 
   const productsWithSourcing = [];
@@ -430,6 +430,7 @@ async function runPeerEvaluateShopsStep(options = {}) {
   const result = await evaluateAllShops({
     ...options,
     ...options.params,
+    channel: options.params?.taobaoChannel === 'web' ? 'web' : (options.channel || 'native'),
     onProgress: reportProgress,
     shouldStop
   });

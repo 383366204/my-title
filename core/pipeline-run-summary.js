@@ -217,6 +217,11 @@ function safeRunFile(runDir, persistedPath, fallbackName) {
 
 function defaultFiles(runDir, files = {}) {
   return {
+    sourceProducts: safeRunFile(runDir, files.sourceProducts, 'source-products.jsonl'),
+    candidateShops: safeRunFile(runDir, files.candidateShops, 'candidate-shops.jsonl'),
+    shopEvaluations: safeRunFile(runDir, files.shopEvaluations, 'shop-evaluations.jsonl'),
+    peerReport: safeRunFile(runDir, files.peerReport, '同行发现报告.xlsx'),
+    peerDiscoveryResult: safeRunFile(runDir, files.peerDiscoveryResult, 'peer-discovery-result.json'),
     inspirationRoots: safeRunFile(runDir, files.inspirationRoots, 'inspiration-roots.jsonl'),
     inspirations: safeRunFile(runDir, files.inspirations, 'inspirations.jsonl'),
     rootCandidates: safeRunFile(runDir, files.rootCandidates, 'root-candidates.jsonl'),
@@ -282,13 +287,30 @@ function summarizePipelineRun({ dataDir = DEFAULT_PIPELINE_DIR, runId, previewLi
   if (!targetRunId) return null;
   const runDir = path.join(dataDir, 'runs', targetRunId);
   const runFile = path.join(runDir, 'run.json');
-  const run = readJson(runFile, null);
+  let run = readJson(runFile, null);
+  // 同行发现以 runtime 为运行事实源，不依赖选品流程的 run.json。
+  const peerRuntime = readJson(path.join(runDir, 'runtime.json'), null);
+  if (!run && peerRuntime?.mode === 'peer-discovery'
+      && typeof peerRuntime.status === 'string' && peerRuntime.startedAt) {
+    run = {
+      runId: targetRunId,
+      status: peerRuntime.status === 'completed' ? 'workflow_complete' : peerRuntime.status,
+      startedAt: peerRuntime.startedAt,
+      updatedAt: peerRuntime.updatedAt,
+      options: { ...peerRuntime.params, mode: 'peer-discovery' }
+    };
+  }
   if (!run) return null;
 
   const status = run.status || 'unknown';
   const stage = pipelineStatusToStage(status);
   const files = defaultFiles(runDir, run.files || {});
   const counts = { ...(run.counts || {}) };
+  if (peerRuntime?.mode === 'peer-discovery') {
+    for (const key of ['sourceProducts', 'candidateShops', 'shopEvaluations']) {
+      counts[key] = countNonEmptyLines(files[key]);
+    }
+  }
   const batchFile = files.distributionBatch;
   const reviewFile = files.distributionReview;
   const batchExists = Boolean(batchFile && fs.existsSync(batchFile));
@@ -331,6 +353,7 @@ function summarizePipelineRun({ dataDir = DEFAULT_PIPELINE_DIR, runId, previewLi
     diversity: run.diversity || {},
     discovery: run.discovery || null,
     options: run.options || {},
+    ...(peerRuntime?.mode === 'peer-discovery' ? { runtime: peerRuntime, error: peerRuntime.error || null } : {}),
     productRank: run.productRank || null,
     manualAction: run.manualAction || null,
     reviewGeneration: run.reviewGeneration || null,

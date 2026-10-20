@@ -15,8 +15,8 @@ function validateWebShopUrl(value) {
   const url = new URL(value);
   const host = url.hostname;
   if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.port ||
-      !(host === 'store.taobao.com' && url.pathname === '/shop/view_shop.htm' ||
-        /^[a-z0-9]+\.taobao\.com$/.test(host) && !['www.taobao.com', 'login.taobao.com', 'item.taobao.com', 's.taobao.com'].includes(host) && url.pathname === '/')) {
+      !(host === 'store.taobao.com' && (url.pathname === '/shop/view_shop.htm' || url.pathname === '/category.htm') ||
+        /^[a-z0-9]+\.taobao\.com$/.test(host) && !['www.taobao.com', 'login.taobao.com', 'item.taobao.com', 's.taobao.com'].includes(host) && (url.pathname === '/' || url.pathname === '/category.htm'))) {
     throw new Error('需要有效的淘宝店铺入口');
   }
   url.protocol = 'https:';

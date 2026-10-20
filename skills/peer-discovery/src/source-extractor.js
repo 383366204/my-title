@@ -9,16 +9,37 @@ const { CdpClient } = require('../../alibaba1688/src/search-web-1688');
 const { runWithPlatformGuard } = require('../../../core/platform-access-guard');
 
 const DOM_EXTRACT_EXPRESSION = `(() => {
-  const img = document.querySelector('#J_UlThumb img, .PicGallery--mainPic img, .mainPic img, [class*="mainPic"] img, [class*="main-img"] img, [class*="mainImage"] img');
+  const findMainImg = () => {
+    const candidates = Array.from(document.querySelectorAll('#J_UlThumb img, .PicGallery--mainPic img, .mainPic img, [class*="mainPic"] img, [class*="main-img"] img, [class*="mainImage"] img, img#mainPicVideoPicEl, #J_ImgBooth'));
+    for (const el of candidates) {
+      const src = el.src || el.dataset?.src || '';
+      if (!src) continue;
+      if (src.includes('saturn') || src.includes('tracking') || src.includes('beacon') || src.includes('spacer')) continue;
+      return el;
+    }
+    return null;
+  };
+  const img = findMainImg();
   const titleEl = document.querySelector('#J_Title h3, .ItemHeader--mainTitle, h1[data-title], [class*="mainTitle"], h1');
   const title = titleEl ? titleEl.textContent.trim() : document.title;
-  const priceEl = document.querySelector('.tm-promo-price .tm-price, .Price--priceInt, [class*="priceInt"], [class*="priceText"], [class*="currentPrice"]');
-  const price = priceEl ? parseFloat(priceEl.textContent.replace(/[^\\d.]/g, '')) : null;
-  const shopLink = document.querySelector('a[href*="shop"], .ShopHeader--shopName a, [class*="shopName"] a');
+  const priceEl = document.querySelector('.tm-promo-price .tm-price, .Price--priceInt, [class*="priceInt"], [class*="priceText"], [class*="currentPrice"], [class*="highlightPrice"], [class*="normalPrice"], [class*="priceWrap"]');
+  let price = null;
+  if (priceEl) {
+    const m = priceEl.textContent.match(/[¥￥]\\s*([\\d.]+)/) || priceEl.textContent.match(/([\\d.]+)/);
+    price = m ? parseFloat(m[1]) : null;
+  }
+  const shopLink = Array.from(document.querySelectorAll('a[href]')).find(a => {
+    try {
+      const u = new URL(a.href);
+      return /^shop[0-9]+\\.taobao\\.com$/.test(u.hostname)
+        || (u.hostname === 'store.taobao.com' && u.pathname === '/shop/view_shop.htm' && u.searchParams.has('shop_id'));
+    } catch { return false; }
+  });
   const shopNameEl = document.querySelector('.ShopHeader--shopName, [class*="shopName"], [class*="shop-name"]');
   const shopName = shopNameEl ? shopNameEl.textContent.trim() : '';
   const shopUrl = shopLink ? shopLink.href : '';
   return {
+    resolvedUrl: location.href,
     mainImageUrl: img ? (img.src || img.dataset.src || '') : '',
     title,
     price: Number.isFinite(price) ? price : null,
@@ -88,6 +109,7 @@ async function extractSourceProducts(options = {}) {
   }
 
   if (!parsed.links.length) {
+    if (runDir) await fs.writeFile(path.join(runDir, 'source-products.jsonl'), '', 'utf8');
     return {
       ok: false,
       status: 'manual_action_required',
@@ -106,11 +128,7 @@ async function extractSourceProducts(options = {}) {
     signal?.throwIfAborted();
     onProgress?.({ current: index + 1, total: parsed.links.length, message: `正在提取商品信息: ${link.inputUrl}` });
 
-    const itemId = extractItemId(link.inputUrl);
-    if (!itemId) {
-      errors.push({ inputUrl: link.inputUrl, code: 'INVALID_ITEM_ID', message: '无法从链接中识别商品ID' });
-      continue;
-    }
+    let itemId = extractItemId(link.inputUrl);
 
     try {
       let extracted;
@@ -143,7 +161,7 @@ async function extractSourceProducts(options = {}) {
             while (Date.now() < deadline) {
               signal?.throwIfAborted();
               const state = await client.evaluate(DOM_EXTRACT_EXPRESSION);
-              if (state && (state.title || state.mainImageUrl)) {
+              if (state?.mainImageUrl && (itemId || extractItemId(state.resolvedUrl))) {
                 success = true;
                 return state;
               }
@@ -161,6 +179,11 @@ async function extractSourceProducts(options = {}) {
         });
       }
 
+      itemId = itemId || extractItemId(extracted?.resolvedUrl);
+      if (!itemId) {
+        errors.push({ inputUrl: link.inputUrl, code: 'INVALID_ITEM_ID', message: '分享链接未跳转到有效商品页，请检查链接是否过期或需要登录' });
+        continue;
+      }
       if (!extracted || !extracted.mainImageUrl) {
         errors.push({ inputUrl: link.inputUrl, code: 'MISSING_MAIN_IMAGE', message: '未能提取到商品主图，无法参与图搜' });
         continue;
@@ -171,6 +194,7 @@ async function extractSourceProducts(options = {}) {
 
       products.push({
         inputUrl: link.inputUrl,
+        resolvedUrl: extracted.resolvedUrl || link.inputUrl,
         itemId,
         title: extracted.title || '',
         price: extracted.price !== undefined ? extracted.price : null,
@@ -191,8 +215,8 @@ async function extractSourceProducts(options = {}) {
   }
 
   // 持久化 source-products.jsonl
-  if (runDir && products.length > 0) {
-    const lines = products.map(p => JSON.stringify(p)).join('\n') + '\n';
+  if (runDir) {
+    const lines = products.map(p => JSON.stringify(p)).join('\n') + (products.length ? '\n' : '');
     await fs.writeFile(path.join(runDir, 'source-products.jsonl'), lines, 'utf8');
   }
 

@@ -37,6 +37,7 @@ test('pause before work avoids collection and pause during work preserves incomp
 test('platform blockers remain actionable, unexpected errors are not swallowed', async () => {
   for (const error of [
     Object.assign(new Error('请登录淘宝'), { code: 'PLATFORM_ACCESS_BLOCKED', status: 'login_required' }),
+    Object.assign(new Error('客户端不支持图搜'), { code: 'capability_unavailable', status: 'capability_unavailable' }),
     Object.assign(new Error('会话排队超时'), { code: 'PLATFORM_ACCESS_LOCK_TIMEOUT', status: 'rate_limited' }),
     Object.assign(new Error('需要滑块验证'), { name: 'PlatformAccessError', status: 'captcha_required' }),
   ]) {
@@ -81,6 +82,18 @@ test('runPeerExtractStep adapts extraction and maps platform blockers', async ()
   });
   assert.equal(blocked.status, 'manual_action_required');
   assert.equal(blocked.platformStatus, 'captcha_required');
+});
+
+test('extraction uses the real products contract and stops failed extraction', async () => {
+  const success = await runPeerExtractStep({ extract: async () => ({ ok: true, products: [{ itemId: '101' }], totalValid: 1 }) });
+  assert.equal(success.validCount, 1);
+  assert.equal(success.sourceProducts[0].itemId, '101');
+  const failed = await runPeerExtractStep({ extract: async () => ({ ok: false, products: [], errors: [{ message: '无法从链接中识别商品ID' }] }) });
+  assert.equal(failed.status, 'manual_action_required');
+  assert.equal(failed.stepIncomplete, true);
+  assert.match(failed.manualAction.userMessage, /商品ID/);
+  const missing = await runPeerSimilarStep({ find: async () => ({ ok: false, errors: [{ message: '缺少源商品数据' }] }) });
+  assert.equal(missing.status, 'manual_action_required');
 });
 
 test('runPeerSimilarStep adapts findSimilar and maps platform blockers', async () => {

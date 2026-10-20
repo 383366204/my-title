@@ -552,6 +552,7 @@ function imageSearchError(code, message, cause) {
  */
 function classifyImageSearchBlocker(text) {
   const value = String(text || '');
+  if (/未知工具|unknown tool|tool.*not found/i.test(value)) return 'capability_unavailable';
   if (/登录失效|请先登录|未登录|login/i.test(value)) return 'login_required';
   if (/安全验证|验证码|滑块|captcha|punish/i.test(value)) return 'captcha_required';
   if (/操作过于频繁|访问受限|rate.?limit|too many/i.test(value)) return 'rate_limited';
@@ -590,8 +591,13 @@ async function imageSearchSingleRaw(imageUrl, productId, options = {}) {
     } catch (error) {
       // 取消信号原样抛出，由上层识别为暂停/取消
       if (error && (error.name === 'AbortError' || signal?.aborted)) throw error;
-      const text = `${error?.message || ''}\n${error?.stderr || ''}\n${error?.stdout || ''}`;
+      const output = readImageSearchOutput(outFile, error?.stdout);
+      const detail = output?.error?.message || output?.error || output?.message || '';
+      const text = `${detail}\n${error?.message || ''}\n${error?.stderr || ''}\n${error?.stdout || ''}`;
       const blocker = classifyImageSearchBlocker(text);
+      if (blocker === 'capability_unavailable') {
+        throw imageSearchError(blocker, '当前淘宝客户端未提供 image_search 图搜工具，请恢复客户端图搜能力后重试当前节点', error);
+      }
       if (blocker) throw imageSearchError(blocker, `淘宝图搜被平台拦截：${error.message}`, error);
       if (error?.killed || /timed out|ETIMEDOUT/i.test(text)) {
         throw imageSearchError('IMAGE_SEARCH_TIMEOUT', `淘宝图搜超时 [${productId}]`, error);
