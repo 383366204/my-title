@@ -6,6 +6,7 @@ const { extractSourceProducts } = require('./source-extractor');
 const { findSimilarProducts } = require('./similar-finder');
 const { collectPeerProducts } = require('./collect-peer-products');
 const { isPlatformBlocker } = require('./sourcing-matcher');
+const { resolveRuntimeTaobaoChannel: resolveTaobaoChannel } = require('./runtime-taobao-channel');
 
 /**
  * Adapt source extraction to pipeline control/progress contract.
@@ -111,7 +112,7 @@ async function runPeerSimilarStep(options) {
       dataDir: options.dataDir,
       runId: options.runId,
       maxCandidateShops: options.params?.maxCandidateShops ?? options.maxCandidateShops ?? 30,
-      channel: options.params?.taobaoChannel || options.channel || 'auto',
+      channel: resolveTaobaoChannel(options),
       port: options.params?.port || options.port,
       imageSearcher: options.imageSearcher,
       signal: controller.signal,
@@ -181,7 +182,7 @@ async function runPeerCollectionStep(options) {
         shops = [];
       }
     }
-    const channel = options.channel || options.params?.resolvedTaobaoChannel || (options.params?.taobaoChannel === 'web' ? 'web' : 'native');
+    const channel = resolveTaobaoChannel(options);
     const collect = options.collect || collectPeerProducts;
     const result = await collect({
       runDir: options.runDir, shops, channel,

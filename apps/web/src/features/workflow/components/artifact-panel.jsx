@@ -1,6 +1,7 @@
 import { Download, ExternalLink, RefreshCw } from 'lucide-react';
 
 import { getWorkflowArtifactView, summarizeWorkflowArtifact } from '../artifact-view.js';
+import { PeerShopReportTable } from './peer-shop-report-table.jsx';
 
 export function ArtifactPanel({ state }) {
   const artifact = state.artifact;
@@ -12,6 +13,11 @@ export function ArtifactPanel({ state }) {
       <div className="flex items-center justify-between gap-2.5 mb-2.5">
         <span className="text-[var(--text-subtle)] text-xs font-extrabold">{view.title || '节点产物'}</span>
         {artifact && <b className="min-w-0 text-[var(--text-disabled)] text-[10px] font-extrabold truncate">{summarizeWorkflowArtifact(artifact)}</b>}
+        {state.status === 'ready' && artifact?.peerShopReport && artifact.downloadUrl && (
+          <a href={artifact.downloadUrl} download={artifact.filename || undefined}
+            className="inline-flex shrink-0 items-center gap-1 rounded border border-[rgba(148,163,184,0.25)] px-2 py-1 text-[11px] text-sky-400 hover:bg-sky-400/10 hover:text-sky-300"
+            title="下载同行店铺 Excel 报告"><Download size={12} /> 下载表格</a>
+        )}
       </div>
       {state.status === 'loading' && (
         <div className="min-w-0 rounded-md p-2.5 text-xs leading-normal flex items-center gap-1.5 bg-[rgba(15,23,42,0.58)] text-[var(--text-disabled)]"><RefreshCw size={13} className="animate-spin" /> 正在加载节点产物...</div>
@@ -22,7 +28,8 @@ export function ArtifactPanel({ state }) {
       {state.status === 'empty' && (
         <div className="min-w-0 rounded-md p-2.5 text-xs leading-normal flex items-center gap-1.5 bg-[rgba(15,23,42,0.58)] text-[var(--text-disabled)]">{state.error || view.emptyText}</div>
       )}
-      {state.status === 'ready' && artifact && businessRows && (
+      {state.status === 'ready' && artifact?.peerShopReport && <PeerShopReportTable rows={view.rows} emptyText={view.emptyText} />}
+      {state.status === 'ready' && artifact && !artifact.peerShopReport && businessRows && (
         <div className="artifact-business-list grid gap-2 min-w-0 max-h-[360px] overflow-y-auto">
           {view.rows.length === 0 ? (
             <div className="min-w-0 rounded-md p-2.5 text-xs leading-normal flex items-center gap-1.5 bg-[rgba(15,23,42,0.58)] text-[var(--text-disabled)]">{view.emptyText}</div>
@@ -38,7 +45,7 @@ export function ArtifactPanel({ state }) {
               {item.description && <p className="mt-1 text-[var(--text-muted)] text-[11px] leading-normal break-all">{item.description}</p>}
               {item.sourceUrl && (
                 <a className="w-fit mt-1.5 text-[11px]" href={item.sourceUrl} target="_blank" rel="noreferrer">
-                  <ExternalLink size={12} /> {['resolveShops', 'collectCompetitors', 'enrichCompetitors'].includes(state.nodeId)
+                  <ExternalLink size={12} /> {artifact.peerShopReport || ['findSimilarProducts', 'evaluateShops'].includes(state.nodeId) ? '打开同行店铺' : ['resolveShops', 'collectCompetitors', 'enrichCompetitors'].includes(state.nodeId)
                     ? state.nodeId === 'resolveShops' ? '打开同行店铺' : '打开淘宝商品'
                     : state.nodeId === 'collectRank' ? '打开淘宝商品' : '打开灵感来源'}
                 </a>
@@ -61,11 +68,11 @@ export function ArtifactPanel({ state }) {
           {view.text || view.emptyText}
         </pre>
       )}
-      {state.status === 'ready' && artifact && view.kind === 'file' && (
+      {state.status === 'ready' && artifact && view.kind === 'file' && !artifact.peerShopReport && (
         <div className="artifact-file-card">
           <div>
             <strong>{artifact.filename || '商品排行表格.xlsx'}</strong>
-            <span>{artifact.count ? `共 ${artifact.count} 条商品` : 'Excel 文件已生成'}</span>
+            <span>{artifact.peerShopReport ? `共 ${artifact.count} 条店铺记录` : artifact.count ? `共 ${artifact.count} 条商品` : 'Excel 文件已生成'}</span>
           </div>
           <a className="artifact-download-button" href={artifact.downloadUrl} download={artifact.filename || undefined}>
             <Download size={14} /> 下载表格

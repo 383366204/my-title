@@ -263,6 +263,11 @@
 }
 
 .workflow-node-callout {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  white-space: normal;
   margin-top: 8px;
   display: grid;
   gap: 3px;
@@ -274,6 +279,14 @@
   font-size: 10px;
   line-height: 1.35;
   text-align: left;
+}
+
+.workflow-node-callout > span {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+  min-width: 0;
 }
 
 .workflow-node-callout strong {

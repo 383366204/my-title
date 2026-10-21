@@ -7,6 +7,7 @@ const { createHash } = require('node:crypto');
 const { collectShopCandidates, parsePaymentSignal } = require('./shared-shop-collector');
 const { matchSourcing, isPlatformBlocker } = require('./sourcing-matcher');
 const { enrichCompetitorProduct } = require('../../competitor-analysis/src/collector');
+const { resolveRuntimeTaobaoChannel: resolveTaobaoChannel } = require('./runtime-taobao-channel');
 
 function hashConfig(obj) {
   const sorted = Object.keys(obj || {}).sort().reduce((acc, k) => {
@@ -288,6 +289,7 @@ async function evaluateAllShops(options = {}) {
     minPayment: options.minPayment ?? 10
   });
   const currentCollectConfigHash = hashConfig({
+    channel: resolveTaobaoChannel(options),
     sortType: 'hot',
     collectLimit: options.collectLimit ?? 40,
     scrollPages: 3
@@ -430,7 +432,7 @@ async function runPeerEvaluateShopsStep(options = {}) {
   const result = await evaluateAllShops({
     ...options,
     ...options.params,
-    channel: options.params?.taobaoChannel === 'web' ? 'web' : (options.channel || 'native'),
+    channel: resolveTaobaoChannel(options),
     onProgress: reportProgress,
     shouldStop
   });

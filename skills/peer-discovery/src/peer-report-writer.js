@@ -14,6 +14,21 @@ function sanitizeText(value) {
 }
 
 /**
+ * 每店仅保留最新评估，避免重试前的阻塞记录污染报告。
+ * @param {object[]} rows 历史评估记录。
+ * @returns {object[]} 最新店铺评估。
+ */
+function latestShopEvaluations(rows) {
+  const latest = new Map();
+  for (const [index, row] of rows.entries()) {
+    const key = row.shopKey || row.shopUrl || `unknown:${index}`;
+    const previous = latest.get(key);
+    if (!previous || (Date.parse(row.evaluatedAt) || 0) >= (Date.parse(previous.evaluatedAt) || 0)) latest.set(key, row);
+  }
+  return [...latest.values()];
+}
+
+/**
  * Write Excel and JSON reports for peer-analysis branch.
  * @param {object} options
  * @returns {Promise<object>}
@@ -23,7 +38,7 @@ async function writePeerReport(options = {}) {
   if (!runDir) throw new Error('运行目录缺失');
   const outputDir = options.outputDir || runDir;
 
-  const evaluations = Array.isArray(options.evaluations) ? options.evaluations : [];
+  const evaluations = latestShopEvaluations(Array.isArray(options.evaluations) ? options.evaluations : []);
   const candidateShops = Array.isArray(options.candidateShops) ? options.candidateShops : [];
   const errors = Array.isArray(options.errors) ? options.errors : [];
 
@@ -210,6 +225,7 @@ async function runPeerReportStep(options = {}) {
 }
 
 module.exports = {
+  latestShopEvaluations,
   writePeerReport,
   runPeerReportStep
 };

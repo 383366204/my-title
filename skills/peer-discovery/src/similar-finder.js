@@ -7,6 +7,7 @@ const { imageSearchSingleRaw } = require('../../title-gen/src/search-taobao-imag
 const { normalizeTaobaoWebCards } = require('./taobao-web-cards');
 const { isPlatformBlocker } = require('./sourcing-matcher');
 const { searchTaobaoWebImage } = require('./taobao-web-image-search');
+const { resolveRuntimeTaobaoChannel: resolveTaobaoChannel } = require('./runtime-taobao-channel');
 
 /**
  * Standardize one candidate similar product from native or web image search results.
@@ -108,7 +109,7 @@ async function findSimilarProducts(options = {}) {
   const candidateShopsMap = new Map();
   const errors = [];
   // 统计真正完成的图搜次数（含返回 0 条），用于区分"无同款"与"全部失败"
-  const channel = options.channel || options.params?.resolvedTaobaoChannel || (options.params?.taobaoChannel === 'web' ? 'web' : 'native');
+  const channel = resolveTaobaoChannel(options);
 
   let searchesCompleted = 0;
   let searchesFailed = 0;

@@ -4,6 +4,7 @@
  * @returns {string} 产物摘要。
  */
 export function summarizeWorkflowArtifact(artifact) {
+  if (artifact?.peerShopReport) return `${artifact.count ?? artifact.rows?.length ?? 0} 家店铺`;
   if (!artifact) return '暂无产物';
   const type = String(artifact.type || '').toLowerCase();
   const file = String(artifact.file || '').toLowerCase();
@@ -561,6 +562,9 @@ function buildCollectRankView(artifact) {
 }
 
 function buildFileView(artifact, nodeId) {
+  if (artifact.peerShopReport) {
+    return { ...buildEvaluateShopsView(artifact), title: '同行店铺清单', emptyText: '本次报告没有店铺记录，请检查同款搜索和逐店评估结果' };
+  }
   const type = String(artifact.type || '').toLowerCase();
   if (type !== 'xlsx') return null;
   if (nodeId === 'generateSheet') {
@@ -697,6 +701,7 @@ const ARTIFACT_HANDLERS = {
   findSimilarProducts: [buildFindSimilarProductsView],
   evaluateShops: [buildEvaluateShopsView],
   peerReport: [buildFileView],
+  end: [buildFileView],
   collectPeerProducts: [(a) => buildBusinessListView(a, 'select')],
   verifyImageSources: [(a) => buildBusinessListView(a, 'verify')],
   prepareListingDrafts: [(a) => buildBusinessListView(a, 'generate')],
