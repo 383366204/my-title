@@ -56,7 +56,7 @@ const ROOT_KEYWORD_STEPS = ['mine', 'keywordReview', 'select', 'generate', 'expo
 const MANUAL_STEPS = ['start', 'select', 'verify', 'generate', 'export'];
 const ORDER_SHEET_STEPS = ['collectRank', 'confirmProducts', 'generateSheet'];
 const REVIEW_SHEET_STEPS = ['importSheet', 'generateReviews', 'generateSheet'];
-const COMPETITOR_ANALYSIS_STEPS = ['resolveShops', 'collectCompetitors', 'enrichCompetitors', 'analyzeCompetitors', 'competitorReport'];
+const COMPETITOR_ANALYSIS_STEPS = ['resolveShops', 'collectCompetitors', 'findCompetitorSources'];
 const PEER_DISCOVERY_STEPS = [
   'extractSources',
   'findSimilarProducts',
@@ -367,6 +367,9 @@ function createDefaultStepFns({ dataDir, runId, params, mode = 'daily', steps = 
       return resolveCompetitorShops({ ...params, dataDir, runId, onProgress: reportProgress });
     },
     collectCompetitors: async ({ reportProgress }) => {
+      if (steps.includes('findCompetitorSources')) {
+        return require('../../competitor-analysis/src/sourcing-flow').runCompetitorCollectionBundle({ ...params, dataDir, runId, onProgress: reportProgress, shouldStop });
+      }
       reportProgress({ current: 0, total: Math.max(2, Number(params.maxShops || 5) * 2), message: '准备采集销量榜和新品榜' });
       return collectCompetitorProducts({ ...params, dataDir, runId, onProgress: reportProgress, shouldStop });
     },
@@ -374,6 +377,7 @@ function createDefaultStepFns({ dataDir, runId, params, mode = 'daily', steps = 
       reportProgress({ current: 0, total: Math.max(1, Number(params.detailLimit || 20) * 2), message: '准备补全榜单商品链接' });
       return enrichCompetitorProducts({ ...params, dataDir, runId, onProgress: reportProgress, shouldStop });
     },
+    findCompetitorSources: async ({ reportProgress }) => require('../../competitor-analysis/src/sourcing-flow').runCompetitorFindSources({ ...params, dataDir, runId, onProgress: reportProgress, shouldStop }),
     analyzeCompetitors: async ({ reportProgress }) => {
       reportProgress({ current: 0, total: 1, message: '正在分析同行商品结构' });
       return analyzeCompetitors({ ...params, dataDir, runId, onProgress: reportProgress });
@@ -579,12 +583,16 @@ async function runPipelineRuntime(options = {}) {
       const reportedProgress = readRuntimeState({ dataDir, runId })?.progress?.[step] || {};
       const stepBlocked = lastResult.status === 'manual_action_required'
         || (BLOCKED_PIPELINE_STATUSES.has(lastResult.status) && lastResult.stepIncomplete === true);
+      const awaitingCompetitorReview = mode === 'competitor-analysis'
+        && lastResult.status === 'needs_review' && lastResult.stepIncomplete === true;
       updateRuntimeState({
         dataDir,
         runId,
         patch: {
           progress: {
-            [step]: stepBlocked
+            [step]: awaitingCompetitorReview
+              ? { ...normalizeProgress(reportedProgress), status: 'needs_review', message: reportedProgress.message }
+              : stepBlocked
               ? {
                   ...normalizeProgress(reportedProgress),
                   status: 'blocked',
@@ -597,7 +605,7 @@ async function runPipelineRuntime(options = {}) {
       appendRuntimeEvent({
         dataDir,
         runId,
-        event: { event: stepBlocked ? 'step_blocked' : 'step_completed', step, status: stepBlocked ? 'blocked' : 'completed' }
+        event: { event: awaitingCompetitorReview ? 'step_review' : stepBlocked ? 'step_blocked' : 'step_completed', step, status: awaitingCompetitorReview ? 'needs_review' : stepBlocked ? 'blocked' : 'completed' }
       });
 
       if (step === 'inspire' && params.reviewInspirationRoots && !stepBlocked && !lastResult.stepIncomplete

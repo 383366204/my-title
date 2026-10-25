@@ -309,9 +309,12 @@ function sanitizeWorkflowParams(mode, raw = {}) {
       ? raw.competitorInputs.map(value => String(value || '').trim()).filter(Boolean).slice(0, 20)
       : [];
     if (!competitorText && competitorInputs.length === 0) throw new Error('请至少输入一条淘宝或天猫同行链接');
+    if (raw.taobaoChannel && !['web', 'native'].includes(raw.taobaoChannel)) throw new TypeError('同行采集通道无效');
     return {
       competitorText,
       competitorInputs,
+      taobaoChannel: raw.taobaoChannel || 'native',
+      port: clampInt(raw.port, 9222, 1, 65535),
       maxShops: clampInt(raw.maxShops, 5, 1, 10),
       hotLimit: clampInt(raw.hotLimit, 20, 5, 50),
       newLimit: clampInt(raw.newLimit, 20, 5, 50),

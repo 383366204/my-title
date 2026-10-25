@@ -18,6 +18,7 @@ const WORKFLOW_NODE_IDS = {
   removeWatermark: 'removeWatermark',
   resolveShops: 'resolveShops',
   collectCompetitors: 'collectCompetitors',
+  findCompetitorSources: 'findCompetitorSources',
   enrichCompetitors: 'enrichCompetitors',
   analyzeCompetitors: 'analyzeCompetitors',
   competitorReport: 'competitorReport',

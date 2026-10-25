@@ -68,11 +68,13 @@ function ensureCompetitorFiles(run, runDir) {
 }
 
 function manualActionResult(context, errors, message) {
+  const web = context.run.options?.taobaoChannel === 'web';
+  if (web) message = `Chrome 网页采集未完成：${[...new Set(errors.map(item => item.message))].join('；') || message}`;
   context.run.status = 'manual_action_required';
   context.run.requiresUserAction = true;
   context.run.blockers = ['taobao_native_manual_action_required'];
   context.run.manualAction = {
-    platform: 'taobao-native',
+    platform: web ? 'taobao' : 'taobao-native',
     status: errors[0]?.code || 'manual_action_required',
     userMessage: message,
     errors
@@ -82,7 +84,7 @@ function manualActionResult(context, errors, message) {
     runId: context.runId,
     runDir: context.runDir,
     status: context.run.status,
-    platform: 'taobao-native',
+    platform: web ? 'taobao' : 'taobao-native',
     manualAction: context.run.manualAction,
     errors
   };
@@ -167,7 +169,7 @@ async function resolveCompetitorShops(options = {}) {
   context.run.options = { ...context.run.options, ...options, client: undefined, mode: 'competitor-analysis' };
   context.run.counts = { ...(context.run.counts || {}), competitorInputs: parsed.links.length, competitorShops: shops.length, competitorResolveFailed: errors.length };
   context.run.competitor = { errors, duplicateShops: parsed.links.length - errors.length - shops.length };
-  if (shops.length === 0) return manualActionResult(context, errors, '没有识别到可分析的同行店铺。请打开淘宝客户端、完成登录或验证后重试。');
+  if (shops.length === 0) return manualActionResult(context, errors, `已识别 ${parsed.links.length} 条链接，但店铺解析失败：${[...new Set(errors.map(item => item.message))].join('；')}`);
   context.run.status = 'competitor_shops_resolved';
   context.run.requiresUserAction = false;
   context.run.blockers = [];

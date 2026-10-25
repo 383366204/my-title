@@ -146,6 +146,9 @@ function outputForNode(id, summary) {
       newFile: summary.files?.competitorNewProducts || ''
     };
   }
+  if (id === WORKFLOW_NODE_IDS.findCompetitorSources) {
+    return { message: summary.runtime?.progress?.findCompetitorSources?.message || '查看货源确认结果' };
+  }
   if (id === WORKFLOW_NODE_IDS.enrichCompetitors) {
     return {
       count: Number(counts.competitorProductDetails || 0),

@@ -487,6 +487,7 @@ app.post('/api/workflows/runs/:runId/review-confirm', (req, res) => {
 
 registerOrderSheetDraftRoutes(app, { readRuntimeState, getOrderSheetDraft, saveOrderSheetDraft });
 registerPeerReviewRoutes(app);
+require('../core/server/competitor-sourcing-routes').registerCompetitorSourcingRoutes(app, { workbench });
 
 function handleConfirmOrderSheet(req, res) {
   if (workbench.current) {

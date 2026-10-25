@@ -140,7 +140,7 @@ describe('pipeline runtime runner', () => {
   it('runs competitor analysis steps in canvas order', async () => {
     const dataDir = tempDataDir();
     const calls = [];
-    const stepNames = ['resolveShops', 'collectCompetitors', 'enrichCompetitors', 'analyzeCompetitors', 'competitorReport'];
+    const stepNames = ['resolveShops', 'collectCompetitors', 'findCompetitorSources'];
     const stepFns = Object.fromEntries(stepNames.map((step, index) => [step, async ({ reportProgress }) => {
       calls.push(step);
       reportProgress({ current: 1, total: 1, message: `${step} 完成` });
@@ -160,6 +160,17 @@ describe('pipeline runtime runner', () => {
     assert.deepEqual(runtime.steps, stepNames);
     assert.ok(stepNames.every(step => runtime.progress[step].status === 'completed'));
     assert.equal(result.status, 'workflow_complete');
+  });
+
+  it('keeps competitor review pending until explicit confirmation', async () => {
+    const dataDir = tempDataDir();
+    const runId = 'competitor_review';
+    await runPipelineRuntime({ dataDir, runId, mode: 'competitor-analysis', steps: ['collectCompetitors'],
+      stepFns: { collectCompetitors: async () => ({ status: 'needs_review', stepIncomplete: true }) } });
+    const runtime = readRuntimeState({ dataDir, runId });
+    assert.equal(runtime.status, 'needs_review');
+    assert.equal(runtime.activeStep, 'collectCompetitors');
+    assert.equal(runtime.progress.collectCompetitors.status, 'needs_review');
   });
 
   it('runs manual direct-input mode from start to product enrichment without keyword review', async () => {

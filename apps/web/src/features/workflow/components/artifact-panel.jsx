@@ -2,11 +2,14 @@ import { Download, ExternalLink, RefreshCw } from 'lucide-react';
 
 import { getWorkflowArtifactView, summarizeWorkflowArtifact } from '../artifact-view.js';
 import { PeerShopReportTable } from './peer-shop-report-table.jsx';
+import { CompetitorSourcingPanel } from './competitor-sourcing-panel.jsx';
 
-export function ArtifactPanel({ state }) {
+export function ArtifactPanel({ state, onPrepareSourcing, onSourcingResumed }) {
   const artifact = state.artifact;
+  if (artifact?.type === 'competitor-sourcing') return <CompetitorSourcingPanel runId={artifact.runId} nodeId={state.nodeId} onPrepareSourcing={onPrepareSourcing} onSourcingResumed={onSourcingResumed} />;
   const view = getWorkflowArtifactView(artifact, state.nodeId);
   const businessRows = view.kind === 'business-list' || view.kind === 'candidate-list';
+  const shopTable = businessRows && (artifact?.peerShopReport || state.nodeId === 'evaluateShops');
 
   return (
     <div className="workflow-artifact-panel">
@@ -28,8 +31,8 @@ export function ArtifactPanel({ state }) {
       {state.status === 'empty' && (
         <div className="min-w-0 rounded-md p-2.5 text-xs leading-normal flex items-center gap-1.5 bg-[rgba(15,23,42,0.58)] text-[var(--text-disabled)]">{state.error || view.emptyText}</div>
       )}
-      {state.status === 'ready' && artifact?.peerShopReport && <PeerShopReportTable rows={view.rows} emptyText={view.emptyText} />}
-      {state.status === 'ready' && artifact && !artifact.peerShopReport && businessRows && (
+      {state.status === 'ready' && shopTable && <PeerShopReportTable rows={view.rows} emptyText={view.emptyText} title={view.title} />}
+      {state.status === 'ready' && artifact && !shopTable && businessRows && (
         <div className="artifact-business-list grid gap-2 min-w-0 max-h-[360px] overflow-y-auto">
           {view.rows.length === 0 ? (
             <div className="min-w-0 rounded-md p-2.5 text-xs leading-normal flex items-center gap-1.5 bg-[rgba(15,23,42,0.58)] text-[var(--text-disabled)]">{view.emptyText}</div>

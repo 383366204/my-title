@@ -12,6 +12,7 @@ const { scoreRootReviewCandidate } = require('../../skills/pipeline-flow/src/roo
 const { normalizeKeywordFilter } = require('../../skills/pipeline-flow/src/keyword-metric-filter');
 const { inspirationReviewState } = require('../../skills/pipeline-flow/src/inspiration-root-review');
 const { latestShopEvaluations } = require('../../skills/peer-discovery/src/peer-report-writer');
+const { readRuntimeState } = require('../../skills/pipeline-flow/runtime/store');
 
 /**
  * 读取 workflow 节点对应的 pipeline artifact。
@@ -56,6 +57,11 @@ function readArtifactJsonl(file, limit) {
 function readWorkflowNodeArtifact(runIdOrOptions, nodeId, options = {}) {
   const normalized = normalizeArtifactOptions(runIdOrOptions, nodeId, options);
   const summary = summarizePipelineRun({ dataDir: normalized.dataDir, runId: normalized.runId, previewLimit: 0, reviewChars: 1 });
+  const competitorRuntime = summary?.options?.mode === 'competitor-analysis'
+    ? readRuntimeState({ dataDir: normalized.dataDir, runId: normalized.runId }) : null;
+  if (competitorRuntime?.steps?.includes('findCompetitorSources') && ['collectCompetitors', 'findCompetitorSources', 'end'].includes(normalized.nodeId)) {
+    return { runId: normalized.runId, nodeId: normalized.nodeId, type: 'competitor-sourcing', rows: [] };
+  }
   const peerReport = summary?.options?.mode === 'peer-discovery'
     && summary.options.discoveryBranch !== 'image-selection'
     && ['peerReport', 'end'].includes(normalized.nodeId);

@@ -58,7 +58,7 @@ export function StartConfigurationPanel({ mode, modeHint, node, onDone, onUpdate
   if (mode === 'competitor-analysis') {
     const parsed = parseCompetitorShareInputs(data.competitorText || '');
     return (
-      <div className="grid gap-4">
+      <div className="start-configuration-panel grid gap-4">
         <p className="m-0 border border-blue-500/30 rounded-[7px] bg-blue-900/[0.12] text-[#bfdbfe] text-[11px] leading-[1.55] p-2.5">{modeHint}</p>
         <fieldset className="grid gap-3.5 min-w-0 m-0 p-0 border-0 disabled:opacity-[0.72]" disabled={readOnly}>
           <section className="grid gap-2.5 border-b border-slate-700/[0.72] pb-3.5 last:border-b-0">
@@ -83,6 +83,11 @@ export function StartConfigurationPanel({ mode, modeHint, node, onDone, onUpdate
           </section>
           <section className="grid gap-2.5 border-b border-slate-700/[0.72] pb-3.5 last:border-b-0">
             <h3>采集范围</h3>
+            <label className="node-field"><span>采集通道</span>
+              <select value={data.taobaoChannel || 'native'} onChange={(event) => onUpdateField(node.id, 'taobaoChannel', event.target.value)}>
+                <option value="web">Chrome 网页</option><option value="native">淘宝客户端</option>
+              </select>
+            </label>
             <div className="grid grid-cols-2 gap-3 max-sm:grid-cols-1">
               <label className="node-field"><span>最多店铺</span><input type="number" min="1" max="10" value={data.maxShops ?? 5} onChange={(event) => onUpdateField(node.id, 'maxShops', Number.parseInt(event.target.value, 10) || 1)} /></label>
               <label className="node-field"><span>每店爆款</span><input type="number" min="5" max="50" value={data.hotLimit ?? 20} onChange={(event) => onUpdateField(node.id, 'hotLimit', Number.parseInt(event.target.value, 10) || 5)} /></label>
@@ -93,7 +98,7 @@ export function StartConfigurationPanel({ mode, modeHint, node, onDone, onUpdate
                 <small>默认与每店榜单数量一致；逐个打开商品获取真实链接，数量越大耗时越长。</small>
               </label>
             </div>
-            <label className="flex items-center gap-2 min-h-9 text-slate-300 text-[11px] [&>input]:w-[15px] [&>input]:h-[15px] [&>input]:m-0 [&>input]:accent-blue-600">
+            <label className="competitor-history-toggle">
               <input type="checkbox" checked={data.compareHistory !== false} onChange={(event) => onUpdateField(node.id, 'compareHistory', event.target.checked)} />
               <span>保留本次快照，用于后续历史对比</span>
             </label>

@@ -13,10 +13,10 @@ const verdictColors = {
  * @param {object} props 结构化店铺视图。
  * @returns {import('react').JSX.Element} 店铺清单。
  */
-export function PeerShopReportTable({ rows, emptyText }) {
+export function PeerShopReportTable({ rows, emptyText, title = '同行店铺清单' }) {
   return (
     <div className="min-w-0 max-h-[420px] overflow-auto border border-[rgba(148,163,184,0.2)] rounded-md">
-      <table className="w-full min-w-[560px] table-fixed border-collapse text-xs text-[var(--text-body)]" aria-label="同行店铺清单">
+      <table className="w-full min-w-[560px] table-fixed border-collapse text-xs text-[var(--text-body)]" aria-label={title}>
         <colgroup>
           <col className="w-[32%]" /><col className="w-[18%]" />
           <col className="w-[16%]" /><col className="w-[18%]" /><col className="w-[16%]" />

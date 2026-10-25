@@ -116,6 +116,7 @@ function statusPlanForSummary(summary) {
     const steps = [
       WORKFLOW_NODE_IDS.resolveShops,
       WORKFLOW_NODE_IDS.collectCompetitors,
+      WORKFLOW_NODE_IDS.findCompetitorSources,
       WORKFLOW_NODE_IDS.enrichCompetitors,
       WORKFLOW_NODE_IDS.analyzeCompetitors,
       WORKFLOW_NODE_IDS.competitorReport
@@ -125,6 +126,7 @@ function statusPlanForSummary(summary) {
       const progressStatus = nodeStatusFromRuntimeProgress(summary.runtime?.progress?.[step]);
       if (progressStatus) states[step] = progressStatus;
     }
+    if (activeStep && summary.runtime?.status === 'needs_review') states[activeStep] = 'needs_review';
     if (summary.status === 'workflow_complete') {
       for (const step of steps) states[step] = 'completed';
       states[WORKFLOW_NODE_IDS.end] = 'completed';

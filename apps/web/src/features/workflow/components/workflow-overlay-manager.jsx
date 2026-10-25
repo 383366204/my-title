@@ -59,6 +59,8 @@ export function WorkflowOverlayManager({
   onConfirmProductReview,
   onRetryNode,
   onSaveManualInput,
+  onPrepareSourcing,
+  onSourcingResumed,
   onUpdateNodeData,
   onSaveNodeFields,
   onSaveStartConfiguration,
@@ -182,7 +184,7 @@ if (activeOverlay.type === WORKFLOW_OVERLAYS.WATERMARK_STUDIO) {
   } else if (activeOverlay.type === WORKFLOW_OVERLAYS.ARTIFACT) {
     content = node?.id === 'inspire'
       ? <InspirationArtifactPanel key={`${currentRunId}:${scopedArtifactState.status}:${scopedArtifactState.artifact?.revision}`} state={scopedArtifactState} />
-      : <ArtifactPanel state={scopedArtifactState} />;
+      : <ArtifactPanel state={scopedArtifactState} onPrepareSourcing={onPrepareSourcing} onSourcingResumed={onSourcingResumed} />;
   } else {
     content = (
       <>

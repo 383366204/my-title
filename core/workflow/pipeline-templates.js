@@ -149,6 +149,7 @@ function workflowNodes(mode = 'daily', options = {}) {
           label: '录入同行',
           description: '粘贴多个淘宝分享文案、商品或店铺链接',
           competitorConfig: true,
+          taobaoChannel: 'web',
           competitorText: '',
           maxShops: 5,
           hotLimit: 20,
@@ -159,11 +160,9 @@ function workflowNodes(mode = 'daily', options = {}) {
         }
       },
       { id: WORKFLOW_NODE_IDS.resolveShops, type: 'pipeline-resolve-shops', data: { label: '识别同行店铺', description: '解析分享短链、商品所属店铺并按店铺去重' } },
-      { id: WORKFLOW_NODE_IDS.collectCompetitors, type: 'pipeline-collect-competitors', data: { label: '采集爆款与新品', description: '依次读取店铺销量排序和新品排序' } },
-      { id: WORKFLOW_NODE_IDS.enrichCompetitors, type: 'pipeline-enrich-competitors', data: { label: '补全商品链接', description: '逐个打开榜单商品，补充可点击链接和商品ID' } },
-      { id: WORKFLOW_NODE_IDS.analyzeCompetitors, type: 'pipeline-analyze-competitors', data: { label: '同行对比分析', description: '分析商品结构、高频词和新品起量信号' } },
-      { id: WORKFLOW_NODE_IDS.competitorReport, type: 'pipeline-competitor-report', data: { label: '生成分析报告', description: '生成可查看、可下载的同行分析报告' } },
-      { id: WORKFLOW_NODE_IDS.end, type: 'production-end', data: { label: '完成', description: '查看报告或将机会词加入选品流水线', competitorDownload: true } }
+      { id: WORKFLOW_NODE_IDS.collectCompetitors, type: 'pipeline-collect-competitors', data: { label: '采集爆款与新品', description: '采集、补全链接、对比分析并生成报告，选择待寻源商品' } },
+      { id: WORKFLOW_NODE_IDS.findCompetitorSources, type: 'pipeline-find-competitor-sources', data: { label: '寻找货源', description: '1688 搜图比对，人工确认同款候选或跳过' } },
+      { id: WORKFLOW_NODE_IDS.end, type: 'production-end', data: { label: '完成', description: '查看分析报告与已确认的1688货源', competitorDownload: true } }
     ], { startX: 90, stepX: 275 }));
   }
 if (mode === 'watermark-removal') {
@@ -297,10 +296,8 @@ function workflowEdges(mode = 'daily', options = {}) {
     ? [
         [WORKFLOW_NODE_IDS.start, WORKFLOW_NODE_IDS.resolveShops],
         [WORKFLOW_NODE_IDS.resolveShops, WORKFLOW_NODE_IDS.collectCompetitors],
-        [WORKFLOW_NODE_IDS.collectCompetitors, WORKFLOW_NODE_IDS.enrichCompetitors],
-        [WORKFLOW_NODE_IDS.enrichCompetitors, WORKFLOW_NODE_IDS.analyzeCompetitors],
-        [WORKFLOW_NODE_IDS.analyzeCompetitors, WORKFLOW_NODE_IDS.competitorReport],
-        [WORKFLOW_NODE_IDS.competitorReport, WORKFLOW_NODE_IDS.end]
+        [WORKFLOW_NODE_IDS.collectCompetitors, WORKFLOW_NODE_IDS.findCompetitorSources],
+        [WORKFLOW_NODE_IDS.findCompetitorSources, WORKFLOW_NODE_IDS.end]
       ]
     : mode === 'order-sheet'
     ? [
@@ -448,8 +445,8 @@ function listProductionWorkflowTemplates() {
     template('competitor-analysis-v1', '指定店铺分析', 'competitor-analysis', '分析指定店铺的销量榜、新品榜和机会方向', {
       entryLabel: '入口：指定店铺或店内商品分享链接',
       scenarioLabel: '适合：跟踪同行爆款和上新方向',
-      flowSummary: '流程：录入同行 → 识别店铺 → 采集爆款与新品 → 补全商品链接 → 对比分析 → 导出报告',
-      modeHint: '支持完整淘宝分享文案、短链接、商品链接和店铺链接；采集期间会使用当前淘宝客户端登录状态。'
+      flowSummary: '流程：录入同行 → 识别店铺 → 采集分析并选商品 → 1688图搜寻找货源 → 确认选货结果',
+      modeHint: '支持完整淘宝分享文案、短链接、商品链接和店铺链接；使用所选采集通道的登录状态。'
     }),
     template('peer-discovery-v1', '以货找店', 'peer-discovery', '从淘宝商品出发发现相似店铺，也可切换图搜选货分支', {
       entryLabel: '入口：淘宝商品链接',

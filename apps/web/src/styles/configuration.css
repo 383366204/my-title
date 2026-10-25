@@ -742,3 +742,17 @@
   flex-wrap: wrap;
   gap: 8px;
 }
+.start-configuration-panel .competitor-history-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.start-configuration-panel .competitor-history-toggle > input[type="checkbox"] {
+  flex: 0 0 16px;
+  width: 16px;
+  min-width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+}

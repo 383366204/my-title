@@ -55,6 +55,7 @@ async function enterProductShop(client) {
  * @returns {Promise<object>} Resolved shop profile.
  */
 async function resolveCompetitorShop(input, options = {}) {
+  if (options.taobaoChannel === 'web') return require('./web-collector').resolveWebCompetitorShop(input, options);
   const client = options.client || new TaobaoNativeClient(options);
   const waitMs = Math.max(0, Number(options.waitMs) || 900);
   await client.navigateToUrl(input.inputUrl);
@@ -156,6 +157,7 @@ async function openSortedShopPage(client, shop, sortType, options = {}) {
  * @returns {Promise<object>} Collection result.
  */
 async function collectSortedShopProducts(shop, sortType, options = {}) {
+  if (options.taobaoChannel === 'web') return require('./web-collector').collectWebCompetitorProducts(shop, sortType, options);
   const client = options.client || new TaobaoNativeClient(options);
   const limit = Math.max(1, Math.min(50, Number.parseInt(options.limit, 10) || 20));
   const waitMs = Math.max(250, Number(options.waitMs) || 900);
@@ -201,6 +203,10 @@ function parseItemIdentity(urlValue) {
  * @returns {Promise<object>} Enriched product.
  */
 async function enrichCompetitorProduct(shop, product, options = {}) {
+  if (options.taobaoChannel === 'web') {
+    if (!product.itemId || !product.productUrl) throw new Error('网页商品缺少有效链接，请重新采集榜单');
+    return { ...product, enrichedAt: new Date().toISOString() };
+  }
   const client = options.client || new TaobaoNativeClient(options);
   const waitMs = Math.max(250, Number(options.waitMs) || 900);
   await openSortedShopPage(client, shop, product.sortType, { limit: Math.max(20, Number(product.rank) || 1), waitMs });

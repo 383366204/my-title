@@ -1,3 +1,5 @@
+import { formatPlatformMessage } from './platform-message.js';
+
 /**
  * 汇总 workflow 节点产物的前端展示文案。
  * @param {object|null} artifact 节点产物。
@@ -637,7 +639,7 @@ function buildEvaluateShopsView(artifact) {
         title: item.shopName || item.shopKey || item.shopId || '未命名店铺',
         meta: [verdictLabels[item.verdict] || item.verdict, `达标商品 ${qCount} 件`, `有货源商品 ${sCount} 件`].filter(Boolean).join(' · '),
         metrics: [verdictLabels[item.verdict] || item.verdict],
-        description: item.reason || item.verdictReason || '',
+        description: formatPlatformMessage(item.reason || item.verdictReason),
         sourceUrl: item.shopUrl || '',
         raw: item
       };

@@ -10,6 +10,14 @@ function readImageSearchCards() {
     title: card.querySelector('[class*="titleText--"]')?.textContent?.trim() || '',
     displayPrice: card.querySelector('[class*="priceItem--"]')?.textContent?.trim() || '',
     imageUrl: card.querySelector('img[class*="mainImg--"]')?.src || '',
+    imageReady: (() => {
+      const image = card.querySelector('img[class*="mainImg--"]');
+      if (!image) return false;
+      const box = image.getBoundingClientRect();
+      // 屏幕外的懒加载图片不应阻塞当前批次；可见图片必须已解码。
+      return box.bottom <= 0 || box.top >= window.innerHeight || box.right <= 0 || box.left >= window.innerWidth
+        || (image.complete && image.naturalWidth > 0);
+    })(),
     shopText: card.querySelector('[class*="offerShopRow--"]')?.innerText || '',
     descriptions: Array.from(card.querySelectorAll('[class*="descText--"]')).map(el => el.textContent.trim()),
     promotionText: card.querySelector('[class*="offerPriceRow--"]')?.innerText || ''

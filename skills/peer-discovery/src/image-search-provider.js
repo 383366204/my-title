@@ -85,6 +85,20 @@ async function assertPage(client) {
 }
 
 /**
+ * 等待当前卡片批次内容与可见图片就绪，不宣称已遍历所有搜索结果。
+ * @param {object[]} rows 本次观察到的卡片。
+ * @param {object} previous 上次观察状态。
+ * @returns {object} 稳定次数与批次可用状态。
+ */
+function imageBatchReadiness(rows, previous = {}) {
+  const ready = rows.length > 0 && rows.every(row => normalizeImageSearchCard(row)
+    && row.displayPrice && row.imageUrl && row.imageReady === true);
+  const signature = JSON.stringify(rows.map(row => [row.renderKey, row.title, row.displayPrice, row.imageUrl]));
+  const stable = ready ? (signature === previous.signature ? previous.stable || 0 : 0) + 1 : 0;
+  return { signature, stable, ready: stable >= 4 };
+}
+
+/**
  * Create an image-only provider using the user's existing debug Chrome session.
  * @param {object} options Port, progress callback and platform guard options.
  * @returns {object} Provider with search(source, {signal}).
@@ -145,17 +159,20 @@ function createImageSearchProvider(options = {}) {
           if (target.targetId !== created.targetId) targets.push(target.targetId);
           result = new CdpClient(`ws://127.0.0.1:${port}/devtools/page/${target.targetId}`);
           options.onProgress?.({ message: '读取1688图搜候选商品' });
+          let batchState = {};
           const raw = await poll(async () => {
             await assertPage(result);
             const rows = await result.evaluate(`(${readImageSearchCards.toString()})()`);
-            return rows.length ? rows : null;
+            batchState = imageBatchReadiness(rows, batchState);
+            options.onProgress?.({ message: `已读取${rows.length}条候选，等待图片与商品信息稳定` });
+            return batchState.ready ? rows : null;
           }, { signal, timeoutMs: 45000, message: '图搜未读取到商品，无法确认是空结果还是页面未加载' });
           stopped(signal);
           const now = Date.now();
           const candidates = [...new Map(raw.map(row => normalizeImageSearchCard(row, { now, maxAgeMs: options.evidenceMaxAgeMs ?? 86400000 })).filter(Boolean).map(row => [row.offerId, row])).values()];
           if (!candidates.length) throw new Error('图搜卡片缺少商品身份信息');
           success = true;
-          return { ok: true, complete: false, candidates, imageDigest: image.digest, collectedAt: now, resultUrl: target.url, scope: 'loaded_cards' };
+          return { ok: true, complete: false, batchReady: true, candidates, imageDigest: image.digest, collectedAt: now, resultUrl: target.url, scope: 'loaded_cards' };
         } finally {
           result?.close();
           home?.close();
@@ -169,4 +186,4 @@ function createImageSearchProvider(options = {}) {
   };
 }
 
-module.exports = { createImageSearchProvider, downloadSearchImage, imagePageBlocker };
+module.exports = { createImageSearchProvider, downloadSearchImage, imagePageBlocker, imageBatchReadiness };

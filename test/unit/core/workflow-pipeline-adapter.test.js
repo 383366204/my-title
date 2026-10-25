@@ -59,6 +59,7 @@ describe('workflow pipeline adapter', () => {
       removeWatermark: 'removeWatermark',
       resolveShops: 'resolveShops',
       collectCompetitors: 'collectCompetitors',
+      findCompetitorSources: 'findCompetitorSources',
       enrichCompetitors: 'enrichCompetitors',
       analyzeCompetitors: 'analyzeCompetitors',
       competitorReport: 'competitorReport',
@@ -223,18 +224,14 @@ describe('workflow pipeline adapter', () => {
       WORKFLOW_NODE_IDS.start,
       WORKFLOW_NODE_IDS.resolveShops,
       WORKFLOW_NODE_IDS.collectCompetitors,
-      WORKFLOW_NODE_IDS.enrichCompetitors,
-      WORKFLOW_NODE_IDS.analyzeCompetitors,
-      WORKFLOW_NODE_IDS.competitorReport,
+      WORKFLOW_NODE_IDS.findCompetitorSources,
       WORKFLOW_NODE_IDS.end
     ]);
     assert.deepEqual(competitorTemplate.workflow.edges.map(edge => `${edge.source}->${edge.target}`), [
       'start->resolveShops',
       'resolveShops->collectCompetitors',
-      'collectCompetitors->enrichCompetitors',
-      'enrichCompetitors->analyzeCompetitors',
-      'analyzeCompetitors->competitorReport',
-      'competitorReport->end'
+      'collectCompetitors->findCompetitorSources',
+      'findCompetitorSources->end'
     ]);
   });
 
@@ -259,9 +256,7 @@ describe('workflow pipeline adapter', () => {
             WORKFLOW_NODE_IDS.start,
             WORKFLOW_NODE_IDS.resolveShops,
             WORKFLOW_NODE_IDS.collectCompetitors,
-            WORKFLOW_NODE_IDS.enrichCompetitors,
-            WORKFLOW_NODE_IDS.analyzeCompetitors,
-            WORKFLOW_NODE_IDS.competitorReport,
+            WORKFLOW_NODE_IDS.findCompetitorSources,
             WORKFLOW_NODE_IDS.end
           ]
         : template.mode === 'peer-discovery'
@@ -568,6 +563,8 @@ describe('workflow pipeline adapter', () => {
     }), {
       competitorText: 'https://m.tb.cn/h.example',
       competitorInputs: [],
+      taobaoChannel: 'native',
+      port: 9222,
       maxShops: 10,
       hotLimit: 5,
       newLimit: 50,

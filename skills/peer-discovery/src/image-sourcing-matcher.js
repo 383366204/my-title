@@ -59,6 +59,7 @@ async function verifyImageSources(source, options = {}) {
   return {
     results,
     complete: response.complete === true,
+    batchReady: response.batchReady === true && results.length > 0,
     confirmedCount: results.filter(row => row.verdict.level === 'confirmed').length,
     noSources: response.complete === true && results.length === 0
   };
