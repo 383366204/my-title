@@ -17,6 +17,25 @@ function tempDataDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'platform-access-guard-'));
 }
 
+test('local upload state timeouts do not trip the breaker but real rate limits still do', async () => {
+  const dataDir = tempDataDir();
+  const options = { dataDir, cache: false, minCooldownMs: 0, maxCooldownMs: 0, failureThreshold: 1 };
+  try {
+    for (let i = 0; i < 3; i++) {
+      await assert.rejects(runWithPlatformGuard('1688', options, async () => {
+        throw Object.assign(new Error('上传状态未确认'), { code: 'IMAGE_UPLOAD_STATE_TIMEOUT' });
+      }), { code: 'IMAGE_UPLOAD_STATE_TIMEOUT' });
+    }
+    let called = false;
+    await runWithPlatformGuard('1688', options, async () => { called = true; });
+    assert.equal(called, true);
+    await assert.rejects(runWithPlatformGuard('1688', options, async () => {
+      throw new PlatformAccessError('访问过于频繁', { status: 'rate_limited' });
+    }));
+    await assert.rejects(runWithPlatformGuard('1688', options, async () => {}), { code: 'PLATFORM_ACCESS_BLOCKED' });
+  } finally { fs.rmSync(dataDir, { recursive: true, force: true }); }
+});
+
 test('expired session lock belonging to a live local process is not stolen', async () => {
   const dataDir = tempDataDir();
   const lockDir = path.join(dataDir, '1688', 'lock');

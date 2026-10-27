@@ -58,6 +58,8 @@ async function verifyImageSources(source, options = {}) {
   const results = response.candidates.map(candidate => ({ ...candidate, verdict: judgeImageCandidate(verifiedSource, candidate, options) }));
   return {
     results,
+    snapshot: response.snapshot || null,
+    snapshotError: response.snapshotError || null,
     complete: response.complete === true,
     batchReady: response.batchReady === true && results.length > 0,
     confirmedCount: results.filter(row => row.verdict.level === 'confirmed').length,

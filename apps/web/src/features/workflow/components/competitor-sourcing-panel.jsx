@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ArrowRight, Download, RefreshCw } from 'lucide-react';
 import { CompetitorProductTransfer } from './competitor-product-transfer.jsx';
+import { CompetitorSourcePicker } from './competitor-source-picker.jsx';
+import { CompetitorDistributionDialog } from './competitor-distribution-dialog.jsx';
 
 const SOURCE_REASONS = {
   evidence_needs_refresh: '价格或规格证据缺失、过期，需人工核对',
@@ -38,16 +40,18 @@ export function CompetitorSourcingPanel({ runId, nodeId, onPrepareSourcing, onSo
   const [message, setMessage] = useState('');
   const [shop, setShop] = useState('');
   const [ratio, setRatio] = useState('1');
+  const [pickerItemId, setPickerItemId] = useState(null);
+  const [distributionDraft, setDistributionDraft] = useState(null);
   const base = `/api/workflows/runs/${encodeURIComponent(runId)}/competitor-sourcing`;
   const selecting = nodeId === 'collectCompetitors';
-  const load = useCallback(async () => {
+  const load = useCallback(async ({ preserveDecisions = false } = {}) => {
     setBusy(true); setError('');
     try {
       const result = await request(base);
       setState({ ...result.data, runtime: result.runtime });
       setSelected(result.data.selectedItemIds || []);
       setRatio(result.data.imagePriceRatioThreshold || '1');
-      setDecisions(Object.fromEntries((result.data.decisions || []).map(d => [d.itemId, d])));
+      setDecisions(prev => preserveDecisions ? prev : Object.fromEntries((result.data.decisions || []).map(d => [d.itemId, d])));
     } catch (err) { setError(err.message); }
     finally { setBusy(false); }
   }, [base]);
@@ -57,7 +61,8 @@ export function CompetitorSourcingPanel({ runId, nodeId, onPrepareSourcing, onSo
     try {
       if (!(selecting ? state?.selectionConfirmed : state?.reviewConfirmed)) await request(`${base}/${selecting ? 'selection' : 'decisions'}`, selecting
         ? { selectedItemIds: selected, skip, imagePriceRatioThreshold: ratio }
-        : { decisions: Object.values(decisions) });
+        : { decisions: (state?.selectedItemIds || []).map(itemId => decisions[itemId]?.action === 'select'
+          ? decisions[itemId] : { itemId, action: 'skip' }) });
       await request(`/api/workflows/runs/${encodeURIComponent(runId)}/resume`, {});
       setMessage('已确认，流程正在继续。');
       if (onSourcingResumed) onSourcingResumed(runId);
@@ -65,7 +70,29 @@ export function CompetitorSourcingPanel({ runId, nodeId, onPrepareSourcing, onSo
     } catch (err) { await load(); setError(err.message); }
     finally { setBusy(false); }
   };
+  const retrySourcing = async () => {
+    setBusy(true); setError('');
+    try {
+      await request(`/api/workflows/runs/${encodeURIComponent(runId)}/resume`, {});
+      if (onSourcingResumed) onSourcingResumed(runId);
+      else await load();
+    } catch (err) { setError(err.message); }
+    finally { setBusy(false); }
+  };
+  const retryComparison = async itemId => {
+    setBusy(true); setError('');
+    try { await request(`${base}/compare/${encodeURIComponent(itemId)}`, {}); await load({ preserveDecisions: true }); }
+    catch (err) { setError(err.message); }
+    finally { setBusy(false); }
+  };
   const products = state?.products || [];
+  const openDistribution = async () => {
+    setBusy(true); setError('');
+    try { const response = await request(`${base}/distribution`, {}); setDistributionDraft(response.data); }
+    catch (err) { setError(err.message); }
+    finally { setBusy(false); }
+  };
+  const pickerProduct = products.find(p => p.itemId === pickerItemId);
   const prepareSourcing = () => {
     const offers = [...new Set((state?.decisions || []).filter(d => d.action === 'select').map(d => d.offerId))];
     if (!offers.length) { setError('尚未选择货源'); return; }
@@ -88,6 +115,7 @@ export function CompetitorSourcingPanel({ runId, nodeId, onPrepareSourcing, onSo
   };
   const rows = selecting ? products : products.filter(p => state?.selectedItemIds?.includes(p.itemId));
   const editable = state?.runtime?.activeStep === nodeId && ['needs_review', 'paused', 'blocked', 'failed'].includes(state?.runtime?.status);
+  const chosenCount = rows.filter(p => decisions[p.itemId]?.action === 'select').length;
   return <div className="grid gap-3 text-xs min-w-0">
     <div className="flex flex-wrap items-center gap-2">
       <label>店铺 <select value={shop} onChange={e => setShop(e.target.value)}><option value="">全部店铺</option>{[...new Set(products.map(p => p.shopName).filter(Boolean))].map(name => <option key={name}>{name}</option>)}</select></label>
@@ -95,33 +123,34 @@ export function CompetitorSourcingPanel({ runId, nodeId, onPrepareSourcing, onSo
       <button type="button" title="刷新结果" disabled={busy} onClick={load}><RefreshCw size={14} className={busy ? 'animate-spin' : ''} /></button>
       {state?.reviewConfirmed && <button type="button" onClick={exportResults} className="inline-flex items-center gap-1 text-sky-400"><Download size={14} /> 下载选货结果</button>}
       {state?.reviewConfirmed && state?.runtime?.status === 'completed' && onPrepareSourcing && <button type="button" onClick={prepareSourcing} className="inline-flex items-center gap-1 text-sky-400"><ArrowRight size={14} /> 准备标题与铺货</button>}
-      <a className="ml-auto inline-flex items-center gap-1 text-sky-400" href={`/api/workflows/runs/${encodeURIComponent(runId)}/artifacts/competitorReport/raw`} download><Download size={14} /> 下载分析报告</a>
+      {state?.reviewConfirmed && <button type="button" disabled={busy || !(state.decisions || []).some(d => d.action === 'select')} className="node-primary-button ml-auto" onClick={openDistribution}>铺货清单与复核</button>}
     </div>
     {error && <div role="alert" className="text-red-400 break-words">{error}</div>}
     {message && <div role="status" className="text-emerald-400">{message}</div>}
     {selecting ? <CompetitorProductTransfer key={runId} products={products} selected={selected} shop={shop} disabled={!editable || busy || state?.selectionConfirmed} onChange={setSelected} /> : <div className="max-h-[420px] overflow-auto">
-      <table className="w-full text-left border-collapse"><thead className="sticky top-0 bg-[var(--bg-panel)]"><tr><th className="p-2">{selecting ? '选择' : '处理'}</th><th className="p-2">同行商品</th><th className="p-2">{selecting ? '来源／价格' : '1688 候选货源'}</th></tr></thead>
+      <table className="w-full text-left border-collapse" style={{ minWidth: 640, tableLayout: 'fixed' }}>
+        <thead className="sticky top-0 bg-[var(--bg-panel)]"><tr><th className="p-2 w-[40%]">同行商品</th><th className="p-2 w-[35%]">已选货源</th><th className="p-2 w-[25%] text-right">操作</th></tr></thead>
         <tbody>{rows.filter(p => !shop || p.shopName === shop).map(p => {
-          const result = (state?.results || []).find(r => r.itemId === p.itemId);
+          const result = state?.results?.find(r => r.itemId === p.itemId);
           const candidates = result?.results || result?.candidates || [];
+          const decision = decisions[p.itemId];
+          const chosen = decision?.action === 'select' ? candidates.find(c => c.offerId === decision.offerId) : null;
           return <tr key={p.itemId} className="border-t border-slate-700 align-top">
-            <td className="p-2">{selecting ? <input type="checkbox" aria-label={`选择${p.title}`} style={{ width: 16, height: 16 }} checked={selected.includes(p.itemId)} disabled={!editable || busy || state?.selectionConfirmed || !/^\d+$/.test(p.itemId) || !p.imageUrl || !p.productUrl} onChange={e => setSelected(prev => e.target.checked ? [...prev, p.itemId] : prev.filter(id => id !== p.itemId))} /> : <button disabled={!editable || busy || state?.reviewConfirmed} className="node-secondary-button" onClick={() => setDecisions(prev => ({ ...prev, [p.itemId]: { itemId: p.itemId, action: 'skip' } }))}>{decisions[p.itemId]?.action === 'skip' ? '已跳过' : '跳过'}</button>}</td>
-            <td className="p-2 max-w-[320px]">{p.imageUrl && <img src={p.imageUrl} alt="" className="w-14 h-14 object-contain float-left mr-2" />}<a href={p.productUrl} target="_blank" rel="noreferrer" className="text-sky-400 hover:underline break-words">{p.title}</a><div className="text-slate-400 mt-1">{p.shopName} · {p.itemId}</div>{!p.imageUrl && <div className="text-amber-400">缺少主图，不能搜图</div>}</td>
-            <td className="p-2">{selecting ? <>{p.sortType === 'new' ? '新品' : '爆款'} · {p.displayPriceText || p.price || '价格待确认'}<div>{p.paymentText || '付款人数未采集'}</div></> : <>
-              {result?.error && <div className="text-red-400 break-words">{typeof result.error === 'string' ? result.error : result.error.message}</div>}
-              {result?.batchReady && !result.complete && <div className="text-slate-400">当前已加载 {candidates.length} 条候选，非全部搜索结果</div>}
-              {candidates.map(c => <div key={c.offerId} className="border-b border-slate-700 py-2">
-                <label className="flex items-start gap-2"><input type="radio" style={{ width: 16, height: 16, flexShrink: 0 }} name={`source-${p.itemId}`} disabled={!editable || busy || c.verdict?.level === 'rejected'} checked={decisions[p.itemId]?.offerId === c.offerId && decisions[p.itemId]?.action === 'select'} onChange={() => setDecisions(prev => ({ ...prev, [p.itemId]: { itemId: p.itemId, action: 'select', offerId: c.offerId, riskAccepted: false } }))} />
-                  <span><a href={`https://detail.1688.com/offer/${encodeURIComponent(c.offerId)}.html`} target="_blank" rel="noreferrer" className="text-sky-400 hover:underline">{c.title || c.offerId}</a><div>{c.priceText || c.displayPriceText || '价格待确认'} · {({ confirmed: '条件通过', suspected: '疑似同款', inconclusive: '待确认', rejected: '不符合' })[c.verdict?.level] || '待确认'}</div><div className="text-slate-400">{SOURCE_REASONS[c.verdict?.reason] || '需人工核对'}</div></span></label>
-              </div>)}
-              {decisions[p.itemId]?.action === 'select' && <label className="flex items-start gap-2 mt-2"><input type="checkbox" style={{ width: 16, height: 16, flexShrink: 0 }} checked={Boolean(decisions[p.itemId].riskAccepted)} disabled={!editable || busy} onChange={e => setDecisions(prev => ({ ...prev, [p.itemId]: { ...prev[p.itemId], riskAccepted: e.target.checked } }))} />已人工核对规格、起订量与价格，接受未验证风险</label>}
-              {!candidates.length && !result?.error && <span>暂无候选结果</span>}
-            </>}</td>
+            <td className="p-2"><div className="flex gap-2 min-w-0">{p.imageUrl && <img src={p.imageUrl} alt="" className="w-12 h-12 shrink-0 object-contain" />}<div className="min-w-0 break-words"><a href={p.productUrl} target="_blank" rel="noreferrer" className="text-sky-400 hover:underline">{p.title}</a><div className="text-slate-400 mt-1">{p.shopName} · {p.itemId}</div><div>参考价：{p.displayPriceText || p.price || '待确认'}</div></div></div></td>
+            <td className="p-2">{chosen ? <div className="flex gap-2 min-w-0">{chosen.imageUrl && <img src={chosen.imageUrl} alt="已选货源" className="w-12 h-12 shrink-0 object-contain" />}<div className="min-w-0 break-words"><a className="text-sky-400 hover:underline" href={`https://detail.1688.com/offer/${encodeURIComponent(chosen.offerId)}.html`} target="_blank" rel="noreferrer">{chosen.title || chosen.offerId}</a><div>参考价：{chosen.priceText || chosen.displayPriceText || '待确认'}</div><div className="text-emerald-400">已选择{state?.reviewConfirmed ? '' : ' · 待提交'}</div></div></div> : <span className="text-slate-400">{decision?.action === 'skip' ? '已跳过' : '尚未选择'}</span>}
+              {result?.error && <div className="text-red-400 mt-1 break-words">寻源异常，请查看候选货源详情</div>}
+            </td>
+            <td className="p-2 align-middle"><div className="flex justify-end"><button type="button" className="node-primary-button" disabled={busy} onClick={() => setPickerItemId(p.itemId)}>{state?.reviewConfirmed || !editable ? '查看候选货源' : chosen ? '更换候选货源' : '选择候选货源'}（{candidates.length}）</button></div></td>
           </tr>;
         })}</tbody>
       </table>
+      {!rows.length && <p className="p-6 text-center text-slate-400">暂无同行商品</p>}
     </div>}
+    {pickerProduct && <CompetitorSourcePicker key={`${runId}-${pickerProduct.itemId}`} product={pickerProduct} result={state?.results?.find(r => r.itemId === pickerProduct.itemId)} decision={decisions[pickerProduct.itemId]} disabled={!editable || Boolean(state?.reviewConfirmed)} busy={busy} base={base} reasons={SOURCE_REASONS} onRetry={retryComparison} onClose={() => setPickerItemId(null)} onConfirm={decision => { setDecisions(prev => ({ ...prev, [decision.itemId]: decision })); setPickerItemId(null); }} />}
+    {distributionDraft && <CompetitorDistributionDialog draft={distributionDraft} onClose={() => setDistributionDraft(null)} />}
     {editable && <div className="sticky bottom-0 bg-[var(--bg-panel)] border-t border-slate-700 pt-3 flex justify-end items-center gap-2">
+      {!selecting && <span className="mr-auto text-slate-400">已选 {chosenCount} 件 · 未选 {rows.length - chosenCount} 件（确认时跳过）</span>}
+      {!selecting && ['blocked', 'failed', 'paused'].includes(state?.runtime?.status) && <button disabled={busy} className="node-secondary-button inline-flex items-center gap-1" onClick={retrySourcing}><RefreshCw size={14} className={busy ? 'animate-spin' : ''} />重试当前商品</button>}
       {selecting && <><span>已选 {selected.length} 件</span><button disabled={busy} className="node-secondary-button" onClick={() => save(true)}>仅完成分析</button></>}
       <button disabled={busy || (selecting && !state?.selectionConfirmed && selected.length === 0)} className="node-primary-button" onClick={() => save()}>{busy ? '处理中…' : (selecting ? state?.selectionConfirmed : state?.reviewConfirmed) ? '继续流程' : selecting ? '确认并寻找货源' : '确认货源并完成'}</button>
     </div>}

@@ -43,9 +43,8 @@ test('incomplete image search blocks and can be retried; review requires every p
   assert.equal(calls, 2);
   assert.throws(() => flow.saveCompetitorSourceDecisions({ ...options, decisions: [] }));
   const decisions = [{ itemId: '123', action: 'select', offerId: '456' }];
-  assert.throws(() => flow.saveCompetitorSourceDecisions({ ...options, decisions }), /人工核对/);
-  decisions[0].riskAccepted = true;
   flow.saveCompetitorSourceDecisions({ ...options, decisions });
+  assert.equal(flow.getCompetitorSourcingState(options).decisions[0].riskAccepted, false);
   assert.equal((await flow.runCompetitorFindSources(options)).status, 'workflow_complete');
 });
 
@@ -56,6 +55,19 @@ test('pause does not call image provider or lose selection', async t => {
   const output = await flow.runCompetitorFindSources({ ...options, shouldStop: () => true, provider: { search() { throw new Error('must not search'); } } });
   assert.equal(output.status, 'paused');
   assert.deepEqual(flow.getCompetitorSourcingState(options).selectedItemIds, ['123']);
+});
+
+test('upload failure persists diagnostic evidence and allows retry', async t => {
+  const options = fixture(t);
+  await flow.runCompetitorCollectionBundle(options);
+  flow.saveCompetitorSelection({ ...options, selectedItemIds: ['123'] });
+  const diagnostics = { stage: '上传图片', uploadFormat: 'png', uploadState: { fileCount: 1, uploaded: false } };
+  options.provider = { search: async () => { throw Object.assign(new Error('状态无法确认'), { code: 'IMAGE_SEARCH_TIMEOUT', diagnostics }); } };
+  assert.equal((await flow.runCompetitorFindSources(options)).status, 'manual_action_required');
+  assert.deepEqual(flow.getCompetitorSourcingState(options).results[0].diagnostics, diagnostics);
+  options.provider = { search: async () => ({ ok: true, complete: true, candidates: [] }) };
+  assert.equal((await flow.runCompetitorFindSources(options)).status, 'needs_review');
+  assert.equal(flow.getCompetitorSourcingState(options).results[0].error, undefined);
 });
 
 test('stable loaded-card batch permits review without claiming exhaustive results or repeating search', async t => {

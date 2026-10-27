@@ -60,7 +60,8 @@ export const DistributionExportPanel = ({
   onDistributionJobChange,
   workflowRunStatus = '',
   directPreview = false,
-  onManualComplete
+  onManualComplete,
+  useDraftRows = false
 }) => {
   const {
     categoryControl,
@@ -81,7 +82,8 @@ export const DistributionExportPanel = ({
   } = useDistributionExportData({
     artifactState,
     currentRunId,
-    sourceNodeId
+    sourceNodeId,
+    useDraftRows
   });
 
   const [previewOpen, setPreviewOpen] = useState(false);

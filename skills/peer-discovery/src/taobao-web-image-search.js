@@ -7,7 +7,7 @@ const { setTimeout: delay } = require('node:timers/promises');
 const { CdpClient } = require('../../alibaba1688/src/search-web-1688');
 const { runWithPlatformGuard, PlatformAccessError } = require('../../../core/platform-access-guard');
 const { downloadSearchImage } = require('./image-search-provider');
-const { prepareTaobaoUploadImage } = require('./taobao-upload-image');
+const { prepareUploadImage } = require('./upload-image');
 const { readTaobaoWebCards, normalizeTaobaoWebCards } = require('./taobao-web-cards');
 
 /**
@@ -62,7 +62,7 @@ async function searchTaobaoWebImage(source, options = {}) {
   const downloaded = await (options.downloadImage || downloadSearchImage)(source.mainImageUrl || source.imageUrl, { signal });
   let image;
   try {
-    image = await (options.prepareImage || prepareTaobaoUploadImage)(downloaded, { signal });
+    image = await (options.prepareImage || prepareUploadImage)(downloaded, { signal });
   } catch (error) {
     signal?.throwIfAborted();
     throw new PlatformAccessError(`淘宝图搜图片准备失败：${error.message}`, {

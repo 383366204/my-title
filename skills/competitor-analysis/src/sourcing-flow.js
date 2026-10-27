@@ -7,6 +7,7 @@ const { getRun, writeRun, readJsonl } = require('../../pipeline-flow/src/run-sto
 const { verifyImageSources } = require('../../peer-discovery/src/image-sourcing-matcher');
 const { createImageSearchProvider } = require('../../peer-discovery/src/image-search-provider');
 const { normalizePriceRatio } = require('../../peer-discovery/src/price-comparison');
+const { saveCandidateSnapshot, compareCandidateScreenshot } = require('../../peer-discovery/src/screenshot-comparison');
 
 function stateFile(options) {
   assertRuntimeRunId(options.runId);
@@ -91,11 +92,17 @@ async function runCompetitorFindSources(options) {
   const state = getCompetitorSourcingState(options);
   if (!state.selectionConfirmed) return result(options, 'needs_review', '请先确认待寻源商品');
   if (state.skip || state.reviewConfirmed) return result(options, 'workflow_complete', state.skip ? '已选择仅完成分析' : '货源复核已完成');
-  const provider = options.provider || createImageSearchProvider({ port: options.port || 9222, onProgress: options.onProgress });
+  let current = 0;
+  const total = state.selectedItemIds.length;
+  const provider = options.provider || createImageSearchProvider({ port: options.port || 9222,
+    captureCandidates: true,
+    saveSnapshot: (_source, capture) => saveCandidateSnapshot(path.join(path.dirname(stateFile(options)), 'source-snapshots'), capture),
+    onProgress: event => options.onProgress?.({ ...event, current, total, message: `第 ${current + 1}/${total} 件 · ${event.message}` }) });
   for (const itemId of state.selectedItemIds) {
     if (state.results.some(r => r.itemId === itemId && !r.error && (r.complete || r.batchReady))) continue;
     if (options.shouldStop?.()) return result(options, 'paused', '寻源已暂停，保留成功结果');
     const source = state.products.find(p => p.itemId === itemId);
+    current = state.selectedItemIds.indexOf(itemId);
     const controller = new AbortController();
     const timer = setInterval(() => { if (options.shouldStop?.()) controller.abort(); }, 250);
     try {
@@ -104,16 +111,43 @@ async function runCompetitorFindSources(options) {
       state.results = state.results.filter(r => r.itemId !== itemId);
       state.results.push({ itemId, ...response });
       writeState(options, state);
+      if (response.snapshot) {
+        options.onProgress?.({ current, total, message: `第 ${current + 1}/${total} 件 · AI比较 ${response.snapshot.mapping.length} 个候选` });
+        const saved = state.results.find(row => row.itemId === itemId);
+        try {
+          saved.comparison = await compareCandidateScreenshot(path.join(path.dirname(stateFile(options)), 'source-snapshots'), response.snapshot, { signal: controller.signal });
+        } catch (error) {
+          saved.comparison = { status: 'failed', message: controller.signal.aborted ? '比对已暂停，可重新分析截图' : '视觉模型调用或结果校验失败，可重新分析或人工选择' };
+        }
+        writeState(options, state);
+        if (controller.signal.aborted) return result(options, 'paused', '已保存候选截图，图片比对已暂停');
+      }
       if (!response.complete && !response.batchReady) return result(options, 'manual_action_required', '1688 图搜结果未完整加载，请检查页面后重试；不能认定为无货源');
     } catch (error) {
       if (controller.signal.aborted) return result(options, 'paused', '寻源已暂停，保留成功结果');
+      const previous = state.results.find(r => r.itemId === itemId);
+      const message = error.cooldownRemainingMs > 0
+        ? `1688访问处于保护冷却期，请在约 ${Math.ceil(error.cooldownRemainingMs / 1000)} 秒后重试；本次未执行上传`
+        : error.message;
       state.results = state.results.filter(r => r.itemId !== itemId);
-      state.results.push({ itemId, error: error.message, code: error.code });
+      state.results.push({ itemId, error: message, code: error.code,
+        diagnostics: error.diagnostics || previous?.diagnostics,
+        diagnosticsFromPreviousAttempt: !error.diagnostics && Boolean(previous?.diagnostics) });
       writeState(options, state);
-      return result(options, 'manual_action_required', error.message);
+      return result(options, 'manual_action_required', `第 ${current + 1}/${total} 件：${message}`);
     } finally { clearInterval(timer); }
   }
   return result(options, 'needs_review', '图搜完成，请逐项确认货源或跳过');
+}
+
+/** @param {object} options 运行及商品ID。 @returns {Promise<object>} 只重试已有截图，不访问1688。 */
+async function retryCompetitorComparison(options) {
+  const state = getCompetitorSourcingState(options);
+  if (state.reviewConfirmed) throw new Error('复核已完成，不能重新分析');
+  const row = state.results.find(item => item.itemId === options.itemId);
+  if (!row?.snapshot) throw new Error('该商品没有可用截图');
+  row.comparison = await compareCandidateScreenshot(path.join(path.dirname(stateFile(options)), 'source-snapshots'), row.snapshot);
+  return writeState(options, state);
 }
 /** @param {object} options 每个选中商品的货源决定。 @returns {object} 复核状态。 */
 function saveCompetitorSourceDecisions(options) {
@@ -128,10 +162,9 @@ function saveCompetitorSourceDecisions(options) {
     if (d.action !== 'select') throw new Error('无效的复核操作');
     const candidate = state.results.find(r => r.itemId === d.itemId)?.results?.find(c => c.offerId === d.offerId);
     if (!candidate || !/^\d+$/.test(candidate.offerId) || candidate.verdict.level === 'rejected') throw new Error('货源不存在或不符合条件');
-    if (candidate.verdict.level !== 'confirmed' && d.riskAccepted !== true) throw new Error('请先人工核对规格、价格和起订量并确认风险');
   }
   state.decisions = options.decisions.map(d => ({ itemId: d.itemId, action: d.action, ...(d.action === 'select' ? { offerId: d.offerId, riskAccepted: d.riskAccepted === true } : {}) }));
   state.reviewConfirmed = true;
   return writeState(options, state);
 }
-module.exports = { getCompetitorSourcingState, runCompetitorCollectionBundle, saveCompetitorSelection, runCompetitorFindSources, saveCompetitorSourceDecisions };
+module.exports = { getCompetitorSourcingState, runCompetitorCollectionBundle, saveCompetitorSelection, runCompetitorFindSources, saveCompetitorSourceDecisions, retryCompetitorComparison };

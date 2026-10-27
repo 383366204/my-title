@@ -5,6 +5,7 @@ import { getWorkflowBlockerActions, getWorkflowRuntimeActions } from '../../work
 import { getWorkflowNodeViewModel } from '../../workflow-node-view.js';
 import { labelPipelineStatus } from '../../../../pipeline-labels.js';
 import { SelectionStartControls } from './selection-start-controls.jsx';
+import { CompetitorDistributionButton } from '../competitor-distribution-button.jsx';
 import {
   WorkflowBlockerCallout,
   WorkflowNodeActionChip,
@@ -188,8 +189,8 @@ const WorkflowReviewQuickActions = ({ data }) => {
 const WorkflowCompletionDownload = ({ nodeId, data }) => {
   const status = String(data?.status || data?.state || '').toLowerCase();
   const workflowRunId = data?.workflowRunId || data?.output?.runId;
-  const artifactNodeId = data?.competitorDownload === true ? 'competitorReport' : 'generateSheet';
-  if (nodeId !== 'end' || status !== 'completed' || (data?.orderSheetDownload !== true && data?.competitorDownload !== true) || !workflowRunId) {
+  const artifactNodeId = 'generateSheet';
+  if (nodeId !== 'end' || status !== 'completed' || data?.orderSheetDownload !== true || !workflowRunId) {
     return null;
   }
   const downloadUrl = `/api/workflows/runs/${encodeURIComponent(workflowRunId)}/artifacts/${artifactNodeId}/raw`;
@@ -198,11 +199,11 @@ const WorkflowCompletionDownload = ({ nodeId, data }) => {
       className="inline-flex items-center gap-[5px] mt-2.5 bg-emerald-600 border border-emerald-500 rounded-md text-white text-[10px] font-extrabold px-[9px] py-1.5 no-underline transition-all duration-[160ms] hover:bg-emerald-700 hover:border-emerald-400 hover:-translate-y-px focus-visible:bg-emerald-700 focus-visible:border-emerald-400 focus-visible:-translate-y-px focus-visible:outline-none cursor-pointer"
       href={downloadUrl}
       download
-      title={data?.competitorDownload === true ? '下载同行分析报告' : '下载本次生成的 Excel 表格'}
+      title="下载本次生成的 Excel 表格"
       onPointerDown={(event) => event.stopPropagation()}
       onClick={(event) => event.stopPropagation()}
     >
-      <Download size={13} /> {data?.competitorDownload === true ? '下载分析报告' : '下载 Excel'}
+      <Download size={13} /> 下载 Excel
     </a>
   );
 };
@@ -320,6 +321,9 @@ export const ProductionNode = ({ id, data }) => {
         符合 {filterCounts.passed} · 待确认 {filterCounts.review} · 不符合 {filterCounts.failed}
       </div>}
       <WorkflowNodeArtifactButton data={data} />
+      {(id === 'findCompetitorSources' || (id === 'end' && data.competitorDownload === true))
+        && data.workflowRunId && ['completed', 'needs_review'].includes(status)
+        && <CompetitorDistributionButton key={data.workflowRunId} runId={data.workflowRunId} />}
       <WorkflowCompletionDownload nodeId={id} data={data} />
       <Handle type="source" position={Position.Right} id="out" />
     </div>

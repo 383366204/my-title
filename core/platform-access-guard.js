@@ -447,6 +447,8 @@ async function runWithPlatformGuard(platform, options, operation) {
       return value;
     } catch (err) {
       if (err && err.code === 'PLATFORM_ACCESS_INTERRUPTED') throw err;
+      // 本地上传面板识别超时不是平台拒绝；验证码和限流仍走原有熔断。
+      if (err && err.code === 'IMAGE_UPLOAD_STATE_TIMEOUT' && classifyPlatformError(err) === 'transient_failure') throw err;
       recordFailure(platform, guardOptions, err);
       throw err;
     }

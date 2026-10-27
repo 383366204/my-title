@@ -22,7 +22,8 @@ import {
 export function useDistributionExportData({
   artifactState,
   currentRunId,
-  sourceNodeId = 'export'
+  sourceNodeId = 'export',
+  useDraftRows = false
 }) {
   const categoryControl = useDistributionCategories(currentRunId);
   const [exportArtifactState, setExportArtifactState] = useState({ status: 'empty', artifact: null, error: '' });
@@ -105,7 +106,8 @@ export function useDistributionExportData({
     };
   }, [artifactState, currentRunId, sourceIsReview, categoryControl.state?.version]);
 
-  const sourceRows = view.kind === 'business-list' ? (view.rows || []) : [];
+  const draftView = useDraftRows ? getWorkflowArtifactView(artifactState?.artifact, 'generate') : null;
+  const sourceRows = useDraftRows ? (draftView?.rows || []) : view.kind === 'business-list' ? (view.rows || []) : [];
   const generateView = getWorkflowArtifactView(generateArtifactState.artifact, 'generate');
   const generateRows = generateView.kind === 'business-list' ? (generateView.rows || []) : [];
   const sourceTitleByLink = new Map(generateRows.flatMap((row) => {
@@ -156,7 +158,7 @@ export function useDistributionExportData({
   const rows = [...readyRows, ...manuallyIncludedRows];
   const activeRows = rows.filter((row) => !row.removed);
   const removedRows = rows.filter((row) => row.removed);
-  const pendingBlockedRows = blockedRows.filter((row) => !included[row.key]).map(applyEdits);
+  const pendingBlockedRows = useDraftRows ? [] : blockedRows.filter((row) => !included[row.key]).map(applyEdits);
   const copyTextValue = buildDistributionText(activeRows);
 
   const manualIncompleteCount = activeRows.filter((row) => (

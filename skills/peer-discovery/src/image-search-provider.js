@@ -8,9 +8,11 @@ const { setTimeout: delay } = require('node:timers/promises');
 const { CdpClient } = require('../../alibaba1688/src/search-web-1688');
 const { runWithPlatformGuard, PlatformAccessError } = require('../../../core/platform-access-guard');
 const { readImageSearchCards, normalizeImageSearchCard } = require('./image-search-cards');
+const { prepareUploadImage } = require('./upload-image');
+const { readImageUploadState } = require('./image-upload-state');
+const { captureCandidateScreenshot } = require('./candidate-screenshot');
 
 const INPUT_SELECTOR = 'input[type="file"][aria-label="以图搜款"]';
-const SEARCH_SELECTOR = 'button[class*="actionPrimary--"]';
 const RESULT_PATH = '/kapp/1688-search/pc-image-search/';
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
@@ -98,6 +100,20 @@ function imageBatchReadiness(rows, previous = {}) {
   return { signature, stable, ready: stable >= 4 };
 }
 
+/** @param {object|null} state 上传控件快照。 @returns {string} 可操作的超时解释。 */
+function uploadTimeoutMessage(state) {
+  if (!state) return '1688上传状态无法读取，请检查保留的浏览器页面';
+  if (state.fileCount !== 1 && !state.uploaded) return '1688上传状态无法确认：控件当前没有文件，也未识别到上传完成提示';
+  return state.uploaded ? '1688已接收图片，但搜索按钮尚不可用'
+    : '1688上传状态无法确认：文件已选中，但未检测到上传完成提示';
+}
+
+/** @param {object|null} state 页面上传状态。 @returns {boolean} 图片已被页面接受且搜索可用。 */
+function isUploadReady(state) {
+  // 上传处理器可能清空 input 以支持重复选择同一文件，不能据此否定完成状态。
+  return Boolean(state?.uploaded && state.previewReady && state.buttonReady && !state.error);
+}
+
 /**
  * Create an image-only provider using the user's existing debug Chrome session.
  * @param {object} options Port, progress callback and platform guard options.
@@ -108,7 +124,10 @@ function createImageSearchProvider(options = {}) {
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Chrome端口无效');
   return {
     async search(source, { signal } = {}) {
-      const image = await downloadSearchImage(source.imageUrl || source.mainImageUrl, { signal });
+      options.onProgress?.({ message: '下载商品主图' });
+      const downloaded = await downloadSearchImage(source.imageUrl || source.mainImageUrl, { signal });
+      options.onProgress?.({ message: '准备上传图片' });
+      const image = await prepareUploadImage(downloaded, { signal });
       if (source.imageDigest && source.imageDigest !== image.digest) {
         throw Object.assign(new Error('商品图片已变化，请刷新源商品证据'), { code: 'IMAGE_EVIDENCE_CHANGED' });
       }
@@ -126,6 +145,9 @@ function createImageSearchProvider(options = {}) {
         let result;
         const targets = [];
         let success = false;
+        let stage = '等待上传入口';
+        let uploadState = null;
+        const startedAt = Date.now();
         try {
           const version = await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(5000) }).then(r => r.json());
           browser = new CdpClient(version.webSocketDebuggerUrl);
@@ -133,21 +155,38 @@ function createImageSearchProvider(options = {}) {
           targets.push(created.targetId);
           home = new CdpClient(`ws://127.0.0.1:${port}/devtools/page/${created.targetId}`);
           options.onProgress?.({ message: '等待1688图搜上传入口' });
+          let entranceStable = 0;
           await poll(async () => {
             await assertPage(home);
-            return home.evaluate(`Boolean(document.querySelector(${JSON.stringify(INPUT_SELECTOR)}))`);
+            const ready = await home.evaluate(`document.readyState === 'complete' && document.querySelectorAll(${JSON.stringify(INPUT_SELECTOR)}).length === 1 && !document.querySelector(${JSON.stringify(INPUT_SELECTOR)}).disabled`);
+            entranceStable = ready ? entranceStable + 1 : 0;
+            return entranceStable >= 3;
           }, { signal, message: '没有找到1688图片上传入口' });
           const file = path.join(tempDir, `image.${image.extension}`);
           await fs.writeFile(file, image.bytes);
           const { root } = await home.send('DOM.getDocument');
           const { nodeId } = await home.send('DOM.querySelector', { nodeId: root.nodeId, selector: INPUT_SELECTOR });
+          if (!nodeId) throw new Error('1688图片上传入口已失效，请重试');
+          stage = '上传图片';
           await home.send('DOM.setFileInputFiles', { nodeId, files: [file] });
+          const uploadStartedAt = Date.now();
+          let readyCount = 0;
+          try {
           await poll(async () => {
             await assertPage(home);
-            return home.evaluate(`document.body.innerText.includes('已上传1张图') && Boolean(document.querySelector(${JSON.stringify(SEARCH_SELECTOR)}))`);
-          }, { signal, message: '1688图片上传未完成，请检查页面提示' });
+            uploadState = await home.evaluate(`(${readImageUploadState.toString()})()`);
+            options.onProgress?.({ message: `等待图片上传完成：${Math.floor((Date.now() - uploadStartedAt) / 1000)} / 90 秒` });
+            readyCount = isUploadReady(uploadState) ? readyCount + 1 : 0;
+            return readyCount >= 2;
+          }, { signal, timeoutMs: 90000, message: '1688上传状态未确认，请检查保留页面' });
+          } catch (error) {
+            if (error.code === 'IMAGE_SEARCH_TIMEOUT') error.code = 'IMAGE_UPLOAD_STATE_TIMEOUT';
+            throw error;
+          }
+          stage = '打开图搜结果';
           stopped(signal);
-          await home.send('Runtime.evaluate', { expression: `document.querySelector(${JSON.stringify(SEARCH_SELECTOR)}).click()`, userGesture: true });
+          const clicked = await home.send('Runtime.evaluate', { expression: `(${readImageUploadState.toString()})(true)`, userGesture: true, returnByValue: true });
+          if (!clicked.result?.value?.clicked) throw Object.assign(new Error('上传面板状态发生变化，未点击搜索，请重试'), { code: 'IMAGE_UPLOAD_STATE_TIMEOUT' });
           const target = await poll(async () => {
             await assertPage(home);
             const { targetInfos } = await browser.send('Target.getTargets');
@@ -159,10 +198,14 @@ function createImageSearchProvider(options = {}) {
           if (target.targetId !== created.targetId) targets.push(target.targetId);
           result = new CdpClient(`ws://127.0.0.1:${port}/devtools/page/${target.targetId}`);
           options.onProgress?.({ message: '读取1688图搜候选商品' });
+          stage = '读取图搜候选';
           let batchState = {};
           const raw = await poll(async () => {
             await assertPage(result);
-            const rows = await result.evaluate(`(${readImageSearchCards.toString()})()`);
+            const allRows = await result.evaluate(`(${readImageSearchCards.toString()})()`);
+            const rows = options.captureCandidates
+              ? [...new Map(allRows.map(row => [normalizeImageSearchCard(row)?.offerId, row]).filter(([id]) => id)).values()].slice(0, 12)
+              : allRows;
             batchState = imageBatchReadiness(rows, batchState);
             options.onProgress?.({ message: `已读取${rows.length}条候选，等待图片与商品信息稳定` });
             return batchState.ready ? rows : null;
@@ -171,8 +214,29 @@ function createImageSearchProvider(options = {}) {
           const now = Date.now();
           const candidates = [...new Map(raw.map(row => normalizeImageSearchCard(row, { now, maxAgeMs: options.evidenceMaxAgeMs ?? 86400000 })).filter(Boolean).map(row => [row.offerId, row])).values()];
           if (!candidates.length) throw new Error('图搜卡片缺少商品身份信息');
-          success = true;
-          return { ok: true, complete: false, batchReady: true, candidates, imageDigest: image.digest, collectedAt: now, resultUrl: target.url, scope: 'loaded_cards' };
+          let snapshot = null;
+          let snapshotError = null;
+          if (options.captureCandidates) {
+            options.onProgress?.({ message: `截取前 ${candidates.length} 个候选商品` });
+            try {
+              const capture = await captureCandidateScreenshot(result, candidates.map(c => c.offerId), { signal });
+              snapshot = await options.saveSnapshot(source, { ...capture, original: image });
+            } catch (error) {
+              if (signal?.aborted) throw error;
+              snapshotError = `截图未完成，保留候选供人工选择：${error.message}`;
+            }
+          }
+          success = !snapshotError;
+          return { ok: true, complete: false, batchReady: true, candidates, snapshot, snapshotError, imageDigest: image.digest, collectedAt: now, resultUrl: target.url, scope: 'loaded_cards' };
+        } catch (error) {
+          error.diagnostics = { stage, elapsedMs: Date.now() - startedAt,
+            originalFormat: downloaded.extension, originalBytes: downloaded.bytes.length,
+            uploadFormat: image.extension, uploadBytes: image.bytes.length,
+            uploadDigest: createHash('sha256').update(image.bytes).digest('hex'), uploadState };
+          if (stage === '上传图片' && error.code === 'IMAGE_UPLOAD_STATE_TIMEOUT') {
+            error.message = uploadTimeoutMessage(uploadState);
+          }
+          throw error;
         } finally {
           result?.close();
           home?.close();
@@ -186,4 +250,4 @@ function createImageSearchProvider(options = {}) {
   };
 }
 
-module.exports = { createImageSearchProvider, downloadSearchImage, imagePageBlocker, imageBatchReadiness };
+module.exports = { createImageSearchProvider, downloadSearchImage, imagePageBlocker, imageBatchReadiness, uploadTimeoutMessage, isUploadReady };

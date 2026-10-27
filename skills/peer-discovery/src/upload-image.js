@@ -7,12 +7,12 @@ const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 
 /**
- * 将已校验的 WebP 下载内容转换成淘宝接受的 PNG；不改变原图。
+ * 将已校验的 WebP 转换成平台通用 PNG；digest 始终代表原图。
  * @param {object} image 下载器返回的 bytes、extension。
  * @param {object} options 取消信号及可注入的转换执行器。
  * @returns {Promise<object>} 可上传的图片内容。
  */
-async function prepareTaobaoUploadImage(image, options = {}) {
+async function prepareUploadImage(image, options = {}) {
   options.signal?.throwIfAborted();
   if (['jpg', 'jpeg', 'png'].includes(image.extension)) return image;
   if (image.extension !== 'webp' || (options.platform || process.platform) !== 'darwin') {
@@ -37,4 +37,4 @@ async function prepareTaobaoUploadImage(image, options = {}) {
   }
 }
 
-module.exports = { prepareTaobaoUploadImage };
+module.exports = { prepareUploadImage };
