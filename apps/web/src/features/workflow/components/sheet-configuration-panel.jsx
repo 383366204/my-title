@@ -29,7 +29,7 @@ export function SheetConfigurationPanel({ node, onDone, onUpdateField, readOnly 
   const update = (field, value) => onUpdateField(node.id, field, value);
 
   return (
-    <div className="grid gap-3.5">
+    <div className="sheet-configuration-panel grid gap-3.5">
       <fieldset className="grid gap-3.5 min-w-0 m-0 p-0 border-0 disabled:opacity-[0.72]" disabled={readOnly}>
       {data.reviewSourceUpload !== true && data.orderSheetOnly !== true && (
       <section className="grid gap-2.5 border-b border-slate-700/72 pb-3.5 last:border-b-0 [&>h3]:m-0 [&>h3]:text-slate-200 [&>h3]:text-xs [&>h3]:tracking-normal">
