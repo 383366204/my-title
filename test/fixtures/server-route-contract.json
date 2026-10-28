@@ -363,5 +363,35 @@
     "method": "post",
     "path": "/api/workflows/validate",
     "handlers": 1
+  },
+  {
+    "method": "get",
+    "path": "/api/workflows/runs/:runId/competitor-sourcing",
+    "handlers": 1
+  },
+  {
+    "method": "get",
+    "path": "/api/workflows/runs/:runId/competitor-sourcing/snapshot/:itemId",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/workflows/runs/:runId/competitor-sourcing/selection",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/workflows/runs/:runId/competitor-sourcing/decisions",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/workflows/runs/:runId/competitor-sourcing/compare/:itemId",
+    "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/workflows/runs/:runId/competitor-sourcing/distribution",
+    "handlers": 1
   }
 ]

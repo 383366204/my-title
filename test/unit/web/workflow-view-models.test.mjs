@@ -1760,10 +1760,12 @@ test('peer discovery workflow exposes readable artifact views', () => {
   assert.equal(productReportView.title, '图搜选货铺货报告');
 
   // Launch blocker tests for peer-discovery
-  assert.deepEqual(getWorkflowLaunchBlocker('peer-discovery', [{ id: 'start', data: { links: '' } }]), {
+  const launchBlocker = getWorkflowLaunchBlocker('peer-discovery', [{ id: 'start', data: { links: '' } }]);
+  assert.ok(Number.isFinite(Date.parse(launchBlocker.logs[0].timestamp)));
+  assert.deepEqual(launchBlocker, {
     status: 'blocked',
     error: '请先在开始节点输入至少一个淘宝商品链接',
-    logs: [{ timestamp: getWorkflowLaunchBlocker('peer-discovery', [{ id: 'start', data: { links: '' } }]).logs[0].timestamp, level: 'error', message: '[peer_links_required] 请先在开始节点输入至少一个淘宝商品链接' }]
+    logs: [{ timestamp: launchBlocker.logs[0].timestamp, level: 'error', message: '[peer_links_required] 请先在开始节点输入至少一个淘宝商品链接' }]
   });
   assert.equal(getWorkflowLaunchBlocker('peer-discovery', [{ id: 'start', data: { links: 'https://item.taobao.com/item.htm?id=123' } }]), null);
 
