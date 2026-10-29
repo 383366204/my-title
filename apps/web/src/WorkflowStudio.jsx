@@ -195,6 +195,17 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
         artifactState={artifactState} copyText={copyText} currentRunId={currentRunId}
         nodeOperationProps={nodeOperationProps} nodes={nodes} onClose={closeOverlay}
         onConfirmProductReview={confirmProductReview} onRetryNode={retryWorkflowNode}
+        onSourcingResumed={(runId) => {
+          setRunStatus('running');
+          listenToRunEvents(runId);
+          closeOverlay();
+        }}
+        onPrepareSourcing={(items) => {
+          const template = templates.find(item => item.id === 'manual-selection-v2');
+          if (!template) throw new Error('未找到1688链接智能铺货模板，请刷新模板列表');
+          loadTemplate({ ...template, workflow: { ...template.workflow, nodes: template.workflow.nodes.map(node => node.id === 'start'
+            ? { ...node, data: { ...node.data, items, defaultKeyword: '' } } : node) } });
+        }}
         onSaveManualInput={({ defaultKeyword, items }) => {
           updateNodeFields('start', { defaultKeyword, items });
           closeOverlay();

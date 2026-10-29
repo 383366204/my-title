@@ -29,7 +29,7 @@ export const WorkflowBlockerCallout = ({ view }) => {
   return (
     <div className={`workflow-node-callout workflow-node-callout-${view.tone}`}>
       <strong>{view.blockerTitle}</strong>
-      <span>{view.blockerMessage}</span>
+      <span title={view.blockerMessage}>{view.blockerMessage}</span>
     </div>
   );
 };
@@ -66,7 +66,9 @@ export const WorkflowNodeActionChip = ({ view, onAction }) => (
 
 const ARTIFACT_NODE_IDS = new Set([
   'inspire', 'mine', 'keywordReview', 'verify', 'select', 'generate', 'collectRank', 'generateSheet',
-  'resolveShops', 'collectCompetitors', 'enrichCompetitors', 'analyzeCompetitors', 'competitorReport'
+  'resolveShops', 'collectCompetitors', 'findCompetitorSources', 'enrichCompetitors', 'analyzeCompetitors', 'competitorReport',
+  'extractSources', 'findSimilarProducts', 'evaluateShops', 'peerReport',
+  'collectPeerProducts', 'verifyImageSources', 'prepareListingDrafts', 'peerProductReport'
 ]);
 
 /**
@@ -77,15 +79,16 @@ const ARTIFACT_NODE_IDS = new Set([
  */
 export const WorkflowNodeArtifactButton = ({ data }) => {
   const status = String(data?.status || data?.state || '').toLowerCase();
+  const peerCompletion = data?.id === 'end' && (data.peerDownload === true || data.competitorDownload === true);
   const output = data?.output;
   const hasOutput = Array.isArray(output)
     ? output.length > 0
     : output && typeof output === 'object'
       ? Object.keys(output).length > 0
       : Boolean(output);
-  const hasResult = (data.id === 'inspire' && ['running', 'paused'].includes(status)) || ['completed', 'blocked', 'failed', 'retryable', 'needs_review', 'waiting_confirmation', 'waiting_manual'].includes(status)
-    && (hasOutput || status !== 'completed');
-  if (!data?.onViewArtifact || !hasResult || !ARTIFACT_NODE_IDS.has(String(data.id || ''))) return null;
+  const hasResult = (data.id === 'inspire' && ['running', 'paused'].includes(status)) || (['collectCompetitors', 'findCompetitorSources'].includes(data.id) && status === 'paused') || ['completed', 'blocked', 'failed', 'retryable', 'needs_review', 'waiting_confirmation', 'waiting_manual'].includes(status)
+    && (hasOutput || peerCompletion || status !== 'completed');
+  if (!data?.onViewArtifact || !hasResult || (!peerCompletion && !ARTIFACT_NODE_IDS.has(String(data.id || '')))) return null;
   return (
     <span
       className="production-node-artifact-action"
@@ -104,7 +107,7 @@ export const WorkflowNodeArtifactButton = ({ data }) => {
         }
       }}
     >
-      <FileText size={11} /> 查看产物
+      <FileText size={11} /> {data.id === 'collectCompetitors' ? '查看并选择商品' : data.id === 'findCompetitorSources' ? '查看并确认货源' : data.id === 'end' && data.competitorDownload ? '查看选货结果' : data.id === 'peerReport' || peerCompletion ? '查看店铺清单' : '查看产物'}
     </span>
   );
 };

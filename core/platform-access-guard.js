@@ -158,6 +158,7 @@ function writeCache(platform, cacheKey, value, options) {
 
 async function withPlatformLock(platform, options, fn) {
   const files = statusFiles(platform, options);
+  const token = crypto.randomUUID();
   const timeoutAt = Date.now() + options.lockTimeoutMs;
   ensureDir(files.dir);
 
@@ -165,6 +166,7 @@ async function withPlatformLock(platform, options, fn) {
     try {
       fs.mkdirSync(files.lockDir);
       writeJson(path.join(files.lockDir, 'owner.json'), {
+        token,
         pid: process.pid,
         host: os.hostname(),
         acquiredAt: new Date().toISOString()
@@ -181,11 +183,28 @@ async function withPlatformLock(platform, options, fn) {
       }
       const owner = readJson(path.join(files.lockDir, 'owner.json'), null);
       const acquiredAt = owner && Date.parse(owner.acquiredAt);
-      if (acquiredAt && Date.now() - acquiredAt > options.staleLockMs) {
+      // 长图搜可能超过旧超时；同机进程仍存活时不得抢走会话锁。
+      let ownerAlive = owner?.host !== os.hostname();
+      if (!ownerAlive && Number.isInteger(owner?.pid) && owner.pid > 0) {
+        try { process.kill(owner.pid, 0); ownerAlive = true; }
+        catch (error) { ownerAlive = error.code !== 'ESRCH'; }
+      }
+      if (acquiredAt && Date.now() - acquiredAt > options.staleLockMs && !ownerAlive) {
+        const reclaimDir = `${files.lockDir}.reclaim`;
+        let reclaimOwned = false;
         try {
-          fs.rmSync(files.lockDir, { recursive: true, force: true });
-          continue;
-        } catch (_) {}
+          fs.mkdirSync(reclaimDir);
+          reclaimOwned = true;
+          const current = readJson(path.join(files.lockDir, 'owner.json'), null);
+          if (JSON.stringify(current) === JSON.stringify(owner)) {
+            fs.rmSync(files.lockDir, { recursive: true, force: true });
+            continue;
+          }
+        } catch (_) {
+          // 另一个等待者正在回收；重新读取，不能删除后来获得的锁。
+        } finally {
+          if (reclaimOwned) fs.rmSync(reclaimDir, { recursive: true, force: true });
+        }
       }
       if (Date.now() >= timeoutAt) {
         throw new PlatformAccessError(`${platform} access guard lock timeout`, {
@@ -202,7 +221,8 @@ async function withPlatformLock(platform, options, fn) {
     return await fn();
   } finally {
     try {
-      fs.rmSync(files.lockDir, { recursive: true, force: true });
+      const owner = readJson(path.join(files.lockDir, 'owner.json'), null);
+      if (owner?.token === token) fs.rmSync(files.lockDir, { recursive: true, force: true });
     } catch (_) {}
   }
 }
@@ -427,6 +447,8 @@ async function runWithPlatformGuard(platform, options, operation) {
       return value;
     } catch (err) {
       if (err && err.code === 'PLATFORM_ACCESS_INTERRUPTED') throw err;
+      // 本地上传面板识别超时不是平台拒绝；验证码和限流仍走原有熔断。
+      if (err && err.code === 'IMAGE_UPLOAD_STATE_TIMEOUT' && classifyPlatformError(err) === 'transient_failure') throw err;
       recordFailure(platform, guardOptions, err);
       throw err;
     }

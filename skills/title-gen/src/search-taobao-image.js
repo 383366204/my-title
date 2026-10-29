@@ -531,6 +531,100 @@ async function imageSearchSingleNative(imageUrl, productId, options = {}) {
 }
 
 /**
+ * 构造带错误码的图搜异常。
+ * @param {string} code 错误码。
+ * @param {string} message 错误信息。
+ * @param {Error} [cause] 原始异常。
+ * @returns {Error} 带 code/platform 的异常。
+ */
+function imageSearchError(code, message, cause) {
+  const error = new Error(message);
+  error.code = code;
+  error.platform = 'taobao';
+  if (cause) error.cause = cause;
+  return error;
+}
+
+/**
+ * 按文本识别平台阻塞类型（登录、验证码、限流）。
+ * @param {string} text 错误文本。
+ * @returns {string|null} 阻塞错误码；非阻塞返回 null。
+ */
+function classifyImageSearchBlocker(text) {
+  const value = String(text || '');
+  if (/未知工具|unknown tool|tool.*not found/i.test(value)) return 'capability_unavailable';
+  if (/登录失效|请先登录|未登录|login/i.test(value)) return 'login_required';
+  if (/安全验证|验证码|滑块|captcha|punish/i.test(value)) return 'captcha_required';
+  if (/操作过于频繁|访问受限|rate.?limit|too many/i.test(value)) return 'rate_limited';
+  return null;
+}
+
+/**
+ * 执行单次淘宝图搜并返回原始响应数据（包含店铺与全量同款商品字段）。
+ * 失败一律抛出带 code 的异常，不返回 null，避免调用方把平台故障当成"无同款"。
+ * @param {string} imageUrl 图片地址。
+ * @param {string} productId 源商品 ID。
+ * @param {object} [options] timeout、signal。
+ * @returns {Promise<object>} native 原始输出。
+ */
+async function imageSearchSingleRaw(imageUrl, productId, options = {}) {
+  const { timeout = 30000, signal = null } = options;
+  if (!imageUrl || typeof imageUrl !== 'string') {
+    throw imageSearchError('IMAGE_SEARCH_INVALID_INPUT', `图搜缺少图片地址 [${productId}]`);
+  }
+  const stamp = Date.now();
+  const reqFile = path.join(os.tmpdir(), `taobao-image-raw-req-${productId}-${stamp}.json`);
+  const outFile = path.join(os.tmpdir(), `taobao-image-raw-${productId}-${stamp}.json`);
+  const requestPayload = {
+    tool: 'image_search',
+    arguments: { imagePath: imageUrl, sourceApp: 'ecom-ai-tools' }
+  };
+  try {
+    fs.writeFileSync(reqFile, JSON.stringify(requestPayload), 'utf8');
+    let result;
+    try {
+      result = await runTaobaoNativeAsync(['--request', reqFile, '-o', outFile], {
+        encoding: 'utf8',
+        timeout,
+        signal
+      });
+    } catch (error) {
+      // 取消信号原样抛出，由上层识别为暂停/取消
+      if (error && (error.name === 'AbortError' || signal?.aborted)) throw error;
+      const output = readImageSearchOutput(outFile, error?.stdout);
+      const detail = output?.error?.message || output?.error || output?.message || '';
+      const text = `${detail}\n${error?.message || ''}\n${error?.stderr || ''}\n${error?.stdout || ''}`;
+      const blocker = classifyImageSearchBlocker(text);
+      if (blocker === 'capability_unavailable') {
+        throw imageSearchError(blocker, '当前淘宝客户端未提供 image_search 图搜工具，请恢复客户端图搜能力后重试当前节点', error);
+      }
+      if (blocker) throw imageSearchError(blocker, `淘宝图搜被平台拦截：${error.message}`, error);
+      if (error?.killed || /timed out|ETIMEDOUT/i.test(text)) {
+        throw imageSearchError('IMAGE_SEARCH_TIMEOUT', `淘宝图搜超时 [${productId}]`, error);
+      }
+      throw imageSearchError('IMAGE_SEARCH_FAILED', `淘宝图搜调用失败 [${productId}]：${error?.message || error}`, error);
+    }
+    const data = readImageSearchOutput(outFile, result && result.stdout);
+    if (!data || typeof data !== 'object') {
+      throw imageSearchError('IMAGE_SEARCH_INVALID_OUTPUT', `淘宝图搜输出无法解析 [${productId}]`);
+    }
+    // native 以结构化错误返回时同样不能当作空结果
+    const errorText = data.ok === false || data.success === false || data.error
+      ? String(data.error?.message || data.error || data.message || data.msg || 'native 返回失败')
+      : '';
+    if (errorText) {
+      const blocker = classifyImageSearchBlocker(errorText);
+      throw imageSearchError(blocker || 'IMAGE_SEARCH_FAILED', `淘宝图搜返回错误 [${productId}]：${errorText}`);
+    }
+    return data;
+  } finally {
+    try { if (fs.existsSync(reqFile)) fs.unlinkSync(reqFile); } catch (_) {}
+    try { if (fs.existsSync(outFile)) fs.unlinkSync(outFile); } catch (_) {}
+  }
+}
+
+
+/**
  * 并发控制器：限制同时进行的 image_search 数量
  * @param {Array} items - 待处理项
  * @param {Function} handler - 每项的处理函数
@@ -825,5 +919,6 @@ module.exports = {
   selectTopTitles,
   cleanPeerTitles,
   imageSearchSingle,
+  imageSearchSingleRaw,
   guardTaobaoImageSearch
 };

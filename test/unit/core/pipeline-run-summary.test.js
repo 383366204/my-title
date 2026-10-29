@@ -31,6 +31,26 @@ function writeText(file, data) {
 }
 
 describe('pipeline run summary', () => {
+  it('lists runtime-only peer discovery history without rewriting persisted records', t => {
+    const dataDir = tempPipelineDir();
+    t.after(() => fs.rmSync(dataDir, { recursive: true, force: true }));
+    for (const [runId, status] of [['peer-complete', 'completed'], ['peer-blocked', 'blocked']]) {
+      writeJson(path.join(dataDir, 'runs', runId, 'runtime.json'), {
+        mode: 'peer-discovery', status, startedAt: '2026-10-18T16:02:03.000Z',
+        updatedAt: '2026-10-18T16:02:04.000Z', params: { discoveryBranch: 'peer-analysis' },
+        steps: ['extractSources'], progress: {},
+      });
+    }
+    writeJson(path.join(dataDir, 'runs', 'unrelated', 'runtime.json'), { mode: 'daily', status: 'completed' });
+    const result = listPipelineRuns({ dataDir });
+    assert.equal(result.runs.length, 2);
+    assert.equal(result.runs.find(run => run.runId === 'peer-complete').status, 'workflow_complete');
+    const { getWorkflowRun } = require('../../../core/workflow/pipeline-runs');
+    const workflow = getWorkflowRun('peer-blocked', { dataDir });
+    assert.equal(workflow.status, 'blocked');
+    assert.equal(workflow.workflow.mode, 'peer-discovery');
+    assert.equal(fs.existsSync(path.join(dataDir, 'runs', 'peer-complete', 'run.json')), false);
+  });
   it('maps pipeline statuses to normalized stages', () => {
     assert.deepEqual(STAGE_ORDER, ['seed', 'mined', 'keyword_review', 'verified', 'selected', 'generated', 'review', 'ready', 'submitted']);
     assert.equal(pipelineStatusToStage('created'), 'seed');

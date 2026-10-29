@@ -1,0 +1,64 @@
+{
+  "probeVersion": "taobao-web-cards-v1",
+  "capturedAt": "2026-10-16T16:35:00.000Z",
+  "channel": "web",
+  "source": "taobao-pc-image-search",
+  "description": "淘宝网页端图搜与店铺卡片探针样本（含店铺提取、付款人数信号与价格证据）",
+  "totalSamples": 6,
+  "rawCards": [
+    {
+      "url": "https://item.taobao.com/item.htm?id=892291403015&spm=a21bo.jianhua.201876.1",
+      "title": "越南沙金光面龙骨项链男仿黄金霸气男士项链",
+      "imageUrl": "https://img.alicdn.com/imgextra/i2/2208119022018/O1CN01BxOHZp2EqARvsUQQo_!!2208119022018.jpg",
+      "displayPriceText": "75.00",
+      "paymentText": "200+人付款",
+      "shopName": "周六福沙金饰品专营店",
+      "shopUrl": "https://store.taobao.com/shop/view_shop.htm?user_number_id=2208119022018&spm=a21bo.1"
+    },
+    {
+      "url": "https://item.taobao.com/item.htm?id=782190334120&spm=a21bo.jianhua.201876.2",
+      "title": "霸气双龙头沙金项链男士实心重工镀金饰品",
+      "imageUrl": "https://img.alicdn.com/imgextra/i4/1829103819/O1CN01c8PoKv2G5ZSHJbmnj_!!1829103819.jpg",
+      "displayPriceText": "128.50",
+      "paymentText": "1.14万人付款",
+      "shopName": "老凤祥沙金旗舰店",
+      "shopUrl": "https://shop1829103819.taobao.com/?spm=a21bo.2"
+    },
+    {
+      "url": "https://detail.tmall.com/item.htm?id=691028374619&spm=a21bo.jianhua.201876.3",
+      "title": "沙金龙骨项链仿金链子不掉色锁骨链",
+      "imageUrl": "https://img.alicdn.com/imgextra/i1/99281726/O1CN01LzVzD11whJkis1YI6_!!99281726.jpg",
+      "displayPriceText": "49.90",
+      "paymentText": "500+人付款",
+      "shopName": "天猫首饰专营店",
+      "shopUrl": "https://store.taobao.com/shop/view_shop.htm?user_number_id=99281726"
+    },
+    {
+      "url": "https://item.taobao.com/item.htm?id=612984719283",
+      "title": "小众设计龙头粗项链嘻哈个性男配饰",
+      "imageUrl": "https://img.alicdn.com/imgextra/i3/77182930/O1CN01VLD94i1alyBqIrZVg_!!77182930.jpg",
+      "displayPriceText": "88.00",
+      "paymentText": "不足10人付款",
+      "shopName": "小众设计手作店",
+      "shopUrl": "https://shop77182930.taobao.com/"
+    },
+    {
+      "url": "https://item.taobao.com/item.htm?id=739102847192",
+      "title": "新款沙金仿金项链轻奢复古饰品",
+      "imageUrl": "https://img.alicdn.com/imgextra/i2/66182910/O1CN01sample.jpg",
+      "displayPriceText": "66.00",
+      "paymentText": "100-200人付款",
+      "shopName": "极简金饰店",
+      "shopUrl": null
+    },
+    {
+      "url": "https://item.taobao.com/item.htm?id=829102847193",
+      "title": "男士粗款老板链金光闪闪项链",
+      "imageUrl": "https://img.alicdn.com/imgextra/i1/55182910/O1CN01sample2.jpg",
+      "displayPriceText": "199.00",
+      "paymentText": "1～2万人付款",
+      "shopName": "奢品沙金总店",
+      "shopUrl": "https://shop55182910.taobao.com/"
+    }
+  ]
+}

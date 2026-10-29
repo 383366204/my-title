@@ -59,21 +59,34 @@ describe('workflow pipeline adapter', () => {
       removeWatermark: 'removeWatermark',
       resolveShops: 'resolveShops',
       collectCompetitors: 'collectCompetitors',
+      findCompetitorSources: 'findCompetitorSources',
       enrichCompetitors: 'enrichCompetitors',
       analyzeCompetitors: 'analyzeCompetitors',
       competitorReport: 'competitorReport',
+      extractSources: 'extractSources',
+      findSimilarProducts: 'findSimilarProducts',
+      evaluateShops: 'evaluateShops',
+      peerReport: 'peerReport',
+      collectPeerProducts: 'collectPeerProducts',
+      verifyImageSources: 'verifyImageSources',
+      prepareListingDrafts: 'prepareListingDrafts',
+      reviewPeerListings: 'reviewPeerListings',
+      peerProductReport: 'peerProductReport',
       end: 'end'
     });
 
     const templates = listProductionWorkflowVariants();
 
-    assert.deepEqual(templates.map(template => template.id), ['selection-v1', 'selection-v1', 'selection-v1', 'manual-selection-v2', 'batch-watermark-v1', 'sycm-order-sheet-v1', 'uploaded-review-sheet-v1', 'competitor-analysis-v1']);
-    assert.deepEqual(templates.map(template => template.entryLabel), ['入口：选词与货源铺货', '入口：选词与货源铺货', '入口：选词与货源铺货', '入口：1688链接（关键词可选）', '入口：本地图片或文件夹', '入口：商品排行或指定商品', '入口：已执行的刷单表', '入口：同行分享链接']);
+    assert.deepEqual(templates.map(template => template.id), ['selection-v1', 'selection-v1', 'selection-v1', 'manual-selection-v2', 'batch-watermark-v1', 'sycm-order-sheet-v1', 'uploaded-review-sheet-v1', 'competitor-analysis-v1', 'peer-discovery-v1']);
+    assert.deepEqual(templates.map(template => template.entryLabel), ['入口：选词与货源铺货', '入口：选词与货源铺货', '入口：选词与货源铺货', '入口：1688链接（关键词可选）', '入口：本地图片或文件夹', '入口：商品排行或指定商品', '入口：已执行的刷单表', '入口：指定店铺或店内商品分享链接', '入口：淘宝商品链接']);
     const rootTemplate = templates.find(template => template.mode === 'root-keyword');
     const manualTemplate = templates.find(template => template.id === 'manual-selection-v2');
     const orderTemplate = templates.find(template => template.id === 'sycm-order-sheet-v1');
     const reviewTemplate = templates.find(template => template.id === 'uploaded-review-sheet-v1');
     const competitorTemplate = templates.find(template => template.id === 'competitor-analysis-v1');
+    const peerTemplate = templates.find(template => template.id === 'peer-discovery-v1');
+    assert.ok(peerTemplate, 'peer-discovery-v1 template should exist');
+    assert.match(peerTemplate.flowSummary, /提取商品/);
     assert.equal(listProductionWorkflowTemplates().filter(item => item.id === 'selection-v1').length, 1);
     assert.equal(templates[1].mode, 'keyword');
     assert.match(templates[0].flowSummary, /机会人工复核/);
@@ -211,18 +224,14 @@ describe('workflow pipeline adapter', () => {
       WORKFLOW_NODE_IDS.start,
       WORKFLOW_NODE_IDS.resolveShops,
       WORKFLOW_NODE_IDS.collectCompetitors,
-      WORKFLOW_NODE_IDS.enrichCompetitors,
-      WORKFLOW_NODE_IDS.analyzeCompetitors,
-      WORKFLOW_NODE_IDS.competitorReport,
+      WORKFLOW_NODE_IDS.findCompetitorSources,
       WORKFLOW_NODE_IDS.end
     ]);
     assert.deepEqual(competitorTemplate.workflow.edges.map(edge => `${edge.source}->${edge.target}`), [
       'start->resolveShops',
       'resolveShops->collectCompetitors',
-      'collectCompetitors->enrichCompetitors',
-      'enrichCompetitors->analyzeCompetitors',
-      'analyzeCompetitors->competitorReport',
-      'competitorReport->end'
+      'collectCompetitors->findCompetitorSources',
+      'findCompetitorSources->end'
     ]);
   });
 
@@ -247,9 +256,16 @@ describe('workflow pipeline adapter', () => {
             WORKFLOW_NODE_IDS.start,
             WORKFLOW_NODE_IDS.resolveShops,
             WORKFLOW_NODE_IDS.collectCompetitors,
-            WORKFLOW_NODE_IDS.enrichCompetitors,
-            WORKFLOW_NODE_IDS.analyzeCompetitors,
-            WORKFLOW_NODE_IDS.competitorReport,
+            WORKFLOW_NODE_IDS.findCompetitorSources,
+            WORKFLOW_NODE_IDS.end
+          ]
+        : template.mode === 'peer-discovery'
+        ? [
+            WORKFLOW_NODE_IDS.start,
+            WORKFLOW_NODE_IDS.extractSources,
+            WORKFLOW_NODE_IDS.findSimilarProducts,
+            WORKFLOW_NODE_IDS.evaluateShops,
+            WORKFLOW_NODE_IDS.peerReport,
             WORKFLOW_NODE_IDS.end
           ]
         : template.mode === 'watermark-removal'
@@ -547,6 +563,8 @@ describe('workflow pipeline adapter', () => {
     }), {
       competitorText: 'https://m.tb.cn/h.example',
       competitorInputs: [],
+      taobaoChannel: 'native',
+      port: 9222,
       maxShops: 10,
       hotLimit: 5,
       newLimit: 50,
@@ -1557,5 +1575,56 @@ describe('workflow pipeline adapter', () => {
       label: '确认铺货清单',
       description: '铺货前必须人工确认具体商品清单，确认后再进入提交动作。'
     });
+  });
+
+  it('sanitizes peer-discovery workflow params and builds discover-peers CLI args', () => {
+    const rawParams = {
+      links: 'https://item.taobao.com/item.htm?id=123456',
+      discoveryBranch: 'image-selection',
+      imagePriceRatioThreshold: '1.25',
+      similarityThreshold: '0.5',
+      priceRatioThreshold: '0.8',
+      collectLimit: '30',
+      minProducts: '8',
+      minSourcing: '4',
+      minPayment: '20',
+      maxCandidateShops: '15',
+      searchMaxProducts: '5',
+      searchMaxPages: '2',
+      port: '9333',
+      evidenceMaxAgeMs: '3600000',
+      allocationMethod: 'sequential'
+    };
+
+    const sanitized = sanitizeWorkflowParams('peer-discovery', rawParams);
+    assert.equal(sanitized.discoveryBranch, 'image-selection');
+    assert.equal(sanitized.links, 'https://item.taobao.com/item.htm?id=123456');
+    assert.equal(sanitized.imagePriceRatioThreshold, '1.25');
+    assert.equal(sanitized.collectLimit, 30);
+    assert.equal(sanitized.minProducts, 8);
+    assert.equal(sanitized.minSourcing, 4);
+    assert.equal(sanitized.minPayment, 20);
+    assert.equal(sanitized.maxCandidateShops, 15);
+    assert.equal(sanitized.port, 9333);
+    assert.equal(sanitized.evidenceMaxAgeMs, 3600000);
+    assert.equal(sanitized.allocationMethod, 'sequential-average');
+
+    assert.throws(() => sanitizeWorkflowParams('peer-discovery', { links: '' }), /请至少输入一个淘宝商品链接/);
+
+    const cliArgs = buildPipelineCliArgs('peer-discovery', rawParams);
+    assert.deepEqual(cliArgs.slice(0, 4), ['bin/cli.js', 'discover-peers', '--links', 'https://item.taobao.com/item.htm?id=123456']);
+    assert.ok(cliArgs.includes('--discovery-branch'));
+    assert.ok(cliArgs.includes('image-selection'));
+    assert.ok(cliArgs.includes('--image-price-ratio-threshold'));
+    assert.ok(cliArgs.includes('1.25'));
+    assert.ok(cliArgs.includes('--json'));
+
+    const launch = resolveProductionWorkflowLaunch({
+      mode: 'peer-discovery',
+      params: rawParams
+    });
+    assert.equal(launch.mode, 'peer-discovery');
+    assert.equal(launch.params.links, 'https://item.taobao.com/item.htm?id=123456');
+    assert.equal(launch.params.discoveryBranch, 'image-selection');
   });
 });

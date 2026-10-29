@@ -32,8 +32,15 @@ test('retired forwarding entry points stay removed', () => {
 test('test files stay inside the root test directory', () => {
   const misplaced = [];
   const visit = directory => {
-    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
-      if (['.git', 'node_modules', 'dist', 'test'].includes(entry.name)) continue;
+    let entries;
+    try {
+      entries = fs.readdirSync(directory, { withFileTypes: true });
+    } catch (err) {
+      if (err.code === 'ENOENT') return;
+      throw err;
+    }
+    for (const entry of entries) {
+      if (['.git', 'node_modules', 'dist', 'test', 'data'].includes(entry.name)) continue;
       const file = path.join(directory, entry.name);
       if (entry.isDirectory()) visit(file);
       else if (/\.(?:test|spec)\.(?:js|jsx|mjs|cjs)$/.test(entry.name)) misplaced.push(path.relative(root, file));

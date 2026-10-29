@@ -14,6 +14,7 @@ import { StartConfigurationPanel } from './start-configuration-panel.jsx';
 import { SelectionSourcePanel } from './selection-source-panel.jsx';
 import { WatermarkStudioPanel } from './watermark-studio-panel.jsx';
 import { KeywordFilterModal } from './keyword-filter-modal.jsx';
+import { PeerReviewPanel } from './peer-review-panel.jsx';
 
 const OVERLAY_COPY = {
   [WORKFLOW_OVERLAYS.ARTIFACT]: ['节点产物', '查看此节点生成的结构化结果。'],
@@ -58,6 +59,8 @@ export function WorkflowOverlayManager({
   onConfirmProductReview,
   onRetryNode,
   onSaveManualInput,
+  onPrepareSourcing,
+  onSourcingResumed,
   onUpdateNodeData,
   onSaveNodeFields,
   onSaveStartConfiguration,
@@ -66,6 +69,11 @@ export function WorkflowOverlayManager({
   updateDistributionNodeJob
 }) {
   if (!activeOverlay) return null;
+  if (activeOverlay.type === WORKFLOW_OVERLAYS.PEER_REVIEW) {
+    return <WorkflowOverlayShell label="同行选货复核与分配" onClose={onClose} wide>
+      {currentRunId ? <PeerReviewPanel key={currentRunId} runId={currentRunId} /> : <p>请先运行流水线，生成铺货草稿。</p>}
+    </WorkflowOverlayShell>;
+  }
   const node = nodes.find((item) => item.id === activeOverlay.nodeId) || null;
   const nodeLabel = node?.data?.label || node?.id || '节点';
   const [defaultLabel, defaultDescription] = OVERLAY_COPY[activeOverlay.type] || OVERLAY_COPY[WORKFLOW_OVERLAYS.NODE_WORKBENCH];
@@ -176,7 +184,7 @@ if (activeOverlay.type === WORKFLOW_OVERLAYS.WATERMARK_STUDIO) {
   } else if (activeOverlay.type === WORKFLOW_OVERLAYS.ARTIFACT) {
     content = node?.id === 'inspire'
       ? <InspirationArtifactPanel key={`${currentRunId}:${scopedArtifactState.status}:${scopedArtifactState.artifact?.revision}`} state={scopedArtifactState} />
-      : <ArtifactPanel state={scopedArtifactState} />;
+      : <ArtifactPanel state={scopedArtifactState} onPrepareSourcing={onPrepareSourcing} onSourcingResumed={onSourcingResumed} />;
   } else {
     content = (
       <>

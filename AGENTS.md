@@ -80,7 +80,7 @@ my-title/
 }
 ```
 
-暴露工具：`generate_title`, `generate_title_from_image`, `batch_generate_titles`, `opportunities`, `trend`, `sycm_query`, `sycm_status`, `suggest_keywords`
+暴露工具：`generate_title`, `generate_title_from_image`, `batch_generate_titles`, `opportunities`, `trend`, `sycm_query`, `sycm_status`, `suggest_keywords`, `discover_peers`, `get_peer_discovery_status`, `cancel_peer_discovery`
 
 ---
 
@@ -196,6 +196,9 @@ cp .env.example .env
 | `sycm_query` | 生意参谋搜索分析数据 | `keyword`, `mode`, `port`, `maxPages` |
 | `sycm_status` | 生意参谋数据缓存状态 | `keyword`(可选) |
 | `suggest_keywords` | 自动选词（13 种策略） | `strategy`, `input`, `max_candidates`, `sycm_verify` |
+| `discover_peers` | 以货找店与图搜选货铺货 | `links`, `discoveryBranch`, `imagePriceRatioThreshold`, `port` |
+| `get_peer_discovery_status` | 同行发现任务状态与进度查询 | `taskId` |
+| `cancel_peer_discovery` | 取消进行中的同行发现任务 | `taskId` |
 
 ### generate_title 返回结构
 

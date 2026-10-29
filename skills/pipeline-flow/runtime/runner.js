@@ -1,6 +1,17 @@
 'use strict';
 const { prepareDistributionCategories } = require('../src/category-state');
 const { prepareSelectionBrowser } = require('./browser-preflight');
+const {
+  runPeerExtractStep,
+  runPeerSimilarStep,
+  runPeerCollectionStep,
+  runPeerVerifyImageSourcesStep,
+  runPeerPrepareListingDraftsStep,
+  runPeerReviewListingsStep,
+  runPeerProductReportStep,
+  runPeerEvaluateShopsStep,
+  runPeerReportStep
+} = require('../../peer-discovery/src/collection-runtime-step');
 
 const fs = require('fs');
 const path = require('path');
@@ -45,7 +56,26 @@ const ROOT_KEYWORD_STEPS = ['mine', 'keywordReview', 'select', 'generate', 'expo
 const MANUAL_STEPS = ['start', 'select', 'verify', 'generate', 'export'];
 const ORDER_SHEET_STEPS = ['collectRank', 'confirmProducts', 'generateSheet'];
 const REVIEW_SHEET_STEPS = ['importSheet', 'generateReviews', 'generateSheet'];
-const COMPETITOR_ANALYSIS_STEPS = ['resolveShops', 'collectCompetitors', 'enrichCompetitors', 'analyzeCompetitors', 'competitorReport'];
+const COMPETITOR_ANALYSIS_STEPS = ['resolveShops', 'collectCompetitors', 'findCompetitorSources'];
+const PEER_DISCOVERY_STEPS = [
+  'extractSources',
+  'findSimilarProducts',
+  'evaluateShops',
+  'peerReport'
+];
+const PEER_IMAGE_SELECTION_STEPS = [
+  'extractSources',
+  'findSimilarProducts',
+  'collectPeerProducts',
+  'verifyImageSources',
+  'prepareListingDrafts',
+  'reviewPeerListings',
+  'peerProductReport'
+];
+function getPeerSteps(params = {}) {
+  return params?.discoveryBranch === 'image-selection'
+    ? PEER_IMAGE_SELECTION_STEPS : PEER_DISCOVERY_STEPS;
+}
 const STOP_STATUSES = new Set([
   'mining_manual_action_required',
   'mining_empty',
@@ -61,7 +91,10 @@ const STOP_STATUSES = new Set([
   'needs_review',
   'ready_to_distribute',
   'awaiting_user_confirmation',
-  'workflow_complete'
+  'workflow_complete',
+  // peer-discovery 正常无结果终态（设计文档 §5.1）
+  'no_products_found',       // 所有候选店铺均无付款达标商品
+  'no_confirmed_sources'     // 完整验证后确定无 confirmed 且无在途/待核对提交
 ]);
 const FAILED_PIPELINE_STATUSES = new Set(['select_failed', 'generate_failed']);
 const BLOCKED_PIPELINE_STATUSES = new Set([
@@ -169,6 +202,34 @@ function createDefaultStepFns({ dataDir, runId, params, mode = 'daily', steps = 
   const shouldStop = () => readRuntimeControl({ dataDir, runId }).requestedAction;
 
   return {
+    extractSources: async ({ reportProgress }) => runPeerExtractStep({
+      runDir: runtimeRunDir(dataDir, runId), dataDir, runId, params, reportProgress, shouldStop,
+    }),
+    findSimilarProducts: async ({ reportProgress }) => runPeerSimilarStep({
+      runDir: runtimeRunDir(dataDir, runId), dataDir, runId, params, reportProgress, shouldStop,
+    }),
+    evaluateShops: async ({ reportProgress }) => runPeerEvaluateShopsStep({
+      runDir: runtimeRunDir(dataDir, runId), dataDir, runId, params, reportProgress, shouldStop,
+    }),
+    peerReport: async ({ reportProgress }) => runPeerReportStep({
+      runDir: runtimeRunDir(dataDir, runId), dataDir, runId, params, reportProgress, shouldStop,
+    }),
+    collectPeerProducts: async ({ reportProgress }) => runPeerCollectionStep({
+      runDir: runtimeRunDir(dataDir, runId), shops: params.peerShops,
+      channel: params.resolvedTaobaoChannel, params, reportProgress, shouldStop,
+    }),
+    verifyImageSources: async ({ reportProgress }) => runPeerVerifyImageSourcesStep({
+      runDir: runtimeRunDir(dataDir, runId), dataDir, runId, params, reportProgress, shouldStop,
+    }),
+    prepareListingDrafts: async ({ reportProgress }) => runPeerPrepareListingDraftsStep({
+      runDir: runtimeRunDir(dataDir, runId), dataDir, runId, params, reportProgress, shouldStop,
+    }),
+    reviewPeerListings: async ({ reportProgress }) => runPeerReviewListingsStep({
+      runDir: runtimeRunDir(dataDir, runId), dataDir, runId, params, reportProgress, shouldStop,
+    }),
+    peerProductReport: async ({ reportProgress }) => runPeerProductReportStep({
+      runDir: runtimeRunDir(dataDir, runId), dataDir, runId, params, reportProgress, shouldStop,
+    }),
     inspire: async ({ reportProgress }) => flowDiscoverInspirations({ ...params, dataDir, runId, onProgress: reportProgress, shouldStop }),
     start: async ({ reportProgress }) => {
       reportProgress({ current: 0, total: keywordCount, message: keywordMode ? `准备 ${keywordCount} 个精确关键词` : '准备流程' });
@@ -306,6 +367,9 @@ function createDefaultStepFns({ dataDir, runId, params, mode = 'daily', steps = 
       return resolveCompetitorShops({ ...params, dataDir, runId, onProgress: reportProgress });
     },
     collectCompetitors: async ({ reportProgress }) => {
+      if (steps.includes('findCompetitorSources')) {
+        return require('../../competitor-analysis/src/sourcing-flow').runCompetitorCollectionBundle({ ...params, dataDir, runId, onProgress: reportProgress, shouldStop });
+      }
       reportProgress({ current: 0, total: Math.max(2, Number(params.maxShops || 5) * 2), message: '准备采集销量榜和新品榜' });
       return collectCompetitorProducts({ ...params, dataDir, runId, onProgress: reportProgress, shouldStop });
     },
@@ -313,6 +377,7 @@ function createDefaultStepFns({ dataDir, runId, params, mode = 'daily', steps = 
       reportProgress({ current: 0, total: Math.max(1, Number(params.detailLimit || 20) * 2), message: '准备补全榜单商品链接' });
       return enrichCompetitorProducts({ ...params, dataDir, runId, onProgress: reportProgress, shouldStop });
     },
+    findCompetitorSources: async ({ reportProgress }) => require('../../competitor-analysis/src/sourcing-flow').runCompetitorFindSources({ ...params, dataDir, runId, onProgress: reportProgress, shouldStop }),
     analyzeCompetitors: async ({ reportProgress }) => {
       reportProgress({ current: 0, total: 1, message: '正在分析同行商品结构' });
       return analyzeCompetitors({ ...params, dataDir, runId, onProgress: reportProgress });
@@ -380,19 +445,21 @@ async function runPipelineRuntime(options = {}) {
   const params = options.params == null ? (existingRuntime?.params || {}) : options.params;
   const mode = options.mode || existingRuntime?.mode || 'daily';
   const configuredSteps = options.steps || existingRuntime?.steps || (
-    mode === 'keyword'
-      ? KEYWORD_STEPS
-      : mode === 'root-keyword'
-        ? ROOT_KEYWORD_STEPS
-      : mode === 'manual'
-        ? MANUAL_STEPS
-        : mode === 'order-sheet'
-          ? ORDER_SHEET_STEPS
-        : mode === 'review-sheet'
-          ? REVIEW_SHEET_STEPS
-          : mode === 'competitor-analysis'
-            ? COMPETITOR_ANALYSIS_STEPS
-          : (injectedStepFns && !injectedStepFns.inspire ? DEFAULT_STEPS : ['inspire', ...DEFAULT_STEPS])
+    mode === 'peer-discovery'
+      ? getPeerSteps(params)
+      : mode === 'keyword'
+        ? KEYWORD_STEPS
+        : mode === 'root-keyword'
+          ? ROOT_KEYWORD_STEPS
+        : mode === 'manual'
+          ? MANUAL_STEPS
+          : mode === 'order-sheet'
+            ? ORDER_SHEET_STEPS
+          : mode === 'review-sheet'
+            ? REVIEW_SHEET_STEPS
+            : mode === 'competitor-analysis'
+              ? COMPETITOR_ANALYSIS_STEPS
+            : (injectedStepFns && !injectedStepFns.inspire ? DEFAULT_STEPS : ['inspire', ...DEFAULT_STEPS])
   );
   const needsBrowser = ['daily', 'keyword', 'root-keyword'].includes(mode)
     && (!injectedStepFns || options.prepareBrowser);
@@ -406,15 +473,29 @@ async function runPipelineRuntime(options = {}) {
   const stepsToRun = steps.slice(startIndex);
 
   if (existingRuntime) {
+    const initialControl = readRuntimeControl({ dataDir, runId });
+    if (initialControl?.requestedAction === 'cancel' || existingRuntime.status === 'cancelled' || existingRuntime.requestedAction === 'cancel') {
+      updateRuntimeState({
+        dataDir,
+        runId,
+        patch: { status: 'cancelled', requestedAction: 'cancel' }
+      });
+      return { runId, runDir, status: 'cancelled', runtimeStatus: 'cancelled' };
+    }
     clearRuntimeControl({ dataDir, runId });
     const progress = options.retryStep
       ? resetProgressFromStep(existingRuntime.progress || {}, steps, options.retryStep)
       : (existingRuntime.progress || {});
+    const startingStatus = options.retryStep
+      ? 'retrying'
+      : (options.preserveRuntime && existingRuntime.status === 'queued')
+        ? 'running'
+        : 'resuming';
     updateRuntimeState({
       dataDir,
       runId,
       patch: {
-        status: options.retryStep ? 'retrying' : 'resuming',
+        status: startingStatus,
         activeStep: startStep,
         requestedAction: null,
         platform: null,
@@ -433,10 +514,13 @@ async function runPipelineRuntime(options = {}) {
   } else {
     initRuntimeState({ dataDir, runId, steps, mode, params });
   }
+  const eventStatus = existingRuntime
+    ? (options.retryStep ? 'retrying' : (options.preserveRuntime && existingRuntime.status === 'queued') ? 'running' : 'resuming')
+    : 'running';
   appendRuntimeEvent({
     dataDir,
     runId,
-    event: { event: 'status', status: existingRuntime ? (options.retryStep ? 'retrying' : 'resuming') : 'running', step: startStep || '' }
+    event: { event: 'status', status: eventStatus, step: startStep || '' }
   });
 
   let lastResult = { runId, runDir, status: 'running' };
@@ -499,12 +583,16 @@ async function runPipelineRuntime(options = {}) {
       const reportedProgress = readRuntimeState({ dataDir, runId })?.progress?.[step] || {};
       const stepBlocked = lastResult.status === 'manual_action_required'
         || (BLOCKED_PIPELINE_STATUSES.has(lastResult.status) && lastResult.stepIncomplete === true);
+      const awaitingCompetitorReview = mode === 'competitor-analysis'
+        && lastResult.status === 'needs_review' && lastResult.stepIncomplete === true;
       updateRuntimeState({
         dataDir,
         runId,
         patch: {
           progress: {
-            [step]: stepBlocked
+            [step]: awaitingCompetitorReview
+              ? { ...normalizeProgress(reportedProgress), status: 'needs_review', message: reportedProgress.message }
+              : stepBlocked
               ? {
                   ...normalizeProgress(reportedProgress),
                   status: 'blocked',
@@ -517,7 +605,7 @@ async function runPipelineRuntime(options = {}) {
       appendRuntimeEvent({
         dataDir,
         runId,
-        event: { event: stepBlocked ? 'step_blocked' : 'step_completed', step, status: stepBlocked ? 'blocked' : 'completed' }
+        event: { event: awaitingCompetitorReview ? 'step_review' : stepBlocked ? 'step_blocked' : 'step_completed', step, status: awaitingCompetitorReview ? 'needs_review' : stepBlocked ? 'blocked' : 'completed' }
       });
 
       if (step === 'inspire' && params.reviewInspirationRoots && !stepBlocked && !lastResult.stepIncomplete
@@ -614,5 +702,8 @@ async function runPipelineRuntime(options = {}) {
 }
 
 module.exports = {
-  runPipelineRuntime
+  runPipelineRuntime,
+  getPeerSteps,
+  PEER_DISCOVERY_STEPS,
+  PEER_IMAGE_SELECTION_STEPS
 };

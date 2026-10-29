@@ -17,6 +17,55 @@ function tempDataDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'platform-access-guard-'));
 }
 
+test('local upload state timeouts do not trip the breaker but real rate limits still do', async () => {
+  const dataDir = tempDataDir();
+  const options = { dataDir, cache: false, minCooldownMs: 0, maxCooldownMs: 0, failureThreshold: 1 };
+  try {
+    for (let i = 0; i < 3; i++) {
+      await assert.rejects(runWithPlatformGuard('1688', options, async () => {
+        throw Object.assign(new Error('上传状态未确认'), { code: 'IMAGE_UPLOAD_STATE_TIMEOUT' });
+      }), { code: 'IMAGE_UPLOAD_STATE_TIMEOUT' });
+    }
+    let called = false;
+    await runWithPlatformGuard('1688', options, async () => { called = true; });
+    assert.equal(called, true);
+    await assert.rejects(runWithPlatformGuard('1688', options, async () => {
+      throw new PlatformAccessError('访问过于频繁', { status: 'rate_limited' });
+    }));
+    await assert.rejects(runWithPlatformGuard('1688', options, async () => {}), { code: 'PLATFORM_ACCESS_BLOCKED' });
+  } finally { fs.rmSync(dataDir, { recursive: true, force: true }); }
+});
+
+test('expired session lock belonging to a live local process is not stolen', async () => {
+  const dataDir = tempDataDir();
+  const lockDir = path.join(dataDir, '1688', 'lock');
+  fs.mkdirSync(lockDir, { recursive: true });
+  fs.writeFileSync(path.join(lockDir, 'owner.json'), JSON.stringify({ pid: process.pid, host: os.hostname(), acquiredAt: '2020-01-01T00:00:00Z' }));
+  let called = false;
+  try {
+    await assert.rejects(runWithPlatformGuard('1688', { dataDir, cache: false, staleLockMs: 1, lockTimeoutMs: 1 }, async () => { called = true; }), { code: 'PLATFORM_ACCESS_LOCK_TIMEOUT' });
+    assert.equal(called, false);
+    assert.equal(fs.existsSync(lockDir), true);
+  } finally { fs.rmSync(dataDir, { recursive: true, force: true }); }
+});
+
+test('dead local owner can be recovered but release cannot remove a different token', async () => {
+  const dataDir = tempDataDir();
+  const lockDir = path.join(dataDir, '1688', 'lock');
+  const exited = require('child_process').spawnSync(process.execPath, ['-e', 'process.exit(0)']);
+  fs.mkdirSync(lockDir, { recursive: true });
+  fs.writeFileSync(path.join(lockDir, 'owner.json'), JSON.stringify({ pid: exited.pid, host: os.hostname(), acquiredAt: '2020-01-01T00:00:00Z' }));
+  try {
+    await runWithPlatformGuard('1688', { dataDir, cache: false, staleLockMs: 1, minCooldownMs: 0, maxCooldownMs: 0 }, async () => {
+      const owner = JSON.parse(fs.readFileSync(path.join(lockDir, 'owner.json'), 'utf8'));
+      assert.equal(owner.pid, process.pid);
+      assert.ok(owner.token);
+      fs.writeFileSync(path.join(lockDir, 'owner.json'), JSON.stringify({ ...owner, token: 'different-owner' }));
+    });
+    assert.equal(fs.existsSync(lockDir), true);
+  } finally { fs.rmSync(dataDir, { recursive: true, force: true }); }
+});
+
 beforeEach(() => {
   resetPlatformAccessState();
 });

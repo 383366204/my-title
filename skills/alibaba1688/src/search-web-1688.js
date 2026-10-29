@@ -772,8 +772,7 @@ function domExtractionExpression(maxCards) {
       url: location.href,
       title: document.title,
       textLength: document.body ? document.body.innerText.length : 0,
-      hasLoginText: document.body ? document.body.innerText.includes('\\u767b\\u5f55') : false,
-      hasCaptchaText: document.body ? (document.body.innerText.includes('\\u9a8c\\u8bc1') || document.body.innerText.includes('\\u6ed1\\u5757')) : false,
+      ...(${detectSearchAccess.toString()})(document, location),
       cards: candidates
     };
   })()`;
@@ -881,6 +880,7 @@ async function _rawSearchWeb1688(options = {}) {
       await client.evaluate('window.scrollTo(0, 0); document.documentElement.scrollTop = 0; document.body.scrollTop = 0; true', 10000);
       const scrollLoad = await scrollPageForProducts(client, pageOptions);
       const snapshot = await client.evaluate(domExtractionExpression(options.maxProducts), 30000);
+      assertSearchPageAccessible(snapshot);
       const normalizedProducts = (snapshot.cards || []).map(normalizeCard);
       const dedupedProducts = dedupeProducts(normalizedProducts);
       const resolved = await resolveProductUrlsDetailed(dedupedProducts, {
@@ -941,19 +941,6 @@ async function _rawSearchWeb1688(options = {}) {
       pageFiltersApplied: combinedFilters,
       scrollLoad: combinedScroll
     });
-    if (syntheticSnapshot.hasCaptchaText || syntheticSnapshot.hasLoginText) {
-      const error = new Error(syntheticSnapshot.hasCaptchaText
-        ? '1688 web search requires manual captcha/security verification'
-        : '1688 web search requires manual login');
-      error.status = syntheticSnapshot.hasCaptchaText ? 'captcha_required' : 'login_required';
-      error.source = '1688-web';
-      error.details = {
-        pageUrl: syntheticSnapshot.url,
-        pageTitle: syntheticSnapshot.title,
-        diagnostics
-      };
-      throw error;
-    }
     return {
       ok: true,
       products,
@@ -1040,8 +1027,7 @@ async function checkWeb1688Status(options = {}) {
           url: location.href,
           title: document.title,
           textLength: text.length,
-          hasLoginText: text.includes('\\u767b\\u5f55'),
-          hasCaptchaText: text.includes('\\u9a8c\\u8bc1') || text.includes('\\u6ed1\\u5757'),
+          ...(${detectSearchAccess.toString()})(document, location),
           productCardCount: ${productLinkCountExpression()}
         };
       })()`, 15000);
@@ -1072,7 +1058,46 @@ async function checkWeb1688Status(options = {}) {
   }
 }
 
+/**
+ * 在页面上下文检测可见的验证控件，避免商品文案触发误报。
+ * @param {Document} doc 页面文档。
+ * @param {Location} loc 页面地址。
+ * @returns {object} 登录与安全验证状态。
+ */
+function detectSearchAccess(doc, loc) {
+  const visible = element => {
+    const style = doc.defaultView.getComputedStyle(element);
+    return element.getClientRects().length > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+  };
+  const hasControl = selector => Array.from(doc.querySelectorAll(selector)).some(visible);
+  const text = doc.body?.innerText || '';
+  return {
+    hasCaptchaText: hasControl('#nc_1_wrapper, #nc_1_n1z, #baxia-dialog-content, iframe[src*="captcha"], iframe[src*="baxia"], [id^="aliyunCaptcha"]')
+      || /请完成安全验证|请拖动滑块|拖动滑块到最右边|访问过于频繁|滑动验证/.test(text),
+    hasLoginText: /^(login|passport)\.1688\.com$/.test(loc.hostname)
+      || hasControl('input[type="password"]')
+  };
+}
+
+/**
+ * 验证受阻后立即停止本次查询，保留页面供用户处理。
+ * @param {object} snapshot 页面快照。
+ * @returns {void}
+ */
+function assertSearchPageAccessible(snapshot) {
+  if (!snapshot.hasCaptchaText && !snapshot.hasLoginText) return;
+  const error = new Error(snapshot.hasCaptchaText
+    ? '1688 触发安全验证。请在当前 Chrome 的 1688 页面完成验证码或滑块验证，再点击“继续流程”。'
+    : '1688 需要登录。请在当前 Chrome 登录 1688，再点击“继续流程”。');
+  error.status = snapshot.hasCaptchaText ? 'captcha_required' : 'login_required';
+  error.source = '1688-web';
+  error.details = { pageUrl: snapshot.url, pageTitle: snapshot.title };
+  throw error;
+}
+
 module.exports = {
+  detectSearchAccess,
+  assertSearchPageAccessible,
   CdpClient,
   buildSearchUrl,
   encodeGbkURIComponent,

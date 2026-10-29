@@ -111,6 +111,9 @@ export function getWorkflowNodeAction(nodeId, state) {
   const normalizedNodeId = String(nodeId || '').toLowerCase();
   const stateDetails = state && typeof state === 'object' ? state : {};
   const normalizedState = String(stateDetails.status || stateDetails.state || state || '').toLowerCase();
+  if (normalizedNodeId === 'reviewpeerlistings') {
+    return { label: '复核商品与分配', action: 'peer-review', tone: getCanvasNodeTone(normalizedState) };
+  }
 
   // --- start node handlers (priority order matters) ---
   if (normalizedNodeId === 'start' && stateDetails.reviewUpload === true) {
@@ -145,6 +148,15 @@ if (normalizedNodeId === 'start' && stateDetails.watermarkStudio === true) {
     const hasInput = Boolean(String(stateDetails.competitorText || '').trim());
     return {
       label: hasInput ? '查看同行设置' : '录入同行',
+      action: 'manual-input',
+      tone: hasInput ? 'success' : 'warn'
+    };
+  }
+  if (normalizedNodeId === 'start' && stateDetails.peerConfig === true) {
+    const rawLinks = stateDetails.links ?? stateDetails.rawLinks ?? stateDetails.linksText ?? '';
+    const hasInput = Boolean(String(rawLinks || '').trim());
+    return {
+      label: hasInput ? '查看选货设置' : '录入商品链接',
       action: 'manual-input',
       tone: hasInput ? 'success' : 'warn'
     };

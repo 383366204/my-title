@@ -121,6 +121,30 @@ function ensureRunFiles(run, runDir) {
   run.files.competitorProductDetails = run.files.competitorProductDetails || path.join(runDir, 'competitor-product-details.jsonl');
   run.files.competitorAnalysis = run.files.competitorAnalysis || path.join(runDir, 'competitor-analysis.json');
   run.files.competitorReport = run.files.competitorReport || path.join(runDir, '同行分析报告.xlsx');
+  run.files.peerInput = run.files.peerInput || path.join(runDir, 'peer-input.json');
+  run.files.sourceProducts = run.files.sourceProducts || path.join(runDir, 'source-products.jsonl');
+  run.files.similarProducts = run.files.similarProducts || path.join(runDir, 'similar-products.jsonl');
+  run.files.candidateShops = run.files.candidateShops || path.join(runDir, 'candidate-shops.jsonl');
+  run.files.peerProducts = run.files.peerProducts || path.join(runDir, 'peer-products.jsonl');
+  run.files.shopSnapshots = run.files.shopSnapshots || path.join(runDir, 'shop-snapshots.jsonl');
+  run.files.sourcingCache = run.files.sourcingCache || path.join(runDir, 'sourcing-cache.jsonl');
+  run.files.shopEvaluations = run.files.shopEvaluations || path.join(runDir, 'shop-evaluations.jsonl');
+  run.files.peerDiscoveryResult = run.files.peerDiscoveryResult || path.join(runDir, 'peer-discovery-result.json');
+  run.files.peerReport = run.files.peerReport || path.join(runDir, '同行发现报告.xlsx');
+  run.files.peerSnapshotsDir = run.files.peerSnapshotsDir || path.join(runDir, 'peer-snapshots');
+  run.files.peerSnapshotManifest = run.files.peerSnapshotManifest || path.join(runDir, 'peer-snapshot-manifest.json');
+  run.files.sourcingDetails = run.files.sourcingDetails || path.join(runDir, 'sourcing-details.jsonl');
+  run.files.peerReviewPointer = run.files.peerReviewPointer || path.join(runDir, 'peer-review-current.json');
+  run.files.peerReviewBundlesDir = run.files.peerReviewBundlesDir || path.join(runDir, 'peer-review-bundles');
+  run.files.peerAllocationPlan = run.files.peerAllocationPlan || path.join(runDir, 'peer-allocation-plan.json');
+  run.files.peerSubmissionLedger = run.files.peerSubmissionLedger || path.join(runDir, 'peer-submissions.jsonl');
+  run.files.imageSourcingResults = run.files.imageSourcingResults || path.join(runDir, 'image-sourcing-results.jsonl');
+  run.files.imageSourcingCache = run.files.imageSourcingCache || path.join(runDir, 'image-sourcing-cache.jsonl');
+  run.files.imageSelectionState = run.files.imageSelectionState || path.join(runDir, 'image-selection-state.json');
+  run.files.similarFinderState = run.files.similarFinderState || path.join(runDir, 'similar-finder-state.json');
+  run.files.peerListingDrafts = run.files.peerListingDrafts || path.join(runDir, 'peer-listing-drafts.jsonl');
+  run.files.peerProductResult = run.files.peerProductResult || path.join(runDir, 'peer-product-result.json');
+  run.files.peerProductReport = run.files.peerProductReport || path.join(runDir, '图搜选货铺货报告.xlsx');
 }
 
 /**
@@ -231,7 +255,31 @@ function initRun({ dataDir = DEFAULT_FLOW_DIR, runId, options = {}, keywordFilte
       competitorNewProducts: path.join(resolved.runDir, 'competitor-new-products.jsonl'),
       competitorProductDetails: path.join(resolved.runDir, 'competitor-product-details.jsonl'),
       competitorAnalysis: path.join(resolved.runDir, 'competitor-analysis.json'),
-      competitorReport: path.join(resolved.runDir, '同行分析报告.xlsx')
+      competitorReport: path.join(resolved.runDir, '同行分析报告.xlsx'),
+      peerInput: path.join(resolved.runDir, 'peer-input.json'),
+      sourceProducts: path.join(resolved.runDir, 'source-products.jsonl'),
+      similarProducts: path.join(resolved.runDir, 'similar-products.jsonl'),
+      candidateShops: path.join(resolved.runDir, 'candidate-shops.jsonl'),
+      peerProducts: path.join(resolved.runDir, 'peer-products.jsonl'),
+      shopSnapshots: path.join(resolved.runDir, 'shop-snapshots.jsonl'),
+      sourcingCache: path.join(resolved.runDir, 'sourcing-cache.jsonl'),
+      shopEvaluations: path.join(resolved.runDir, 'shop-evaluations.jsonl'),
+      peerDiscoveryResult: path.join(resolved.runDir, 'peer-discovery-result.json'),
+      peerReport: path.join(resolved.runDir, '同行发现报告.xlsx'),
+      peerSnapshotsDir: path.join(resolved.runDir, 'peer-snapshots'),
+      peerSnapshotManifest: path.join(resolved.runDir, 'peer-snapshot-manifest.json'),
+      sourcingDetails: path.join(resolved.runDir, 'sourcing-details.jsonl'),
+      peerReviewPointer: path.join(resolved.runDir, 'peer-review-current.json'),
+      peerReviewBundlesDir: path.join(resolved.runDir, 'peer-review-bundles'),
+      peerAllocationPlan: path.join(resolved.runDir, 'peer-allocation-plan.json'),
+      peerSubmissionLedger: path.join(resolved.runDir, 'peer-submissions.jsonl'),
+      imageSourcingResults: path.join(resolved.runDir, 'image-sourcing-results.jsonl'),
+      imageSourcingCache: path.join(resolved.runDir, 'image-sourcing-cache.jsonl'),
+      imageSelectionState: path.join(resolved.runDir, 'image-selection-state.json'),
+      similarFinderState: path.join(resolved.runDir, 'similar-finder-state.json'),
+      peerListingDrafts: path.join(resolved.runDir, 'peer-listing-drafts.jsonl'),
+      peerProductResult: path.join(resolved.runDir, 'peer-product-result.json'),
+      peerProductReport: path.join(resolved.runDir, '图搜选货铺货报告.xlsx')
     }
   };
   ensureRunQualityState(run, requestedPolicy);

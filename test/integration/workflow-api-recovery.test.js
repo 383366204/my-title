@@ -376,6 +376,30 @@ test('workflow recovery APIs - pause, resume, and retry', async (t) => {
         assert.deepStrictEqual(runnerCalls[0].params, { mine: 13, verify: 8, generate: 5, productsPerKeyword: 3 });
         assert.strictEqual(runnerCalls[1].resumeFromStep, 'verify');
         assert.deepStrictEqual(runnerCalls[1].params, { mine: 13, verify: 8, generate: 5, productsPerKeyword: 3 });
+        await new Promise((resolve) => setImmediate(resolve));
+        updateRuntimeState({ dataDir: pipelineDataDir, runId, patch: {
+          mode: 'peer-discovery',
+          steps: ['extractSources', 'findSimilarProducts', 'evaluateShops', 'peerReport'],
+          activeStep: 'findSimilarProducts',
+          status: 'failed'
+        } });
+        const peerRetry = await fetch(`${baseUrl}/api/workflows/runs/${runId}/retry-node`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nodeId: 'findSimilarProducts' })
+        });
+        assert.strictEqual(peerRetry.status, 200);
+        assert.strictEqual((await peerRetry.json()).data.control.step, 'findSimilarProducts');
+        await new Promise((resolve) => setImmediate(resolve));
+        assert.strictEqual(runnerCalls[2].mode, 'peer-discovery');
+        assert.strictEqual(runnerCalls[2].retryStep, 'findSimilarProducts');
+        for (const nodeId of ['collectPeerProducts', 'reviewPeerListings']) {
+          const invalidRetry = await fetch(`${baseUrl}/api/workflows/runs/${runId}/retry-node`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ nodeId })
+          });
+          assert.strictEqual(invalidRetry.status, 400);
+        }
+        assert.strictEqual(runnerCalls.length, 3);
       } finally {
         app.locals.pipelineRuntimeRunner = originalRunner;
         fs.rmSync(runDir, { recursive: true, force: true });

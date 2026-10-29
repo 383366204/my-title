@@ -2,6 +2,8 @@ const { test } = require('node:test');
 const assert = require('assert');
 
 const {
+  detectSearchAccess,
+  assertSearchPageAccessible,
   buildSearchUrl,
   encodeGbkURIComponent,
   buildPageFilterConfig,
@@ -16,6 +18,32 @@ const {
   filterWebProducts,
   dedupeProducts
 } = require('../../../../skills/alibaba1688/src/search-web-1688');
+
+test('access detection ignores ordinary product text and hidden challenge controls', () => {
+  const doc = {
+    body: { innerText: '登录 注册 工业滑块 质量验证' },
+    defaultView: { getComputedStyle: () => ({ visibility: 'visible', display: 'none' }) },
+    querySelectorAll: () => [{ getClientRects: () => [] }]
+  };
+  assert.deepStrictEqual(detectSearchAccess(doc, { hostname: 's.1688.com' }), { hasLoginText: false, hasCaptchaText: false });
+  doc.body.innerText = '请完成安全验证';
+  assert.strictEqual(detectSearchAccess(doc, { hostname: 's.1688.com' }).hasCaptchaText, true);
+  doc.body.innerText = '';
+  assert.strictEqual(detectSearchAccess(doc, { hostname: 'login.1688.com' }).hasLoginText, true);
+  doc.querySelectorAll = selector => selector.includes('baxia') ? [{ getClientRects: () => [{}] }] : [];
+  doc.defaultView.getComputedStyle = () => ({ visibility: 'visible', display: 'block' });
+  assert.strictEqual(detectSearchAccess(doc, { hostname: 's.1688.com' }).hasCaptchaText, true);
+});
+
+test('blocked search stops with actionable Chinese error and original page URL', () => {
+  assert.doesNotThrow(() => assertSearchPageAccessible({}));
+  assert.throws(() => assertSearchPageAccessible({ hasCaptchaText: true, url: 'https://s.1688.com/' }), error => {
+    assert.strictEqual(error.status, 'captcha_required');
+    assert.strictEqual(error.details.pageUrl, 'https://s.1688.com/');
+    assert.match(error.message, /安全验证.*继续流程/);
+    return true;
+  });
+});
 
 test('encodeGbkURIComponent encodes Chinese keyword for 1688 search', () => {
   assert.strictEqual(encodeGbkURIComponent('\u6212\u6307'), '%BD%E4%D6%B8');

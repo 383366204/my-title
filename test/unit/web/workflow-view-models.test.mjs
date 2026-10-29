@@ -1684,3 +1684,103 @@ test('competitor workflow exposes actionable summaries and readable artifacts', 
   assert.match(view.rows[0].meta, /销量榜/);
   assert.match(view.rows[1].description, /不代表精确上架日期/);
 });
+
+test('peer discovery workflow exposes readable artifact views', () => {
+  const extractView = getWorkflowArtifactView({
+    rows: [{
+      title: '源商品标题',
+      price: '29.90',
+      itemId: '688123456789',
+      mainImageUrl: 'https://img.alicdn.com/source.jpg',
+      sourceUrl: 'https://item.taobao.com/item.htm?id=688123456789'
+    }]
+  }, 'extractSources');
+  assert.equal(extractView.kind, 'business-list');
+  assert.equal(extractView.title, '源商品列表');
+  assert.equal(extractView.rows[0].title, '源商品标题');
+  assert.match(extractView.rows[0].meta, /¥29.90/);
+  assert.equal(extractView.rows[0].imageUrl, 'https://img.alicdn.com/source.jpg');
+
+  const similarView = getWorkflowArtifactView({
+    rows: [{
+      shopKey: 'shop_001',
+      similarProductCount: 5,
+      representativeProducts: ['item_a', 'item_b'],
+      shopUrl: 'https://shop1.taobao.com'
+    }]
+  }, 'findSimilarProducts');
+  assert.equal(similarView.kind, 'business-list');
+  assert.equal(similarView.title, '候选店铺列表');
+  assert.equal(similarView.rows[0].title, 'shop_001');
+  assert.match(similarView.rows[0].meta, /5 个同款/);
+  assert.match(similarView.rows[0].description, /代表商品: item_a, item_b/);
+
+  const evalView = getWorkflowArtifactView({
+    rows: [{
+      shopKey: 'shop_002',
+      verdict: 'blocked',
+      paymentQualifiedCount: 6,
+      sourcingConfirmedCount: 6,
+      reason: '平台滑块拦截'
+    }]
+  }, 'evaluateShops');
+  assert.equal(evalView.kind, 'business-list');
+  assert.equal(evalView.title, '逐店评估结果');
+  assert.match(evalView.rows[0].meta, /平台拦截/);
+  assert.match(evalView.rows[0].meta, /达标商品 6 件/);
+  assert.equal(evalView.rows[0].description, '平台滑块拦截');
+
+  const ledgerView = getWorkflowArtifactView({
+    rows: [{
+      offerId: '1688_001',
+      targetShopId: 'shop_tb_01',
+      batchId: 'batch_01',
+      status: 'success',
+      submittedAt: 1770000000000
+    }]
+  }, 'reviewPeerListings');
+  assert.equal(ledgerView.kind, 'business-list');
+  assert.equal(ledgerView.title, '铺货分发账本');
+  assert.equal(ledgerView.rows[0].title, '商品 1688_001');
+  assert.match(ledgerView.rows[0].meta, /目标店铺 shop_tb_01/);
+  assert.match(ledgerView.rows[0].meta, /提交成功/);
+
+  const reportView = getWorkflowArtifactView({
+    type: 'xlsx',
+    file: '同行发现报告.xlsx'
+  }, 'peerReport');
+  assert.equal(reportView.kind, 'file');
+  assert.equal(reportView.title, '同行发现报告');
+
+  const productReportView = getWorkflowArtifactView({
+    type: 'xlsx',
+    file: '图搜选货铺货报告.xlsx'
+  }, 'peerProductReport');
+  assert.equal(productReportView.kind, 'file');
+  assert.equal(productReportView.title, '图搜选货铺货报告');
+
+  // Launch blocker tests for peer-discovery
+  const launchBlocker = getWorkflowLaunchBlocker('peer-discovery', [{ id: 'start', data: { links: '' } }]);
+  assert.ok(Number.isFinite(Date.parse(launchBlocker.logs[0].timestamp)));
+  assert.deepEqual(launchBlocker, {
+    status: 'blocked',
+    error: '请先在开始节点输入至少一个淘宝商品链接',
+    logs: [{ timestamp: launchBlocker.logs[0].timestamp, level: 'error', message: '[peer_links_required] 请先在开始节点输入至少一个淘宝商品链接' }]
+  });
+  assert.equal(getWorkflowLaunchBlocker('peer-discovery', [{ id: 'start', data: { links: 'https://item.taobao.com/item.htm?id=123' } }]), null);
+
+  // Start node action and view model for peerConfig
+  const actionEmpty = getWorkflowNodeAction('start', { peerConfig: true, links: '' });
+  assert.equal(actionEmpty.label, '录入商品链接');
+  assert.equal(actionEmpty.tone, 'warn');
+
+  const actionFilled = getWorkflowNodeAction('start', { peerConfig: true, links: 'https://item.taobao.com/item.htm?id=123' });
+  assert.equal(actionFilled.label, '查看选货设置');
+  assert.equal(actionFilled.tone, 'success');
+
+  const vm = getWorkflowNodeViewModel('start', { peerConfig: true, links: 'https://item.taobao.com/item.htm?id=123', discoveryBranch: 'image-selection' });
+  assert.match(vm.configSummary, /1 条商品链接 · 图搜选货/);
+
+  const launchParams = getWorkflowLaunchParams([{ id: 'start', data: { peerConfig: true, linksText: 'https://item.taobao.com/item.htm?id=999' } }]);
+  assert.deepEqual(launchParams.links, ['https://item.taobao.com/item.htm?id=999']);
+});

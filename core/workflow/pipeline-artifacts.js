@@ -11,6 +11,8 @@ const { WORKFLOW_NODE_IDS, ARTIFACT_BY_NODE } = require('./pipeline-definition-c
 const { scoreRootReviewCandidate } = require('../../skills/pipeline-flow/src/root-opportunity-review');
 const { normalizeKeywordFilter } = require('../../skills/pipeline-flow/src/keyword-metric-filter');
 const { inspirationReviewState } = require('../../skills/pipeline-flow/src/inspiration-root-review');
+const { latestShopEvaluations } = require('../../skills/peer-discovery/src/peer-report-writer');
+const { readRuntimeState } = require('../../skills/pipeline-flow/runtime/store');
 
 /**
  * 读取 workflow 节点对应的 pipeline artifact。
@@ -55,7 +57,15 @@ function readArtifactJsonl(file, limit) {
 function readWorkflowNodeArtifact(runIdOrOptions, nodeId, options = {}) {
   const normalized = normalizeArtifactOptions(runIdOrOptions, nodeId, options);
   const summary = summarizePipelineRun({ dataDir: normalized.dataDir, runId: normalized.runId, previewLimit: 0, reviewChars: 1 });
-  const artifact = ARTIFACT_BY_NODE[normalized.nodeId];
+  const competitorRuntime = summary?.options?.mode === 'competitor-analysis'
+    ? readRuntimeState({ dataDir: normalized.dataDir, runId: normalized.runId }) : null;
+  if (competitorRuntime?.steps?.includes('findCompetitorSources') && ['collectCompetitors', 'findCompetitorSources', 'end'].includes(normalized.nodeId)) {
+    return { runId: normalized.runId, nodeId: normalized.nodeId, type: 'competitor-sourcing', rows: [] };
+  }
+  const peerReport = summary?.options?.mode === 'peer-discovery'
+    && summary.options.discoveryBranch !== 'image-selection'
+    && ['peerReport', 'end'].includes(normalized.nodeId);
+  const artifact = peerReport ? ARTIFACT_BY_NODE.peerReport : ARTIFACT_BY_NODE[normalized.nodeId];
   if (!summary || !artifact) return null;
   const file = summary.files && summary.files[artifact.fileKey];
   if (!file) return null;
@@ -235,13 +245,23 @@ function readWorkflowNodeArtifact(runIdOrOptions, nodeId, options = {}) {
   }
   if (artifact.type === 'xlsx') {
     if (!fs.existsSync(file)) return null;
+    let reportRows;
+    if (peerReport) {
+      if (fs.existsSync(summary.files.peerDiscoveryResult)) {
+        const report = JSON.parse(fs.readFileSync(summary.files.peerDiscoveryResult, 'utf8'));
+        reportRows = latestShopEvaluations(['qualifiedShops', 'unqualifiedShops', 'inconclusiveShops', 'blockedShops'].flatMap(key => report[key] || []));
+      } else {
+        reportRows = latestShopEvaluations(readArtifactJsonl(summary.files.shopEvaluations, 'all'));
+      }
+    }
     return {
       runId: summary.runId,
       nodeId: normalized.nodeId,
       file,
       filename: path.basename(file),
       type: 'xlsx',
-      count: normalized.nodeId === WORKFLOW_NODE_IDS.competitorReport
+      ...(peerReport ? { rows: reportRows, peerShopReport: true } : {}),
+      count: peerReport ? reportRows.length : normalized.nodeId === WORKFLOW_NODE_IDS.competitorReport
         ? Number(summary.counts?.competitorReportRows || 0)
         : Number(summary.counts?.orderSheetRows || 0),
       downloadUrl: `/api/workflows/runs/${encodeURIComponent(summary.runId)}/artifacts/${encodeURIComponent(normalized.nodeId)}/raw`

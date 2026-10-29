@@ -60,6 +60,8 @@ function normalizeNodeProgress(progress = {}) {
 
 function nodeStatusFromRuntimeProgress(progress) {
   const status = progress && progress.status ? String(progress.status) : '';
+  if (status === 'queued') return 'queued';
+  if (status === 'pending') return 'pending';
   if (status === 'cancelled') return 'cancelled';
   if (status === 'failed') return 'failed';
   if (status === 'blocked') return 'blocked';
@@ -114,6 +116,7 @@ function statusPlanForSummary(summary) {
     const steps = [
       WORKFLOW_NODE_IDS.resolveShops,
       WORKFLOW_NODE_IDS.collectCompetitors,
+      WORKFLOW_NODE_IDS.findCompetitorSources,
       WORKFLOW_NODE_IDS.enrichCompetitors,
       WORKFLOW_NODE_IDS.analyzeCompetitors,
       WORKFLOW_NODE_IDS.competitorReport
@@ -123,9 +126,46 @@ function statusPlanForSummary(summary) {
       const progressStatus = nodeStatusFromRuntimeProgress(summary.runtime?.progress?.[step]);
       if (progressStatus) states[step] = progressStatus;
     }
+    if (activeStep && summary.runtime?.status === 'needs_review') states[activeStep] = 'needs_review';
     if (summary.status === 'workflow_complete') {
       for (const step of steps) states[step] = 'completed';
       states[WORKFLOW_NODE_IDS.end] = 'completed';
+    } else if (activeStep && states[activeStep] === 'idle') {
+      states[activeStep] = summary.runtime?.status === 'failed' ? 'failed' : summary.runtime?.status === 'blocked' ? 'blocked' : 'running';
+    }
+    return states;
+  }
+  if (mode === 'peer-discovery') {
+    states[WORKFLOW_NODE_IDS.start] = 'completed';
+    const branch = summary.runtime?.params?.discoveryBranch || summary.options?.discoveryBranch || 'peer-analysis';
+    const steps = branch === 'image-selection'
+      ? [
+          WORKFLOW_NODE_IDS.extractSources,
+          WORKFLOW_NODE_IDS.findSimilarProducts,
+          WORKFLOW_NODE_IDS.collectPeerProducts,
+          WORKFLOW_NODE_IDS.verifyImageSources,
+          WORKFLOW_NODE_IDS.prepareListingDrafts,
+          WORKFLOW_NODE_IDS.reviewPeerListings,
+          WORKFLOW_NODE_IDS.peerProductReport
+        ]
+      : [
+          WORKFLOW_NODE_IDS.extractSources,
+          WORKFLOW_NODE_IDS.findSimilarProducts,
+          WORKFLOW_NODE_IDS.evaluateShops,
+          WORKFLOW_NODE_IDS.peerReport
+        ];
+    const activeStep = summary.runtime?.activeStep;
+    for (const step of steps) {
+      const progressStatus = nodeStatusFromRuntimeProgress(summary.runtime?.progress?.[step]);
+      if (progressStatus) states[step] = progressStatus;
+    }
+    if (summary.status === 'workflow_complete' || summary.runtime?.status === 'completed') {
+      for (const step of steps) states[step] = 'completed';
+      states[WORKFLOW_NODE_IDS.end] = 'completed';
+    } else if (summary.runtime?.status === 'cancelled') {
+      if (activeStep) states[activeStep] = 'cancelled';
+    } else if (summary.runtime?.status === 'queued') {
+      if (activeStep) states[activeStep] = 'queued';
     } else if (activeStep && states[activeStep] === 'idle') {
       states[activeStep] = summary.runtime?.status === 'failed' ? 'failed' : summary.runtime?.status === 'blocked' ? 'blocked' : 'running';
     }

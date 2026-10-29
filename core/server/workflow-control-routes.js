@@ -227,7 +227,11 @@ function registerWorkflowControlRoutes(app, {
       }
       const runtime = readRuntimeState({ runId });
       if (runtime) {
-        if (!['start', 'inspire', 'mine', 'keywordReview', 'verify', 'select', 'generate', 'export', 'collectRank', 'generateSheet', 'resolveShops', 'collectCompetitors', 'enrichCompetitors', 'analyzeCompetitors', 'competitorReport'].includes(nodeId)) {
+        const sourcingRetryAllowed = runtime.mode === 'competitor-analysis' && nodeId === 'findCompetitorSources' && runtime.steps?.includes(nodeId);
+        const peerRetryAllowed = sourcingRetryAllowed || runtime.mode === 'peer-discovery'
+          && runtime.steps?.includes(nodeId)
+          && ['extractSources', 'findSimilarProducts', 'evaluateShops', 'peerReport', 'collectPeerProducts', 'verifyImageSources', 'prepareListingDrafts', 'peerProductReport'].includes(nodeId);
+        if (!peerRetryAllowed && !['start', 'inspire', 'mine', 'keywordReview', 'verify', 'select', 'generate', 'export', 'collectRank', 'generateSheet', 'resolveShops', 'collectCompetitors', 'enrichCompetitors', 'analyzeCompetitors', 'competitorReport'].includes(nodeId)) {
           return res.status(400).json({ ok: false, error: '不支持的流程步骤。' });
         }
         const manualOrderSheetCollection = nodeId === 'collectRank'

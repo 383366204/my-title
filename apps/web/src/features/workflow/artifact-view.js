@@ -1,9 +1,12 @@
+import { formatPlatformMessage } from './platform-message.js';
+
 /**
  * 汇总 workflow 节点产物的前端展示文案。
  * @param {object|null} artifact 节点产物。
  * @returns {string} 产物摘要。
  */
 export function summarizeWorkflowArtifact(artifact) {
+  if (artifact?.peerShopReport) return `${artifact.count ?? artifact.rows?.length ?? 0} 家店铺`;
   if (!artifact) return '暂无产物';
   const type = String(artifact.type || '').toLowerCase();
   const file = String(artifact.file || '').toLowerCase();
@@ -561,6 +564,9 @@ function buildCollectRankView(artifact) {
 }
 
 function buildFileView(artifact, nodeId) {
+  if (artifact.peerShopReport) {
+    return { ...buildEvaluateShopsView(artifact), title: '同行店铺清单', emptyText: '本次报告没有店铺记录，请检查同款搜索和逐店评估结果' };
+  }
   const type = String(artifact.type || '').toLowerCase();
   if (type !== 'xlsx') return null;
   if (nodeId === 'generateSheet') {
@@ -570,7 +576,100 @@ function buildFileView(artifact, nodeId) {
   if (nodeId === 'competitorReport') {
     return { kind: 'file', title: '同行分析报告', emptyText: '报告尚未生成', rows: [], text: '' };
   }
+  if (nodeId === 'peerReport') {
+    return { kind: 'file', title: '同行发现报告', emptyText: '报告尚未生成', rows: [], text: '' };
+  }
+  if (nodeId === 'peerProductReport') {
+    return { kind: 'file', title: '图搜选货铺货报告', emptyText: '报告尚未生成', rows: [], text: '' };
+  }
   return null;
+}
+
+function buildExtractSourcesView(artifact) {
+  const items = Array.isArray(artifact.items) ? artifact.items : artifact.rows;
+  if (!Array.isArray(items)) return null;
+  return {
+    kind: 'business-list',
+    title: '源商品列表',
+    emptyText: '暂无源商品',
+    rows: items.map(item => ({
+      title: item.title || '未命名源商品',
+      meta: [item.price ? `¥${item.price}` : '', item.itemId ? `商品ID ${item.itemId}` : ''].filter(Boolean).join(' · '),
+      metrics: [item.mainImageUrl ? '已提取主图' : '无主图'].filter(Boolean),
+      description: item.sourceUrl || '',
+      imageUrl: item.mainImageUrl || '',
+      sourceUrl: item.sourceUrl || '',
+      raw: item
+    })),
+    text: ''
+  };
+}
+
+function buildFindSimilarProductsView(artifact) {
+  const items = Array.isArray(artifact.items) ? artifact.items : artifact.rows;
+  if (!Array.isArray(items)) return null;
+  return {
+    kind: 'business-list',
+    title: '候选店铺列表',
+    emptyText: '暂无候选店铺',
+    rows: items.map(item => ({
+      title: item.shopName || item.shopKey || item.shopId || '未命名店铺',
+      meta: [item.shopId ? `店铺ID ${item.shopId}` : '', item.similarProductCount ? `${item.similarProductCount} 个同款` : ''].filter(Boolean).join(' · '),
+      metrics: [item.similarProductCount ? `${item.similarProductCount} 款` : ''].filter(Boolean),
+      description: (Array.isArray(item.representativeProducts) && item.representativeProducts.length > 0 ? `代表商品: ${item.representativeProducts.slice(0, 3).join(', ')}` : (item.similarProductTitles || []).slice(0, 3).join('；')) || item.shopUrl || '',
+      sourceUrl: item.shopUrl || '',
+      raw: item
+    })),
+    text: ''
+  };
+}
+
+function buildEvaluateShopsView(artifact) {
+  const items = Array.isArray(artifact.items) ? artifact.items : artifact.rows;
+  if (!Array.isArray(items)) return null;
+  const verdictLabels = { qualified: '合格同行', unqualified: '不合格', inconclusive: '无法断定', error: '评估出错', skipped: '跳过', blocked: '平台拦截' };
+  return {
+    kind: 'business-list',
+    title: '逐店评估结果',
+    emptyText: '暂无评估结果',
+    rows: items.map(item => {
+      const qCount = item.paymentQualifiedCount ?? item.qualifiedProductsCount ?? 0;
+      const sCount = item.sourcingConfirmedCount ?? item.sourcingMatchedCount ?? 0;
+      return {
+        title: item.shopName || item.shopKey || item.shopId || '未命名店铺',
+        meta: [verdictLabels[item.verdict] || item.verdict, `达标商品 ${qCount} 件`, `有货源商品 ${sCount} 件`].filter(Boolean).join(' · '),
+        metrics: [verdictLabels[item.verdict] || item.verdict],
+        description: formatPlatformMessage(item.reason || item.verdictReason),
+        sourceUrl: item.shopUrl || '',
+        raw: item
+      };
+    }),
+    text: ''
+  };
+}
+
+function buildPeerReviewLedgerView(artifact) {
+  const items = Array.isArray(artifact.items) ? artifact.items : artifact.rows;
+  if (!Array.isArray(items)) return null;
+  const statusLabels = { success: '提交成功', failed: '提交失败', pending: '待提交' };
+  return {
+    kind: 'business-list',
+    title: '铺货分发账本',
+    emptyText: '暂无铺货记录',
+    rows: items.map(item => ({
+      title: item.title || `商品 ${item.offerId || item.itemId || ''}`,
+      meta: [
+        item.targetShopId ? `目标店铺 ${item.targetShopId}` : '',
+        item.batchId ? `批次 ${item.batchId}` : '',
+        statusLabels[item.status] || item.status || ''
+      ].filter(Boolean).join(' · '),
+      metrics: [statusLabels[item.status] || item.status || ''],
+      description: item.error || (item.submittedAt ? `提交时间: ${new Date(item.submittedAt).toLocaleString()}` : ''),
+      sourceUrl: item.offerId ? `https://detail.1688.com/offer/${item.offerId}.html` : '',
+      raw: item
+    })),
+    text: ''
+  };
 }
 
 function buildExportTextView(artifact) {
@@ -600,6 +699,16 @@ const ARTIFACT_HANDLERS = {
   collectRank: [buildCollectRankView],
   generateSheet: [buildFileView],
   competitorReport: [buildFileView],
+  extractSources: [buildExtractSourcesView],
+  findSimilarProducts: [buildFindSimilarProductsView],
+  evaluateShops: [buildEvaluateShopsView],
+  peerReport: [buildFileView],
+  end: [buildFileView],
+  collectPeerProducts: [(a) => buildBusinessListView(a, 'select')],
+  verifyImageSources: [(a) => buildBusinessListView(a, 'verify')],
+  prepareListingDrafts: [(a) => buildBusinessListView(a, 'generate')],
+  reviewPeerListings: [buildPeerReviewLedgerView, buildReviewTextView],
+  peerProductReport: [buildFileView],
   export: [(a) => buildBusinessListView(a, 'export'), buildExportTextView],
   review: [buildReviewTextView]
 };

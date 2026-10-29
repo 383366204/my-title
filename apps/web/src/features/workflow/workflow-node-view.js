@@ -1,4 +1,5 @@
 import { getCanvasNodeTone, getWorkflowNodeAction } from "./workflow-node-actions.js";
+import { formatPlatformMessage } from './platform-message.js';
 import { parseCompetitorShareInputs, parseRootKeywords } from "./workflow-launch-params.js";
 
 const ORDER_SHEET_DATE_LABELS = {
@@ -41,8 +42,8 @@ export function labelWorkflowNodeStatus(status) {
 export function getWorkflowBlockerView(state = {}) {
   const status = String(state.status || '').toLowerCase();
   const blocker = String(state.blocker || '').toLowerCase();
-  const error = String(state.error || '').trim();
-  const actionHint = String(state.actionHint || '').trim();
+  const error = formatPlatformMessage(state.error).trim();
+  const actionHint = formatPlatformMessage(state.actionHint).trim();
   const cooldown = Number(state.cooldownRemainingMs || 0);
 
   if (cooldown > 0) {
@@ -81,6 +82,16 @@ export function getCompetitorConfigSummary(state = {}) {
   return parsed.links.length > 0
     ? `${parsed.links.length} 条同行链接 · 爆款 ${hotLimit}/店 · 新品 ${newLimit}/店 · 链接 ${detailLimit}/榜`
     : '尚未录入同行链接';
+}
+
+export function getPeerConfigSummary(state = {}) {
+  const rawLinks = state.links ?? state.rawLinks ?? state.linksText ?? '';
+  const parsed = parseCompetitorShareInputs(rawLinks);
+  const branch = state.discoveryBranch === 'image-selection' ? '图搜选货' : '同行发现';
+  const count = parsed.links.length;
+  return count > 0
+    ? `${count} 条商品链接 · ${branch} · 采集上限 ${state.collectLimit ?? 40}`
+    : '尚未录入商品链接';
 }
 
 export function getRootKeywordConfigSummary(state = {}) {
@@ -375,7 +386,7 @@ export function getWorkflowNodeDetailRows(node = {}) {
   const view = getWorkflowNodeViewModel(node.id, data);
   const manualAction = data.manualAction && typeof data.manualAction === 'object' ? data.manualAction : null;
   const platformStatus = data.platformStatus || manualAction?.status || '';
-  const actionHint = data.actionHint || manualAction?.userMessage || '';
+  const actionHint = formatPlatformMessage(data.actionHint || manualAction?.userMessage);
   const status = String(data.status || data.state || '').toLowerCase();
   const active = ['pending', 'running', 'retrying', 'resuming'].includes(status);
   const verifyOutput = data.output && typeof data.output === 'object' ? data.output : {};
@@ -551,7 +562,7 @@ export function formatWorkflowProgressLabel(progress) {
   const hasCurrent = progress.current !== null && progress.current !== undefined && progress.current !== '';
   const hasTotal = progress.total !== null && progress.total !== undefined && progress.total !== '';
   const hasPercent = progress.percent !== null && progress.percent !== undefined && progress.percent !== '';
-  const message = String(progress.message || '').trim();
+  const message = formatPlatformMessage(progress.message).trim();
   if (message) parts.push(message);
   if (hasCurrent && hasTotal) parts.push(`${progress.current}/${progress.total}`);
   if (hasPercent) parts.push(`${progress.percent}%`);
@@ -595,7 +606,9 @@ export function getWorkflowNodeViewModel(nodeId, state = {}) {
     outputSummary: active ? '' : state.outputSummary || successLabel || '',
     successLabel,
     resultLocation,
-    configSummary: String(nodeId) === 'start' && state.reviewUpload === true
+    configSummary: String(nodeId) === 'start' && state.peerConfig === true
+      ? getPeerConfigSummary(state)
+      : String(nodeId) === 'start' && state.reviewUpload === true
       ? (state.uploadId ? `${state.uploadName || '刷单表'} · ${state.uploadSummary?.parsedSheetCount || state.groups?.length || 0} 个订单组 · ${state.uploadSummary?.productCount || 0} 个商品` : '尚未上传刷单表')
       : String(nodeId) === 'start' && state.orderSheetConfig === true
       ? getOrderSheetConfigSummary(state)
