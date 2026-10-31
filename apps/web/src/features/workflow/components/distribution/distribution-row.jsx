@@ -20,6 +20,7 @@ export function DistributionRow({
   index,
   variant = 'workbench', // 'preview' | 'workbench'
   isBlocked = false,
+  validationError,
   onUpdateEdit,
   onMarkRemoved,
   onMarkIncluded,
@@ -67,9 +68,11 @@ export function DistributionRow({
     }
 
     return (
-      <article className={`flex gap-2 min-w-0 border rounded-lg bg-slate-900/72 p-[7px_9px] ${row.removed ? 'border-rose-400/32 opacity-[0.78]' : 'border-slate-800/90'}`}>
+      <article data-distribution-url={url} className={`flex gap-2 min-w-0 border rounded-lg bg-slate-900/72 p-[7px_9px] ${validationError ? '!border-red-400' : row.removed ? 'border-rose-400/32 opacity-[0.78]' : 'border-slate-800/90'}`}>
         {index != null && <span className="shrink-0 self-center w-5 text-center text-slate-500 text-[11px] font-bold">{index}</span>}
         <div className="grid gap-1.5 min-w-0 flex-1">
+        {validationError && <p role="alert" className="text-xs text-red-300">{validationError.reasons.join('；')}</p>}
+        {!row.removed && keyword && row.title && !row.title.includes(keyword) && <p className="text-xs text-amber-300">标题未包含原选品词「{keyword}」，仅供提醒，不影响铺货。</p>}
         {/* Row 1: source title (clickable link) + status tag */}
         <div className="flex items-center gap-1.5 min-w-0">
           <span className="shrink-0 w-[56px] text-slate-400 text-[11px] font-bold whitespace-nowrap">原标题</span>

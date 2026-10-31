@@ -11,6 +11,16 @@ const { validateDistributionCategories } = require('../../core/server/distributi
 const { initRun, appendJsonl, writeRun } = require('../../skills/pipeline-flow/src/run-store');
 const { readCategoryState, saveCategoryState, categorySnapshot, prepareDistributionCategories } = require('../../skills/pipeline-flow/src/category-state');
 const { flowExport } = require('../../skills/pipeline-flow/src/export-flow');
+const { validateGeneratedRow } = require('../../skills/pipeline-flow/src/export-validator');
+
+test('missing keyword is a warning only for manually reviewed submissions', () => {
+  const row = { keyword: '猫窝冬', title: '冬季保暖猫窝封闭式宠物睡觉小屋柔软舒适可拆洗垫子四季家用', url: 'https://detail.1688.com/offer/738958020534.html' };
+  assert.ok(validateGeneratedRow(row).reasons.includes('title_missing_keyword'));
+  const reviewed = validateGeneratedRow(row, { manualMode: true });
+  assert.ok(!reviewed.reasons.includes('title_missing_keyword'));
+  assert.deepEqual(reviewed.warnings, ['title_missing_keyword']);
+  assert.ok(reviewed.reasons.includes('missing_category'));
+});
 
 async function fixture(t, extractor) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'category-routes-'));
@@ -45,6 +55,23 @@ const result = () => ({ categoryAnalysis: { recommendation: { ranking: [
   { category: '淘宝 > 茶托', clickRatio: 20, clickRate: 10 }
 ], recommended: { category: '淘宝 > 杯垫', clickRatio: 80, clickRate: 30 } } } });
 
+test('manual distribution allows rewritten keywords and identifies every invalid product', async t => {
+  const f = await fixture(t, async () => result());
+  const snapshot = await f.get();
+  await f.post({ action: 'query', version: snapshot.version, urls: f.rows.map(row => row.url) });
+  await f.wait();
+  const items = f.rows.map(row => ({ ...row, category: '淘宝 > 杯垫', title: row.title.replace('杯垫', '茶垫') }));
+  assert.doesNotThrow(() => validateDistributionCategories(f.options.runId, items, f.options));
+  assert.throws(() => validateDistributionCategories(f.options.runId, items.map(row => ({ ...row, title: '短标题' })), f.options), error => {
+    assert.equal(error.itemErrors.length, 2);
+    assert.equal(error.itemErrors[0].url, items[0].url);
+    assert.match(error.message, /短标题/);
+    assert.match(error.itemErrors[0].reasons[0], /标题字数不足/);
+    assert.doesNotMatch(error.message, /title_too_short/);
+    return true;
+  });
+});
+
 test('query, confirmation, files, copy and submission share authoritative SYCM categories', async t => {
   let calls = 0;
   const f = await fixture(t, async (_word, config) => { calls++; assert.equal(config.guardMinCooldownMs, 45000); return result(); });
@@ -70,7 +97,7 @@ test('query, confirmation, files, copy and submission share authoritative SYCM c
   assert.ok(!copy.data.text.includes('不可信'));
   assert.throws(() => validateDistributionCategories(f.options.runId, [{ ...f.rows[0], category: '1688旧类目' }], f.options), /类目缺失或已变更/);
   assert.doesNotThrow(() => validateDistributionCategories(f.options.runId, [{ ...f.rows[0], category: '淘宝 > 茶托' }], f.options));
-  assert.throws(() => validateDistributionCategories(f.options.runId, [{ ...f.rows[0], title: '短', category: '淘宝 > 茶托' }], f.options), /title_too_short/);
+  assert.throws(() => validateDistributionCategories(f.options.runId, [{ ...f.rows[0], title: '短', category: '淘宝 > 茶托' }], f.options), /标题字数不足/);
   f.lock();
   snapshot = await f.get();
   assert.equal(snapshot.locked, true);

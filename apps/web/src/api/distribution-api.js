@@ -1,4 +1,5 @@
 import { requestJson } from './http.js';
+export const prepareDistribution = input => requestJson('/api/distribution/prepare', { method: 'POST', body: input });
 
 const distributionRunPath = (jobId) => `/api/distribution/runs/${encodeURIComponent(jobId)}`;
 

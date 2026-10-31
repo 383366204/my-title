@@ -393,5 +393,10 @@
     "method": "post",
     "path": "/api/workflows/runs/:runId/competitor-sourcing/distribution",
     "handlers": 1
+  },
+  {
+    "method": "post",
+    "path": "/api/distribution/prepare",
+    "handlers": 1
   }
 ]
