@@ -42,6 +42,27 @@ function registerDistributionRoutes(app, deps) {
     catch (error) { res.status(400).json({ ok: false, error: error.message }); }
   });
 
+  app.post('/api/distribution/prepare', async (req, res) => {
+    let ownsPreparation = false;
+    try {
+      if (req.body?.platform !== 'zhangfei') return res.status(400).json({ ok: false, error: '此平台暂不支持自动填写，请复制内容后手动粘贴' });
+      if (submissionPreparing || [...activeDistributionJobs.values()].some(job => ['checking', 'submitting', 'paused'].includes(job.status))) return res.status(409).json({ ok: false, error: '已有铺货操作进行中，请稍后重试' });
+      submissionPreparing = true;
+      ownsPreparation = true;
+      const selection = resolveSelection(req.body);
+      const input = String(req.body?.input || '').trim();
+      const items = parseItems(input);
+      if (!items.length) throw new Error('铺货清单为空');
+      if (readDistributionJob(`${req.body.runId}-distribution`)?.status === 'completed') throw new Error('当前运行已完成铺货，请勿重复准备');
+      (deps.validateDistributionCategories || validateDistributionCategories)(req.body.runId, items, { dataDir: deps.dataDir });
+      const prepare = deps.prepareDistributionInput || require('../../skills/1688-distribution').prepareDistributionInput;
+      const result = await prepare({ input, ...selection });
+      return res.json({ ok: true, data: result });
+    } catch (err) {
+      return res.status(400).json({ ok: false, error: err.message, ...(err.itemErrors ? { itemErrors: err.itemErrors } : {}) });
+    } finally { if (ownsPreparation) submissionPreparing = false; }
+  });
+
   app.post('/api/distribution/check', async (req, res) => {
     try {
       const input = String(req.body?.input || '').trim();
@@ -59,7 +80,7 @@ function registerDistributionRoutes(app, deps) {
       return res.json({ ok: true, data: result });
     } catch (err) {
       const status = ['INVALID_ITEM', 'INVALID_SHOP'].includes(err?.code) ? 400 : 500;
-      return res.status(status).json({ ok: false, error: err.message });
+      return res.status(status).json({ ok: false, error: err.message, ...(err.itemErrors ? { itemErrors: err.itemErrors } : {}) });
     }
   });
 
@@ -170,7 +191,7 @@ function registerDistributionRoutes(app, deps) {
       return res.json({ ok: true, data: { jobId, status: 'submitting', total: items.length, ...selection } });
     } catch (err) {
       const status = ['INVALID_ITEM', 'INVALID_SHOP'].includes(err?.code) ? 400 : 500;
-      return res.status(status).json({ ok: false, error: err.message });
+      return res.status(status).json({ ok: false, error: err.message, ...(err.itemErrors ? { itemErrors: err.itemErrors } : {}) });
     } finally {
       if (ownsPreparation) submissionPreparing = false;
     }

@@ -38,7 +38,10 @@ function validateGeneratedRow(row, context = {}) {
   if (url && !parseOfferId(url)) reasons.push('invalid_1688_url');
   if (!title) reasons.push('missing_title');
   if (title && title.length < minTitleLength) reasons.push(`title_too_short:${title.length}<${minTitleLength}`);
-  if (row.keyword && title && !title.includes(row.keyword)) reasons.push('title_missing_keyword');
+  const warnings = [];
+  if (row.keyword && title && !title.includes(row.keyword)) {
+    (context.manualMode === true ? warnings : reasons).push('title_missing_keyword');
+  }
 
   const banned = checkBannedWords(title);
   if (!banned.valid) reasons.push(`banned_words:${banned.words.join(',')}`);
@@ -56,6 +59,7 @@ function validateGeneratedRow(row, context = {}) {
   return {
     ok: reasons.length === 0,
     reasons,
+    warnings,
     categoryConfidence: category.confidence,
     categoryReason: category.reason,
     recommendedCategory: category.recommendedCategory,

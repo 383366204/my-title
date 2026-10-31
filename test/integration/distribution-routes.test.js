@@ -40,10 +40,11 @@ test('multi-shop requests propagate mode, reject invalid targets and lock retry 
   const a = shops.save({ name: '一店', platformShopName: '甲店', port: 9222 });
   const b = shops.save({ name: '二店', platformShopName: '乙店', port: 9222 });
   const c = shops.save({ name: '三店', platformShopName: '丙店', port: 9223 });
-  let checked, submitted, rechecked;
+  let checked, submitted, rechecked, prepared;
   const jobs = createDistributionJobs({ jobDir: dir, getConfirmationReader: () => async options => { rechecked = options; return { ok: false }; } });
   const app = express(); app.use(express.json());
   registerDistributionRoutes(app, {
+    prepareDistributionInput: async options => { prepared = options; return { status: 'prepared', submitted: false }; },
     validateDistributionCategories: () => {},
     shops, jobs, parseItems: () => [{ offerId: '123', url: 'https://detail.1688.com/offer/123.html', title: '杯垫' }],
     checkDistributionReadiness: async options => { checked = options; return { canSubmit: true }; },
@@ -54,6 +55,13 @@ test('multi-shop requests propagate mode, reject invalid targets and lock retry 
   t.after(() => new Promise(resolve => server.close(resolve)));
   const post = (action, body) => fetch(`http://127.0.0.1:${server.address().port}/api/distribution/${action}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const request = { input: 'fixture', confirm: true, shopIds: [a.id, b.id], shopRevisions: { [a.id]: a.revision, [b.id]: b.revision } };
+  const preparedResponse = await post('prepare', { ...request, runId: 'prepare-test', platform: 'zhangfei' });
+  assert.equal(preparedResponse.status, 200);
+  assert.equal((await preparedResponse.json()).data.submitted, false);
+  assert.equal(prepared.input, 'fixture');
+  assert.equal(submitted, undefined);
+  assert.equal(jobs.readDistributionJob('prepare-test-distribution'), null);
+  assert.equal((await post('prepare', { ...request, platform: '1688' })).status, 400);
   for (const shopIds of [[], [a.id, a.id], [a.id, c.id], ['missing'], 'invalid']) {
     assert.equal((await post('check', { ...request, shopIds })).status, 400);
   }

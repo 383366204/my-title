@@ -1787,6 +1787,7 @@ function getReadinessBlockers({ itemCount, browser, duplicates }) {
 }
 
 module.exports = {
+  prepareDistributionInput,
   selectDistributionModeAndAllShopsStable,
   splitDistributionBatches,
   DEFAULT_CDP_PORT,
@@ -1814,3 +1815,24 @@ module.exports = {
   checkDistributionReadiness,
   distributeProducts
 };
+
+/**
+ * 仅填写张飞搬家清单，最终提交必须由用户在平台完成。
+ * @param {object} options 清单及店铺配置。
+ * @returns {Promise<object>} 填写结果，不包含提交成功状态。
+ */
+async function prepareDistributionInput(options = {}) {
+  const items = parseItems(options.input || '');
+  if (!items.length) throw new Error('铺货清单为空');
+  if (items.length > 20) throw new Error('单次最多准备20件商品，请先分批选择，避免覆盖尚未提交的清单');
+  const port = options.port || DEFAULT_CDP_PORT;
+  const target = await getBusinessTarget(port);
+  const client = await createCdpClientForTarget(target);
+  try {
+    await ensureMultiStorePage(client, { port });
+    const filled = await fillItems(client, normalizeItemsForInput(items));
+    validateFilledText(filled.text, items);
+    await selectDistributionModeAndAllShopsStable(client, { ...options, itemCount: items.length });
+    return { status: 'prepared', total: items.length, submitted: false, message: '清单已填写，请在张飞搬家核对后手动点击「开始批量复制」。尚未提交铺货。' };
+  } finally { await client.close(); }
+}

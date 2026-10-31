@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import {
   Check,
   ChevronRight,
@@ -8,12 +8,13 @@ import {
   X
 } from 'lucide-react';
 
-import { checkDistribution as checkDistributionRequest } from '../../../api/distribution-api.js';
+import { checkDistribution as checkDistributionRequest, prepareDistribution } from '../../../api/distribution-api.js';
 import { copyCategoryContent } from '../../../api/category-api.js';
 import { useDistributionJob } from '../hooks/use-distribution-job.js';
 import { DistributionRow } from './distribution/distribution-row.jsx';
 import { labelDistributionBlocker, buildDistributionText, distributionCopyFormat, distributionCopyIssues, distributionRowUrl } from './distribution/distribution-view-model.js';
 import { DistributionCopyButton } from './distribution/distribution-copy-button.jsx';
+import { DistributionPlatformButton } from './distribution/distribution-platform-button.jsx';
 import { usePersistentMap } from '../hooks/use-persistent-map.js';
 import { ExecutionPanel } from './distribution/execution-panel.jsx';
 import { useDistributionExportData } from './distribution/use-distribution-export-data.js';
@@ -91,7 +92,18 @@ export const DistributionExportPanel = ({
   const [selectedMode, setSelectedMode] = useState('random-average');
   const [editingShop, setEditingShop] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [distributionPlatform, setDistributionPlatform] = useState('zhangfei');
+  const [preparationMessage, setPreparationMessage] = useState('');
   const [distributionCheck, setDistributionCheck] = useState({ status: 'idle', result: null, error: '' });
+  const previewRowsRef = useRef(null);
+  const locateItem = (url) => {
+    const row = [...(previewRowsRef.current?.querySelectorAll('[data-distribution-url]') || [])].find(element => element.dataset.distributionUrl === url);
+    row?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    row?.querySelector('input')?.focus({ preventScroll: true });
+  };
+  useEffect(() => {
+    if (distributionCheck.itemErrors?.length) locateItem(distributionCheck.itemErrors[0].url);
+  }, [distributionCheck]);
   const [manualCopiedText, setManualCopiedText] = useState('');
   const [manualCompleteStatus, setManualCompleteStatus] = useState({ status: 'idle', message: '' });
   const [copyPreference, setCopyPreference] = usePersistentMap('ecom.distributionCopyFormat');
@@ -116,14 +128,14 @@ export const DistributionExportPanel = ({
     pendingAction: distributionPendingAction,
     chromeStarting: distributionChromeStarting,
     chromeMessage: distributionChromeMessage,
-    submit: submitDistributionJob,
     completeManual: completeManualDistributionJob,
     control: controlDistributionJob,
     startChrome: startDistributionChromeJob
   } = useDistributionJob({
     initialJobId: currentRunId ? `${currentRunId}-distribution` : '',
     notifyCompletedOnRestore: String(workflowRunStatus).toLowerCase() !== 'completed',
-    onJobChange: onDistributionJobChange
+    onJobChange: onDistributionJobChange,
+    onValidationError: itemErrors => setDistributionCheck({ status: 'error', result: null, error: '请修改清单中标出的商品', itemErrors })
   });
 
   const lockedShops = useMemo(() => distributionJob?.targetShops || (distributionJob?.shop ? [distributionJob.shop] : null), [distributionJob?.targetShops, distributionJob?.shop]);
@@ -155,23 +167,21 @@ export const DistributionExportPanel = ({
       setDistributionCheck({ status: 'ready', result: payload, error: '' });
       return payload;
     } catch (error) {
-      setDistributionCheck({ status: 'error', result: null, error: error.message });
+      setDistributionCheck({ status: 'error', result: null, error: error.message, itemErrors: error.payload?.itemErrors || [] });
       return null;
     }
   };
 
-  const submitDistribution = async (checkResult = distributionCheck.result) => {
-    if (!copyTextValue || !checkResult?.canSubmit) return;
-    const job = await submitDistributionJob({ input: copyTextValue, runId: currentRunId || '', ...selection });
-    if (job) setPreviewOpen(false);
-  };
-
   const confirmAndSubmitDistribution = async () => {
+    if (distributionPlatform !== 'zhangfei') return;
     if (!copyTextValue || editingShop || shopBusy || distributionJob?.status === 'completed') return;
     setSubmitting(true);
+    setPreparationMessage('');
     try {
-      const checkResult = await checkDistribution();
-      if (checkResult?.canSubmit) await submitDistribution(checkResult);
+      const result = await prepareDistribution({ input: copyTextValue, runId: currentRunId, platform: distributionPlatform, ...selection });
+      setPreparationMessage(result.message);
+    } catch (error) {
+      setDistributionCheck({ status: 'error', result: null, error: error.message, itemErrors: error.payload?.itemErrors || [] });
     } finally { setSubmitting(false); }
   };
 
@@ -234,11 +244,33 @@ export const DistributionExportPanel = ({
         <button type="button" className="node-secondary-button" disabled={removedRows.length === 0} onClick={resetRemoved}>
           <RefreshCw size={13} /> 恢复全部
         </button>
-        <button type="button" className="node-primary-button danger" disabled={!copyTextValue || editingShop || !targetsValid || shopBusy || distributionJob?.status === 'completed'} onClick={confirmAndSubmitDistribution}>
-          {distributionCheck.status === 'loading' ? <RefreshCw size={13} className="animate-spin" /> : <Play size={13} />}
-          {distributionCheck.status === 'loading' ? '正在检查铺货环境' : '确认并开始自动铺货'}
+        <DistributionPlatformButton value={distributionPlatform} disabled={shopBusy || Boolean(distributionJob)} onChange={platform => {
+          setDistributionPlatform(platform);
+          setPreparationMessage('');
+          setDistributionCheck({ status: 'idle', result: null, error: '' });
+        }}>
+        <button type="button" className="node-primary-button danger" title={`当前平台：${distributionPlatform === 'zhangfei' ? '张飞搬家' : '1688官方铺货（暂未接入自动提交）'}`} disabled={distributionPlatform !== 'zhangfei' || !copyTextValue || editingShop || !targetsValid || shopBusy || distributionJob?.status === 'completed'} onClick={confirmAndSubmitDistribution}>
+          {submitting ? <RefreshCw size={13} className="animate-spin" /> : <Play size={13} />}
+          {submitting ? '正在填写铺货清单' : '填写铺货清单，手动提交'}
         </button>
+        </DistributionPlatformButton>
       </div>
+      <div className="text-xs text-slate-300">铺货平台：{distributionPlatform === 'zhangfei' ? '张飞搬家' : '1688官方铺货'}</div>
+      {preparationMessage && <div role="status" className="text-xs text-sky-300">{preparationMessage}</div>}
+      {distributionPlatform === '1688' && <div role="status" className="text-xs text-amber-300 border border-amber-500/30 rounded p-2">
+        官方平台请使用「链接$$标题」格式，进入「批量铺货」粘贴。最后由你点击「立即铺货」。
+        <button type="button" className="node-secondary-button" disabled={!activeRows.length || submitting} onClick={async () => {
+          setSubmitting(true); setPreparationMessage('');
+          try {
+            if (activeRows.length > 200) throw new Error('官方平台单次最多200件，请分批选择后复制');
+            const content = await copyCategoryContent(currentRunId, { format: 'title', items: activeRows.map(row => ({ url: distributionRowUrl(row), title: row.title })) });
+            await onCopyText(content.text);
+            setPreparationMessage('已复制链接和标题，请前往1688官方平台粘贴；尚未提交铺货。');
+          } catch (error) { setPreparationMessage(error.message); }
+          finally { setSubmitting(false); }
+        }}>复制官方铺货内容</button>
+        <a className="text-sky-400 underline ml-2" href="https://ufuwu.1688.com/page/fuwu_work_isv_container.htm?appkey=2839818" target="_blank" rel="noreferrer">打开1688官方铺货</a>
+      </div>}
       <div className="grid gap-2 min-w-0 relative">
         {targetShops.length > 0 && !targetsValid && <div role="alert" className="grid gap-0.5 border border-red-400/40 bg-red-900/15 text-red-200 px-2.5 py-2 rounded-md text-[11px] leading-normal break-all">请选择已启用且使用同一 Chrome 调试端口的店铺。</div>}
         <ExecutionPanel distributionJob={distributionJob} pendingAction={distributionPendingAction} activeRowsCount={activeRows.length} distributionSubmitError={distributionSubmitError} onControlJob={controlDistribution} />
@@ -256,7 +288,7 @@ export const DistributionExportPanel = ({
         )}
         {distributionCheck.status === 'ready' && !distributionCheck.result?.canSubmit && (
           <div className="grid gap-0.5 border border-red-400/40 bg-red-900/15 text-red-200 px-2.5 py-2 rounded-md text-[11px] leading-normal break-all">
-            <strong>暂时无法开始自动铺货</strong>
+            <strong>暂时无法准备铺货清单</strong>
             {distributionCheck.result?.shopError && <span>{distributionCheck.result.shopError}</span>}
             {Array.isArray(distributionCheck.result?.blockers) && distributionCheck.result.blockers.length > 0
               ? <span>阻塞原因：{distributionCheck.result.blockers.map(labelDistributionBlocker).join('，')}</span>
@@ -283,7 +315,12 @@ export const DistributionExportPanel = ({
       </div>
 
       <CategoryToolbar control={categoryControl} rows={activeRows} onRemove={markRemoved} />
-      <div className="min-h-0 grid content-start gap-[9px] overflow-auto pr-0.5">
+      {distributionCheck.itemErrors?.map(item => <div key={item.url} role="alert" className="flex items-center gap-2 border border-red-400 rounded p-2 text-xs text-red-300">
+        {item.imageUrl && <img src={item.imageUrl} alt="" className="w-10 h-10 object-contain" />}
+        <div className="min-w-0 flex-1 break-words"><strong>{item.title}</strong><p>{item.reasons.join('；')}</p></div>
+        <button type="button" className="node-secondary-button shrink-0" onClick={() => locateItem(item.url)}>定位并修改</button>
+      </div>)}
+      <div ref={previewRowsRef} className="min-h-0 grid content-start gap-[9px] overflow-auto pr-0.5">
         {exportStatus === 'loading' && <div className="artifact-empty"><RefreshCw size={13} className="animate-spin" /> 正在加载铺货清单...</div>}
         {exportStatus === 'error' && <div className="artifact-error">{exportError || '铺货清单加载失败'}</div>}
         {exportStatus !== 'loading' && rows.length === 0 && (
@@ -296,6 +333,7 @@ export const DistributionExportPanel = ({
             row={row}
             variant="preview"
             isBlocked={false}
+            validationError={distributionCheck.itemErrors?.find(item => item.url === distributionRowUrl(row))}
             onUpdateEdit={updateRowEdit}
             onMarkRemoved={markRemoved}
           />
@@ -350,7 +388,7 @@ export const DistributionExportPanel = ({
       <div className="flex items-center flex-wrap text-[10px] gap-1.5 mb-3 text-[var(--text-disabled)] [&>span]:inline-flex [&>span]:items-center [&>span]:gap-1 [&>b]:inline-flex [&>b]:items-center [&>b]:justify-center [&>b]:w-[18px] [&>b]:h-[18px] [&>b]:rounded-full [&>b]:bg-slate-500/20" aria-label="铺货操作步骤">
         <span className="text-blue-200 font-extrabold [&>b]:bg-blue-600 [&>b]:text-white"><b>1</b>确认商品</span>
         <ChevronRight size={13} />
-        <span><b>2</b>选择人工或自动铺货</span>
+        <span><b>2</b>准备清单并在平台手动提交</span>
         <ChevronRight size={13} />
         <span><b>3</b>确认完成</span>
       </div>
@@ -376,7 +414,7 @@ export const DistributionExportPanel = ({
         </article>
         <article className="grid content-between gap-3 min-w-0 p-3 border border-blue-400/30 rounded-lg bg-blue-900/10 [&>div>span]:text-[var(--text-muted)] [&>div>span]:block [&>div>span]:text-[10px] [&>div>span]:font-extrabold [&>div>span]:mb-[3px] [&>div>strong]:text-slate-100 [&>div>strong]:block [&>div>strong]:text-[13px] [&>div>p]:text-[var(--text-muted)] [&>div>p]:text-[11px] [&>div>p]:leading-normal [&>div>p]:mt-[5px]">
           <div>
-            <span>自动铺货</span>
+            <span>填写铺货清单</span>
             <strong>使用当前 Chrome 登录态</strong>
             <p>先检查 Chrome、登录状态和重复批次，再在清单预览中确认提交。</p>
           </div>
@@ -429,7 +467,7 @@ export const DistributionExportPanel = ({
               {Array.isArray(distributionCheck.result?.blockers) && distributionCheck.result.blockers.length > 0 && (
                 <p>阻塞原因：{distributionCheck.result.blockers.map(labelDistributionBlocker).join('，')}</p>
               )}
-              {distributionCheck.result?.canSubmit && <p>检查通过。打开清单预览后，确认商品无误即可启动自动铺货。</p>}
+              {distributionCheck.result?.canSubmit && <p>检查通过。填写清单后，请在铺货平台手动确认提交。</p>}
             </>
           )}
         </div>

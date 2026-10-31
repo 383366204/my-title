@@ -10,7 +10,7 @@ import {
 
 const FINISHED_STATUSES = new Set(['completed', 'failed', 'cancelled']);
 
-export function useDistributionJob({ initialJobId = '', notifyCompletedOnRestore = false, onJobChange } = {}) {
+export function useDistributionJob({ initialJobId = '', notifyCompletedOnRestore = false, onJobChange, onValidationError } = {}) {
   const [job, setJobState] = useState(null);
   const [error, setError] = useState('');
   const [pendingAction, setPendingAction] = useState('');
@@ -18,6 +18,8 @@ export function useDistributionJob({ initialJobId = '', notifyCompletedOnRestore
   const [chromeMessage, setChromeMessage] = useState('');
   const onJobChangeRef = useRef(onJobChange);
   onJobChangeRef.current = onJobChange;
+  const onValidationErrorRef = useRef(onValidationError);
+  onValidationErrorRef.current = onValidationError;
   const revision = useRef(0);
   const actionPending = useRef(false);
   const setJob = useCallback((nextJob) => {
@@ -73,7 +75,11 @@ export function useDistributionJob({ initialJobId = '', notifyCompletedOnRestore
       const nextJob = await submitDistribution({ input, confirm: true, runId, shopId, shopRevision, shopIds, shopRevisions, distributionMode });
       setJob(nextJob);
       return nextJob;
-    } catch (submitError) { setError(submitError.message); return null; }
+    } catch (submitError) {
+      setError(submitError.message);
+      if (submitError.payload?.itemErrors) onValidationErrorRef.current?.(submitError.payload.itemErrors);
+      return null;
+    }
   }, [setJob]);
 
   const completeManual = useCallback(async ({ input, runId, shopId, shopRevision, shopIds, shopRevisions, distributionMode }) => {
