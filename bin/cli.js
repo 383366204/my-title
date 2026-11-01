@@ -1772,9 +1772,8 @@ workflowCommand
       try {
         const { createWorkbenchLeaseManager } = require('../core/runtime/workbench-lease');
         const { runPipelineRuntime } = require('../skills/pipeline-flow/runtime/runner');
-        const { readRuntimeState, isPidAlive } = require('../skills/pipeline-flow/runtime/store');
-        const leaseDir = options.dataDir ? path.join(options.dataDir, 'leases') : undefined;
-        const leaseManager = createWorkbenchLeaseManager({ runtimeDir: leaseDir });
+        const { readRuntimeState, isPidAlive, resolvePipelineLeaseDir } = require('../skills/pipeline-flow/runtime/store');
+        const leaseManager = createWorkbenchLeaseManager({ runtimeDir: resolvePipelineLeaseDir(options.dataDir) });
 
         const result = await leaseManager.withLease(`run:${options.run}`, { timeoutMs: 0 }, async () => {
           const runtime = readRuntimeState({ dataDir: options.dataDir, runId: options.run, autoRecover: true });

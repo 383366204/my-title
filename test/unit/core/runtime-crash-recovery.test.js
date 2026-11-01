@@ -18,7 +18,10 @@ const {
   recoverRuntimeState,
   verifyEventConsistency,
   appendRuntimeEvent,
-  readRuntimeEvents
+  readRuntimeEvents,
+  DEFAULT_RUNTIME_DATA_DIR,
+  resolveDataDir,
+  resolvePipelineLeaseDir
 } = require('../../../skills/pipeline-flow/runtime/store');
 const { runPipelineRuntime } = require('../../../skills/pipeline-flow/runtime/runner');
 const { createWorkflowControlService } = require('../../../core/workflow/control-service');
@@ -861,6 +864,44 @@ describe('PR-05 Runtime Crash Recovery & Atomic Snapshot Suite', () => {
       // Verify the lease was NOT leaked and subsequent attempt is not blocked by 409
       const leaseFile = leaseManager.getLeasePath(`run:${runId}`);
       assert.equal(fs.existsSync(leaseFile), false, 'Lease file must be released after control write failure');
+    });
+
+    it('resolves lease directory consistently whether default dataDir is omitted or explicitly provided', () => {
+      const defaultLeaseDir = resolvePipelineLeaseDir();
+      assert.equal(defaultLeaseDir, path.join(path.resolve(DEFAULT_RUNTIME_DATA_DIR), 'leases'));
+      assert.equal(resolvePipelineLeaseDir('data/pipeline'), defaultLeaseDir);
+      assert.equal(resolvePipelineLeaseDir('./data/pipeline'), defaultLeaseDir);
+
+      const customDir = createTempDir('custom-lease-');
+      assert.equal(resolvePipelineLeaseDir(customDir), path.join(path.resolve(customDir), 'leases'));
+    });
+
+    it('controlService detects lease conflict between omitted dataDir and explicit default dataDir', async () => {
+      const dataDir = createTempDir();
+      const runId = 'server_default_dir_lease_conflict';
+      initRun({ dataDir, runId });
+      initRuntimeState({ dataDir, runId, steps: ['mine'] });
+      updateRuntimeState({ dataDir, runId, patch: { status: 'interrupted', pid: null } });
+
+      // Acquire lease using the resolved lease dir for this dataDir
+      const externalLeaseManager = createWorkbenchLeaseManager({ runtimeDir: resolvePipelineLeaseDir(dataDir) });
+      const lease = await externalLeaseManager.acquire(`run:${runId}`, { timeoutMs: 0 });
+
+      // Control service initialized with same dataDir but default internal leaseManager
+      const controlService = createWorkflowControlService({
+        dataDir,
+        workbench: { current: null, run: () => Promise.resolve() },
+        readRuntimeState: (opts) => readRuntimeState({ dataDir, ...opts })
+      });
+
+      try {
+        const res = await controlService.resumeRun({ runId });
+        assert.equal(res.httpStatus, 409);
+        assert.equal(res.body.ok, false);
+        assert.match(res.body.error, /正在被其他进程执行中/);
+      } finally {
+        lease.release();
+      }
     });
   });
 

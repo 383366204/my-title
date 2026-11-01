@@ -9,7 +9,7 @@ const { readWorkflowNodeArtifact } = require('./pipeline-artifacts');
 const { getKeywordRecollectionRoots } = require('../server/keyword-filter-routes');
 const { saveInspirationRoots } = require('../../skills/pipeline-flow/src/inspiration-root-review');
 const { isValidStepForMode } = require('./pipeline-definition-common');
-const { isPidAlive } = require('../../skills/pipeline-flow/runtime/store');
+const { isPidAlive, resolvePipelineLeaseDir } = require('../../skills/pipeline-flow/runtime/store');
 const { createWorkbenchLeaseManager } = require('../runtime/workbench-lease');
 
 const LAUNCH_VALIDATION_PATTERN = /未知 workflow mode|未知 workflow template|工作流定义|工作流必须匹配|关键词不能为空|词根不能为空|1688 商品链接|同行链接|商品缺少关键词|商品重复/;
@@ -117,7 +117,7 @@ function createWorkflowControlService(dependencies = {}) {
     isValidStepForMode: defaultIsValidStepForMode = isValidStepForMode,
     dataDir,
     leaseManager = dependencies.leaseManager || createWorkbenchLeaseManager({
-      runtimeDir: dataDir ? path.join(dataDir, 'leases') : undefined
+      runtimeDir: resolvePipelineLeaseDir(dataDir)
     })
   } = dependencies;
 

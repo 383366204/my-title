@@ -19,7 +19,11 @@ function assertRuntimeRunId(runId) {
 }
 
 function resolveDataDir(dataDir) {
-  return dataDir || DEFAULT_RUNTIME_DATA_DIR;
+  return path.resolve(dataDir || DEFAULT_RUNTIME_DATA_DIR);
+}
+
+function resolvePipelineLeaseDir(dataDir) {
+  return path.join(resolveDataDir(dataDir), 'leases');
 }
 
 function runDir(dataDir, runId) {
@@ -645,6 +649,9 @@ function verifyEventConsistency({ dataDir, runId }) {
 }
 
 module.exports = {
+  DEFAULT_RUNTIME_DATA_DIR,
+  resolveDataDir,
+  resolvePipelineLeaseDir,
   initRuntimeState,
   readRuntimeState,
   updateRuntimeState,
