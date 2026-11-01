@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const { withAgentResponseFields } = require('./agent-response');
+const { readRuntimeState } = require('../skills/pipeline-flow/runtime/store');
 
 const DEFAULT_PIPELINE_DIR = path.join(process.cwd(), 'data', 'pipeline');
 const STAGE_ORDER = ['seed', 'mined', 'keyword_review', 'verified', 'selected', 'generated', 'review', 'ready', 'submitted'];
@@ -33,6 +34,7 @@ const STATUS_STAGE = {
   competitor_analyzed: 'review',
   generate_failed: 'generated',
   needs_review: 'review',
+  interrupted: 'review',
   ready_to_distribute: 'ready',
   export_empty: 'review',
   awaiting_user_confirmation: 'ready',
@@ -249,8 +251,10 @@ function defaultFiles(runDir, files = {}) {
   };
 }
 
-function buildNextCommand(status, runId, files) {
+function buildNextCommand(status, runId, files, dataDir) {
   const runPart = runId ? ` --run ${runId}` : '';
+  const isCustomDataDir = dataDir && path.resolve(dataDir) !== path.resolve(DEFAULT_PIPELINE_DIR);
+  const dataDirPart = isCustomDataDir ? ` --data-dir "${dataDir}"` : '';
   if (status === 'created') return `node bin/cli.js flow mine${runPart} --json`;
   if (status === 'mined' || status === 'awaiting_keyword_review' || status === 'keyword_review_empty') return `node bin/cli.js flow review${runPart} --approve-all --json`;
   if (status === 'keywords_reviewed') return `node bin/cli.js flow verify${runPart} --json`;
@@ -266,6 +270,7 @@ function buildNextCommand(status, runId, files) {
       : '';
   }
   if (status === 'awaiting_user_confirmation') return 'node bin/cli.js workflow resume --confirm-submit --json';
+  if (status === 'interrupted') return `node bin/cli.js workflow resume${runPart}${dataDirPart} --json`;
   return '';
 }
 
@@ -288,8 +293,13 @@ function summarizePipelineRun({ dataDir = DEFAULT_PIPELINE_DIR, runId, previewLi
   const runDir = path.join(dataDir, 'runs', targetRunId);
   const runFile = path.join(runDir, 'run.json');
   let run = readJson(runFile, null);
-  // 同行发现或早期阶段停止运行以 runtime 为运行事实源。
-  const runtimeState = readJson(path.join(runDir, 'runtime.json'), null);
+  // 同行发现或早期阶段停止运行以 runtime 为运行事实源（加载时自愈崩溃的活跃运行）
+  let runtimeState = null;
+  try {
+    runtimeState = readRuntimeState({ dataDir, runId: targetRunId, autoRecover: true });
+  } catch (_error) {
+    runtimeState = null;
+  }
   if (!run && runtimeState && typeof runtimeState.status === 'string' && runtimeState.startedAt) {
     run = {
       runId: targetRunId,
@@ -301,7 +311,7 @@ function summarizePipelineRun({ dataDir = DEFAULT_PIPELINE_DIR, runId, previewLi
   }
   if (!run) return null;
 
-  const status = run.status || 'unknown';
+  const status = runtimeState?.status === 'interrupted' ? 'interrupted' : (run.status || 'unknown');
   const stage = pipelineStatusToStage(status);
   const files = defaultFiles(runDir, run.files || {});
   const counts = { ...(run.counts || {}) };
@@ -335,8 +345,11 @@ function summarizePipelineRun({ dataDir = DEFAULT_PIPELINE_DIR, runId, previewLi
   if (status === 'awaiting_keyword_review') blockers.push('keyword_review_required');
   if (status === 'keyword_review_empty') blockers.push('no_keyword_review_approved');
   if (status === 'select_failed') blockers.push('no_selected_products');
+  if (status === 'interrupted') blockers.push('process_interrupted');
 
-  const nextCommand = run.nextCommand || buildNextCommand(status, targetRunId, files);
+  const nextCommand = status === 'interrupted'
+    ? buildNextCommand(status, targetRunId, files, dataDir)
+    : (run.nextCommand || buildNextCommand(status, targetRunId, files, dataDir));
   const payload = withAgentResponseFields({
     ok: true,
     runId: run.runId || targetRunId,

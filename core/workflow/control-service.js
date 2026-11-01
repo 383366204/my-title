@@ -9,6 +9,8 @@ const { readWorkflowNodeArtifact } = require('./pipeline-artifacts');
 const { getKeywordRecollectionRoots } = require('../server/keyword-filter-routes');
 const { saveInspirationRoots } = require('../../skills/pipeline-flow/src/inspiration-root-review');
 const { isValidStepForMode } = require('./pipeline-definition-common');
+const { isPidAlive, resolvePipelineLeaseDir } = require('../../skills/pipeline-flow/runtime/store');
+const { createWorkbenchLeaseManager } = require('../runtime/workbench-lease');
 
 const LAUNCH_VALIDATION_PATTERN = /未知 workflow mode|未知 workflow template|工作流定义|工作流必须匹配|关键词不能为空|词根不能为空|1688 商品链接|同行链接|商品缺少关键词|商品重复/;
 
@@ -113,7 +115,10 @@ function createWorkflowControlService(dependencies = {}) {
     originalLog = () => {},
     originalError = () => {},
     isValidStepForMode: defaultIsValidStepForMode = isValidStepForMode,
-    dataDir
+    dataDir,
+    leaseManager = dependencies.leaseManager || createWorkbenchLeaseManager({
+      runtimeDir: resolvePipelineLeaseDir(dataDir)
+    })
   } = dependencies;
 
   /**
@@ -275,7 +280,7 @@ function createWorkflowControlService(dependencies = {}) {
     const logLabel = source === 'pipeline' ? 'Pipeline Resume' : 'Workflow Resume';
     const modeTag = source === 'pipeline' ? 'resume' : 'workflow-resume';
     try {
-      const runtime = readRuntimeState({ runId });
+      const runtime = readRuntimeState({ dataDir, runId, autoRecover: true });
       if (runtime) {
         if (workbench.current) {
           return {
@@ -283,8 +288,24 @@ function createWorkflowControlService(dependencies = {}) {
             body: { ok: false, error: '已有工作流正在运行，请等待完成后再继续。' }
           };
         }
+        const activeStatuses = ['running', 'resuming', 'retrying'];
+        const isExternalPidAlive = runtime.pid && runtime.pid !== process.pid && isPidAlive(runtime.pid);
+        if (activeStatuses.includes(runtime.status) && isExternalPidAlive) {
+          return {
+            httpStatus: 409,
+            body: { ok: false, error: `运行记录 ${runId} 仍在执行中 (PID ${runtime.pid})，不可重复启动` }
+          };
+        }
+        const lease = leaseManager.tryAcquireOnce(`run:${runId}`, { purpose: 'workflow-resume' });
+        if (!lease) {
+          return {
+            httpStatus: 409,
+            body: { ok: false, error: `运行记录 ${runId} 正在被其他进程执行中，不可重复启动` }
+          };
+        }
         const runMode = runtime.mode || (runtime.steps?.includes('keyword') ? 'keyword' : 'daily');
         if (stopAfterStep && !defaultIsValidStepForMode(runMode, stopAfterStep, { discoveryBranch: runtime.params?.discoveryBranch })) {
+          lease.release();
           return {
             httpStatus: 400,
             body: {
@@ -297,6 +318,7 @@ function createWorkflowControlService(dependencies = {}) {
           const startIndex = runtime.steps.indexOf(runtime.activeStep);
           const stopIndex = runtime.steps.indexOf(stopAfterStep);
           if (startIndex !== -1 && stopIndex !== -1 && stopIndex < startIndex) {
+            lease.release();
             return {
               httpStatus: 400,
               body: {
@@ -306,21 +328,31 @@ function createWorkflowControlService(dependencies = {}) {
             };
           }
         }
-        const control = requestRuntimeResume({ runId });
-        const runState = { runId, mode: modeTag };
-        const promise = workbench.run(runState, () => getPipelineRuntimeRunner()({
-          runId,
-          mode: runMode,
-          params: runtime.params || {},
-          preserveRuntime: true,
-          resumeFromStep: runtime.activeStep,
-          steps: runtime.steps,
-          ...(stopAfterStep ? { stopAfterStep } : {})
-        }));
+        let control;
+        let promise;
+        try {
+          control = requestRuntimeResume({ runId });
+          const runState = { runId, mode: modeTag };
+          promise = workbench.run(runState, () => getPipelineRuntimeRunner()({
+            runId,
+            mode: runMode,
+            params: runtime.params || {},
+            preserveRuntime: true,
+            resumeFromStep: runtime.activeStep,
+            steps: runtime.steps,
+            ...(dataDir ? { dataDir } : {}),
+            ...(stopAfterStep ? { stopAfterStep } : {})
+          }));
+        } catch (err) {
+          lease.release();
+          throw err;
+        }
         promise.then((result) => {
           originalLog(`[${logLabel}] runtime 完成，runId=${result.runId}, status=${result.runtimeStatus || result.status}`);
         }).catch((err) => {
           originalError(`[${logLabel}] runtime 失败，runId=${runId}:`, err.message);
+        }).finally(() => {
+          lease.release();
         });
         return {
           httpStatus: 200,
@@ -371,24 +403,49 @@ function createWorkflowControlService(dependencies = {}) {
         };
       }
       try {
-        const runtime = readRuntimeState({ runId });
+        const runtime = readRuntimeState({ dataDir, runId, autoRecover: true });
         if (!runtime) {
           return { httpStatus: 404, body: { ok: false, error: '未找到该流程运行记录' } };
         }
-        const control = requestRuntimeRetryStep({ runId, step });
-        const runState = { runId, mode: 'retry-step' };
-        const promise = workbench.run(runState, () => getPipelineRuntimeRunner()({
-          runId,
-          mode: runtime.mode || (runtime.steps?.includes('keyword') ? 'keyword' : 'daily'),
-          params: runtime.params || {},
-          preserveRuntime: true,
-          retryStep: step,
-          steps: runtime.steps
-        }));
+        const activeStatuses = ['running', 'resuming', 'retrying'];
+        const isExternalPidAlive = runtime.pid && runtime.pid !== process.pid && isPidAlive(runtime.pid);
+        if (activeStatuses.includes(runtime.status) && isExternalPidAlive) {
+          return {
+            httpStatus: 409,
+            body: { ok: false, error: `运行记录 ${runId} 仍在执行中 (PID ${runtime.pid})，不可重复重试` }
+          };
+        }
+        const lease = leaseManager.tryAcquireOnce(`run:${runId}`, { purpose: 'pipeline-retry' });
+        if (!lease) {
+          return {
+            httpStatus: 409,
+            body: { ok: false, error: `运行记录 ${runId} 正在被其他进程执行中，不可重复重试` }
+          };
+        }
+        let control;
+        let promise;
+        try {
+          control = requestRuntimeRetryStep({ runId, step });
+          const runState = { runId, mode: 'retry-step' };
+          promise = workbench.run(runState, () => getPipelineRuntimeRunner()({
+            runId,
+            mode: runtime.mode || (runtime.steps?.includes('keyword') ? 'keyword' : 'daily'),
+            params: runtime.params || {},
+            preserveRuntime: true,
+            retryStep: step,
+            steps: runtime.steps,
+            ...(dataDir ? { dataDir } : {})
+          }));
+        } catch (err) {
+          lease.release();
+          throw err;
+        }
         promise.then((result) => {
           originalLog(`[Pipeline Retry] runtime 完成，runId=${result.runId}, status=${result.runtimeStatus || result.status}`);
         }).catch((err) => {
           originalError(`[Pipeline Retry] runtime 失败，runId=${runId}, step=${step}:`, err.message);
+        }).finally(() => {
+          lease.release();
         });
         return {
           httpStatus: 200,
@@ -404,7 +461,7 @@ function createWorkflowControlService(dependencies = {}) {
       if (!nodeId) {
         return { httpStatus: 400, body: { ok: false, error: 'nodeId is required' } };
       }
-      const runtime = readRuntimeState({ runId });
+      const runtime = readRuntimeState({ dataDir, runId, autoRecover: true });
       if (runtime) {
         if (!isWorkflowRetryNodeAllowed(runtime, nodeId)) {
           return { httpStatus: 400, body: { ok: false, error: '不支持的流程步骤。' } };
@@ -446,20 +503,45 @@ function createWorkflowControlService(dependencies = {}) {
             body: { ok: false, error: '已有工作流正在运行，请等待完成后再重试。' }
           };
         }
-        const control = requestRuntimeRetryStep({ runId, step: nodeId });
-        const runState = { runId, mode: 'workflow-retry-step' };
-        const promise = workbench.run(runState, () => getPipelineRuntimeRunner()({
-          runId,
-          mode: runtime.mode || (runtime.steps?.includes('keyword') ? 'keyword' : 'daily'),
-          params: runtime.params || {},
-          preserveRuntime: true,
-          retryStep: nodeId,
-          steps: runtime.steps
-        }));
+        const activeStatuses = ['running', 'resuming', 'retrying'];
+        const isExternalPidAlive = runtime.pid && runtime.pid !== process.pid && isPidAlive(runtime.pid);
+        if (activeStatuses.includes(runtime.status) && isExternalPidAlive) {
+          return {
+            httpStatus: 409,
+            body: { ok: false, error: `运行记录 ${runId} 仍在执行中 (PID ${runtime.pid})，不可重复重试` }
+          };
+        }
+        const lease = leaseManager.tryAcquireOnce(`run:${runId}`, { purpose: 'workflow-retry-node' });
+        if (!lease) {
+          return {
+            httpStatus: 409,
+            body: { ok: false, error: `运行记录 ${runId} 正在被其他进程执行中，不可重复重试` }
+          };
+        }
+        let control;
+        let promise;
+        try {
+          control = requestRuntimeRetryStep({ runId, step: nodeId });
+          const runState = { runId, mode: 'workflow-retry-step' };
+          promise = workbench.run(runState, () => getPipelineRuntimeRunner()({
+            runId,
+            mode: runtime.mode || (runtime.steps?.includes('keyword') ? 'keyword' : 'daily'),
+            params: runtime.params || {},
+            preserveRuntime: true,
+            retryStep: nodeId,
+            steps: runtime.steps,
+            ...(dataDir ? { dataDir } : {})
+          }));
+        } catch (err) {
+          lease.release();
+          throw err;
+        }
         promise.then((result) => {
           originalLog(`[Workflow Retry] runtime 完成，runId=${result.runId}, status=${result.runtimeStatus || result.status}`);
         }).catch((err) => {
           originalError(`[Workflow Retry] runtime 失败，runId=${runId}, step=${nodeId}:`, err.message);
+        }).finally(() => {
+          lease.release();
         });
         return {
           httpStatus: 200,

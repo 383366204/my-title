@@ -1758,13 +1758,62 @@ workflowCommand
 
 workflowCommand
   .command('resume')
-  .description('Resume workflow after explicit user confirmation')
+  .description('Resume workflow after explicit user confirmation or continue interrupted pipeline run')
+  .option('--run <id>', 'Resume pipeline runtime run by runId')
+  .option('--data-dir <path>', 'Pipeline data directory')
   .option('--state-dir <dir>', 'Workflow state directory')
   .option('--confirm-submit', 'Required to submit distribution')
   .option('--json', 'JSON output')
   .action(async function(options, command) {
     const mainOpts = command && command.parent && command.parent.parent ? command.parent.parent.opts() : {};
     const jsonMode = !!options.json || !!mainOpts.json;
+
+    if (options.run) {
+      try {
+        const { createWorkbenchLeaseManager } = require('../core/runtime/workbench-lease');
+        const { runPipelineRuntime } = require('../skills/pipeline-flow/runtime/runner');
+        const { readRuntimeState, isPidAlive, resolvePipelineLeaseDir } = require('../skills/pipeline-flow/runtime/store');
+        const leaseManager = createWorkbenchLeaseManager({ runtimeDir: resolvePipelineLeaseDir(options.dataDir) });
+
+        const result = await leaseManager.withLease(`run:${options.run}`, { timeoutMs: 0 }, async () => {
+          const runtime = readRuntimeState({ dataDir: options.dataDir, runId: options.run, autoRecover: true });
+          if (!runtime) {
+            throw new Error(`未找到运行记录 ${options.run}`);
+          }
+          const activeStatuses = ['running', 'resuming', 'retrying'];
+          if (activeStatuses.includes(runtime.status) && isPidAlive(runtime.pid)) {
+            throw new Error(`运行记录 ${options.run} 仍在执行中 (PID ${runtime.pid})，不可重复启动`);
+          }
+          return await runPipelineRuntime({
+            dataDir: options.dataDir,
+            runId: options.run,
+            preserveRuntime: true,
+            resumeFromStep: runtime.activeStep
+          });
+        });
+        const payload = withAgentResponseFields({
+          ...result,
+          ok: true,
+          runId: options.run,
+          status: result.runtimeStatus || result.status
+        });
+        if (jsonMode) writeAsciiJson(payload);
+        else console.log(`Run ${options.run} resumed: status=${payload.status}`);
+        return;
+      } catch (error) {
+        const payload = withAgentResponseFields({
+          ok: false,
+          runId: options.run,
+          status: 'workflow_resume_failed',
+          error: error.message,
+          blockers: ['workflow_resume_failed']
+        });
+        if (jsonMode) writeAsciiJson(payload);
+        else console.error('\nError:', error.message);
+        process.exit(1);
+      }
+    }
+
     const stateFile = workflowStateFile(options);
     try {
       const state = readWorkflowState(stateFile);

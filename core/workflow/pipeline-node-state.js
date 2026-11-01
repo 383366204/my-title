@@ -75,6 +75,7 @@ function nodeStatusFromRuntimeProgress(progress) {
   if (status === 'completed') return 'completed';
   if (status === 'running') return 'running';
   if (status === 'idle') return 'idle';
+  if (status === 'interrupted') return 'blocked';
   return '';
 }
 
@@ -465,10 +466,14 @@ function buildNodeStates(summary) {
         blocker: runtime.blocker || currentState.blocker || null,
         actionHint: runtimeFailed
           ? currentState.actionHint || runtime.error || '当前节点执行失败，请查看节点结果和运行日志后重试。'
-          : runtime.actionHint || currentState.actionHint || null,
+          : runtime.status === 'interrupted'
+            ? runtime.error || '流程执行进程异常中断，请点击继续或重试该节点。'
+            : runtime.actionHint || currentState.actionHint || null,
         nextRecommendedAction: runtimeFailed
           ? currentState.nextRecommendedAction || { action: 'retry-node', label: activeStep === WORKFLOW_NODE_IDS.collectRank ? '重试采集' : '重试节点', description: '保留当前运行参数并重新执行该节点。' }
-          : runtime.nextRecommendedAction || currentState.nextRecommendedAction || null,
+          : runtime.status === 'interrupted'
+            ? { action: 'resume', label: '继续执行', description: '从当前中断步骤恢复执行工作流。' }
+            : runtime.nextRecommendedAction || currentState.nextRecommendedAction || null,
         platform: runtime.platform || currentState.platform || null,
         platformStatus: runtime.platformStatus || currentState.platformStatus || null,
         manualAction: runtime.manualAction || currentState.manualAction || null,

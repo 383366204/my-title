@@ -509,6 +509,7 @@ async function runPipelineRuntime(options = {}) {
       patch: {
         status: startingStatus,
         activeStep: startStep,
+        incrementAttempt: Boolean(options.retryStep || startingStatus === 'resuming' || startingStatus === 'retrying'),
         requestedAction: null,
         platform: null,
         platformStatus: null,

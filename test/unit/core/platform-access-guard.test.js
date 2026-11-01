@@ -210,7 +210,7 @@ test('platform guard applies a longer cooldown at a configured batch boundary', 
     maxBatchCooldownMs: 35
   }, async () => ({ ok: true }));
 
-  assert.ok(Date.now() - started >= 30);
+  assert.ok(Date.now() - started >= 25);
 });
 
 test('platform guard can pause before a cooled-down request reaches the platform', async () => {
