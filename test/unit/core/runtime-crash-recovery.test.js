@@ -751,6 +751,92 @@ describe('PR-05 Runtime Crash Recovery & Atomic Snapshot Suite', () => {
     });
   });
 
+  describe('ControlService Execution Lease & Concurrency Protection', () => {
+    it('rejects server resumeRun when target run is actively running in alive process', async () => {
+      const dataDir = createTempDir();
+      const runId = 'server_resume_active_conflict';
+      initRun({ dataDir, runId });
+      initRuntimeState({ dataDir, runId, steps: ['mine'] });
+      updateRuntimeState({
+        dataDir,
+        runId,
+        patch: {
+          activeStep: 'mine',
+          pid: 1, // External alive process
+          status: 'running'
+        }
+      });
+
+      const workbench = { current: null, run: () => Promise.resolve() };
+      const controlService = createWorkflowControlService({
+        dataDir,
+        workbench,
+        readRuntimeState: (opts) => readRuntimeState({ dataDir, ...opts })
+      });
+
+      const res = await controlService.resumeRun({ runId });
+      assert.equal(res.httpStatus, 409);
+      assert.equal(res.body.ok, false);
+      assert.match(res.body.error, /仍在执行中/);
+    });
+
+    it('rejects server resumeRun when execution lease is held by another process', async () => {
+      const dataDir = createTempDir();
+      const runId = 'server_resume_lease_conflict';
+      initRun({ dataDir, runId });
+      initRuntimeState({ dataDir, runId, steps: ['mine'] });
+      updateRuntimeState({ dataDir, runId, patch: { status: 'interrupted', pid: null } });
+
+      const leaseManager = createWorkbenchLeaseManager({ runtimeDir: path.join(dataDir, 'leases') });
+      const lease = await leaseManager.acquire(`run:${runId}`, { timeoutMs: 0 });
+
+      const workbench = { current: null, run: () => Promise.resolve() };
+      const controlService = createWorkflowControlService({
+        dataDir,
+        workbench,
+        leaseManager,
+        readRuntimeState: (opts) => readRuntimeState({ dataDir, ...opts })
+      });
+
+      try {
+        const res = await controlService.resumeRun({ runId });
+        assert.equal(res.httpStatus, 409);
+        assert.equal(res.body.ok, false);
+        assert.match(res.body.error, /正在被其他进程执行中/);
+      } finally {
+        lease.release();
+      }
+    });
+
+    it('rejects server retryStep when execution lease is held by another process', async () => {
+      const dataDir = createTempDir();
+      const runId = 'server_retry_lease_conflict';
+      initRun({ dataDir, runId });
+      initRuntimeState({ dataDir, runId, steps: ['mine'] });
+      updateRuntimeState({ dataDir, runId, patch: { status: 'interrupted', pid: null } });
+
+      const leaseManager = createWorkbenchLeaseManager({ runtimeDir: path.join(dataDir, 'leases') });
+      const lease = await leaseManager.acquire(`run:${runId}`, { timeoutMs: 0 });
+
+      const workbench = { current: null, run: () => Promise.resolve() };
+      const controlService = createWorkflowControlService({
+        dataDir,
+        workbench,
+        leaseManager,
+        readRuntimeState: (opts) => readRuntimeState({ dataDir, ...opts })
+      });
+
+      try {
+        const res = await controlService.retryStep({ runId, stepId: 'mine', source: 'pipeline' });
+        assert.equal(res.httpStatus, 409);
+        assert.equal(res.body.ok, false);
+        assert.match(res.body.error, /正在被其他进程执行中/);
+      } finally {
+        lease.release();
+      }
+    });
+  });
+
   describe('Event Consistency Verification (verifyEventConsistency)', () => {
     it('validates intact chronological event streams', () => {
       const dataDir = createTempDir();
