@@ -1,6 +1,11 @@
 'use strict';
 
-const { WORKFLOW_NODE_IDS, localIsoDate } = require('./pipeline-definition-common');
+const {
+  WORKFLOW_NODE_IDS,
+  CANONICAL_WORKFLOW_STEPS,
+  getCanonicalSteps,
+  localIsoDate
+} = require('./pipeline-definition-common');
 
 function workflowNodes(mode = 'daily', options = {}) {
   const withSteps = (nodes) => nodes.map((node, index) => ({
@@ -265,82 +270,15 @@ if (mode === 'watermark-removal') {
 }
 
 function workflowEdges(mode = 'daily', options = {}) {
-  if (mode === 'peer-discovery') {
-    const branch = options?.discoveryBranch || options?.branch || 'peer-analysis';
-    const pairs = branch === 'image-selection'
-      ? [
-          [WORKFLOW_NODE_IDS.start, WORKFLOW_NODE_IDS.extractSources],
-          [WORKFLOW_NODE_IDS.extractSources, WORKFLOW_NODE_IDS.findSimilarProducts],
-          [WORKFLOW_NODE_IDS.findSimilarProducts, WORKFLOW_NODE_IDS.collectPeerProducts],
-          [WORKFLOW_NODE_IDS.collectPeerProducts, WORKFLOW_NODE_IDS.verifyImageSources],
-          [WORKFLOW_NODE_IDS.verifyImageSources, WORKFLOW_NODE_IDS.prepareListingDrafts],
-          [WORKFLOW_NODE_IDS.prepareListingDrafts, WORKFLOW_NODE_IDS.reviewPeerListings],
-          [WORKFLOW_NODE_IDS.reviewPeerListings, WORKFLOW_NODE_IDS.peerProductReport],
-          [WORKFLOW_NODE_IDS.peerProductReport, WORKFLOW_NODE_IDS.end]
-        ]
-      : [
-          [WORKFLOW_NODE_IDS.start, WORKFLOW_NODE_IDS.extractSources],
-          [WORKFLOW_NODE_IDS.extractSources, WORKFLOW_NODE_IDS.findSimilarProducts],
-          [WORKFLOW_NODE_IDS.findSimilarProducts, WORKFLOW_NODE_IDS.evaluateShops],
-          [WORKFLOW_NODE_IDS.evaluateShops, WORKFLOW_NODE_IDS.peerReport],
-          [WORKFLOW_NODE_IDS.peerReport, WORKFLOW_NODE_IDS.end]
-        ];
-    return pairs.map(([source, target]) => ({
-      id: `${source}-${target}`,
-      source,
-      target,
-      type: 'straight'
-    }));
+  const steps = [
+    WORKFLOW_NODE_IDS.start,
+    ...getCanonicalSteps(mode, { ...options, excludeStart: true }),
+    WORKFLOW_NODE_IDS.end
+  ];
+  const pairs = [];
+  for (let i = 0; i < steps.length - 1; i++) {
+    pairs.push([steps[i], steps[i + 1]]);
   }
-  const pairs = mode === 'competitor-analysis'
-    ? [
-        [WORKFLOW_NODE_IDS.start, WORKFLOW_NODE_IDS.resolveShops],
-        [WORKFLOW_NODE_IDS.resolveShops, WORKFLOW_NODE_IDS.collectCompetitors],
-        [WORKFLOW_NODE_IDS.collectCompetitors, WORKFLOW_NODE_IDS.findCompetitorSources],
-        [WORKFLOW_NODE_IDS.findCompetitorSources, WORKFLOW_NODE_IDS.end]
-      ]
-    : mode === 'order-sheet'
-    ? [
-        [WORKFLOW_NODE_IDS.start, WORKFLOW_NODE_IDS.collectRank],
-        [WORKFLOW_NODE_IDS.collectRank, WORKFLOW_NODE_IDS.confirmProducts],
-        [WORKFLOW_NODE_IDS.confirmProducts, WORKFLOW_NODE_IDS.generateSheet],
-        [WORKFLOW_NODE_IDS.generateSheet, WORKFLOW_NODE_IDS.end]
-      ]
-    : mode === 'review-sheet'
-      ? [
-          [WORKFLOW_NODE_IDS.start, WORKFLOW_NODE_IDS.importSheet],
-          [WORKFLOW_NODE_IDS.importSheet, WORKFLOW_NODE_IDS.generateReviews],
-          [WORKFLOW_NODE_IDS.generateReviews, WORKFLOW_NODE_IDS.generateSheet],
-          [WORKFLOW_NODE_IDS.generateSheet, WORKFLOW_NODE_IDS.end]
-        ]
-    : mode === 'watermark-removal'
-    ? [
-        [WORKFLOW_NODE_IDS.start, WORKFLOW_NODE_IDS.removeWatermark],
-        [WORKFLOW_NODE_IDS.removeWatermark, WORKFLOW_NODE_IDS.end]
-      ]
-    : mode === 'keyword'
-    ? [
-        [WORKFLOW_NODE_IDS.start, WORKFLOW_NODE_IDS.select],
-        [WORKFLOW_NODE_IDS.select, WORKFLOW_NODE_IDS.generate],
-        [WORKFLOW_NODE_IDS.generate, WORKFLOW_NODE_IDS.export],
-        [WORKFLOW_NODE_IDS.export, WORKFLOW_NODE_IDS.end]
-      ]
-    : mode === 'manual'
-      ? [
-        [WORKFLOW_NODE_IDS.start, WORKFLOW_NODE_IDS.select],
-        [WORKFLOW_NODE_IDS.select, WORKFLOW_NODE_IDS.verify],
-        [WORKFLOW_NODE_IDS.verify, WORKFLOW_NODE_IDS.generate],
-        [WORKFLOW_NODE_IDS.generate, WORKFLOW_NODE_IDS.export],
-        [WORKFLOW_NODE_IDS.export, WORKFLOW_NODE_IDS.end]
-      ]
-      : [
-        ...(mode === 'daily' ? [[WORKFLOW_NODE_IDS.start, WORKFLOW_NODE_IDS.inspire], [WORKFLOW_NODE_IDS.inspire, WORKFLOW_NODE_IDS.mine]] : [[WORKFLOW_NODE_IDS.start, WORKFLOW_NODE_IDS.mine]]),
-        [WORKFLOW_NODE_IDS.mine, WORKFLOW_NODE_IDS.keywordReview],
-        [WORKFLOW_NODE_IDS.keywordReview, WORKFLOW_NODE_IDS.select],
-        [WORKFLOW_NODE_IDS.select, WORKFLOW_NODE_IDS.generate],
-        [WORKFLOW_NODE_IDS.generate, WORKFLOW_NODE_IDS.export],
-        [WORKFLOW_NODE_IDS.export, WORKFLOW_NODE_IDS.end]
-      ];
   return pairs.map(([source, target]) => ({
     id: `${source}-${target}`,
     source,

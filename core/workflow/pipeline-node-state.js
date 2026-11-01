@@ -74,6 +74,7 @@ function nodeStatusFromRuntimeProgress(progress) {
   if (status === 'awaiting_product_review') return 'waiting_confirmation';
   if (status === 'completed') return 'completed';
   if (status === 'running') return 'running';
+  if (status === 'idle') return 'idle';
   return '';
 }
 
@@ -98,12 +99,28 @@ function statusPlanForSummary(summary) {
     return memo;
   }, {});
   const mode = summary.runtime?.mode || summary.options?.mode || '';
+  if (summary.runtime?.steps && summary.runtime?.stoppedAfterStep) {
+    states[WORKFLOW_NODE_IDS.start] = 'completed';
+    for (const step of summary.runtime.steps) {
+      states[step] = nodeStatusFromRuntimeProgress(summary.runtime.progress?.[step]) || 'idle';
+    }
+    return states;
+  }
+  if (['daily', 'root-keyword', 'keyword'].includes(mode) && summary.runtime?.steps) {
+    states[WORKFLOW_NODE_IDS.start] = 'completed';
+    for (const step of summary.runtime.steps) {
+      states[step] = nodeStatusFromRuntimeProgress(summary.runtime.progress?.[step]) || 'idle';
+    }
+    const stoppedEarly = Boolean(summary.runtime?.stoppedAfterStep);
+    if (status === 'workflow_complete' && !stoppedEarly) states[WORKFLOW_NODE_IDS.end] = 'completed';
+    return states;
+  }
   if (mode === 'daily' && summary.runtime?.steps?.includes(WORKFLOW_NODE_IDS.inspire)) {
     states[WORKFLOW_NODE_IDS.start] = 'completed';
     for (const step of summary.runtime.steps) {
       states[step] = nodeStatusFromRuntimeProgress(summary.runtime.progress?.[step]) || 'idle';
     }
-    if (status === 'workflow_complete') states[WORKFLOW_NODE_IDS.end] = 'completed';
+    if (status === 'workflow_complete' && !summary.runtime?.stoppedAfterStep) states[WORKFLOW_NODE_IDS.end] = 'completed';
     return states;
   }
   if (mode === 'keyword' && ['created', 'mined'].includes(status)) {
@@ -127,9 +144,11 @@ function statusPlanForSummary(summary) {
       if (progressStatus) states[step] = progressStatus;
     }
     if (activeStep && summary.runtime?.status === 'needs_review') states[activeStep] = 'needs_review';
-    if (summary.status === 'workflow_complete') {
+    if (summary.status === 'workflow_complete' && !summary.runtime?.stoppedAfterStep) {
       for (const step of steps) states[step] = 'completed';
       states[WORKFLOW_NODE_IDS.end] = 'completed';
+    } else if (summary.runtime?.status === 'completed' && summary.runtime?.stoppedAfterStep) {
+      // 局部执行完成，后续待恢复步骤保持 idle
     } else if (activeStep && states[activeStep] === 'idle') {
       states[activeStep] = summary.runtime?.status === 'failed' ? 'failed' : summary.runtime?.status === 'blocked' ? 'blocked' : 'running';
     }
@@ -159,13 +178,15 @@ function statusPlanForSummary(summary) {
       const progressStatus = nodeStatusFromRuntimeProgress(summary.runtime?.progress?.[step]);
       if (progressStatus) states[step] = progressStatus;
     }
-    if (summary.status === 'workflow_complete' || summary.runtime?.status === 'completed') {
+    if ((summary.status === 'workflow_complete' || summary.runtime?.status === 'completed') && !summary.runtime?.stoppedAfterStep) {
       for (const step of steps) states[step] = 'completed';
       states[WORKFLOW_NODE_IDS.end] = 'completed';
     } else if (summary.runtime?.status === 'cancelled') {
       if (activeStep) states[activeStep] = 'cancelled';
     } else if (summary.runtime?.status === 'queued') {
       if (activeStep) states[activeStep] = 'queued';
+    } else if (summary.runtime?.status === 'completed' && summary.runtime?.stoppedAfterStep) {
+      // 局部执行完成，后续待恢复步骤保持 idle
     } else if (activeStep && states[activeStep] === 'idle') {
       states[activeStep] = summary.runtime?.status === 'failed' ? 'failed' : summary.runtime?.status === 'blocked' ? 'blocked' : 'running';
     }
@@ -267,7 +288,7 @@ function statusPlanForSummary(summary) {
     return states;
   }
 
-  if (status === 'workflow_complete') {
+  if (status === 'workflow_complete' && !summary.runtime?.stoppedAfterStep) {
     completeThrough(states, WORKFLOW_NODE_IDS.end);
     return states;
   }
@@ -425,33 +446,36 @@ function buildNodeStates(summary) {
       ? WORKFLOW_NODE_IDS.keywordReview
       : runtime?.activeStep;
   if (runtime && activeStep && states[activeStep]) {
-    const runtimeStatus = nodeStatusFromRuntimeProgress({ status: runtime.status }) || 'running';
-    const runtimeFailed = runtimeStatus === 'failed';
-    const currentState = states[activeStep];
-    const activeProgress = currentState.progress || {};
-    states[activeStep] = {
-      ...currentState,
-      status: runtimeStatus,
-      output: currentState.output || outputForNode(activeStep, summary),
-      progress: normalizeNodeProgress({
-        ...activeProgress,
+    const isStoppedBeforeActive = Boolean(runtime.stoppedAfterStep && runtime.stoppedAfterStep !== activeStep && runtime.status === 'completed');
+    if (!isStoppedBeforeActive) {
+      const runtimeStatus = nodeStatusFromRuntimeProgress({ status: runtime.status }) || 'running';
+      const runtimeFailed = runtimeStatus === 'failed';
+      const currentState = states[activeStep];
+      const activeProgress = currentState.progress || {};
+      states[activeStep] = {
+        ...currentState,
         status: runtimeStatus,
-        message: activeProgress.message || (runtimeStatus === 'paused' ? '已暂停' : '')
-      }),
-      error: runtime.error || currentState.error || null,
-      blocker: runtime.blocker || currentState.blocker || null,
-      actionHint: runtimeFailed
-        ? currentState.actionHint || runtime.error || '当前节点执行失败，请查看节点结果和运行日志后重试。'
-        : runtime.actionHint || currentState.actionHint || null,
-      nextRecommendedAction: runtimeFailed
-        ? currentState.nextRecommendedAction || { action: 'retry-node', label: activeStep === WORKFLOW_NODE_IDS.collectRank ? '重试采集' : '重试节点', description: '保留当前运行参数并重新执行该节点。' }
-        : runtime.nextRecommendedAction || currentState.nextRecommendedAction || null,
-      platform: runtime.platform || currentState.platform || null,
-      platformStatus: runtime.platformStatus || currentState.platformStatus || null,
-      manualAction: runtime.manualAction || currentState.manualAction || null,
-      durationMs: runtime.durationMs || currentState.durationMs || null,
-      outputSummary: runtime.outputSummary || currentState.outputSummary || null
-    };
+        output: currentState.output || outputForNode(activeStep, summary),
+        progress: normalizeNodeProgress({
+          ...activeProgress,
+          status: runtimeStatus,
+          message: activeProgress.message || (runtimeStatus === 'paused' ? '已暂停' : '')
+        }),
+        error: runtime.error || currentState.error || null,
+        blocker: runtime.blocker || currentState.blocker || null,
+        actionHint: runtimeFailed
+          ? currentState.actionHint || runtime.error || '当前节点执行失败，请查看节点结果和运行日志后重试。'
+          : runtime.actionHint || currentState.actionHint || null,
+        nextRecommendedAction: runtimeFailed
+          ? currentState.nextRecommendedAction || { action: 'retry-node', label: activeStep === WORKFLOW_NODE_IDS.collectRank ? '重试采集' : '重试节点', description: '保留当前运行参数并重新执行该节点。' }
+          : runtime.nextRecommendedAction || currentState.nextRecommendedAction || null,
+        platform: runtime.platform || currentState.platform || null,
+        platformStatus: runtime.platformStatus || currentState.platformStatus || null,
+        manualAction: runtime.manualAction || currentState.manualAction || null,
+        durationMs: runtime.durationMs || currentState.durationMs || null,
+        outputSummary: runtime.outputSummary || currentState.outputSummary || null
+      };
+    }
   }
   if (summary.options?.mode === 'competitor-analysis') {
     const collectionState = states[WORKFLOW_NODE_IDS.collectCompetitors];
