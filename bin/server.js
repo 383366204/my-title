@@ -16,6 +16,7 @@ const { registerWorkflowQueryRoutes } = require('../core/server/workflow-query-r
 const { registerOrderSheetDraftRoutes } = require('../core/server/order-sheet-draft-routes');
 const { registerPeerReviewRoutes } = require('../core/server/peer-review-routes');
 const { createWorkbenchCoordinator } = require('../core/server/workbench-coordinator');
+const { createWorkflowControlService } = require('../core/workflow/control-service');
 const { registerPipelineRoutes } = require('../core/server/pipeline-routes');
 const { registerWorkflowControlRoutes } = require('../core/server/workflow-control-routes');
 const { registerWorkbenchRoutes } = require('../core/server/workbench-routes');
@@ -238,30 +239,40 @@ function parsePositiveNumber(value, fallback) {
   return Number.isFinite(num) && num > 0 ? num : fallback;
 }
 
-registerPipelineRoutes(app, {
-  parsePositiveNumber,
-  listPipelineRuns,
-  withPipelineRuntimeFields,
-  isValidWorkflowRunIdParam,
-  summarizePipelineRun,
+const workflowControlService = createWorkflowControlService({
+  validateProductionWorkflow,
   workbench,
+  isValidWorkflowRunIdParam,
+  requestRuntimeCancel,
+  readRuntimeState,
+  getPipelineRuntimeRunner,
+  parsePositiveNumber,
+  getSycmChromeAvailabilityChecker,
+  recoverSycmAccessAfterChrome,
+  requestRuntimeRetryStep,
+  pipelineRunResponse,
+  retryWorkflowNode,
+  getRun,
+  requestRuntimeResume,
+  resumeWorkflow,
+  requestRuntimePause,
+  markRunPaused,
   resolveProductionWorkflowLaunch,
   resolveManualShareParams,
   sanitizeWorkflowParams,
   createRunId,
   resolveProductionWorkflowDefinition,
   writeWorkflowDefinition,
-  getPipelineRuntimeRunner,
-  originalLog,
-  originalError,
-  readRuntimeState,
+  listPipelineRuns,
+  summarizePipelineRun,
+  withPipelineRuntimeFields,
   appendRunCandidates,
-  requestRuntimePause,
-  pipelineRunResponse,
-  requestRuntimeResume,
-  requestRuntimeRetryStep,
-  runPipelineStep
+  runPipelineStep,
+  originalLog,
+  originalError
 });
+
+registerPipelineRoutes(app, { controlService: workflowControlService });
 
 function getPipelineRuntimeRunner() {
   return app.locals.pipelineRuntimeRunner || runPipelineRuntime;
@@ -597,33 +608,7 @@ registerResearchRoutes(app, {
   resolve1688ShareText
 });
 
-registerWorkflowControlRoutes(app, {
-  validateProductionWorkflow,
-  workbench,
-  isValidWorkflowRunIdParam,
-  requestRuntimeCancel,
-  readRuntimeState,
-  getPipelineRuntimeRunner,
-  parsePositiveNumber,
-  getSycmChromeAvailabilityChecker,
-  recoverSycmAccessAfterChrome,
-  requestRuntimeRetryStep,
-  pipelineRunResponse,
-  retryWorkflowNode,
-  getRun,
-  requestRuntimeResume,
-  resumeWorkflow,
-  requestRuntimePause,
-  markRunPaused,
-  resolveProductionWorkflowLaunch,
-  resolveManualShareParams,
-  sanitizeWorkflowParams,
-  createRunId,
-  resolveProductionWorkflowDefinition,
-  writeWorkflowDefinition,
-  originalLog,
-  originalError
-});
+registerWorkflowControlRoutes(app, { controlService: workflowControlService });
 
 // 人工筛词确认后暂停在下一步骤，等待用户继续。
 registerSelectionReviewRoutes(app, {
