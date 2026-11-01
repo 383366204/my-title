@@ -75,6 +75,7 @@ function createClientForwarder(deps = {}) {
 
       // 2. 发起 HTTP 健康探测
       const healthData = await new Promise((resolve, reject) => {
+        let healthEnded = false;
         const req = httpClient.get(
           `http://127.0.0.1:${serverInfo.port}/api/runtime/health`,
           { timeout: healthTimeoutMs },
@@ -82,10 +83,20 @@ function createClientForwarder(deps = {}) {
             let body = '';
             res.on('data', (chunk) => { body += chunk; });
             res.on('end', () => {
+              healthEnded = true;
               try {
                 resolve(JSON.parse(body));
               } catch (e) {
                 reject(e);
+              }
+            });
+            res.on('error', (err) => {
+              healthEnded = true;
+              reject(err);
+            });
+            res.on('close', () => {
+              if (!healthEnded) {
+                reject(new Error('健康检查响应流过早关闭'));
               }
             });
           }
@@ -136,8 +147,12 @@ function createClientForwarder(deps = {}) {
           },
           (res) => {
             let body = '';
+            let ended = false;
+            const queryUrl = `http://127.0.0.1:${serverInfo.port}/api/runtime/operations/${requestId}`;
+
             res.on('data', (chunk) => { body += chunk; });
             res.on('end', () => {
+              ended = true;
               try {
                 const responseJson = JSON.parse(body);
                 if (res.statusCode >= 200 && res.statusCode < 300 && responseJson.ok) {
@@ -149,7 +164,37 @@ function createClientForwarder(deps = {}) {
                   reject(err);
                 }
               } catch (parseErr) {
-                reject(new Error(`解析服务端响应失败: ${parseErr.message}, body: ${body}`));
+                reject(
+                  new ServerForwardingError(
+                    `解析服务端响应失败: ${parseErr.message}, body: ${body}。请核查 operation 状态: ${queryUrl}`,
+                    requestId,
+                    queryUrl,
+                    parseErr
+                  )
+                );
+              }
+            });
+
+            res.on('error', (resErr) => {
+              reject(
+                new ServerForwardingError(
+                  `读取服务端响应流异常 (${resErr.message})。若请求已被服务端接收，请查询 operation 状态: ${queryUrl}`,
+                  requestId,
+                  queryUrl,
+                  resErr
+                )
+              );
+            });
+
+            res.on('close', () => {
+              if (!ended) {
+                reject(
+                  new ServerForwardingError(
+                    `服务端响应流过早关闭 (premature close)。若请求已被服务端接收，请查询 operation 状态: ${queryUrl}`,
+                    requestId,
+                    queryUrl
+                  )
+                );
               }
             });
           }

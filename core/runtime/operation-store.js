@@ -99,7 +99,7 @@ function createOperationStore(options = {}) {
   }
 
   /**
-   * 原子受理操作请求 (利用 open 'wx' 排他创建，杜绝多进程并发提交相同 requestId 时的穿透竞争)
+   * 原子受理操作请求 (利用原子硬链接或排他创建，杜绝多进程并发提交相同 requestId 时的穿透竞争)
    * @param {string} requestId
    * @param {Object} initialRecord
    * @returns {{ claimed: boolean, record: Object }}
@@ -109,41 +109,66 @@ function createOperationStore(options = {}) {
       return { claimed: true, record: initialRecord };
     }
     const filePath = getFilePath(requestId);
-    let fd = null;
+    const tmpPath = `${filePath}.claim.${process.pid}.${Date.now()}.${crypto.randomBytes(4).toString('hex')}`;
+    fs.writeFileSync(tmpPath, JSON.stringify(initialRecord, null, 2), 'utf8');
+
+    let claimed = false;
     try {
-      fd = fs.openSync(filePath, 'wx');
-      fs.writeFileSync(fd, JSON.stringify(initialRecord, null, 2), 'utf8');
-      fs.fsyncSync(fd);
-      fs.closeSync(fd);
-      fd = null;
-      return { claimed: true, record: initialRecord };
+      // 优先尝试原子硬链接创建：天然保证一旦目标文件出现，其内容必然已完整写入，消除并发时读到半写入文件的窗口
+      fs.linkSync(tmpPath, filePath);
+      claimed = true;
     } catch (err) {
-      if (fd !== null) {
-        try { fs.closeSync(fd); } catch {}
-      }
-      if (err.code === 'EEXIST') {
-        const existing = get(requestId);
-        if (existing) {
-          return { claimed: false, record: existing };
-        }
-        // 文件已存在但内容无法读取/未写入（说明上一个创建进程在写入中途崩溃）
-        // 按照 ADR D5 严格决议：绝不静默自动重跑不确定状态的操作，标记为 unknown_interrupted 状态以供核查
-        const interruptedRecord = {
-          requestId,
-          toolId: initialRecord?.toolId || 'unknown',
-          inputDigest: initialRecord?.inputDigest || '',
-          status: 'unknown_interrupted',
-          error: '操作创建时原进程中断，状态不可考',
-          createdAt: initialRecord?.createdAt || new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        };
+      if (err.code !== 'EEXIST') {
+        // 如果底层不支持 linkSync (如跨文件系统)，降级为 openSync 'wx' 互斥创建
+        let fd = null;
         try {
-          save(interruptedRecord);
-        } catch {}
-        return { claimed: false, record: interruptedRecord };
+          fd = fs.openSync(filePath, 'wx');
+          fs.writeFileSync(fd, JSON.stringify(initialRecord, null, 2), 'utf8');
+          fs.fsyncSync(fd);
+          fs.closeSync(fd);
+          fd = null;
+          claimed = true;
+        } catch (openErr) {
+          if (fd !== null) try { fs.closeSync(fd); } catch {}
+          if (openErr.code !== 'EEXIST') throw openErr;
+        }
       }
-      throw err;
+    } finally {
+      try { fs.unlinkSync(tmpPath); } catch {}
     }
+
+    if (claimed) {
+      return { claimed: true, record: initialRecord };
+    }
+
+    // 此时文件已存在，读取已有记录（若正好遇上并发写落盘微小窗口，重试轮询等待最多 500ms）
+    let existing = null;
+    const deadline = Date.now() + 500;
+    while (!existing && Date.now() < deadline) {
+      existing = get(requestId);
+      if (existing) break;
+      const waitTill = Date.now() + 20;
+      while (Date.now() < waitTill) {}
+    }
+
+    if (existing) {
+      return { claimed: false, record: existing };
+    }
+
+    // 500ms 后依然无法读取有效 JSON，说明原创建进程在写入中途确实崩溃
+    const interruptedRecord = {
+      requestId,
+      toolId: initialRecord?.toolId || 'unknown',
+      inputDigest: initialRecord?.inputDigest || '',
+      status: 'unknown_interrupted',
+      error: '操作创建时原进程中断，状态不可考',
+      createdAt: initialRecord?.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    try {
+      save(interruptedRecord);
+    } catch {}
+    return { claimed: false, record: interruptedRecord };
   }
 
   return {
