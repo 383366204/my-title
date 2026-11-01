@@ -23,11 +23,23 @@ class ServerExecutionTimeoutError extends Error {
   }
 }
 
+class ServerForwardingError extends Error {
+  constructor(message, requestId, operationQueryUrl, cause) {
+    super(message);
+    this.name = 'ServerForwardingError';
+    this.code = 'SERVER_FORWARDING_ERROR';
+    this.requestId = requestId;
+    this.operationQueryUrl = operationQueryUrl;
+    if (cause) this.cause = cause;
+  }
+}
+
 /**
  * 创建客户端转发器
  * @param {Object} [deps]
  * @param {string} [deps.runtimeDir]
  * @param {import('./tool-executor').createToolExecutor} [deps.localExecutor]
+ * @param {any} [deps.httpClient] HTTP 客户端（默认 Node.js 内置 http 模块）
  * @param {number} [deps.healthTimeoutMs]
  * @param {number} [deps.requestTimeoutMs]
  */
@@ -36,6 +48,7 @@ function createClientForwarder(deps = {}) {
   const runtimeDir = deps.runtimeDir || path.join(projectRoot, 'data', 'runtime');
   const serverJsonPath = path.join(runtimeDir, 'server.json');
   const localExecutor = deps.localExecutor || createDefaultToolExecutor();
+  const httpClient = deps.httpClient || http;
   const healthTimeoutMs = deps.healthTimeoutMs || 1000;
   const requestTimeoutMs = deps.requestTimeoutMs || 60000;
 
@@ -62,7 +75,7 @@ function createClientForwarder(deps = {}) {
 
       // 2. 发起 HTTP 健康探测
       const healthData = await new Promise((resolve, reject) => {
-        const req = http.get(
+        const req = httpClient.get(
           `http://127.0.0.1:${serverInfo.port}/api/runtime/health`,
           { timeout: healthTimeoutMs },
           (res) => {
@@ -111,7 +124,7 @@ function createClientForwarder(deps = {}) {
       });
 
       return await new Promise((resolve, reject) => {
-        const req = http.request(
+        const req = httpClient.request(
           `http://127.0.0.1:${serverInfo.port}/api/runtime/tools/${encodeURIComponent(idOrName)}/execute`,
           {
             method: 'POST',
@@ -156,7 +169,15 @@ function createClientForwarder(deps = {}) {
         });
 
         req.on('error', (err) => {
-          reject(new Error(`连接本地 Runtime Server 失败: ${err.message}`));
+          const queryUrl = `http://127.0.0.1:${serverInfo.port}/api/runtime/operations/${requestId}`;
+          reject(
+            new ServerForwardingError(
+              `连接本地 Runtime Server 失败 (${err.message})。若请求已被服务端接收，请查询 operation 状态: ${queryUrl}`,
+              requestId,
+              queryUrl,
+              err
+            )
+          );
         });
 
         req.write(postData);
@@ -180,5 +201,6 @@ function createClientForwarder(deps = {}) {
 
 module.exports = {
   createClientForwarder,
-  ServerExecutionTimeoutError
+  ServerExecutionTimeoutError,
+  ServerForwardingError
 };

@@ -10,14 +10,120 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
+const { EventEmitter } = require('events');
 const express = require('express');
-const { createClientForwarder, ServerExecutionTimeoutError } = require('../../../core/runtime/server-forwarder');
+const { createClientForwarder, ServerExecutionTimeoutError, ServerForwardingError } = require('../../../core/runtime/server-forwarder');
 const { registerRuntimeRoutes } = require('../../../core/server/runtime-routes');
 const { createToolRegistry } = require('../../../core/runtime/tool-registry');
 const { createToolExecutor } = require('../../../core/runtime/tool-executor');
 const { createOperationStore } = require('../../../core/runtime/operation-store');
 
 const TEST_RUNTIME_DIR = path.resolve(__dirname, '../../../data/test-runtime-forwarder');
+
+function createExpressMockHttpClient(app) {
+  return {
+    get: (urlStr, options, callback) => {
+      const parsed = new URL(urlStr);
+      const req = new EventEmitter();
+      req.destroy = (err) => { req.emit('error', err); };
+      process.nextTick(() => {
+        const mockReq = new EventEmitter();
+        mockReq.method = 'GET';
+        mockReq.url = parsed.pathname + parsed.search;
+        mockReq.headers = options.headers || {};
+        const mockRes = new EventEmitter();
+        mockRes.statusCode = 200;
+        mockRes.status = (code) => { mockRes.statusCode = code; return mockRes; };
+        mockRes.setHeader = () => {};
+        mockRes.json = (obj) => {
+          mockRes.emit('data', Buffer.from(JSON.stringify(obj)));
+          mockRes.emit('end');
+        };
+        mockRes.send = (str) => {
+          mockRes.emit('data', Buffer.from(str));
+          mockRes.emit('end');
+        };
+        callback(mockRes);
+        app(mockReq, mockRes);
+      });
+      return req;
+    },
+    request: (urlStr, options, callback) => {
+      const parsed = new URL(urlStr);
+      const req = new EventEmitter();
+      const chunks = [];
+      let timer = null;
+      req.write = (c) => chunks.push(c);
+      req.destroy = (err) => {
+        if (timer) clearTimeout(timer);
+        req.emit('error', err || new Error('destroyed'));
+      };
+      req.end = () => {
+        if (options.timeout) {
+          timer = setTimeout(() => {
+            req.emit('timeout');
+          }, options.timeout);
+        }
+        process.nextTick(() => {
+          const bodyBuffer = Buffer.concat(chunks.map(c => typeof c === 'string' ? Buffer.from(c) : c));
+          const mockReq = new EventEmitter();
+          mockReq.method = options.method || 'POST';
+          mockReq.url = parsed.pathname + parsed.search;
+          mockReq.headers = options.headers || {};
+          const mockRes = new EventEmitter();
+          mockRes.statusCode = 200;
+          mockRes.status = (code) => { mockRes.statusCode = code; return mockRes; };
+          mockRes.setHeader = () => {};
+          mockRes.json = (obj) => {
+            if (timer) clearTimeout(timer);
+            callback(mockRes);
+            mockRes.emit('data', Buffer.from(JSON.stringify(obj)));
+            mockRes.emit('end');
+          };
+          mockRes.send = (str) => {
+            if (timer) clearTimeout(timer);
+            callback(mockRes);
+            mockRes.emit('data', Buffer.from(str));
+            mockRes.emit('end');
+          };
+          app(mockReq, mockRes);
+          mockReq.emit('data', bodyBuffer);
+          mockReq.emit('end');
+        });
+      };
+      return req;
+    }
+  };
+}
+
+async function startServerOrMock(app) {
+  const server = http.createServer(app);
+  try {
+    await new Promise((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', () => {
+        server.removeListener('error', reject);
+        resolve();
+      });
+    });
+    return {
+      server,
+      port: server.address().port,
+      httpClient: undefined,
+      close: () => server.close()
+    };
+  } catch (err) {
+    if (err.code === 'EPERM') {
+      return {
+        server: null,
+        port: 9999,
+        httpClient: createExpressMockHttpClient(app),
+        close: () => {}
+      };
+    }
+    throw err;
+  }
+}
 
 describe('core/runtime/server-forwarder', () => {
   before(() => {
@@ -73,10 +179,9 @@ describe('core/runtime/server-forwarder', () => {
       instanceId
     });
 
-    // 启动测试 HTTP Server
-    const server = http.createServer(serverApp);
-    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-    const port = server.address().port;
+    // 启动测试 HTTP Server (若在沙箱环境中受限则平滑切到 mockHttpClient)
+    const running = await startServerOrMock(serverApp);
+    const port = running.port;
 
     // 写入 server.json 描述文件
     const serverJsonPath = path.join(TEST_RUNTIME_DIR, 'server.json');
@@ -101,7 +206,8 @@ describe('core/runtime/server-forwarder', () => {
 
     const forwarder = createClientForwarder({
       runtimeDir: TEST_RUNTIME_DIR,
-      localExecutor: mockLocalExecutor
+      localExecutor: mockLocalExecutor,
+      httpClient: running.httpClient
     });
 
     try {
@@ -110,7 +216,7 @@ describe('core/runtime/server-forwarder', () => {
       assert.equal(localExecuted, false, '不应当在本地回退执行');
       assert.deepEqual(result, { fromServer: true, echoed: 'hello' });
     } finally {
-      server.close();
+      running.close();
       try { fs.unlinkSync(serverJsonPath); } catch {}
     }
   });
@@ -129,9 +235,8 @@ describe('core/runtime/server-forwarder', () => {
       }, 1000);
     });
 
-    const server = http.createServer(serverApp);
-    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-    const port = server.address().port;
+    const running = await startServerOrMock(serverApp);
+    const port = running.port;
 
     const serverJsonPath = path.join(TEST_RUNTIME_DIR, 'server.json');
     fs.writeFileSync(
@@ -156,6 +261,7 @@ describe('core/runtime/server-forwarder', () => {
     const forwarder = createClientForwarder({
       runtimeDir: TEST_RUNTIME_DIR,
       localExecutor: mockLocalExecutor,
+      httpClient: running.httpClient,
       requestTimeoutMs: 100 // 100ms 触发超时
     });
 
@@ -166,6 +272,7 @@ describe('core/runtime/server-forwarder', () => {
           assert.ok(err instanceof ServerExecutionTimeoutError);
           assert.equal(err.code, 'SERVER_EXECUTION_TIMEOUT');
           assert.equal(err.requestId, 'req-timeout-test');
+          assert.ok(err.operationQueryUrl.includes('req-timeout-test'));
           return true;
         }
       );
@@ -173,7 +280,65 @@ describe('core/runtime/server-forwarder', () => {
       // 核心安全约束校验：本地执行次数必须为 0！绝不盲目重跑！
       assert.equal(localExecutedCount, 0, '超时后绝不应该在本地重跑产生重复副作用');
     } finally {
-      server.close();
+      running.close();
+      try { fs.unlinkSync(serverJsonPath); } catch {}
+    }
+  });
+
+  it('转发连接异常时应当抛出 ServerForwardingError 并保留 requestId 与查询链接', async () => {
+    const serverJsonPath = path.join(TEST_RUNTIME_DIR, 'server.json');
+    fs.writeFileSync(
+      serverJsonPath,
+      JSON.stringify({
+        pid: process.pid,
+        port: 59999,
+        instanceId: 'offline-inst',
+        protocolVersion: '1.0'
+      }),
+      'utf8'
+    );
+
+    const mockHttpClient = {
+      get: (url, opts, cb) => {
+        const req = new EventEmitter();
+        req.destroy = () => {};
+        process.nextTick(() => {
+          const res = new EventEmitter();
+          cb(res);
+          res.emit('data', Buffer.from(JSON.stringify({ ok: true, instanceId: 'offline-inst' })));
+          res.emit('end');
+        });
+        return req;
+      },
+      request: (url, opts, cb) => {
+        const req = new EventEmitter();
+        req.write = () => {};
+        req.end = () => {
+          process.nextTick(() => {
+            req.emit('error', new Error('ECONNRESET connection reset'));
+          });
+        };
+        return req;
+      }
+    };
+
+    const forwarder = createClientForwarder({
+      runtimeDir: TEST_RUNTIME_DIR,
+      httpClient: mockHttpClient
+    });
+
+    try {
+      await assert.rejects(
+        async () => forwarder.execute('test.tool', {}, { requestId: 'req-forward-err-1' }),
+        (err) => {
+          assert.ok(err instanceof ServerForwardingError);
+          assert.equal(err.code, 'SERVER_FORWARDING_ERROR');
+          assert.equal(err.requestId, 'req-forward-err-1');
+          assert.ok(err.operationQueryUrl.includes('req-forward-err-1'));
+          return true;
+        }
+      );
+    } finally {
       try { fs.unlinkSync(serverJsonPath); } catch {}
     }
   });

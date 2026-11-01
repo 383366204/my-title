@@ -105,6 +105,37 @@ describe('core/runtime/workbench-lease', () => {
     assert.equal(fs.existsSync(leasePath), false);
   });
 
+  it('被意外遗弃的 .reclaim 锁（PID 死亡或超时）应当被自愈清理，不应永久阻塞后续回收', async () => {
+    const manager = createWorkbenchLeaseManager({ runtimeDir: TEST_RUNTIME_DIR, ttlMs: 100 });
+    const resourceKey = 'cdp:9224c';
+    const leasePath = manager.getLeasePath(resourceKey);
+    const reclaimLockPath = `${leasePath}.reclaim`;
+
+    // 构造僵尸锁
+    const fakeZombieLease = {
+      resourceKey,
+      ownerToken: 'zombie-token-2',
+      pid: 99999998,
+      purpose: 'zombie-2',
+      acquiredAt: new Date(Date.now() - 60000).toISOString(),
+      heartbeatAt: new Date(Date.now() - 60000).toISOString(),
+      ttlMs: 5000
+    };
+    fs.writeFileSync(leasePath, JSON.stringify(fakeZombieLease, null, 2), 'utf8');
+
+    // 模拟前一个回收进程崩溃，遗留了一个 PID 已死亡的 .reclaim 文件
+    fs.writeFileSync(reclaimLockPath, JSON.stringify({ pid: 99999997, createdAt: Date.now() - 60000 }), 'utf8');
+
+    // 尝试获取该资源，应当自愈清理遗弃的 .reclaim 锁并成功回收接管
+    const newLease = await manager.acquire(resourceKey, { timeoutMs: 1000 });
+    assert.equal(newLease.pid, process.pid);
+    assert.ok(fs.existsSync(leasePath));
+
+    newLease.release();
+    assert.equal(fs.existsSync(leasePath), false);
+    assert.equal(fs.existsSync(reclaimLockPath), false);
+  });
+
   it('活进程锁未释放时，新请求超时应当抛出 LeaseBusyError 且禁止强抢', async () => {
     const manager = createWorkbenchLeaseManager({ runtimeDir: TEST_RUNTIME_DIR });
     const resourceKey = 'cdp:9225';

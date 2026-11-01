@@ -252,4 +252,39 @@ describe('core/runtime/tool-executor', () => {
     assert.equal(opStore.get('order:1').result.val, 1);
     assert.equal(opStore.get('order.1').result.val, 2);
   });
+
+  it('创建操作记录中途崩溃遗留空/损坏文件时，再次请求应当标记为 unknown_interrupted 并拒绝重跑', async () => {
+    const registry = createToolRegistry();
+    let callCount = 0;
+    registry.register({
+      id: 'echo.test',
+      execute: async (input) => {
+        callCount++;
+        return input;
+      }
+    });
+
+    const opStore = createOperationStore({ operationsDir });
+    const reqId = 'crash-on-create-req';
+    const filePath = opStore.getFilePath(reqId);
+
+    // 模拟上一进程在 openSync('wx') 后被杀，遗留 0 字节空文件
+    fs.writeFileSync(filePath, '', 'utf8');
+
+    const executor = createToolExecutor({ registry, operationStore: opStore });
+
+    await assert.rejects(
+      async () => executor.execute('echo.test', { val: 123 }, { requestId: reqId }),
+      (err) => {
+        assert.equal(err.code, 'OPERATION_INTERRUPTED');
+        assert.equal(err.status, 409);
+        return true;
+      }
+    );
+
+    assert.equal(callCount, 0, '绝不自动重跑');
+    const record = opStore.get(reqId);
+    assert.equal(record.status, 'unknown_interrupted');
+    assert.ok(record.error);
+  });
 });

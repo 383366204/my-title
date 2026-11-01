@@ -123,7 +123,24 @@ function createOperationStore(options = {}) {
       }
       if (err.code === 'EEXIST') {
         const existing = get(requestId);
-        return { claimed: false, record: existing || initialRecord };
+        if (existing) {
+          return { claimed: false, record: existing };
+        }
+        // 文件已存在但内容无法读取/未写入（说明上一个创建进程在写入中途崩溃）
+        // 按照 ADR D5 严格决议：绝不静默自动重跑不确定状态的操作，标记为 unknown_interrupted 状态以供核查
+        const interruptedRecord = {
+          requestId,
+          toolId: initialRecord?.toolId || 'unknown',
+          inputDigest: initialRecord?.inputDigest || '',
+          status: 'unknown_interrupted',
+          error: '操作创建时原进程中断，状态不可考',
+          createdAt: initialRecord?.createdAt || new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+        try {
+          save(interruptedRecord);
+        } catch {}
+        return { claimed: false, record: interruptedRecord };
       }
       throw err;
     }

@@ -118,6 +118,67 @@ function createWorkbenchLeaseManager(options = {}) {
   }
 
   /**
+   * 尝试原子获取短生命周期的回收互斥锁（具备陈旧回收锁自愈能力，防止因回收进程异常退出而遗留死锁 blocker）
+   * @param {string} reclaimLockPath
+   * @returns {{ release: () => void }|null}
+   */
+  function tryAcquireReclaimLock(reclaimLockPath) {
+    function tryCreate() {
+      let fd = null;
+      try {
+        fd = fs.openSync(reclaimLockPath, 'wx');
+        const meta = { pid: process.pid, createdAt: Date.now() };
+        fs.writeFileSync(fd, JSON.stringify(meta), 'utf8');
+        fs.closeSync(fd);
+        fd = null;
+        return {
+          release: () => {
+            try { fs.unlinkSync(reclaimLockPath); } catch {}
+          }
+        };
+      } catch (err) {
+        if (fd !== null) {
+          try { fs.closeSync(fd); } catch {}
+        }
+        if (err.code === 'EEXIST') {
+          return null;
+        }
+        throw err;
+      }
+    }
+
+    const lock = tryCreate();
+    if (lock) return lock;
+
+    // 回收锁已存在，检查是否被遗弃（持有者 PID 已死，或存在超过 5 秒的陈旧回收锁）
+    try {
+      let isAbandoned = false;
+      try {
+        const raw = fs.readFileSync(reclaimLockPath, 'utf8');
+        const data = JSON.parse(raw);
+        if (data && data.pid) {
+          if (!isProcessAlive(data.pid) || (Date.now() - (data.createdAt || 0) > 5000)) {
+            isAbandoned = true;
+          }
+        }
+      } catch {
+        // 文件为空或损坏
+        const stat = fs.statSync(reclaimLockPath);
+        if (Date.now() - stat.mtimeMs > 5000) {
+          isAbandoned = true;
+        }
+      }
+
+      if (isAbandoned) {
+        try { fs.unlinkSync(reclaimLockPath); } catch {}
+        return tryCreate();
+      }
+    } catch {}
+
+    return null;
+  }
+
+  /**
    * 尝试原子获取单次租约（非阻塞）
    * @param {string} resourceKey
    * @param {Object} [meta={}]
@@ -199,20 +260,16 @@ function createWorkbenchLeaseManager(options = {}) {
           if (!alive) {
             // 确认原进程已经死亡 (ESRCH)，属于僵尸锁，通过互斥回收锁防止多个等待者竞态删除新锁
             const reclaimLockPath = `${leasePath}.reclaim`;
-            let reclaimFd = null;
-            try {
-              reclaimFd = fs.openSync(reclaimLockPath, 'wx');
-              // 获取到回收锁后，再次核验 leasePath 的持有者 token 依然等于刚才确认死亡的 token
-              const recheck = readLeaseFile(leasePath);
-              if (recheck && recheck.ownerToken === existing.ownerToken && !isProcessAlive(recheck.pid)) {
-                fs.unlinkSync(leasePath);
-              }
-            } catch {
-              // 忽略其他并发回收者的处理
-            } finally {
-              if (reclaimFd !== null) {
-                try { fs.closeSync(reclaimFd); } catch {}
-                try { fs.unlinkSync(reclaimLockPath); } catch {}
+            const reclaimLock = tryAcquireReclaimLock(reclaimLockPath);
+            if (reclaimLock) {
+              try {
+                // 获取到回收锁后，再次核验 leasePath 的持有者 token 依然等于刚才确认死亡的 token
+                const recheck = readLeaseFile(leasePath);
+                if (recheck && recheck.ownerToken === existing.ownerToken && !isProcessAlive(recheck.pid)) {
+                  fs.unlinkSync(leasePath);
+                }
+              } finally {
+                reclaimLock.release();
               }
             }
           }
@@ -223,22 +280,18 @@ function createWorkbenchLeaseManager(options = {}) {
             const stat = fs.statSync(leasePath);
             if (Date.now() - stat.mtimeMs > defaultTtlMs) {
               const reclaimLockPath = `${leasePath}.reclaim`;
-              let reclaimFd = null;
-              try {
-                reclaimFd = fs.openSync(reclaimLockPath, 'wx');
-                const recheck = readLeaseFile(leasePath);
-                if (recheck === null && fs.existsSync(leasePath)) {
-                  const recheckStat = fs.statSync(leasePath);
-                  if (Date.now() - recheckStat.mtimeMs > defaultTtlMs) {
-                    fs.unlinkSync(leasePath);
+              const reclaimLock = tryAcquireReclaimLock(reclaimLockPath);
+              if (reclaimLock) {
+                try {
+                  const recheck = readLeaseFile(leasePath);
+                  if (recheck === null && fs.existsSync(leasePath)) {
+                    const recheckStat = fs.statSync(leasePath);
+                    if (Date.now() - recheckStat.mtimeMs > defaultTtlMs) {
+                      fs.unlinkSync(leasePath);
+                    }
                   }
-                }
-              } catch {
-                // 忽略并发竞争
-              } finally {
-                if (reclaimFd !== null) {
-                  try { fs.closeSync(reclaimFd); } catch {}
-                  try { fs.unlinkSync(reclaimLockPath); } catch {}
+                } finally {
+                  reclaimLock.release();
                 }
               }
             }
