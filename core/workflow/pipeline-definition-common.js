@@ -160,6 +160,8 @@ function getCanonicalSteps(mode = 'daily', options = {}) {
   return result;
 }
 
+const MODES_WITH_START_STEP = new Set(['daily', 'keyword', 'root-keyword', 'manual']);
+
 /**
  * 校验某步骤是否为目标模式的合法步骤。
  * @param {string} mode 工作流模式。
@@ -169,7 +171,8 @@ function getCanonicalSteps(mode = 'daily', options = {}) {
  */
 function isValidStepForMode(mode, step, options = {}) {
   if (!step) return false;
-  const steps = getCanonicalSteps(mode, { ...options, includeStart: true });
+  const includeStart = MODES_WITH_START_STEP.has(mode);
+  const steps = getCanonicalSteps(mode, { ...options, includeStart });
   return steps.includes(step) || step === WORKFLOW_NODE_IDS.end;
 }
 

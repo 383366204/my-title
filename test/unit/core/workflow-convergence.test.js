@@ -146,6 +146,16 @@ describe('PR-04 Workflow Convergence & StopAfterStep Suite', () => {
       assert.ok(isValidStepForMode('peer-discovery', 'evaluateShops', { discoveryBranch: 'peer-analysis' }));
       assert.ok(!isValidStepForMode('peer-discovery', 'evaluateShops', { discoveryBranch: 'image-selection' }));
       assert.ok(isValidStepForMode('peer-discovery', 'collectPeerProducts', { discoveryBranch: 'image-selection' }));
+
+      // MODES_WITH_START_STEP validation (Codex review finding)
+      assert.ok(isValidStepForMode('daily', 'start'), 'daily supports browser start step');
+      assert.ok(isValidStepForMode('keyword', 'start'), 'keyword supports browser start step');
+      assert.ok(isValidStepForMode('root-keyword', 'start'), 'root-keyword supports browser start step');
+      assert.ok(isValidStepForMode('manual', 'start'), 'manual supports browser start step');
+      assert.ok(!isValidStepForMode('peer-discovery', 'start'), 'peer-discovery does not have runner start step');
+      assert.ok(!isValidStepForMode('order-sheet', 'start'), 'order-sheet does not have runner start step');
+      assert.ok(!isValidStepForMode('review-sheet', 'start'), 'review-sheet does not have runner start step');
+      assert.ok(!isValidStepForMode('competitor-analysis', 'start'), 'competitor-analysis does not have runner start step');
     });
   });
 
@@ -358,6 +368,64 @@ describe('PR-04 Workflow Convergence & StopAfterStep Suite', () => {
         }),
         /指定的停止步骤 mine 已在当前起始步骤 select 之前/
       );
+    });
+
+    it('clears persisted stopAfterStep on resume so execution continues to end without boundary conflict', async () => {
+      const dataDir = createTempDir();
+      const runId = 'run_resume_clears_stop_boundary';
+      const executedSteps = [];
+
+      const stepFns = {
+        mine: async () => {
+          executedSteps.push('mine');
+          return { status: 'completed' };
+        },
+        keywordReview: async () => {
+          executedSteps.push('keywordReview');
+          return { status: 'completed' };
+        },
+        select: async () => {
+          executedSteps.push('select');
+          return { status: 'completed' };
+        },
+        generate: async () => {
+          executedSteps.push('generate');
+          return { status: 'completed' };
+        },
+        export: async () => {
+          executedSteps.push('export');
+          return { status: 'completed' };
+        }
+      };
+
+      // 1. Initial run stops after mine
+      const firstRun = await runPipelineRuntime({
+        dataDir,
+        runId,
+        mode: 'root-keyword',
+        params: { stopAfterStep: 'mine' },
+        stopAfterStep: 'mine',
+        stepFns
+      });
+      assert.equal(firstRun.runtimeStatus, 'completed');
+      assert.equal(firstRun.stoppedAfterStep, 'mine');
+      assert.deepEqual(executedSteps, ['mine']);
+
+      // 2. Resume run without specifying stopAfterStep: should NOT throw "指定的停止步骤 mine 已在当前起始步骤 keywordReview 之前"
+      const resumeRun = await runPipelineRuntime({
+        dataDir,
+        runId,
+        mode: 'root-keyword',
+        preserveRuntime: true,
+        resumeFromStep: 'keywordReview',
+        stepFns
+      });
+      assert.equal(resumeRun.runtimeStatus, 'completed');
+      assert.equal(resumeRun.stoppedAfterStep, undefined);
+      assert.deepEqual(executedSteps, ['mine', 'keywordReview', 'select', 'generate', 'export']);
+
+      const finalState = readRuntimeState({ dataDir, runId });
+      assert.equal(finalState.params.stopAfterStep, undefined, 'params.stopAfterStep should be cleared on resume');
     });
   });
 

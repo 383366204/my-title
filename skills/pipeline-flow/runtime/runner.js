@@ -436,8 +436,13 @@ async function runPipelineRuntime(options = {}) {
     ? readRuntimeState({ dataDir, runId })
     : null;
   const params = options.params == null
-    ? (existingRuntime?.params || {})
-    : { ...options.params, ...(options.stopAfterStep ? { stopAfterStep: options.stopAfterStep } : {}) };
+    ? { ...(existingRuntime?.params || {}) }
+    : { ...options.params };
+  if (options.stopAfterStep) {
+    params.stopAfterStep = options.stopAfterStep;
+  } else if (options.preserveRuntime) {
+    delete params.stopAfterStep;
+  }
   const mode = options.mode || existingRuntime?.mode || 'daily';
   const configuredSteps = options.steps || existingRuntime?.steps || (
     mode === 'peer-discovery'
@@ -466,7 +471,9 @@ async function runPipelineRuntime(options = {}) {
   if (!steps.includes(startStep)) throw new Error(`当前模式不包含步骤 ${startStep}，请新建运行。`);
   const startIndex = Math.max(0, steps.indexOf(startStep));
   const stepsToRun = steps.slice(startIndex);
-  const stopAfterStep = options.stopAfterStep || params.stopAfterStep || null;
+  const stopAfterStep = options.stopAfterStep !== undefined
+    ? options.stopAfterStep
+    : (options.preserveRuntime ? null : params.stopAfterStep) || null;
   if (stopAfterStep && !steps.includes(stopAfterStep) && stopAfterStep !== 'end') {
     throw new Error(`当前模式不包含指定停止步骤 ${stopAfterStep}，请新建运行。`);
   }
