@@ -221,6 +221,55 @@ describe('PR-05 Runtime Crash Recovery & Atomic Snapshot Suite', () => {
 
       try { fs.unlinkSync(lockFile); } catch {}
     });
+
+    it('does not revoke state lock held by a living process even if lock timestamp is stale (> 5s)', () => {
+      const dataDir = createTempDir();
+      const runId = 'run_lock_living_stale';
+      initRuntimeState({ dataDir, runId, steps: ['mine'] });
+
+      // Living PID with createdAt 10 seconds ago
+      const lockFile = path.join(dataDir, 'runs', runId, 'runtime.json.lock');
+      fs.writeFileSync(lockFile, JSON.stringify({
+        pid: process.pid,
+        ownerToken: 'other_owner',
+        createdAt: Date.now() - 10000
+      }), 'utf8');
+
+      assert.throws(
+        () => updateRuntimeState({ dataDir, runId, patch: { status: 'paused' } }),
+        (err) => err.code === 'RUNTIME_LOCK_TIMEOUT',
+        'Should refuse to steal lock from a living process regardless of lock age'
+      );
+
+      try { fs.unlinkSync(lockFile); } catch {}
+    });
+
+    it('recovers from dead lock even when an abandoned .reclaim lock was left behind by a crashed reclaimer', () => {
+      const dataDir = createTempDir();
+      const runId = 'run_reclaim_abandoned';
+      initRuntimeState({ dataDir, runId, steps: ['mine'] });
+
+      const lockFile = path.join(dataDir, 'runs', runId, 'runtime.json.lock');
+      const reclaimFile = `${lockFile}.reclaim`;
+
+      // Dead owner on main lock
+      fs.writeFileSync(lockFile, JSON.stringify({
+        pid: 99999999,
+        ownerToken: 'dead_owner',
+        createdAt: Date.now() - 5000
+      }), 'utf8');
+
+      // Abandoned reclaim lock left empty or with dead PID
+      fs.writeFileSync(reclaimFile, JSON.stringify({
+        pid: 99999998,
+        createdAt: Date.now() - 2000
+      }), 'utf8');
+
+      const updated = updateRuntimeState({ dataDir, runId, patch: { status: 'paused' } });
+      assert.equal(updated.status, 'paused');
+      assert.equal(fs.existsSync(lockFile), false);
+      assert.equal(fs.existsSync(reclaimFile), false);
+    });
   });
 
   describe('Process Liveness Tester (isPidAlive)', () => {

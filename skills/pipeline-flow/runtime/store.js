@@ -139,6 +139,80 @@ function readRuntimeState({ dataDir, runId, autoRecover = true, isAliveFn = isPi
 
 const processActiveRunLocks = new Map();
 
+function tryAcquireReclaimLock(reclaimPath) {
+  let rfd = null;
+  try {
+    rfd = fs.openSync(reclaimPath, 'wx');
+    fs.writeFileSync(rfd, JSON.stringify({ pid: process.pid, createdAt: Date.now() }), 'utf8');
+    fs.closeSync(rfd);
+    rfd = null;
+    return true;
+  } catch (err) {
+    if (rfd !== null) {
+      try { fs.closeSync(rfd); } catch {}
+      rfd = null;
+    }
+    if (err.code === 'EEXIST') {
+      try {
+        const content = fs.readFileSync(reclaimPath, 'utf8');
+        if (content.length > 0) {
+          const meta = JSON.parse(content);
+          const isDead = typeof meta.pid === 'number' && meta.pid > 0 && !isPidAlive(meta.pid);
+          const isStale = Date.now() - (meta.createdAt || 0) > 3000;
+          if (isDead || isStale) {
+            try { fs.unlinkSync(reclaimPath); } catch {}
+            let rfd2 = null;
+            try {
+              rfd2 = fs.openSync(reclaimPath, 'wx');
+              fs.writeFileSync(rfd2, JSON.stringify({ pid: process.pid, createdAt: Date.now() }), 'utf8');
+              fs.closeSync(rfd2);
+              return true;
+            } catch {
+              if (rfd2 !== null) try { fs.closeSync(rfd2); } catch {}
+              return false;
+            }
+          }
+        } else {
+          try {
+            const stat = fs.statSync(reclaimPath);
+            if (Date.now() - stat.mtimeMs > 30) {
+              try { fs.unlinkSync(reclaimPath); } catch {}
+              let rfd2 = null;
+              try {
+                rfd2 = fs.openSync(reclaimPath, 'wx');
+                fs.writeFileSync(rfd2, JSON.stringify({ pid: process.pid, createdAt: Date.now() }), 'utf8');
+                fs.closeSync(rfd2);
+                return true;
+              } catch {
+                if (rfd2 !== null) try { fs.closeSync(rfd2); } catch {}
+                return false;
+              }
+            }
+          } catch {}
+        }
+      } catch {
+        try {
+          const stat = fs.statSync(reclaimPath);
+          if (Date.now() - stat.mtimeMs > 500) {
+            try { fs.unlinkSync(reclaimPath); } catch {}
+            let rfd2 = null;
+            try {
+              rfd2 = fs.openSync(reclaimPath, 'wx');
+              fs.writeFileSync(rfd2, JSON.stringify({ pid: process.pid, createdAt: Date.now() }), 'utf8');
+              fs.closeSync(rfd2);
+              return true;
+            } catch {
+              if (rfd2 !== null) try { fs.closeSync(rfd2); } catch {}
+              return false;
+            }
+          }
+        } catch {}
+      }
+    }
+    return false;
+  }
+}
+
 /**
  * Synchronously acquire a per-run exclusive state lock for critical read-check-write transitions.
  * Supports re-entrancy within the same process and auto-reclaims stale or dead PID locks.
@@ -188,45 +262,43 @@ function withRunLockSync(dataDir, runId, fn) {
         try {
           const content = fs.readFileSync(file, 'utf8');
           const meta = JSON.parse(content);
-          const isDead = meta.pid && !isPidAlive(meta.pid);
-          const isStale = Date.now() - meta.createdAt > 5000;
-          if (isDead || isStale) {
-            let rfd = null;
-            try {
-              rfd = fs.openSync(reclaimFile, 'wx');
-              const recheck = JSON.parse(fs.readFileSync(file, 'utf8'));
-              if (recheck && recheck.ownerToken === meta.ownerToken && ((recheck.pid && !isPidAlive(recheck.pid)) || (Date.now() - recheck.createdAt > 5000))) {
-                fs.unlinkSync(file);
-              }
-            } catch {
-              // Concurrent reclamation in progress, ignore
-            } finally {
-              if (rfd !== null) {
-                try { fs.closeSync(rfd); } catch {}
+          const hasPid = typeof meta.pid === 'number' && meta.pid > 0;
+          // IMPORTANT: Locks held by living processes must NEVER be revoked by age alone.
+          const isDead = hasPid && !isPidAlive(meta.pid);
+          const isCorruptStale = !hasPid && (Date.now() - (meta.createdAt || 0) > 5000);
+          if (isDead || isCorruptStale) {
+            if (tryAcquireReclaimLock(reclaimFile)) {
+              try {
+                const recheck = JSON.parse(fs.readFileSync(file, 'utf8'));
+                const recheckHasPid = typeof recheck.pid === 'number' && recheck.pid > 0;
+                const recheckDead = recheckHasPid && !isPidAlive(recheck.pid);
+                const recheckCorruptStale = !recheckHasPid && (Date.now() - (recheck.createdAt || 0) > 5000);
+                if (recheck && recheck.ownerToken === meta.ownerToken && (recheckDead || recheckCorruptStale)) {
+                  fs.unlinkSync(file);
+                }
+              } catch {}
+              finally {
                 try { fs.unlinkSync(reclaimFile); } catch {}
               }
+              continue;
             }
-            continue;
           }
         } catch {
           try {
             const stat = fs.statSync(file);
             if (Date.now() - stat.mtimeMs > 5000) {
-              let rfd = null;
-              try {
-                rfd = fs.openSync(reclaimFile, 'wx');
-                const recheckStat = fs.statSync(file);
-                if (Date.now() - recheckStat.mtimeMs > 5000) {
-                  fs.unlinkSync(file);
-                }
-              } catch {}
-              finally {
-                if (rfd !== null) {
-                  try { fs.closeSync(rfd); } catch {}
+              if (tryAcquireReclaimLock(reclaimFile)) {
+                try {
+                  const recheckStat = fs.statSync(file);
+                  if (Date.now() - recheckStat.mtimeMs > 5000) {
+                    fs.unlinkSync(file);
+                  }
+                } catch {}
+                finally {
                   try { fs.unlinkSync(reclaimFile); } catch {}
                 }
+                continue;
               }
-              continue;
             }
           } catch {}
         }
