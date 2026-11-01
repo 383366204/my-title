@@ -583,6 +583,24 @@ function _formatDate(date) {
 async function _rawExtractSycmData(keyword, options) {
   options = options || {};
   var port = options.port || DEFAULT_PORT;
+  var leaseManager = options.leaseManager;
+  if (!leaseManager) {
+    try {
+      leaseManager = require('../../../core/runtime/workbench-lease').getLeaseManager();
+    } catch {}
+  }
+  var resourceKey = 'cdp:' + port;
+  if (leaseManager && typeof leaseManager.withLease === 'function') {
+    return leaseManager.withLease(resourceKey, { purpose: 'sycm.cdp:' + keyword }, function() {
+      return _executeRawExtractSycmData(keyword, options);
+    });
+  }
+  return _executeRawExtractSycmData(keyword, options);
+}
+
+async function _executeRawExtractSycmData(keyword, options) {
+  options = options || {};
+  var port = options.port || DEFAULT_PORT;
   var maxPages = options.maxPages || DEFAULT_MAX_PAGES;
   var mode = options.mode || 'blue';
   var onProgress = options.onProgress || function() {};
