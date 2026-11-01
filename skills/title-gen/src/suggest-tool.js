@@ -96,8 +96,9 @@ const suggestTool = {
     platforms: []
   },
   execute: async (input, ctx) => {
+    ctx = ctx || {};
     const verifyFn = input.sycm_verify
-      ? (cands, opts) => defaultVerifyKeywordsAdapter(cands, { ...opts, leaseManager: ctx.leaseManager })
+      ? (cands, opts) => (typeof ctx.verifyKeywords === 'function' ? ctx.verifyKeywords : defaultVerifyKeywordsAdapter)(cands, { ...opts, leaseManager: ctx.leaseManager })
       : undefined;
 
     return await suggestAndVerify({
@@ -107,6 +108,7 @@ const suggestTool = {
       port: input.port || 9222,
       skipSycm: !input.sycm_verify,
       verifyFn,
+      suggestKeywordsFn: ctx.suggestKeywords,
       leaseManager: ctx.leaseManager,
       onProgress: (msg) => {
         if (ctx.logger && typeof ctx.logger.info === 'function') {

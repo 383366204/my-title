@@ -57,6 +57,53 @@ describe('core/runtime/atomic-tools', () => {
     }
   });
 
+  it('suggestAndVerify 与 keyword.suggest 在开启 sycm_verify 时应当透传 verifyFn 回调并返回验证指标', async () => {
+    let verifyFnCalled = false;
+    let receivedOptions = null;
+
+    const mockVerifyFn = async (candidates, opts) => {
+      verifyFnCalled = true;
+      receivedOptions = opts;
+      return {
+        ok: true,
+        keywords: candidates.map(kw => ({
+          keyword: kw,
+          searchPopularity: 888,
+          clickRate: 0.12,
+          conversionRate: 0.05,
+          demandSupplyRatio: 1.5,
+          tmallClickShare: 0.3
+        })),
+        verified: candidates.length,
+        failed: 0,
+        errors: []
+      };
+    };
+
+    const ctx = {
+      leaseManager: { tag: 'mock-lease' },
+      suggestKeywords: async () => ['纯银锁骨链', '银项链女'],
+      verifyKeywords: mockVerifyFn
+    };
+
+    const res = await suggestTool.execute({
+      strategy: 'scene',
+      input: '约会送礼',
+      max_candidates: 2,
+      sycm_verify: true,
+      port: 9333
+    }, ctx);
+
+    assert.equal(res.ok, true);
+    assert.equal(verifyFnCalled, true);
+    assert.equal(receivedOptions.port, 9333);
+    assert.equal(receivedOptions.maxCandidates, 2);
+    assert.equal(receivedOptions.leaseManager.tag, 'mock-lease');
+    assert.equal(res.keywords.length, 2);
+    assert.equal(res.keywords[0].keyword, '纯银锁骨链');
+    assert.equal(res.keywords[0].searchPopularity, 888);
+  });
+
   it('sycm.query 工具声明中不应有静态 cdp:9222 租约，避免与底层动态租约冲突双重获取', () => {
     assert.deepEqual(queryTool.policy.resourceKeys, []);
   });
