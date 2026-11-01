@@ -8,7 +8,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const { createDefaultToolRegistry, createDefaultToolExecutor } = require('../../../core/runtime/bootstrap');
-const { suggestTool } = require('../../../skills/title-gen/src/suggest-tool');
+const { suggestTool, defaultVerifyKeywordsAdapter } = require('../../../skills/title-gen/src/suggest-tool');
 const { queryTool } = require('../../../skills/sycm-research/src/query-tool');
 const { generateTool } = require('../../../skills/title-gen/src/generate-tool');
 
@@ -210,7 +210,7 @@ describe('core/runtime/atomic-tools', () => {
     }
   });
 
-  it('title.generate 与 sycm.query 应当在 abortSignal 已触发时立即中断抛错', async () => {
+  it('title.generate 与 sycm.query 与 keyword.suggest 应当在 abortSignal 已触发时立即中断抛错', async () => {
     const controller = new AbortController();
     controller.abort();
 
@@ -229,6 +229,39 @@ describe('core/runtime/atomic-tools', () => {
         return true;
       }
     );
+
+    await assert.rejects(
+      async () => suggestTool.execute({ strategy: 'crowd', input: '学生' }, { abortSignal: controller.signal }),
+      (err) => {
+        assert.equal(err.code, 'OPERATION_ABORTED');
+        return true;
+      }
+    );
+  });
+
+  it('defaultVerifyKeywordsAdapter 应当在信号中止时停止循环并抛出 OPERATION_ABORTED', async () => {
+    const controller = new AbortController();
+    let callCount = 0;
+    const mockExtractor = async (kw) => {
+      callCount++;
+      if (callCount === 1) {
+        controller.abort(); // 第一次处理后触发中止
+      }
+      return { ok: true, data: [{ keyword: kw, searchPopularity: '100' }] };
+    };
+
+    await assert.rejects(
+      async () => defaultVerifyKeywordsAdapter(['词1', '词2', '词3'], {
+        signal: controller.signal,
+        extractSycmDataFn: mockExtractor
+      }),
+      (err) => {
+        assert.equal(err.code, 'OPERATION_ABORTED');
+        return true;
+      }
+    );
+
+    assert.equal(callCount, 1, '中止后不应继续执行后续关键词 extractor');
   });
 
   it('sycm-cdp-extractor 在租约管理器不可用时应当 fail-closed 抛错拒绝，不应无保护裸跑', async () => {

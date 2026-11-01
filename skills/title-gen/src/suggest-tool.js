@@ -18,7 +18,8 @@ const { normalizeSycmMetrics } = require('../../sycm-research/src/metric-parser'
  * @returns {Promise<Object>}
  */
 async function defaultVerifyKeywordsAdapter(candidates, options = {}) {
-  const { port = 9222, maxCandidates = 5, onProgress = () => {}, leaseManager, extractSycmDataFn } = options;
+  const { port = 9222, maxCandidates = 5, onProgress = () => {}, leaseManager, extractSycmDataFn, signal, shouldStop } = options;
+  const isAborted = () => signal?.aborted || (typeof shouldStop === 'function' && shouldStop());
   const extractor = typeof extractSycmDataFn === 'function' ? extractSycmDataFn : extractSycmData;
   const keywordMap = new Map();
   const errors = [];
@@ -26,6 +27,12 @@ async function defaultVerifyKeywordsAdapter(candidates, options = {}) {
   let failed = 0;
 
   for (let i = 0; i < candidates.length; i++) {
+    if (isAborted()) {
+      const abortErr = new Error('关键词验证已在处理中被中止');
+      abortErr.code = 'OPERATION_ABORTED';
+      abortErr.nonPlatform = true;
+      throw abortErr;
+    }
     const candidate = candidates[i];
     onProgress(`正在验证关键词 (${i + 1}/${candidates.length}): ${candidate}`);
     try {
@@ -33,6 +40,7 @@ async function defaultVerifyKeywordsAdapter(candidates, options = {}) {
         mode: 'hot',
         port,
         leaseManager,
+        shouldStop: isAborted,
         onProgress: (msg) => onProgress(`[SYCM ${candidate}] ${msg}`)
       });
 
@@ -58,6 +66,9 @@ async function defaultVerifyKeywordsAdapter(candidates, options = {}) {
         }
       }
     } catch (err) {
+      if (err.code === 'OPERATION_ABORTED' || isAborted()) {
+        throw err;
+      }
       failed++;
       errors.push({ keyword: candidate, error: err.message });
     }
@@ -100,11 +111,19 @@ const suggestTool = {
   },
   execute: async (input, ctx) => {
     ctx = ctx || {};
+    if (ctx.abortSignal?.aborted) {
+      const abortErr = new Error('操作已被中止');
+      abortErr.code = 'OPERATION_ABORTED';
+      abortErr.nonPlatform = true;
+      throw abortErr;
+    }
     const verifyFn = input.sycm_verify
       ? (cands, opts) => (typeof ctx.verifyKeywords === 'function' ? ctx.verifyKeywords : defaultVerifyKeywordsAdapter)(cands, {
           ...opts,
           extractSycmDataFn: ctx.extractSycmData,
-          leaseManager: ctx.leaseManager
+          leaseManager: ctx.leaseManager,
+          signal: ctx.abortSignal,
+          shouldStop: () => ctx.abortSignal?.aborted
         })
       : undefined;
 

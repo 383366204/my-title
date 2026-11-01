@@ -60,6 +60,31 @@ describe('core/runtime/workbench-lease', () => {
     assert.equal(fs.existsSync(leasePath), false);
   });
 
+  it('acquire 应当在 options.signal 中止或 options.shouldStop 返回 true 时立即抛出 OPERATION_ABORTED', async () => {
+    const manager = createWorkbenchLeaseManager({ runtimeDir: TEST_RUNTIME_DIR });
+    const controller = new AbortController();
+    controller.abort();
+
+    await assert.rejects(
+      async () => manager.acquire('cdp:9224_abort', { signal: controller.signal }),
+      (err) => {
+        assert.equal(err.code, 'OPERATION_ABORTED');
+        assert.equal(err.nonPlatform, true);
+        return true;
+      }
+    );
+
+    let stopFlag = true;
+    await assert.rejects(
+      async () => manager.acquire('cdp:9224_abort', { shouldStop: () => stopFlag }),
+      (err) => {
+        assert.equal(err.code, 'OPERATION_ABORTED');
+        assert.equal(err.nonPlatform, true);
+        return true;
+      }
+    );
+  });
+
   it('死锁/僵尸进程锁 (PID 已死) 应当被安全清理并接管', async () => {
     const manager = createWorkbenchLeaseManager({ runtimeDir: TEST_RUNTIME_DIR });
     const resourceKey = 'cdp:9224';

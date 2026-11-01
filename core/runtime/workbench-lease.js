@@ -348,6 +348,13 @@ function createWorkbenchLeaseManager(options = {}) {
     const startTime = Date.now();
 
     while (true) {
+      if (options.signal?.aborted || (typeof options.shouldStop === 'function' && options.shouldStop())) {
+        const abortErr = new Error(`获取租约 [${resourceKey}] 已被中止`);
+        abortErr.code = 'OPERATION_ABORTED';
+        abortErr.nonPlatform = true;
+        throw abortErr;
+      }
+
       const lease = tryAcquireOnce(resourceKey, options);
       if (lease) {
         return lease;

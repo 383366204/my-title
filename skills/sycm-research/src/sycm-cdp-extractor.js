@@ -601,7 +601,13 @@ async function _rawExtractSycmData(keyword, options) {
     unavailableErr.nonPlatform = true;
     throw unavailableErr;
   }
-  return leaseManager.withLease(resourceKey, { purpose: 'sycm.cdp:' + keyword }, function() {
+  return leaseManager.withLease(resourceKey, { purpose: 'sycm.cdp:' + keyword, shouldStop: options.shouldStop }, function() {
+    if (typeof options.shouldStop === 'function' && options.shouldStop()) {
+      const abortErr = new Error('操作已在等待租约期间被中止');
+      abortErr.code = 'OPERATION_ABORTED';
+      abortErr.nonPlatform = true;
+      throw abortErr;
+    }
     return _executeRawExtractSycmData(keyword, options);
   });
 }
