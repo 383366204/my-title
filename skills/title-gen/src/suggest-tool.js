@@ -127,7 +127,7 @@ const suggestTool = {
         })
       : undefined;
 
-    return await suggestAndVerify({
+    const res = await suggestAndVerify({
       strategy: input.strategy,
       input: input.input || '',
       maxCandidates: input.max_candidates || 5,
@@ -142,6 +142,14 @@ const suggestTool = {
         }
       }
     });
+
+    if (ctx.abortSignal?.aborted) {
+      const abortErr = new Error('关键词建议与验证已被取消');
+      abortErr.code = 'OPERATION_ABORTED';
+      abortErr.nonPlatform = true;
+      throw abortErr;
+    }
+    return res;
   }
 };
 

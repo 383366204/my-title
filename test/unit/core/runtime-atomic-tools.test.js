@@ -279,6 +279,31 @@ describe('core/runtime/atomic-tools', () => {
     assert.equal(callCount, 1, '中止后不应继续执行后续关键词 extractor');
   });
 
+  it('keyword.suggest 在开启 sycm_verify 且验证期间触发中止时，应当抛出 OPERATION_ABORTED 而不是静默返回 ok: false', async () => {
+    const controller = new AbortController();
+    const mockExtractor = async (kw) => {
+      controller.abort();
+      const abortErr = new Error('提取过程中被中止');
+      abortErr.code = 'OPERATION_ABORTED';
+      throw abortErr;
+    };
+
+    await assert.rejects(
+      async () => suggestTool.execute(
+        { strategy: 'crowd', input: '学生', sycm_verify: true },
+        {
+          abortSignal: controller.signal,
+          suggestKeywords: async () => ['书包', '文具盒'],
+          extractSycmData: mockExtractor
+        }
+      ),
+      (err) => {
+        assert.equal(err.code, 'OPERATION_ABORTED');
+        return true;
+      }
+    );
+  });
+
   it('sycm-cdp-extractor 在租约管理器不可用时应当 fail-closed 抛错拒绝，不应无保护裸跑', async () => {
     const { extractSycmData } = require('../../../skills/sycm-research/src/sycm-cdp-extractor');
 

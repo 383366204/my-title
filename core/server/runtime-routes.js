@@ -19,6 +19,7 @@ function resolveNumericHttpStatus(err) {
     return err.statusCode;
   }
   if (err?.code === 'IDEMPOTENCY_CONFLICT' || err?.code === 'OPERATION_INTERRUPTED') return 409;
+  if (err?.code === 'OPERATION_ABORTED') return 499;
   if (err?.code === 'TOOL_NOT_FOUND') return 404;
   if (err?.code === 'INVALID_ARGUMENT') return 400;
   if (err?.code === 'LEASE_BUSY' || err?.code === 'PLATFORM_ACCESS_BLOCKED') return 429;
@@ -53,11 +54,20 @@ function registerRuntimeRoutes(app, deps = {}) {
     const toolId = req.params.id;
     const { input = {}, requestId, caller = 'remote-forward' } = req.body || {};
 
+    const abortController = new AbortController();
+    req.on('close', () => {
+      if (!res.writableEnded) {
+        abortController.abort();
+      }
+    });
+
     try {
       const result = await toolExecutor.execute(toolId, input, {
         requestId,
-        caller
+        caller,
+        abortSignal: abortController.signal
       });
+      if (res.writableEnded) return;
       res.json({
         ok: true,
         toolId,
@@ -65,6 +75,7 @@ function registerRuntimeRoutes(app, deps = {}) {
         result
       });
     } catch (err) {
+      if (res.writableEnded) return;
       const httpStatus = resolveNumericHttpStatus(err);
       res.status(httpStatus).json({
         ok: false,

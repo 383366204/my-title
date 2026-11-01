@@ -473,6 +473,9 @@ async function verifyKeywordsWithSycm(candidates, options = {}) {
     }
     throw new Error('验证回调返回格式无效');
   } catch (error) {
+    if (error.code === 'OPERATION_ABORTED' || error.name === 'AbortError') {
+      throw error;
+    }
     return {
       ok: false,
       error: error.message,
