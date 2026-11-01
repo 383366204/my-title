@@ -189,14 +189,35 @@ function createToolExecutor(deps = {}) {
       leaseManager
     };
 
+    if (options.abortSignal?.aborted) {
+      const abortErr = new Error(`工具 [${tool.id}] 执行已在启动前被取消`);
+      abortErr.code = 'OPERATION_ABORTED';
+      abortErr.nonPlatform = true;
+      throw abortErr;
+    }
+
     // 4. 执行函数（包含物理资源租约获取生命周期，并在异常时确保 opRecord 落盘）
     const declaredResourceKeys = tool.policy?.resourceKeys || [];
-    let runner = () => tool.execute(normalizedInput, ctx);
+    let runner = () => {
+      if (options.abortSignal?.aborted) {
+        const abortErr = new Error(`工具 [${tool.id}] 执行已在获取租约后被取消`);
+        abortErr.code = 'OPERATION_ABORTED';
+        abortErr.nonPlatform = true;
+        throw abortErr;
+      }
+      return tool.execute(normalizedInput, ctx);
+    };
+
     if (declaredResourceKeys.length > 0) {
       const leaseTimeoutMs = options.acquireTimeoutMs;
       for (const resKey of declaredResourceKeys) {
         const currentRunner = runner;
-        runner = () => leaseManager.withLease(resKey, { purpose: tool.id, timeoutMs: leaseTimeoutMs }, currentRunner);
+        runner = () => leaseManager.withLease(resKey, {
+          purpose: tool.id,
+          timeoutMs: leaseTimeoutMs,
+          signal: options.abortSignal,
+          shouldStop: () => options.abortSignal?.aborted
+        }, currentRunner);
       }
     }
 

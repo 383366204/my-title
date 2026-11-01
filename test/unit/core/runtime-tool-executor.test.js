@@ -326,4 +326,50 @@ describe('core/runtime/tool-executor', () => {
     assert.equal(record.status, 'unknown_interrupted');
     assert.ok(record.error);
   });
+
+  it('在等待物理资源租约期间若中止信号触发，应当立即抛出 OPERATION_ABORTED 且绝不调用工具实现', async () => {
+    const registry = createToolRegistry();
+    let ran = false;
+    registry.register({
+      id: 'tool.lease.abort',
+      policy: { resourceKeys: ['cdp:test_abort_port'] },
+      execute: async () => {
+        ran = true;
+        return 'executed';
+      }
+    });
+
+    const leaseManager = createWorkbenchLeaseManager({ runtimeDir: leasesDir });
+    // 先占用租约
+    const heldLease = leaseManager.tryAcquireOnce('cdp:test_abort_port');
+    assert.ok(heldLease, '应当成功先持有租约');
+
+    const opStore = createOperationStore({ operationsDir });
+    const executor = createToolExecutor({ registry, leaseManager, operationStore: opStore });
+
+    const controller = new AbortController();
+    const execPromise = executor.execute('tool.lease.abort', {}, {
+      requestId: 'req-abort-lease',
+      abortSignal: controller.signal,
+      acquireTimeoutMs: 1000
+    });
+
+    // 触发中止
+    controller.abort();
+    // 释放先前占用的租约
+    heldLease.release();
+
+    await assert.rejects(
+      execPromise,
+      (err) => {
+        assert.equal(err.code, 'OPERATION_ABORTED');
+        return true;
+      }
+    );
+
+    assert.equal(ran, false, '中止后绝不执行工具实现');
+    const opRecord = opStore.get('req-abort-lease');
+    assert.equal(opRecord.status, 'failed');
+    assert.equal(opRecord.error.code, 'OPERATION_ABORTED');
+  });
 });
