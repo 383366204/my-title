@@ -29,7 +29,11 @@ function runDir(dataDir, runId) {
 
 function readJson(file, fallback) {
   if (!fs.existsSync(file)) return fallback;
-  return JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
+  } catch (_err) {
+    return fallback;
+  }
 }
 
 /**

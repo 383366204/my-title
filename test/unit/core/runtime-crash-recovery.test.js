@@ -343,6 +343,20 @@ describe('PR-05 Runtime Crash Recovery & Atomic Snapshot Suite', () => {
       assert.match(nodeStates.mine.actionHint, /流程执行进程异常中断/);
       assert.equal(nodeStates.mine.nextRecommendedAction.action, 'resume');
     });
+
+    it('preserves summary fallback and displays artifacts when runtime.json is malformed', () => {
+      const dataDir = createTempDir();
+      const runId = 'run_malformed_runtime_fallback';
+      const { run, runDir } = initRun({ dataDir, runId });
+      // Write corrupted truncated JSON left by an un-atomic write crash
+      fs.writeFileSync(path.join(runDir, 'runtime.json'), '{"status": "running", "steps": [broken...', 'utf8');
+
+      // Summary should not throw; should gracefully fall back to run.json
+      const summary = summarizePipelineRun({ dataDir, runId });
+      assert.ok(summary);
+      assert.equal(summary.runId, runId);
+      assert.equal(summary.status, 'created');
+    });
   });
 
   describe('Resuming an Interrupted Run (Runner & ControlService)', () => {
@@ -503,6 +517,40 @@ describe('PR-05 Runtime Crash Recovery & Atomic Snapshot Suite', () => {
       const resumedRuntime = readRuntimeState({ dataDir, runId });
       assert.equal(resumedRuntime.status, 'needs_review');
       assert.equal(resumedRuntime.progress.export.status, 'completed');
+    });
+
+    it('rejects CLI workflow resume when target run is actively running in alive process', () => {
+      const dataDir = createTempDir();
+      const runId = 'cli_resume_active_conflict';
+      const cliPath = path.join(__dirname, '../../../bin/cli.js');
+
+      initRun({ dataDir, runId });
+      initRuntimeState({ dataDir, runId, steps: ['mine'] });
+      updateRuntimeState({
+        dataDir,
+        runId,
+        patch: {
+          pid: process.pid, // currently alive process
+          status: 'running',
+          activeStep: 'mine'
+        }
+      });
+
+      try {
+        execFileSync(
+          process.execPath,
+          [cliPath, 'workflow', 'resume', '--run', runId, '--data-dir', dataDir, '--json'],
+          { encoding: 'utf8' }
+        );
+        assert.fail('Expected active run resume to be rejected');
+      } catch (err) {
+        assert.equal(err.status, 1);
+        const stdout = JSON.parse(err.stdout);
+        assert.equal(stdout.ok, false);
+        assert.equal(stdout.runId, runId);
+        assert.equal(stdout.status, 'workflow_resume_failed');
+        assert.match(stdout.error, /仍在执行中/);
+      }
     });
   });
 

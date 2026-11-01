@@ -292,7 +292,12 @@ function summarizePipelineRun({ dataDir = DEFAULT_PIPELINE_DIR, runId, previewLi
   const runFile = path.join(runDir, 'run.json');
   let run = readJson(runFile, null);
   // 同行发现或早期阶段停止运行以 runtime 为运行事实源（加载时自愈崩溃的活跃运行）
-  const runtimeState = readRuntimeState({ dataDir, runId: targetRunId, autoRecover: true });
+  let runtimeState = null;
+  try {
+    runtimeState = readRuntimeState({ dataDir, runId: targetRunId, autoRecover: true });
+  } catch (_error) {
+    runtimeState = null;
+  }
   if (!run && runtimeState && typeof runtimeState.status === 'string' && runtimeState.startedAt) {
     run = {
       runId: targetRunId,
