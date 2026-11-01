@@ -251,8 +251,10 @@ function defaultFiles(runDir, files = {}) {
   };
 }
 
-function buildNextCommand(status, runId, files) {
+function buildNextCommand(status, runId, files, dataDir) {
   const runPart = runId ? ` --run ${runId}` : '';
+  const isCustomDataDir = dataDir && path.resolve(dataDir) !== path.resolve(DEFAULT_PIPELINE_DIR);
+  const dataDirPart = isCustomDataDir ? ` --data-dir "${dataDir}"` : '';
   if (status === 'created') return `node bin/cli.js flow mine${runPart} --json`;
   if (status === 'mined' || status === 'awaiting_keyword_review' || status === 'keyword_review_empty') return `node bin/cli.js flow review${runPart} --approve-all --json`;
   if (status === 'keywords_reviewed') return `node bin/cli.js flow verify${runPart} --json`;
@@ -268,7 +270,7 @@ function buildNextCommand(status, runId, files) {
       : '';
   }
   if (status === 'awaiting_user_confirmation') return 'node bin/cli.js workflow resume --confirm-submit --json';
-  if (status === 'interrupted') return `node bin/cli.js workflow resume${runPart} --json`;
+  if (status === 'interrupted') return `node bin/cli.js workflow resume${runPart}${dataDirPart} --json`;
   return '';
 }
 
@@ -346,8 +348,8 @@ function summarizePipelineRun({ dataDir = DEFAULT_PIPELINE_DIR, runId, previewLi
   if (status === 'interrupted') blockers.push('process_interrupted');
 
   const nextCommand = status === 'interrupted'
-    ? buildNextCommand(status, targetRunId, files)
-    : (run.nextCommand || buildNextCommand(status, targetRunId, files));
+    ? buildNextCommand(status, targetRunId, files, dataDir)
+    : (run.nextCommand || buildNextCommand(status, targetRunId, files, dataDir));
   const payload = withAgentResponseFields({
     ok: true,
     runId: run.runId || targetRunId,

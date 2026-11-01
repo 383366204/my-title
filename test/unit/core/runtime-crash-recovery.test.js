@@ -381,10 +381,12 @@ describe('PR-05 Runtime Crash Recovery & Atomic Snapshot Suite', () => {
       assert.ok(summary);
       assert.equal(summary.status, 'interrupted');
       assert.ok(summary.blockers.includes('process_interrupted'));
-      assert.match(summary.nextCommand, /workflow resume --run run_auto_heal_on_read --json/);
+      assert.match(summary.nextCommand, /workflow resume --run run_auto_heal_on_read/);
+      assert.match(summary.nextCommand, /--data-dir/);
+      assert.match(summary.nextCommand, /--json/);
     });
 
-    it('overrides stale persisted run.nextCommand when run is interrupted', () => {
+    it('overrides stale persisted run.nextCommand when run is interrupted and preserves custom dataDir', () => {
       const dataDir = createTempDir();
       const runId = 'interrupted_verify_stale_cmd';
       const { run } = initRun({ dataDir, runId });
@@ -399,7 +401,7 @@ describe('PR-05 Runtime Crash Recovery & Atomic Snapshot Suite', () => {
 
       const summary = summarizePipelineRun({ dataDir, runId });
       assert.equal(summary.status, 'interrupted');
-      assert.equal(summary.nextCommand, `node bin/cli.js workflow resume --run ${runId} --json`);
+      assert.equal(summary.nextCommand, `node bin/cli.js workflow resume --run ${runId} --data-dir "${dataDir}" --json`);
     });
 
     it('projects interrupted run onto summary and canvas cleanly', () => {
@@ -834,6 +836,31 @@ describe('PR-05 Runtime Crash Recovery & Atomic Snapshot Suite', () => {
       } finally {
         lease.release();
       }
+    });
+
+    it('releases execution lease if requestRuntimeResume throws an error', async () => {
+      const dataDir = createTempDir();
+      const runId = 'control_write_fail_lease_release';
+      initRun({ dataDir, runId });
+      initRuntimeState({ dataDir, runId, steps: ['mine'] });
+      updateRuntimeState({ dataDir, runId, patch: { status: 'interrupted', pid: null } });
+
+      const leaseManager = createWorkbenchLeaseManager({ runtimeDir: path.join(dataDir, 'leases') });
+      const service = createWorkflowControlService({
+        dataDir,
+        leaseManager,
+        workbench: { current: null },
+        readRuntimeState: () => ({ status: 'interrupted', mode: 'daily', steps: ['mine'], activeStep: 'mine' }),
+        requestRuntimeResume: () => { throw new Error('transient write failure'); }
+      });
+
+      const res1 = await service.resumeRun({ runId });
+      assert.equal(res1.httpStatus, 500);
+      assert.match(res1.body.error, /transient write failure/);
+
+      // Verify the lease was NOT leaked and subsequent attempt is not blocked by 409
+      const leaseFile = leaseManager.getLeasePath(`run:${runId}`);
+      assert.equal(fs.existsSync(leaseFile), false, 'Lease file must be released after control write failure');
     });
   });
 

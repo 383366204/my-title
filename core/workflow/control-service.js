@@ -328,10 +328,11 @@ function createWorkflowControlService(dependencies = {}) {
             };
           }
         }
-        const control = requestRuntimeResume({ runId });
-        const runState = { runId, mode: modeTag };
+        let control;
         let promise;
         try {
+          control = requestRuntimeResume({ runId });
+          const runState = { runId, mode: modeTag };
           promise = workbench.run(runState, () => getPipelineRuntimeRunner()({
             runId,
             mode: runMode,
@@ -421,10 +422,11 @@ function createWorkflowControlService(dependencies = {}) {
             body: { ok: false, error: `运行记录 ${runId} 正在被其他进程执行中，不可重复重试` }
           };
         }
-        const control = requestRuntimeRetryStep({ runId, step });
-        const runState = { runId, mode: 'retry-step' };
+        let control;
         let promise;
         try {
+          control = requestRuntimeRetryStep({ runId, step });
+          const runState = { runId, mode: 'retry-step' };
           promise = workbench.run(runState, () => getPipelineRuntimeRunner()({
             runId,
             mode: runtime.mode || (runtime.steps?.includes('keyword') ? 'keyword' : 'daily'),
@@ -516,10 +518,11 @@ function createWorkflowControlService(dependencies = {}) {
             body: { ok: false, error: `运行记录 ${runId} 正在被其他进程执行中，不可重复重试` }
           };
         }
-        const control = requestRuntimeRetryStep({ runId, step: nodeId });
-        const runState = { runId, mode: 'workflow-retry-step' };
+        let control;
         let promise;
         try {
+          control = requestRuntimeRetryStep({ runId, step: nodeId });
+          const runState = { runId, mode: 'workflow-retry-step' };
           promise = workbench.run(runState, () => getPipelineRuntimeRunner()({
             runId,
             mode: runtime.mode || (runtime.steps?.includes('keyword') ? 'keyword' : 'daily'),
