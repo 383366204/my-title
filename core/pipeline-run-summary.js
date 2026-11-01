@@ -345,7 +345,9 @@ function summarizePipelineRun({ dataDir = DEFAULT_PIPELINE_DIR, runId, previewLi
   if (status === 'select_failed') blockers.push('no_selected_products');
   if (status === 'interrupted') blockers.push('process_interrupted');
 
-  const nextCommand = run.nextCommand || buildNextCommand(status, targetRunId, files);
+  const nextCommand = status === 'interrupted'
+    ? buildNextCommand(status, targetRunId, files)
+    : (run.nextCommand || buildNextCommand(status, targetRunId, files));
   const payload = withAgentResponseFields({
     ok: true,
     runId: run.runId || targetRunId,

@@ -314,6 +314,24 @@ describe('PR-05 Runtime Crash Recovery & Atomic Snapshot Suite', () => {
       assert.match(summary.nextCommand, /workflow resume --run run_auto_heal_on_read --json/);
     });
 
+    it('overrides stale persisted run.nextCommand when run is interrupted', () => {
+      const dataDir = createTempDir();
+      const runId = 'interrupted_verify_stale_cmd';
+      const { run } = initRun({ dataDir, runId });
+      const runFile = path.join(dataDir, 'runs', runId, 'run.json');
+      fs.writeFileSync(runFile, JSON.stringify({
+        ...run,
+        status: 'mined',
+        nextCommand: `node bin/cli.js flow review --run ${runId} --json`
+      }));
+      initRuntimeState({ dataDir, runId, steps: ['mine', 'verify'] });
+      updateRuntimeState({ dataDir, runId, patch: { activeStep: 'verify', pid: 99999999 } });
+
+      const summary = summarizePipelineRun({ dataDir, runId });
+      assert.equal(summary.status, 'interrupted');
+      assert.equal(summary.nextCommand, `node bin/cli.js workflow resume --run ${runId} --json`);
+    });
+
     it('projects interrupted run onto summary and canvas cleanly', () => {
       const summary = {
         runId: 'run_interrupted_proj',

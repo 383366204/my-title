@@ -137,6 +137,86 @@ function readRuntimeState({ dataDir, runId, autoRecover = true, isAliveFn = isPi
   return readJson(runtimeFile(dataDir, runId), null);
 }
 
+const processActiveRunLocks = new Map();
+
+/**
+ * Synchronously acquire a per-run exclusive state lock for critical read-check-write transitions.
+ * Supports re-entrancy within the same process and auto-reclaims stale or dead PID locks.
+ * @param {string} dataDir Pipeline data directory.
+ * @param {string} runId Runtime run id.
+ * @param {function} fn Critical section function.
+ * @returns {*} Return value of fn.
+ */
+function withRunLockSync(dataDir, runId, fn) {
+  assertRuntimeRunId(runId);
+  const lockKey = `${resolveDataDir(dataDir)}:${runId}`;
+  const currentDepth = processActiveRunLocks.get(lockKey) || 0;
+  if (currentDepth > 0) {
+    processActiveRunLocks.set(lockKey, currentDepth + 1);
+    try {
+      return fn();
+    } finally {
+      processActiveRunLocks.set(lockKey, currentDepth);
+    }
+  }
+
+  const file = `${runtimeFile(dataDir, runId)}.lock`;
+  const dir = path.dirname(file);
+  fs.mkdirSync(dir, { recursive: true });
+
+  const maxAttempts = 30;
+  const retryDelayMs = 10;
+  let fd = null;
+  let acquired = false;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      fd = fs.openSync(file, 'wx');
+      fs.writeFileSync(fd, JSON.stringify({ pid: process.pid, createdAt: Date.now() }), 'utf8');
+      fs.closeSync(fd);
+      fd = null;
+      acquired = true;
+      break;
+    } catch (err) {
+      if (fd !== null) {
+        try { fs.closeSync(fd); } catch {}
+        fd = null;
+      }
+      if (err.code === 'EEXIST') {
+        try {
+          const content = fs.readFileSync(file, 'utf8');
+          const meta = JSON.parse(content);
+          if ((meta.pid && !isPidAlive(meta.pid)) || (Date.now() - meta.createdAt > 5000)) {
+            try { fs.unlinkSync(file); } catch {}
+            continue;
+          }
+        } catch {
+          try {
+            const stat = fs.statSync(file);
+            if (Date.now() - stat.mtimeMs > 5000) {
+              try { fs.unlinkSync(file); } catch {}
+              continue;
+            }
+          } catch {}
+        }
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, retryDelayMs);
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  processActiveRunLocks.set(lockKey, 1);
+  try {
+    return fn();
+  } finally {
+    processActiveRunLocks.delete(lockKey);
+    if (acquired) {
+      try { fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
 /**
  * Merge a runtime state patch into the current runtime state atomically with revision increment.
  * @param {object} options Runtime options.
@@ -148,37 +228,39 @@ function readRuntimeState({ dataDir, runId, autoRecover = true, isAliveFn = isPi
  */
 function updateRuntimeState({ dataDir, runId, patch = {}, expectedRevision }) {
   assertRuntimeRunId(runId);
-  const current = readRuntimeState({ dataDir, runId, autoRecover: false }) || {};
-  const curRev = Number.isInteger(current.revision) ? current.revision : 0;
-  if (expectedRevision !== undefined && curRev !== expectedRevision) {
-    const err = new Error(`Runtime revision conflict for run ${runId}: expected revision ${expectedRevision}, found ${curRev}`);
-    err.code = 'REVISION_CONFLICT';
-    err.expectedRevision = expectedRevision;
-    err.actualRevision = curRev;
-    throw err;
-  }
+  return withRunLockSync(dataDir, runId, () => {
+    const current = readRuntimeState({ dataDir, runId, autoRecover: false }) || {};
+    const curRev = Number.isInteger(current.revision) ? current.revision : 0;
+    if (expectedRevision !== undefined && curRev !== expectedRevision) {
+      const err = new Error(`Runtime revision conflict for run ${runId}: expected revision ${expectedRevision}, found ${curRev}`);
+      err.code = 'REVISION_CONFLICT';
+      err.expectedRevision = expectedRevision;
+      err.actualRevision = curRev;
+      throw err;
+    }
 
-  const nextRevision = curRev + 1;
-  const nextAttempt = patch.attempt !== undefined
-    ? patch.attempt
-    : (patch.incrementAttempt ? (current.attempt || 1) + 1 : (current.attempt || 1));
+    const nextRevision = curRev + 1;
+    const nextAttempt = patch.attempt !== undefined
+      ? patch.attempt
+      : (patch.incrementAttempt ? (current.attempt || 1) + 1 : (current.attempt || 1));
 
-  const next = {
-    ...current,
-    pid: process.pid,
-    ...patch,
-    revision: nextRevision,
-    attempt: nextAttempt,
-    progress: {
-      ...(current.progress || {}),
-      ...(patch.progress || {})
-    },
-    updatedAt: new Date().toISOString()
-  };
-  delete next.incrementAttempt;
+    const next = {
+      ...current,
+      pid: process.pid,
+      ...patch,
+      revision: nextRevision,
+      attempt: nextAttempt,
+      progress: {
+        ...(current.progress || {}),
+        ...(patch.progress || {})
+      },
+      updatedAt: new Date().toISOString()
+    };
+    delete next.incrementAttempt;
 
-  writeJsonAtomic(runtimeFile(dataDir, runId), next);
-  return next;
+    writeJsonAtomic(runtimeFile(dataDir, runId), next);
+    return next;
+  });
 }
 
 /**
@@ -338,74 +420,76 @@ function recoverRuntimeState({
   now = () => new Date().toISOString()
 } = {}) {
   assertRuntimeRunId(runId);
-  const current = readRuntimeState({ dataDir, runId, autoRecover: false });
-  if (!current) return { recovered: false, runtime: null, reason: 'not_found' };
+  return withRunLockSync(dataDir, runId, () => {
+    const current = readRuntimeState({ dataDir, runId, autoRecover: false });
+    if (!current) return { recovered: false, runtime: null, reason: 'not_found' };
 
-  const activeStatuses = ['running', 'resuming', 'retrying'];
-  if (!activeStatuses.includes(current.status)) {
-    return { recovered: false, runtime: current, reason: 'not_active' };
-  }
-
-  const recordedPid = current.pid;
-  if (!Number.isInteger(recordedPid) || recordedPid <= 0) {
-    return { recovered: false, runtime: current, reason: 'no_pid' };
-  }
-  const alive = isAliveFn(recordedPid);
-  if (alive) {
-    return { recovered: false, runtime: current, reason: 'process_alive' };
-  }
-
-  // Process is dead, perform crash recovery transition
-  const activeStep = current.activeStep || (current.steps && current.steps[0]) || '';
-  const updatedProgress = { ...(current.progress || {}) };
-  if (activeStep && updatedProgress[activeStep]) {
-    updatedProgress[activeStep] = {
-      ...updatedProgress[activeStep],
-      status: 'interrupted',
-      message: '执行进程异常中断'
-    };
-  }
-
-  const recoveredTime = now();
-  try {
-    const recoveredRuntime = updateRuntimeState({
-      dataDir,
-      runId,
-      expectedRevision: current.revision,
-      patch: {
-        status: 'interrupted',
-        interruptedAt: recoveredTime,
-        interruptedReason: 'process_terminated_unexpectedly',
-        error: current.error || '流程执行进程异常退出，状态已安全恢复，可手动点击恢复继续执行。',
-        progress: updatedProgress,
-        pid: recordedPid,
-        updatedAt: recoveredTime
-      }
-    });
-
-    appendRuntimeEvent({
-      dataDir,
-      runId,
-      event: {
-        event: 'interrupted',
-        step: activeStep,
-        previousStatus: current.status,
-        reason: 'process_terminated_unexpectedly',
-        deadPid: recordedPid,
-        revision: recoveredRuntime.revision,
-        attempt: recoveredRuntime.attempt || 1,
-        timestamp: recoveredTime
-      }
-    });
-
-    return { recovered: true, runtime: recoveredRuntime, reason: 'recovered_from_crash' };
-  } catch (err) {
-    if (err.code === 'REVISION_CONFLICT') {
-      const fresh = readRuntimeState({ dataDir, runId, autoRecover: false });
-      return { recovered: false, runtime: fresh, reason: 'concurrent_modification' };
+    const activeStatuses = ['running', 'resuming', 'retrying'];
+    if (!activeStatuses.includes(current.status)) {
+      return { recovered: false, runtime: current, reason: 'not_active' };
     }
-    throw err;
-  }
+
+    const recordedPid = current.pid;
+    if (!Number.isInteger(recordedPid) || recordedPid <= 0) {
+      return { recovered: false, runtime: current, reason: 'no_pid' };
+    }
+    const alive = isAliveFn(recordedPid);
+    if (alive) {
+      return { recovered: false, runtime: current, reason: 'process_alive' };
+    }
+
+    // Process is dead, perform crash recovery transition
+    const activeStep = current.activeStep || (current.steps && current.steps[0]) || '';
+    const updatedProgress = { ...(current.progress || {}) };
+    if (activeStep && updatedProgress[activeStep]) {
+      updatedProgress[activeStep] = {
+        ...updatedProgress[activeStep],
+        status: 'interrupted',
+        message: '执行进程异常中断'
+      };
+    }
+
+    const recoveredTime = now();
+    try {
+      const recoveredRuntime = updateRuntimeState({
+        dataDir,
+        runId,
+        expectedRevision: current.revision,
+        patch: {
+          status: 'interrupted',
+          interruptedAt: recoveredTime,
+          interruptedReason: 'process_terminated_unexpectedly',
+          error: current.error || '流程执行进程异常退出，状态已安全恢复，可手动点击恢复继续执行。',
+          progress: updatedProgress,
+          pid: recordedPid,
+          updatedAt: recoveredTime
+        }
+      });
+
+      appendRuntimeEvent({
+        dataDir,
+        runId,
+        event: {
+          event: 'interrupted',
+          step: activeStep,
+          previousStatus: current.status,
+          reason: 'process_terminated_unexpectedly',
+          deadPid: recordedPid,
+          revision: recoveredRuntime.revision,
+          attempt: recoveredRuntime.attempt || 1,
+          timestamp: recoveredTime
+        }
+      });
+
+      return { recovered: true, runtime: recoveredRuntime, reason: 'recovered_from_crash' };
+    } catch (err) {
+      if (err.code === 'REVISION_CONFLICT') {
+        const fresh = readRuntimeState({ dataDir, runId, autoRecover: false });
+        return { recovered: false, runtime: fresh, reason: 'concurrent_modification' };
+      }
+      throw err;
+    }
+  });
 }
 
 /**
