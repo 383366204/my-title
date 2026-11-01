@@ -153,6 +153,21 @@ describe('core/runtime/atomic-tools', () => {
     assert.equal(parsed.success, false);
   });
 
+  it('title.generate 应当拒绝非正数 count 与负数价格入参', () => {
+    const invalidZeroCount = generateTool.inputSchema.safeParse({ keyword: '项链', count: 0 });
+    assert.equal(invalidZeroCount.success, false);
+
+    const invalidNegativeCount = generateTool.inputSchema.safeParse({ keyword: '项链', count: -1 });
+    assert.equal(invalidNegativeCount.success, false);
+
+    const invalidNegativePrice = generateTool.inputSchema.safeParse({ keyword: '项链', min_price: -10 });
+    assert.equal(invalidNegativePrice.success, false);
+
+    const valid = generateTool.inputSchema.safeParse({ keyword: '项链', count: 3, min_price: 10, max_price: 50 });
+    assert.equal(valid.success, true);
+    assert.equal(valid.data.count, 3);
+  });
+
   it('title.generate 应当将 count 生效并截断返回的 titles 与 products 数量', async () => {
     let passedOptions = null;
     const mockPipeline = async (keyword, opts) => {

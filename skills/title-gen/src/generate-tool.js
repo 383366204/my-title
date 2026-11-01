@@ -18,9 +18,9 @@ const inputSchema = z.object({
   sycm_auto: z.boolean().optional().default(false).describe('是否自动查询生意参谋'),
   research: z.boolean().optional().default(false).describe('推荐研究关键词模式'),
   use_image_search: z.boolean().optional().default(false).describe('是否启用淘宝图搜'),
-  min_price: z.number().optional().default(0).describe('最低价格过滤'),
-  max_price: z.number().optional().default(0).describe('最高价格过滤'),
-  count: z.number().int().optional().default(3).describe('生成标题候选数量')
+  min_price: z.number().nonnegative().optional().default(0).describe('最低价格过滤'),
+  max_price: z.number().nonnegative().optional().default(0).describe('最高价格过滤'),
+  count: z.number().int().positive('count 必须大于 0').optional().default(3).describe('生成标题候选数量')
 });
 
 const defaultSearchProductsAdapter = ({ coreWord, blueOceanWord, modifiers, semanticGroups, searchMode, webFilters, port, maxProducts, maxPages, maxResolveLinks, scrollLoad, scrollSteps }) =>
