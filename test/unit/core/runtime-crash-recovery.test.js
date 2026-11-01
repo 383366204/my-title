@@ -200,6 +200,27 @@ describe('PR-05 Runtime Crash Recovery & Atomic Snapshot Suite', () => {
       assert.equal(u2.attempt, 3);
       assert.equal(u2.revision, 3);
     });
+
+    it('throws RUNTIME_LOCK_TIMEOUT when lock cannot be acquired within retry limit', () => {
+      const dataDir = createTempDir();
+      const runId = 'run_lock_timeout';
+      initRuntimeState({ dataDir, runId, steps: ['mine'] });
+
+      // Simulate external alive process holding the lock file
+      const lockFile = path.join(dataDir, 'runs', runId, 'runtime.json.lock');
+      fs.writeFileSync(lockFile, JSON.stringify({
+        pid: process.pid,
+        ownerToken: 'other_owner',
+        createdAt: Date.now()
+      }), 'utf8');
+
+      assert.throws(
+        () => updateRuntimeState({ dataDir, runId, patch: { status: 'paused' } }),
+        (err) => err.code === 'RUNTIME_LOCK_TIMEOUT'
+      );
+
+      try { fs.unlinkSync(lockFile); } catch {}
+    });
   });
 
   describe('Process Liveness Tester (isPidAlive)', () => {

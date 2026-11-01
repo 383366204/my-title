@@ -161,9 +161,11 @@ function withRunLockSync(dataDir, runId, fn) {
   }
 
   const file = `${runtimeFile(dataDir, runId)}.lock`;
+  const reclaimFile = `${file}.reclaim`;
   const dir = path.dirname(file);
   fs.mkdirSync(dir, { recursive: true });
 
+  const ownerToken = `${process.pid}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
   const maxAttempts = 30;
   const retryDelayMs = 10;
   let fd = null;
@@ -172,7 +174,7 @@ function withRunLockSync(dataDir, runId, fn) {
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
       fd = fs.openSync(file, 'wx');
-      fs.writeFileSync(fd, JSON.stringify({ pid: process.pid, createdAt: Date.now() }), 'utf8');
+      fs.writeFileSync(fd, JSON.stringify({ pid: process.pid, ownerToken, createdAt: Date.now() }), 'utf8');
       fs.closeSync(fd);
       fd = null;
       acquired = true;
@@ -186,15 +188,44 @@ function withRunLockSync(dataDir, runId, fn) {
         try {
           const content = fs.readFileSync(file, 'utf8');
           const meta = JSON.parse(content);
-          if ((meta.pid && !isPidAlive(meta.pid)) || (Date.now() - meta.createdAt > 5000)) {
-            try { fs.unlinkSync(file); } catch {}
+          const isDead = meta.pid && !isPidAlive(meta.pid);
+          const isStale = Date.now() - meta.createdAt > 5000;
+          if (isDead || isStale) {
+            let rfd = null;
+            try {
+              rfd = fs.openSync(reclaimFile, 'wx');
+              const recheck = JSON.parse(fs.readFileSync(file, 'utf8'));
+              if (recheck && recheck.ownerToken === meta.ownerToken && ((recheck.pid && !isPidAlive(recheck.pid)) || (Date.now() - recheck.createdAt > 5000))) {
+                fs.unlinkSync(file);
+              }
+            } catch {
+              // Concurrent reclamation in progress, ignore
+            } finally {
+              if (rfd !== null) {
+                try { fs.closeSync(rfd); } catch {}
+                try { fs.unlinkSync(reclaimFile); } catch {}
+              }
+            }
             continue;
           }
         } catch {
           try {
             const stat = fs.statSync(file);
             if (Date.now() - stat.mtimeMs > 5000) {
-              try { fs.unlinkSync(file); } catch {}
+              let rfd = null;
+              try {
+                rfd = fs.openSync(reclaimFile, 'wx');
+                const recheckStat = fs.statSync(file);
+                if (Date.now() - recheckStat.mtimeMs > 5000) {
+                  fs.unlinkSync(file);
+                }
+              } catch {}
+              finally {
+                if (rfd !== null) {
+                  try { fs.closeSync(rfd); } catch {}
+                  try { fs.unlinkSync(reclaimFile); } catch {}
+                }
+              }
               continue;
             }
           } catch {}
@@ -206,14 +237,23 @@ function withRunLockSync(dataDir, runId, fn) {
     }
   }
 
+  if (!acquired) {
+    const timeoutErr = new Error(`Timeout acquiring runtime state lock for run ${runId}`);
+    timeoutErr.code = 'RUNTIME_LOCK_TIMEOUT';
+    throw timeoutErr;
+  }
+
   processActiveRunLocks.set(lockKey, 1);
   try {
     return fn();
   } finally {
     processActiveRunLocks.delete(lockKey);
-    if (acquired) {
-      try { fs.unlinkSync(file); } catch {}
-    }
+    try {
+      const currentMeta = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (currentMeta && currentMeta.ownerToken === ownerToken) {
+        fs.unlinkSync(file);
+      }
+    } catch {}
   }
 }
 
