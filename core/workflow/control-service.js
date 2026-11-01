@@ -293,6 +293,19 @@ function createWorkflowControlService(dependencies = {}) {
             }
           };
         }
+        if (stopAfterStep && stopAfterStep !== 'end' && Array.isArray(runtime.steps) && runtime.activeStep) {
+          const startIndex = runtime.steps.indexOf(runtime.activeStep);
+          const stopIndex = runtime.steps.indexOf(stopAfterStep);
+          if (startIndex !== -1 && stopIndex !== -1 && stopIndex < startIndex) {
+            return {
+              httpStatus: 400,
+              body: {
+                ok: false,
+                error: `指定的停止步骤 ${stopAfterStep} 已在当前起始步骤 ${runtime.activeStep} 之前。`
+              }
+            };
+          }
+        }
         const control = requestRuntimeResume({ runId });
         const runState = { runId, mode: modeTag };
         const promise = workbench.run(runState, () => getPipelineRuntimeRunner()({

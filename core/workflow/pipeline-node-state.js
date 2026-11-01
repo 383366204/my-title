@@ -74,6 +74,7 @@ function nodeStatusFromRuntimeProgress(progress) {
   if (status === 'awaiting_product_review') return 'waiting_confirmation';
   if (status === 'completed') return 'completed';
   if (status === 'running') return 'running';
+  if (status === 'idle') return 'idle';
   return '';
 }
 
@@ -98,6 +99,13 @@ function statusPlanForSummary(summary) {
     return memo;
   }, {});
   const mode = summary.runtime?.mode || summary.options?.mode || '';
+  if (summary.runtime?.steps && summary.runtime?.stoppedAfterStep) {
+    states[WORKFLOW_NODE_IDS.start] = 'completed';
+    for (const step of summary.runtime.steps) {
+      states[step] = nodeStatusFromRuntimeProgress(summary.runtime.progress?.[step]) || 'idle';
+    }
+    return states;
+  }
   if (['daily', 'root-keyword', 'keyword'].includes(mode) && summary.runtime?.steps) {
     states[WORKFLOW_NODE_IDS.start] = 'completed';
     for (const step of summary.runtime.steps) {

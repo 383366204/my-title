@@ -566,6 +566,38 @@ describe('PR-04 Workflow Convergence & StopAfterStep Suite', () => {
       assert.equal(response.body.ok, true);
       assert.equal(runnerArgs.stopAfterStep, 'generate');
     });
+
+    it('rejects resume stopAfterStep preceding activeStep with HTTP 400 synchronously', async () => {
+      const workbench = createMockWorkbench();
+      let runnerCalled = false;
+      const mockRuntime = {
+        runId: 'test-resume-preceding',
+        mode: 'daily',
+        activeStep: 'select',
+        steps: ['inspire', 'mine', 'keywordReview', 'select', 'generate', 'export'],
+        params: {}
+      };
+
+      const service = createWorkflowControlService({
+        workbench,
+        readRuntimeState: () => mockRuntime,
+        requestRuntimeResume: () => ({ status: 'resuming' }),
+        getPipelineRuntimeRunner: () => async () => {
+          runnerCalled = true;
+          return { status: 'completed' };
+        }
+      });
+
+      const response = await service.resumeRun({
+        runId: 'test-resume-preceding',
+        stopAfterStep: 'mine'
+      });
+
+      assert.equal(response.httpStatus, 400);
+      assert.equal(response.body.ok, false);
+      assert.equal(response.body.error, '指定的停止步骤 mine 已在当前起始步骤 select 之前。');
+      assert.equal(runnerCalled, false, 'Runner should not be called when validation fails');
+    });
   });
 
   describe('Canvas Read-Only Projection for Partially Executed Runs', () => {
@@ -640,6 +672,86 @@ describe('PR-04 Workflow Convergence & StopAfterStep Suite', () => {
       assert.equal(nodeStates.evaluateShops.status, 'idle');
       assert.equal(nodeStates.peerReport.status, 'idle');
       assert.equal(nodeStates.end.status, 'idle', 'Peer discovery end node must be idle');
+    });
+
+    it('projects unexecuted nodes as idle across order-sheet, review-sheet and manual modes', () => {
+      // 1. order-sheet stopping after collectRank
+      const orderSummary = {
+        runId: 'proj_order_1',
+        status: 'product_rank_collected',
+        options: { mode: 'order-sheet' },
+        runtime: {
+          mode: 'order-sheet',
+          status: 'completed',
+          activeStep: 'confirmProducts',
+          stoppedAfterStep: 'collectRank',
+          steps: ['collectRank', 'confirmProducts', 'generateSheet'],
+          progress: {
+            collectRank: { status: 'completed', percent: 100, message: '完成' },
+            confirmProducts: { status: 'idle', percent: 0, message: '' },
+            generateSheet: { status: 'idle', percent: 0, message: '' }
+          }
+        }
+      };
+      const orderNodes = buildNodeStates(orderSummary);
+      assert.equal(orderNodes.start.status, 'completed');
+      assert.equal(orderNodes.collectRank.status, 'completed');
+      assert.equal(orderNodes.confirmProducts.status, 'idle', 'confirmProducts must be idle');
+      assert.equal(orderNodes.generateSheet.status, 'idle', 'generateSheet must be idle');
+      assert.equal(orderNodes.end.status, 'idle', 'end must be idle');
+
+      // 2. review-sheet stopping after importSheet
+      const reviewSummary = {
+        runId: 'proj_review_1',
+        status: 'review_source_imported',
+        options: { mode: 'review-sheet' },
+        runtime: {
+          mode: 'review-sheet',
+          status: 'completed',
+          activeStep: 'generateReviews',
+          stoppedAfterStep: 'importSheet',
+          steps: ['importSheet', 'generateReviews', 'generateSheet'],
+          progress: {
+            importSheet: { status: 'completed', percent: 100, message: '完成' },
+            generateReviews: { status: 'idle', percent: 0, message: '' },
+            generateSheet: { status: 'idle', percent: 0, message: '' }
+          }
+        }
+      };
+      const reviewNodes = buildNodeStates(reviewSummary);
+      assert.equal(reviewNodes.start.status, 'completed');
+      assert.equal(reviewNodes.importSheet.status, 'completed');
+      assert.equal(reviewNodes.generateReviews.status, 'idle', 'generateReviews must be idle');
+      assert.equal(reviewNodes.generateSheet.status, 'idle', 'generateSheet must be idle');
+      assert.equal(reviewNodes.end.status, 'idle', 'end must be idle');
+
+      // 3. manual mode stopping after start
+      const manualSummary = {
+        runId: 'proj_manual_1',
+        status: 'browser_ready',
+        options: { mode: 'manual', workflowVersion: 3 },
+        runtime: {
+          mode: 'manual',
+          status: 'completed',
+          activeStep: 'select',
+          stoppedAfterStep: 'start',
+          steps: ['start', 'select', 'verify', 'generate', 'export'],
+          progress: {
+            start: { status: 'completed', percent: 100, message: '完成' },
+            select: { status: 'idle', percent: 0, message: '' },
+            verify: { status: 'idle', percent: 0, message: '' },
+            generate: { status: 'idle', percent: 0, message: '' },
+            export: { status: 'idle', percent: 0, message: '' }
+          }
+        }
+      };
+      const manualNodes = buildNodeStates(manualSummary);
+      assert.equal(manualNodes.start.status, 'completed');
+      assert.equal(manualNodes.select.status, 'idle', 'select must be idle');
+      assert.equal(manualNodes.verify.status, 'idle', 'verify must be idle');
+      assert.equal(manualNodes.generate.status, 'idle', 'generate must be idle');
+      assert.equal(manualNodes.export.status, 'idle', 'export must be idle');
+      assert.equal(manualNodes.end.status, 'idle', 'end must be idle');
     });
   });
 });
