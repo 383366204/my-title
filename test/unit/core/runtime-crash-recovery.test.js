@@ -7,6 +7,7 @@ const path = require('path');
 const os = require('os');
 const { execFileSync } = require('child_process');
 
+const { createWorkbenchLeaseManager } = require('../../../core/runtime/workbench-lease');
 const { initRun, appendJsonl } = require('../../../skills/pipeline-flow/src/run-store');
 const {
   initRuntimeState,
@@ -550,6 +551,36 @@ describe('PR-05 Runtime Crash Recovery & Atomic Snapshot Suite', () => {
         assert.equal(stdout.runId, runId);
         assert.equal(stdout.status, 'workflow_resume_failed');
         assert.match(stdout.error, /仍在执行中/);
+      }
+    });
+
+    it('rejects concurrent CLI workflow resume when execution lease is held', async () => {
+      const dataDir = createTempDir();
+      const runId = 'cli_resume_lease_conflict';
+      const cliPath = path.join(__dirname, '../../../bin/cli.js');
+
+      initRun({ dataDir, runId });
+      initRuntimeState({ dataDir, runId, steps: ['mine'] });
+
+      const leaseManager = createWorkbenchLeaseManager({ runtimeDir: path.join(dataDir, 'leases') });
+      const lease = await leaseManager.acquire(`run:${runId}`, { timeoutMs: 0 });
+
+      try {
+        execFileSync(
+          process.execPath,
+          [cliPath, 'workflow', 'resume', '--run', runId, '--data-dir', dataDir, '--json'],
+          { encoding: 'utf8' }
+        );
+        assert.fail('Expected concurrent resume to fail due to lease');
+      } catch (err) {
+        assert.equal(err.status, 1);
+        const stdout = JSON.parse(err.stdout);
+        assert.equal(stdout.ok, false);
+        assert.equal(stdout.runId, runId);
+        assert.equal(stdout.status, 'workflow_resume_failed');
+        assert.match(stdout.error, /占用中/);
+      } finally {
+        lease.release();
       }
     });
   });

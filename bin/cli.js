@@ -1770,21 +1770,27 @@ workflowCommand
 
     if (options.run) {
       try {
+        const { createWorkbenchLeaseManager } = require('../core/runtime/workbench-lease');
         const { runPipelineRuntime } = require('../skills/pipeline-flow/runtime/runner');
         const { readRuntimeState, isPidAlive } = require('../skills/pipeline-flow/runtime/store');
-        const runtime = readRuntimeState({ dataDir: options.dataDir, runId: options.run, autoRecover: true });
-        if (!runtime) {
-          throw new Error(`未找到运行记录 ${options.run}`);
-        }
-        const activeStatuses = ['running', 'resuming', 'retrying'];
-        if (activeStatuses.includes(runtime.status) && isPidAlive(runtime.pid)) {
-          throw new Error(`运行记录 ${options.run} 仍在执行中 (PID ${runtime.pid})，不可重复启动`);
-        }
-        const result = await runPipelineRuntime({
-          dataDir: options.dataDir,
-          runId: options.run,
-          preserveRuntime: true,
-          resumeFromStep: runtime.activeStep
+        const leaseDir = options.dataDir ? path.join(options.dataDir, 'leases') : undefined;
+        const leaseManager = createWorkbenchLeaseManager({ runtimeDir: leaseDir });
+
+        const result = await leaseManager.withLease(`run:${options.run}`, { timeoutMs: 0 }, async () => {
+          const runtime = readRuntimeState({ dataDir: options.dataDir, runId: options.run, autoRecover: true });
+          if (!runtime) {
+            throw new Error(`未找到运行记录 ${options.run}`);
+          }
+          const activeStatuses = ['running', 'resuming', 'retrying'];
+          if (activeStatuses.includes(runtime.status) && isPidAlive(runtime.pid)) {
+            throw new Error(`运行记录 ${options.run} 仍在执行中 (PID ${runtime.pid})，不可重复启动`);
+          }
+          return await runPipelineRuntime({
+            dataDir: options.dataDir,
+            runId: options.run,
+            preserveRuntime: true,
+            resumeFromStep: runtime.activeStep
+          });
         });
         const payload = withAgentResponseFields({
           ...result,
