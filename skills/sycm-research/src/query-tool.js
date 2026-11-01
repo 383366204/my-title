@@ -11,7 +11,7 @@ const { extractSycmData } = require('./sycm-cdp-extractor');
 
 const inputSchema = z.object({
   keyword: z.string().min(1, 'keyword 不能为空'),
-  mode: z.enum(['blue', 'hot', 'all']).optional().default('blue'),
+  mode: z.enum(['blue', 'hot']).optional().default('blue'),
   port: z.number().int().positive().optional().default(9222),
   maxPages: z.number().int().min(1).max(10).optional().default(1),
   pageFilters: z.object({

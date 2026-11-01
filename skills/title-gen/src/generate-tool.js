@@ -70,6 +70,7 @@ const generateTool = {
       throw abortErr;
     }
 
+    const requestedCount = input.count || 3;
     const pipelineOptions = {
       maxLength: input.length || 60,
       sycmData: input.keyword_data,
@@ -78,11 +79,12 @@ const generateTool = {
       useImageSearch: Boolean(input.use_image_search),
       minPrice: input.min_price || 0,
       maxPrice: input.max_price || 0,
-      limit: input.count || 3,
-      count: input.count || 3,
+      limit: requestedCount,
+      count: requestedCount,
+      productLimit: requestedCount,
       signal: ctx.abortSignal,
       leaseManager: ctx.leaseManager,
-      searchProducts: defaultSearchProductsAdapter,
+      searchProducts: ctx.searchProducts || defaultSearchProductsAdapter,
       fetchKeywordData: input.sycm_auto
         ? (args) => defaultFetchSycmKeywordDataAdapter({ ...args, leaseManager: ctx.leaseManager, signal: ctx.abortSignal })
         : undefined,
@@ -93,7 +95,17 @@ const generateTool = {
       }
     };
 
-    return await generateTitlePipeline(input.keyword, pipelineOptions);
+    const pipelineFn = typeof ctx.pipelineFn === 'function' ? ctx.pipelineFn : generateTitlePipeline;
+    const res = await pipelineFn(input.keyword, pipelineOptions);
+    if (res && typeof res === 'object') {
+      if (Array.isArray(res.products) && res.products.length > requestedCount) {
+        res.products = res.products.slice(0, requestedCount);
+      }
+      if (Array.isArray(res.titles) && res.titles.length > requestedCount) {
+        res.titles = res.titles.slice(0, requestedCount);
+      }
+    }
+    return res;
   }
 };
 

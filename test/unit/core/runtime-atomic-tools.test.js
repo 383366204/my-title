@@ -145,6 +145,36 @@ describe('core/runtime/atomic-tools', () => {
     assert.deepEqual(parsed.data.filterConditions, { minPv: 100, customTag: 'test' });
   });
 
+  it('sycm.query 应当拒绝未实现的 mode: all 入参', () => {
+    const parsed = queryTool.inputSchema.safeParse({
+      keyword: '纯银项链',
+      mode: 'all'
+    });
+    assert.equal(parsed.success, false);
+  });
+
+  it('title.generate 应当将 count 生效并截断返回的 titles 与 products 数量', async () => {
+    let passedOptions = null;
+    const mockPipeline = async (keyword, opts) => {
+      passedOptions = opts;
+      return {
+        ok: true,
+        keyword,
+        titles: ['t1', 't2', 't3', 't4'],
+        products: [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }]
+      };
+    };
+
+    const res = await generateTool.execute(
+      { keyword: '纯银项链', count: 2 },
+      { pipelineFn: mockPipeline }
+    );
+
+    assert.equal(passedOptions.productLimit, 2);
+    assert.equal(res.titles.length, 2);
+    assert.equal(res.products.length, 2);
+  });
+
   it('title.generate 工具应当正确映射 maxLength 与 sycmData 字段', async () => {
     const originalExecute = generateTool.execute;
 
