@@ -179,4 +179,41 @@ describe('core/runtime/atomic-tools', () => {
       generateTool.execute = originalExecute;
     }
   });
+
+  it('title.generate 与 sycm.query 应当在 abortSignal 已触发时立即中断抛错', async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    await assert.rejects(
+      async () => generateTool.execute({ keyword: '纯银项链' }, { abortSignal: controller.signal }),
+      (err) => {
+        assert.equal(err.code, 'OPERATION_ABORTED');
+        return true;
+      }
+    );
+
+    await assert.rejects(
+      async () => queryTool.execute({ keyword: '纯银项链' }, { abortSignal: controller.signal }),
+      (err) => {
+        assert.equal(err.code, 'OPERATION_ABORTED');
+        return true;
+      }
+    );
+  });
+
+  it('sycm-cdp-extractor 在租约管理器不可用时应当 fail-closed 抛错拒绝，不应无保护裸跑', async () => {
+    const { extractSycmData } = require('../../../skills/sycm-research/src/sycm-cdp-extractor');
+
+    await assert.rejects(
+      async () => extractSycmData('纯银项链', {
+        guardCache: false,
+        leaseManager: { withLease: null } // 无效租约管理器
+      }),
+      (err) => {
+        assert.equal(err.code, 'LEASE_MANAGER_UNAVAILABLE');
+        assert.equal(err.nonPlatform, true);
+        return true;
+      }
+    );
+  });
 });

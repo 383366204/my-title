@@ -587,15 +587,23 @@ async function _rawExtractSycmData(keyword, options) {
   if (!leaseManager) {
     try {
       leaseManager = require('../../../core/runtime/workbench-lease').getLeaseManager();
-    } catch {}
+    } catch (err) {
+      const leaseInitErr = new Error(`初始化 CDP 租约管理器失败: ${err.message}`);
+      leaseInitErr.code = 'LEASE_INIT_FAILED';
+      leaseInitErr.nonPlatform = true;
+      throw leaseInitErr;
+    }
   }
   var resourceKey = 'cdp:' + port;
-  if (leaseManager && typeof leaseManager.withLease === 'function') {
-    return leaseManager.withLease(resourceKey, { purpose: 'sycm.cdp:' + keyword }, function() {
-      return _executeRawExtractSycmData(keyword, options);
-    });
+  if (!leaseManager || typeof leaseManager.withLease !== 'function') {
+    const unavailableErr = new Error('CDP 租约管理器不可用，禁止无租约访问浏览器');
+    unavailableErr.code = 'LEASE_MANAGER_UNAVAILABLE';
+    unavailableErr.nonPlatform = true;
+    throw unavailableErr;
   }
-  return _executeRawExtractSycmData(keyword, options);
+  return leaseManager.withLease(resourceKey, { purpose: 'sycm.cdp:' + keyword }, function() {
+    return _executeRawExtractSycmData(keyword, options);
+  });
 }
 
 async function _executeRawExtractSycmData(keyword, options) {

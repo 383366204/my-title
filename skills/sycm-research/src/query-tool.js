@@ -36,11 +36,18 @@ const queryTool = {
     platforms: ['sycm']
   },
   execute: async (input, ctx) => {
+    ctx = ctx || {};
+    if (ctx.abortSignal?.aborted) {
+      const abortErr = new Error('操作已在启动前取消');
+      abortErr.code = 'OPERATION_ABORTED';
+      throw abortErr;
+    }
     const port = input.port || 9222;
     // 动态绑定实际端口资源键
     const options = {
       ...input,
       leaseManager: ctx.leaseManager,
+      shouldStop: () => ctx.abortSignal?.aborted,
       onProgress: (msg) => {
         if (ctx.logger && typeof ctx.logger.info === 'function') {
           ctx.logger.info(`[sycm.query] ${msg}`);

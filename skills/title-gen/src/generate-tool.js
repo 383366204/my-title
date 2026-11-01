@@ -35,14 +35,15 @@ const defaultSearchProductsAdapter = ({ coreWord, blueOceanWord, modifiers, sema
     ...(webFilters || {})
   });
 
-async function defaultFetchSycmKeywordDataAdapter({ keyword, port, leaseManager }) {
+async function defaultFetchSycmKeywordDataAdapter({ keyword, port, leaseManager, signal }) {
   const result = await extractSycmData(keyword, {
     port: parseInt(port || process.env.SYCM_DEBUG_PORT || '9222', 10),
     maxPages: parseInt(process.env.SYCM_MAX_PAGES || '1', 10),
     mode: process.env.SYCM_TITLE_MODE || 'blue',
     loginMode: process.env.SYCM_LOGIN_MODE || 'manual',
     filterConditions: DEFAULT_FILTER_CONDITIONS,
-    leaseManager
+    leaseManager,
+    shouldStop: () => signal?.aborted
   });
   return result && Array.isArray(result.data) ? result.data : [];
 }
@@ -62,6 +63,13 @@ const generateTool = {
     platforms: ['1688']
   },
   execute: async (input, ctx) => {
+    ctx = ctx || {};
+    if (ctx.abortSignal?.aborted) {
+      const abortErr = new Error('操作已在启动前取消');
+      abortErr.code = 'OPERATION_ABORTED';
+      throw abortErr;
+    }
+
     const pipelineOptions = {
       maxLength: input.length || 60,
       sycmData: input.keyword_data,
@@ -72,9 +80,12 @@ const generateTool = {
       maxPrice: input.max_price || 0,
       limit: input.count || 3,
       count: input.count || 3,
+      signal: ctx.abortSignal,
       leaseManager: ctx.leaseManager,
       searchProducts: defaultSearchProductsAdapter,
-      fetchKeywordData: input.sycm_auto ? (args) => defaultFetchSycmKeywordDataAdapter({ ...args, leaseManager: ctx.leaseManager }) : undefined,
+      fetchKeywordData: input.sycm_auto
+        ? (args) => defaultFetchSycmKeywordDataAdapter({ ...args, leaseManager: ctx.leaseManager, signal: ctx.abortSignal })
+        : undefined,
       onProgress: (msg) => {
         if (ctx.logger && typeof ctx.logger.info === 'function') {
           ctx.logger.info(`[title.generate] ${msg}`);
