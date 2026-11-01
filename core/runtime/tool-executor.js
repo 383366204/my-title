@@ -102,6 +102,8 @@ function createToolExecutor(deps = {}) {
         if (existing.status === 'failed') {
           const prevErr = new Error(existing.error?.message || '操作此前已失败');
           prevErr.code = existing.error?.code || 'OPERATION_FAILED';
+          if (existing.error?.status !== undefined) prevErr.status = existing.error.status;
+          if (existing.error?.statusCode !== undefined) prevErr.statusCode = existing.error.statusCode;
           throw prevErr;
         }
         if (existing.status === 'unknown_interrupted') {
@@ -151,6 +153,8 @@ function createToolExecutor(deps = {}) {
         if (opRecord.status === 'failed') {
           const err = new Error(opRecord.error?.message || '操作此前已失败');
           err.code = opRecord.error?.code || 'OPERATION_FAILED';
+          if (opRecord.error?.status !== undefined) err.status = opRecord.error.status;
+          if (opRecord.error?.statusCode !== undefined) err.statusCode = opRecord.error.statusCode;
           throw err;
         }
         if (opRecord.status === 'unknown_interrupted') {
@@ -208,6 +212,8 @@ function createToolExecutor(deps = {}) {
       opRecord.error = {
         message: err.message,
         code: err.code,
+        status: err.status,
+        statusCode: err.statusCode,
         stack: err.stack
       };
       opRecord.updatedAt = new Date().toISOString();

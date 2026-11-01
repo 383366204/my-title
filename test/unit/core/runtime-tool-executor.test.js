@@ -167,6 +167,45 @@ describe('core/runtime/tool-executor', () => {
     assert.equal(fs.existsSync(leasePath), false);
   });
 
+  it('执行失败时应当持久化并保留 error status 与 statusCode，重放时完整还原', async () => {
+    const registry = createToolRegistry();
+    registry.register({
+      id: 'failing.tool',
+      execute: async () => {
+        const err = new Error('login needed');
+        err.code = 'PLATFORM_ACCESS_BLOCKED';
+        err.status = 'login_required';
+        err.statusCode = 403;
+        throw err;
+      }
+    });
+
+    const opStore = createOperationStore({ operationsDir });
+    const executor = createToolExecutor({ registry, operationStore: opStore });
+
+    // 首次调用抛错
+    await assert.rejects(
+      async () => executor.execute('failing.tool', {}, { requestId: 'req-fail-status-1' }),
+      (err) => {
+        assert.equal(err.code, 'PLATFORM_ACCESS_BLOCKED');
+        assert.equal(err.status, 'login_required');
+        assert.equal(err.statusCode, 403);
+        return true;
+      }
+    );
+
+    // 再次以相同 requestId 重放时，应当完整还原 status 与 statusCode
+    await assert.rejects(
+      async () => executor.execute('failing.tool', {}, { requestId: 'req-fail-status-1' }),
+      (err) => {
+        assert.equal(err.code, 'PLATFORM_ACCESS_BLOCKED');
+        assert.equal(err.status, 'login_required');
+        assert.equal(err.statusCode, 403);
+        return true;
+      }
+    );
+  });
+
   it('遇到中断留下的 unknown_interrupted 记录时，再次请求应当明确抛错拒绝而不是自动重跑', async () => {
     const registry = createToolRegistry();
     let callCount = 0;
