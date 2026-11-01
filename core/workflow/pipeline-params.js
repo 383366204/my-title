@@ -106,6 +106,14 @@ function sanitizeManualWorkflowItems(raw = {}) {
  * @returns {object} 清洗后的参数。
  */
 function sanitizeWorkflowParams(mode, raw = {}) {
+  const params = sanitizeModeParams(mode, raw);
+  if (raw.stopAfterStep) {
+    params.stopAfterStep = String(raw.stopAfterStep).trim();
+  }
+  return params;
+}
+
+function sanitizeModeParams(mode, raw = {}) {
   if (mode === 'daily') {
     const discoveryMode = ['inspiration', 'seed', 'hybrid'].includes(String(raw.discoveryMode || '').trim())
       ? String(raw.discoveryMode).trim()
@@ -562,7 +570,7 @@ function resolveProductionWorkflowLaunch(body = {}) {
   for (const key of ['enabledDimensions', 'customInputs', 'candidateScreening', 'keywordFilter', 'reviewInspirationRoots']) {
     if (Object.prototype.hasOwnProperty.call(body, key)) params[key] = body[key];
   }
-  for (const key of ['keyword', 'keywords', 'roots', 'rootsText', 'sycmMode', 'period', 'compareType', 'sycmRiskProfile', 'sycmMinIntervalMs', 'sycmMaxIntervalMs', 'sycmBatchSize', 'sycmMinBatchCooldownMs', 'sycmMaxBatchCooldownMs', 'sycmMaxRetries', 'mine', 'discoveryMode', 'source', 'rootMode', 'rootLimit', 'rootCooldownDays', 'familyCooldownDays', 'inspirationSycmPages', 'inspirationUseLLM', 'maxObservingSeeds', 'maxObservingPoolSize', 'maxNewSeeds', 'autoReplenishSeeds', 'recordSeedFeedback', 'verify', 'select', 'generate', 'export', 'productsPerKeyword', 'length', 'port', 'pages', 'minBlueRows', 'fallbackHot', 'autoApproveKeywords', 'autoExpandVerify', 'verifyReserve', 'autoAllowReviewKeywords', 'reviewKeywordLimit', 'workRequirement', 'dateMode', 'startDate', 'endDate', 'orderDate', 'storeName', 'sheetType', 'sortMetric', 'productLimit', 'fileName', 'includeRawData', 'includeImages', 'amountMode', 'missingAmountPolicy', 'cartQuantity', 'rowSpan', 'orderNote', 'reviewGroupSize', 'includeSpacerRow', 'uploadId', 'uploadName', 'groups', 'reviewTone', 'reviewLength', 'useAI', 'inputMode', 'manualItems', 'manualItemsText', 'competitorText', 'competitorInputs', 'maxShops', 'hotLimit', 'newLimit', 'detailLimit', 'waitMs', 'compareHistory', 'links', 'rawLinks', 'linksText', 'discoveryBranch', 'imagePriceRatioThreshold', 'similarityThreshold', 'priceRatioThreshold', 'collectLimit', 'minProducts', 'minSourcing', 'minPayment', 'maxCandidateShops', 'searchMaxProducts', 'searchMaxPages', 'evidenceMaxAgeMs', 'allocationMethod', 'taobaoChannel']) {
+  for (const key of ['keyword', 'keywords', 'roots', 'rootsText', 'sycmMode', 'period', 'compareType', 'sycmRiskProfile', 'sycmMinIntervalMs', 'sycmMaxIntervalMs', 'sycmBatchSize', 'sycmMinBatchCooldownMs', 'sycmMaxBatchCooldownMs', 'sycmMaxRetries', 'mine', 'discoveryMode', 'source', 'rootMode', 'rootLimit', 'rootCooldownDays', 'familyCooldownDays', 'inspirationSycmPages', 'inspirationUseLLM', 'maxObservingSeeds', 'maxObservingPoolSize', 'maxNewSeeds', 'autoReplenishSeeds', 'recordSeedFeedback', 'verify', 'select', 'generate', 'export', 'productsPerKeyword', 'length', 'port', 'pages', 'minBlueRows', 'fallbackHot', 'autoApproveKeywords', 'autoExpandVerify', 'verifyReserve', 'autoAllowReviewKeywords', 'reviewKeywordLimit', 'workRequirement', 'dateMode', 'startDate', 'endDate', 'orderDate', 'storeName', 'sheetType', 'sortMetric', 'productLimit', 'fileName', 'includeRawData', 'includeImages', 'amountMode', 'missingAmountPolicy', 'cartQuantity', 'rowSpan', 'orderNote', 'reviewGroupSize', 'includeSpacerRow', 'uploadId', 'uploadName', 'groups', 'reviewTone', 'reviewLength', 'useAI', 'inputMode', 'manualItems', 'manualItemsText', 'competitorText', 'competitorInputs', 'maxShops', 'hotLimit', 'newLimit', 'detailLimit', 'waitMs', 'compareHistory', 'links', 'rawLinks', 'linksText', 'discoveryBranch', 'imagePriceRatioThreshold', 'similarityThreshold', 'priceRatioThreshold', 'collectLimit', 'minProducts', 'minSourcing', 'minPayment', 'maxCandidateShops', 'searchMaxProducts', 'searchMaxPages', 'evidenceMaxAgeMs', 'allocationMethod', 'taobaoChannel', 'stopAfterStep']) {
     if (Object.prototype.hasOwnProperty.call(body, key)) params[key] = body[key];
   }
 

@@ -49,29 +49,22 @@ const {
   clearRuntimeControl,
   appendRuntimeEvent
 } = require('./store');
+const {
+  CANONICAL_WORKFLOW_STEPS,
+  getCanonicalSteps,
+  isValidStepForMode
+} = require('../../../core/workflow/pipeline-definition-common');
 
-const DEFAULT_STEPS = ['mine', 'keywordReview', 'select', 'generate', 'export'];
-const KEYWORD_STEPS = ['start', 'select', 'generate', 'export'];
-const ROOT_KEYWORD_STEPS = ['mine', 'keywordReview', 'select', 'generate', 'export'];
-const MANUAL_STEPS = ['start', 'select', 'verify', 'generate', 'export'];
-const ORDER_SHEET_STEPS = ['collectRank', 'confirmProducts', 'generateSheet'];
-const REVIEW_SHEET_STEPS = ['importSheet', 'generateReviews', 'generateSheet'];
-const COMPETITOR_ANALYSIS_STEPS = ['resolveShops', 'collectCompetitors', 'findCompetitorSources'];
-const PEER_DISCOVERY_STEPS = [
-  'extractSources',
-  'findSimilarProducts',
-  'evaluateShops',
-  'peerReport'
-];
-const PEER_IMAGE_SELECTION_STEPS = [
-  'extractSources',
-  'findSimilarProducts',
-  'collectPeerProducts',
-  'verifyImageSources',
-  'prepareListingDrafts',
-  'reviewPeerListings',
-  'peerProductReport'
-];
+const DEFAULT_STEPS = CANONICAL_WORKFLOW_STEPS.daily.filter(s => s !== 'inspire');
+const KEYWORD_STEPS = CANONICAL_WORKFLOW_STEPS.keyword;
+const ROOT_KEYWORD_STEPS = CANONICAL_WORKFLOW_STEPS['root-keyword'];
+const MANUAL_STEPS = CANONICAL_WORKFLOW_STEPS.manual;
+const ORDER_SHEET_STEPS = CANONICAL_WORKFLOW_STEPS['order-sheet'];
+const REVIEW_SHEET_STEPS = CANONICAL_WORKFLOW_STEPS['review-sheet'];
+const COMPETITOR_ANALYSIS_STEPS = CANONICAL_WORKFLOW_STEPS['competitor-analysis'];
+const PEER_DISCOVERY_STEPS = CANONICAL_WORKFLOW_STEPS['peer-discovery:peer-analysis'];
+const PEER_IMAGE_SELECTION_STEPS = CANONICAL_WORKFLOW_STEPS['peer-discovery:image-selection'];
+
 function getPeerSteps(params = {}) {
   return params?.discoveryBranch === 'image-selection'
     ? PEER_IMAGE_SELECTION_STEPS : PEER_DISCOVERY_STEPS;
@@ -442,7 +435,9 @@ async function runPipelineRuntime(options = {}) {
   const existingRuntime = options.preserveRuntime
     ? readRuntimeState({ dataDir, runId })
     : null;
-  const params = options.params == null ? (existingRuntime?.params || {}) : options.params;
+  const params = options.params == null
+    ? (existingRuntime?.params || {})
+    : { ...options.params, ...(options.stopAfterStep ? { stopAfterStep: options.stopAfterStep } : {}) };
   const mode = options.mode || existingRuntime?.mode || 'daily';
   const configuredSteps = options.steps || existingRuntime?.steps || (
     mode === 'peer-discovery'
@@ -471,6 +466,13 @@ async function runPipelineRuntime(options = {}) {
   if (!steps.includes(startStep)) throw new Error(`当前模式不包含步骤 ${startStep}，请新建运行。`);
   const startIndex = Math.max(0, steps.indexOf(startStep));
   const stepsToRun = steps.slice(startIndex);
+  const stopAfterStep = options.stopAfterStep || params.stopAfterStep || null;
+  if (stopAfterStep && !steps.includes(stopAfterStep) && stopAfterStep !== 'end') {
+    throw new Error(`当前模式不包含指定停止步骤 ${stopAfterStep}，请新建运行。`);
+  }
+  if (stopAfterStep && stopAfterStep !== 'end' && steps.indexOf(stopAfterStep) < startIndex) {
+    throw new Error(`指定的停止步骤 ${stopAfterStep} 已在当前起始步骤 ${startStep} 之前。`);
+  }
 
   if (existingRuntime) {
     const initialControl = readRuntimeControl({ dataDir, runId });
@@ -524,6 +526,7 @@ async function runPipelineRuntime(options = {}) {
   });
 
   let lastResult = { runId, runDir, status: 'running' };
+  let reachedStopAfterStep = false;
   try {
     for (const step of stepsToRun) {
       updateRuntimeState({
@@ -656,15 +659,25 @@ async function runPipelineRuntime(options = {}) {
       }
 
       if (lastResult.status && STOP_STATUSES.has(lastResult.status)) break;
+
+      if (stopAfterStep && step === stopAfterStep) {
+        reachedStopAfterStep = true;
+        break;
+      }
     }
 
     const pipelineStatus = lastResult.status || 'completed';
     const runtimeStatus = runtimeStatusForPipelineStatus(pipelineStatus);
+    const isStoppedAfterStep = reachedStopAfterStep && runtimeStatus === 'completed';
+    const nextStep = isStoppedAfterStep ? nextStepAfter(steps, stopAfterStep) : null;
     updateRuntimeState({
       dataDir,
       runId,
       patch: {
         status: runtimeStatus,
+        ...(isStoppedAfterStep && stopAfterStep !== steps[steps.length - 1]
+          ? { activeStep: nextStep } : {}),
+        stoppedAfterStep: isStoppedAfterStep ? stopAfterStep : undefined,
         platform: lastResult.platform,
         manualAction: lastResult.manualAction,
         blocker: lastResult.blocker,
@@ -679,10 +692,18 @@ async function runPipelineRuntime(options = {}) {
       event: {
         event: 'status',
         status: runtimeStatus,
-        pipelineStatus
+        pipelineStatus,
+        ...(isStoppedAfterStep ? { stoppedAfterStep: stopAfterStep } : {})
       }
     });
-    return { ...lastResult, runId, runDir, status: pipelineStatus, runtimeStatus };
+    return {
+      ...lastResult,
+      runId,
+      runDir,
+      status: pipelineStatus,
+      runtimeStatus,
+      ...(isStoppedAfterStep ? { stoppedAfterStep: stopAfterStep } : {})
+    };
   } catch (error) {
     updateRuntimeState({
       dataDir,

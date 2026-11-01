@@ -8,6 +8,7 @@ const { getRun: getPipelineRun } = require('../../skills/pipeline-flow/src/run-s
 const { readWorkflowNodeArtifact } = require('./pipeline-artifacts');
 const { getKeywordRecollectionRoots } = require('../server/keyword-filter-routes');
 const { saveInspirationRoots } = require('../../skills/pipeline-flow/src/inspiration-root-review');
+const { isValidStepForMode } = require('./pipeline-definition-common');
 
 const LAUNCH_VALIDATION_PATTERN = /未知 workflow mode|未知 workflow template|工作流定义|工作流必须匹配|关键词不能为空|词根不能为空|1688 商品链接|同行链接|商品缺少关键词|商品重复/;
 
@@ -111,6 +112,7 @@ function createWorkflowControlService(dependencies = {}) {
     runPipelineStep,
     originalLog = () => {},
     originalError = () => {},
+    isValidStepForMode: defaultIsValidStepForMode = isValidStepForMode,
     dataDir
   } = dependencies;
 
@@ -138,8 +140,20 @@ function createWorkflowControlService(dependencies = {}) {
 
     try {
       const launch = resolveProductionWorkflowLaunch(body || {});
+      const stopAfterStep = body.stopAfterStep || body.params?.stopAfterStep || options.stopAfterStep || launch.params?.stopAfterStep || null;
+      if (stopAfterStep && !defaultIsValidStepForMode(launch.mode, stopAfterStep, { discoveryBranch: launch.params?.discoveryBranch })) {
+        workbench.release(runState);
+        return {
+          httpStatus: 400,
+          body: {
+            ok: false,
+            error: `指定的 stopAfterStep '${stopAfterStep}' 不是 ${launch.mode} 模式的有效步骤。`
+          }
+        };
+      }
       const resolvedParams = await resolveManualShareParams(launch.mode, launch.params);
       const params = sanitizeWorkflowParams(launch.mode, resolvedParams);
+      if (stopAfterStep) params.stopAfterStep = stopAfterStep;
       const runId = createRunId();
       const definition = resolveProductionWorkflowDefinition(body || {}, launch);
       writeWorkflowDefinition({ runId, definition });
@@ -147,7 +161,8 @@ function createWorkflowControlService(dependencies = {}) {
       const promise = workbench.runReserved(runState, () => getPipelineRuntimeRunner()({
         runId,
         mode: launch.mode,
-        params
+        params,
+        ...(stopAfterStep ? { stopAfterStep } : {})
       }));
 
       promise.then((result) => {
@@ -247,7 +262,7 @@ function createWorkflowControlService(dependencies = {}) {
    * @param {'workflow'|'pipeline'} [options.source='workflow'] 调用来源。
    * @returns {Promise<{httpStatus:number, body:object}>}
    */
-  async function resumeRun({ runId, validateRunId = false, allowLegacyFallback = false, source = 'workflow' }) {
+  async function resumeRun({ runId, validateRunId = false, allowLegacyFallback = false, source = 'workflow', stopAfterStep = null }) {
     if (validateRunId && !isValidWorkflowRunIdParam(runId)) {
       return { httpStatus: 400, body: { ok: false, error: '无效的运行 ID。' } };
     }
@@ -276,7 +291,8 @@ function createWorkflowControlService(dependencies = {}) {
           params: runtime.params || {},
           preserveRuntime: true,
           resumeFromStep: runtime.activeStep,
-          steps: runtime.steps
+          steps: runtime.steps,
+          ...(stopAfterStep ? { stopAfterStep } : {})
         }));
         promise.then((result) => {
           originalLog(`[${logLabel}] runtime 完成，runId=${result.runId}, status=${result.runtimeStatus || result.status}`);
