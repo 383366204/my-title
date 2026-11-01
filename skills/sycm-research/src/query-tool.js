@@ -18,7 +18,7 @@ const inputSchema = z.object({
     compareType: z.enum(['cycle', 'yearSync']).optional(),
     timePeriod: z.enum(['7d', '30d', 'day', 'week', 'month']).optional()
   }).optional(),
-  filterConditions: z.record(z.any()).optional()
+  filterConditions: z.record(z.string(), z.any()).optional()
 });
 
 /** @type {import('../../../core/runtime/contracts').ToolDefinition} */

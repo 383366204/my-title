@@ -233,4 +233,23 @@ describe('core/runtime/tool-executor', () => {
 
     blocker.release();
   });
+
+  it('不同但仅有特殊符号差异的 requestId 不应产生文件命名冲突', async () => {
+    const registry = createToolRegistry();
+    registry.register({
+      id: 'echo.test',
+      execute: async (input) => input
+    });
+
+    const opStore = createOperationStore({ operationsDir });
+    const executor = createToolExecutor({ registry, operationStore: opStore });
+
+    const res1 = await executor.execute('echo.test', { val: 1 }, { requestId: 'order:1' });
+    const res2 = await executor.execute('echo.test', { val: 2 }, { requestId: 'order.1' });
+
+    assert.deepEqual(res1, { val: 1 });
+    assert.deepEqual(res2, { val: 2 });
+    assert.equal(opStore.get('order:1').result.val, 1);
+    assert.equal(opStore.get('order.1').result.val, 2);
+  });
 });

@@ -61,9 +61,17 @@ describe('core/runtime/atomic-tools', () => {
     assert.deepEqual(queryTool.policy.resourceKeys, []);
   });
 
+  it('sycm.query 工具入参 Schema 应当支持可选的 filterConditions 字典校验', () => {
+    const parsed = queryTool.inputSchema.safeParse({
+      keyword: '纯银项链',
+      filterConditions: { minPv: 100, customTag: 'test' }
+    });
+    assert.equal(parsed.success, true);
+    assert.deepEqual(parsed.data.filterConditions, { minPv: 100, customTag: 'test' });
+  });
+
   it('title.generate 工具应当正确映射 maxLength 与 sycmData 字段', async () => {
     const originalExecute = generateTool.execute;
-    let receivedOptions = null;
 
     try {
       generateTool.execute = async (input, ctx) => {
@@ -72,7 +80,8 @@ describe('core/runtime/atomic-tools', () => {
           ok: true,
           keyword: input.keyword,
           maxLength: input.length,
-          sycmData: input.keyword_data
+          sycmData: input.keyword_data,
+          limit: input.count || 3
         };
       };
 
@@ -82,13 +91,15 @@ describe('core/runtime/atomic-tools', () => {
       const res = await executor.execute('title.generate', {
         keyword: '纯银项链',
         length: 50,
-        keyword_data: 'tab-separated-data'
+        keyword_data: 'tab-separated-data',
+        count: 5
       });
 
       assert.equal(res.ok, true);
       assert.equal(res.keyword, '纯银项链');
       assert.equal(res.maxLength, 50);
       assert.equal(res.sycmData, 'tab-separated-data');
+      assert.equal(res.limit, 5);
     } finally {
       generateTool.execute = originalExecute;
     }

@@ -70,6 +70,7 @@ const generateTool = {
       useImageSearch: Boolean(input.use_image_search),
       minPrice: input.min_price || 0,
       maxPrice: input.max_price || 0,
+      limit: input.count || 3,
       count: input.count || 3,
       leaseManager: ctx.leaseManager,
       searchProducts: defaultSearchProductsAdapter,

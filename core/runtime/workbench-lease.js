@@ -217,6 +217,34 @@ function createWorkbenchLeaseManager(options = {}) {
             }
           }
           // 注意：如果原进程依然存活 (alive === true)，即使心跳超时也绝不抢占（由上层决定排队等待）
+        } else {
+          // 文件存在但无法解析为有效 JSON（可能因上个进程在 openSync 后未来得及写入即被杀死，或内容损坏）
+          try {
+            const stat = fs.statSync(leasePath);
+            if (Date.now() - stat.mtimeMs > defaultTtlMs) {
+              const reclaimLockPath = `${leasePath}.reclaim`;
+              let reclaimFd = null;
+              try {
+                reclaimFd = fs.openSync(reclaimLockPath, 'wx');
+                const recheck = readLeaseFile(leasePath);
+                if (recheck === null && fs.existsSync(leasePath)) {
+                  const recheckStat = fs.statSync(leasePath);
+                  if (Date.now() - recheckStat.mtimeMs > defaultTtlMs) {
+                    fs.unlinkSync(leasePath);
+                  }
+                }
+              } catch {
+                // 忽略并发竞争
+              } finally {
+                if (reclaimFd !== null) {
+                  try { fs.closeSync(reclaimFd); } catch {}
+                  try { fs.unlinkSync(reclaimLockPath); } catch {}
+                }
+              }
+            }
+          } catch {
+            // stat 失败（如文件刚被删除）忽略
+          }
         }
         return null;
       }

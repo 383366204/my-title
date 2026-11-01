@@ -86,6 +86,25 @@ describe('core/runtime/workbench-lease', () => {
     assert.equal(fs.existsSync(leasePath), false);
   });
 
+  it('损坏或空的陈旧租约文件 (mtime 超时) 应当被安全回收接管', async () => {
+    const manager = createWorkbenchLeaseManager({ runtimeDir: TEST_RUNTIME_DIR, ttlMs: 100 });
+    const resourceKey = 'cdp:9224b';
+    const leasePath = manager.getLeasePath(resourceKey);
+
+    // 写入一个损坏的非 JSON 内容，并将 mtime 设置为 500ms 前（超过 ttlMs 100ms）
+    fs.writeFileSync(leasePath, '{corrupted-json...', 'utf8');
+    const pastTime = (Date.now() - 500) / 1000;
+    fs.utimesSync(leasePath, pastTime, pastTime);
+
+    // 尝试获取该资源，应当识别出损坏且超时，并安全回收接管
+    const newLease = await manager.acquire(resourceKey, { timeoutMs: 1000 });
+    assert.equal(newLease.pid, process.pid);
+    assert.ok(fs.existsSync(leasePath));
+
+    newLease.release();
+    assert.equal(fs.existsSync(leasePath), false);
+  });
+
   it('活进程锁未释放时，新请求超时应当抛出 LeaseBusyError 且禁止强抢', async () => {
     const manager = createWorkbenchLeaseManager({ runtimeDir: TEST_RUNTIME_DIR });
     const resourceKey = 'cdp:9225';

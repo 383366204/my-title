@@ -7,6 +7,25 @@
 'use strict';
 
 /**
+ * 将领域错误状态安全转换为标准数值型 HTTP 状态码
+ * @param {any} err
+ * @returns {number}
+ */
+function resolveNumericHttpStatus(err) {
+  if (typeof err?.status === 'number' && err.status >= 100 && err.status < 600) {
+    return err.status;
+  }
+  if (typeof err?.statusCode === 'number' && err.statusCode >= 100 && err.statusCode < 600) {
+    return err.statusCode;
+  }
+  if (err?.code === 'IDEMPOTENCY_CONFLICT' || err?.code === 'OPERATION_INTERRUPTED') return 409;
+  if (err?.code === 'TOOL_NOT_FOUND') return 404;
+  if (err?.code === 'INVALID_ARGUMENT') return 400;
+  if (err?.code === 'LEASE_BUSY' || err?.code === 'PLATFORM_ACCESS_BLOCKED') return 429;
+  return 500;
+}
+
+/**
  * 注册运行时路由
  * @param {import('express').Express} app
  * @param {Object} deps
@@ -46,12 +65,13 @@ function registerRuntimeRoutes(app, deps = {}) {
         result
       });
     } catch (err) {
-      const status = err.status || (err.code === 'IDEMPOTENCY_CONFLICT' ? 409 : err.code === 'TOOL_NOT_FOUND' ? 404 : err.code === 'INVALID_ARGUMENT' ? 400 : 500);
-      res.status(status).json({
+      const httpStatus = resolveNumericHttpStatus(err);
+      res.status(httpStatus).json({
         ok: false,
         error: err.message,
         code: err.code || 'TOOL_EXECUTION_FAILED',
-        status
+        domainStatus: typeof err.status === 'string' ? err.status : undefined,
+        status: httpStatus
       });
     }
   });

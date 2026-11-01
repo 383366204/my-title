@@ -53,8 +53,10 @@ function createOperationStore(options = {}) {
   fs.mkdirSync(operationsDir, { recursive: true });
 
   function getFilePath(requestId) {
-    const safeKey = String(requestId).replace(/[^a-zA-Z0-9_-]/g, '_');
-    return path.join(operationsDir, `${safeKey}.json`);
+    const raw = String(requestId);
+    const safeKey = raw.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 48);
+    const hash = crypto.createHash('sha256').update(raw).digest('hex').slice(0, 16);
+    return path.join(operationsDir, `${safeKey}_${hash}.json`);
   }
 
   /**
