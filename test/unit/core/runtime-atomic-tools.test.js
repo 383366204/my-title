@@ -104,6 +104,34 @@ describe('core/runtime/atomic-tools', () => {
     assert.equal(res.keywords[0].searchPopularity, 888);
   });
 
+  it('defaultVerifyKeywordsAdapter 应当使用 normalizeSycmMetrics 正确解析区间和百分比指标', async () => {
+    const mockExtractSycmData = async () => ({
+      data: [{
+        keyword: '项链女',
+        searchPopularity: '100 ~ 200',
+        clickRate: '12%',
+        conversionRate: '3%',
+        demandSupplyRatio: '2.5',
+        tmallClickShare: '8%'
+      }]
+    });
+
+    const { defaultVerifyKeywordsAdapter } = require('../../../skills/title-gen/src/suggest-tool');
+    const res = await defaultVerifyKeywordsAdapter(['项链'], {
+      maxCandidates: 5,
+      extractSycmDataFn: mockExtractSycmData
+    });
+
+    assert.equal(res.ok, true);
+    assert.equal(res.keywords.length, 1);
+    assert.equal(res.keywords[0].keyword, '项链女');
+    assert.equal(res.keywords[0].searchPopularity, 100);
+    assert.equal(res.keywords[0].clickRate, 0.12);
+    assert.equal(res.keywords[0].conversionRate, 0.03);
+    assert.equal(res.keywords[0].demandSupplyRatio, 2.5);
+    assert.equal(res.keywords[0].tmallClickShare, 0.08);
+  });
+
   it('sycm.query 工具声明中不应有静态 cdp:9222 租约，避免与底层动态租约冲突双重获取', () => {
     assert.deepEqual(queryTool.policy.resourceKeys, []);
   });

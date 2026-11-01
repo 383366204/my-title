@@ -9,6 +9,7 @@
 const { z } = require('zod');
 const { suggestAndVerify, VALID_STRATEGIES } = require('./keyword-suggester');
 const { extractSycmData } = require('../../sycm-research/src/sycm-cdp-extractor');
+const { normalizeSycmMetrics } = require('../../sycm-research/src/metric-parser');
 
 /**
  * 默认生意参谋验证适配器
@@ -17,7 +18,8 @@ const { extractSycmData } = require('../../sycm-research/src/sycm-cdp-extractor'
  * @returns {Promise<Object>}
  */
 async function defaultVerifyKeywordsAdapter(candidates, options = {}) {
-  const { port = 9222, maxCandidates = 5, onProgress = () => {}, leaseManager } = options;
+  const { port = 9222, maxCandidates = 5, onProgress = () => {}, leaseManager, extractSycmDataFn } = options;
+  const extractor = typeof extractSycmDataFn === 'function' ? extractSycmDataFn : extractSycmData;
   const keywordMap = new Map();
   const errors = [];
   let verified = 0;
@@ -27,7 +29,7 @@ async function defaultVerifyKeywordsAdapter(candidates, options = {}) {
     const candidate = candidates[i];
     onProgress(`正在验证关键词 (${i + 1}/${candidates.length}): ${candidate}`);
     try {
-      const result = await extractSycmData(candidate, {
+      const result = await extractor(candidate, {
         mode: 'hot',
         port,
         leaseManager,
@@ -41,16 +43,17 @@ async function defaultVerifyKeywordsAdapter(candidates, options = {}) {
 
       verified++;
       for (const item of result.data) {
+        const normalized = normalizeSycmMetrics(item);
         const kw = item.keyword || candidate;
-        const searchPopularity = Number(item.searchPopularity) || 0;
+        const searchPopularity = Number(normalized.searchPopularity) || 0;
         if (searchPopularity >= 20 && !keywordMap.has(kw)) {
           keywordMap.set(kw, {
             keyword: kw,
             searchPopularity,
-            clickRate: Number(item.clickRate) || 0,
-            conversionRate: Number(item.conversionRate) || 0,
-            demandSupplyRatio: Number(item.demandSupplyRatio) || 0,
-            tmallClickShare: Number(item.tmallClickShare) || 0
+            clickRate: Number(normalized.clickRate) || 0,
+            conversionRate: Number(normalized.conversionRate) || 0,
+            demandSupplyRatio: Number(normalized.demandSupplyRatio) || 0,
+            tmallClickShare: Number(normalized.tmallClickShare) || 0
           });
         }
       }
@@ -98,7 +101,11 @@ const suggestTool = {
   execute: async (input, ctx) => {
     ctx = ctx || {};
     const verifyFn = input.sycm_verify
-      ? (cands, opts) => (typeof ctx.verifyKeywords === 'function' ? ctx.verifyKeywords : defaultVerifyKeywordsAdapter)(cands, { ...opts, leaseManager: ctx.leaseManager })
+      ? (cands, opts) => (typeof ctx.verifyKeywords === 'function' ? ctx.verifyKeywords : defaultVerifyKeywordsAdapter)(cands, {
+          ...opts,
+          extractSycmDataFn: ctx.extractSycmData,
+          leaseManager: ctx.leaseManager
+        })
       : undefined;
 
     return await suggestAndVerify({
@@ -120,5 +127,6 @@ const suggestTool = {
 };
 
 module.exports = {
-  suggestTool
+  suggestTool,
+  defaultVerifyKeywordsAdapter
 };
