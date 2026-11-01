@@ -8,6 +8,70 @@
 
 const { z } = require('zod');
 const { suggestAndVerify, VALID_STRATEGIES } = require('./keyword-suggester');
+const { extractSycmData } = require('../../sycm-research/src/sycm-cdp-extractor');
+
+/**
+ * 默认生意参谋验证适配器
+ * @param {string[]} candidates
+ * @param {Object} options
+ * @returns {Promise<Object>}
+ */
+async function defaultVerifyKeywordsAdapter(candidates, options = {}) {
+  const { port = 9222, maxCandidates = 5, onProgress = () => {}, leaseManager } = options;
+  const keywordMap = new Map();
+  const errors = [];
+  let verified = 0;
+  let failed = 0;
+
+  for (let i = 0; i < candidates.length; i++) {
+    const candidate = candidates[i];
+    onProgress(`正在验证关键词 (${i + 1}/${candidates.length}): ${candidate}`);
+    try {
+      const result = await extractSycmData(candidate, {
+        mode: 'hot',
+        port,
+        leaseManager,
+        onProgress: (msg) => onProgress(`[SYCM ${candidate}] ${msg}`)
+      });
+
+      if (!result || !Array.isArray(result.data) || result.data.length === 0) {
+        failed++;
+        continue;
+      }
+
+      verified++;
+      for (const item of result.data) {
+        const kw = item.keyword || candidate;
+        const searchPopularity = Number(item.searchPopularity) || 0;
+        if (searchPopularity >= 20 && !keywordMap.has(kw)) {
+          keywordMap.set(kw, {
+            keyword: kw,
+            searchPopularity,
+            clickRate: Number(item.clickRate) || 0,
+            conversionRate: Number(item.conversionRate) || 0,
+            demandSupplyRatio: Number(item.demandSupplyRatio) || 0,
+            tmallClickShare: Number(item.tmallClickShare) || 0
+          });
+        }
+      }
+    } catch (err) {
+      failed++;
+      errors.push({ keyword: candidate, error: err.message });
+    }
+  }
+
+  const sorted = Array.from(keywordMap.values())
+    .sort((a, b) => b.searchPopularity - a.searchPopularity)
+    .slice(0, maxCandidates);
+
+  return {
+    ok: true,
+    keywords: sorted,
+    verified,
+    failed,
+    errors
+  };
+}
 
 const inputSchema = z.object({
   strategy: z.enum(['crowd', 'scene', 'season', 'problem', 'industry', 'holiday', 'gift', 'cross', 'guochao', 'trend', 'niche', 'emotion', 'price']).describe('选词策略'),
@@ -32,12 +96,17 @@ const suggestTool = {
     platforms: []
   },
   execute: async (input, ctx) => {
+    const verifyFn = input.sycm_verify
+      ? (cands, opts) => defaultVerifyKeywordsAdapter(cands, { ...opts, leaseManager: ctx.leaseManager })
+      : undefined;
+
     return await suggestAndVerify({
       strategy: input.strategy,
       input: input.input || '',
       maxCandidates: input.max_candidates || 5,
       port: input.port || 9222,
       skipSycm: !input.sycm_verify,
+      verifyFn,
       leaseManager: ctx.leaseManager,
       onProgress: (msg) => {
         if (ctx.logger && typeof ctx.logger.info === 'function') {

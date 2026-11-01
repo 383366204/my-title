@@ -1,4 +1,6 @@
 'use strict';
+require('dotenv').config();
+
 const { createRuntimeView } = require('../core/server/runtime-view');
 const { createSycmAccessRecovery } = require('../core/server/sycm-access-recovery');
 
@@ -32,7 +34,6 @@ const fs = require('fs');
 const net = require('net');
 const { spawn } = require('child_process');
 const { AsyncLocalStorage } = require('async_hooks');
-require('dotenv').config();
 
 const {
   listSeeds,
