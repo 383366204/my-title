@@ -96,9 +96,41 @@ function createOperationStore(options = {}) {
     fs.renameSync(tmpPath, filePath);
   }
 
+  /**
+   * 原子受理操作请求 (利用 open 'wx' 排他创建，杜绝多进程并发提交相同 requestId 时的穿透竞争)
+   * @param {string} requestId
+   * @param {Object} initialRecord
+   * @returns {{ claimed: boolean, record: Object }}
+   */
+  function claimOrGet(requestId, initialRecord) {
+    if (!requestId) {
+      return { claimed: true, record: initialRecord };
+    }
+    const filePath = getFilePath(requestId);
+    let fd = null;
+    try {
+      fd = fs.openSync(filePath, 'wx');
+      fs.writeFileSync(fd, JSON.stringify(initialRecord, null, 2), 'utf8');
+      fs.fsyncSync(fd);
+      fs.closeSync(fd);
+      fd = null;
+      return { claimed: true, record: initialRecord };
+    } catch (err) {
+      if (fd !== null) {
+        try { fs.closeSync(fd); } catch {}
+      }
+      if (err.code === 'EEXIST') {
+        const existing = get(requestId);
+        return { claimed: false, record: existing || initialRecord };
+      }
+      throw err;
+    }
+  }
+
   return {
     get,
     save,
+    claimOrGet,
     getFilePath,
     computeInputDigest
   };

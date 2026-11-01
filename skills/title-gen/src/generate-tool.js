@@ -8,6 +8,8 @@
 
 const { z } = require('zod');
 const { generateTitlePipeline } = require('./pipeline');
+const { searchAll } = require('../../alibaba1688/src/search-1688');
+const { extractSycmData, DEFAULT_FILTER_CONDITIONS } = require('../../sycm-research/src/sycm-cdp-extractor');
 
 const inputSchema = z.object({
   keyword: z.string().min(1, 'keyword 不能为空').describe('商品关键词'),
@@ -20,6 +22,30 @@ const inputSchema = z.object({
   max_price: z.number().optional().default(0).describe('最高价格过滤'),
   count: z.number().int().optional().default(3).describe('生成标题候选数量')
 });
+
+const defaultSearchProductsAdapter = ({ coreWord, blueOceanWord, modifiers, semanticGroups, searchMode, webFilters, port, maxProducts, maxPages, maxResolveLinks, scrollLoad, scrollSteps }) =>
+  searchAll(coreWord, blueOceanWord, modifiers, semanticGroups, {
+    mode: searchMode || 'api',
+    port,
+    maxProducts,
+    maxPages,
+    maxResolveLinks,
+    scrollLoad,
+    scrollSteps,
+    ...(webFilters || {})
+  });
+
+async function defaultFetchSycmKeywordDataAdapter({ keyword, port, leaseManager }) {
+  const result = await extractSycmData(keyword, {
+    port: parseInt(port || process.env.SYCM_DEBUG_PORT || '9222', 10),
+    maxPages: parseInt(process.env.SYCM_MAX_PAGES || '1', 10),
+    mode: process.env.SYCM_TITLE_MODE || 'blue',
+    loginMode: process.env.SYCM_LOGIN_MODE || 'manual',
+    filterConditions: DEFAULT_FILTER_CONDITIONS,
+    leaseManager
+  });
+  return result && Array.isArray(result.data) ? result.data : [];
+}
 
 /** @type {import('../../../core/runtime/contracts').ToolDefinition} */
 const generateTool = {
@@ -37,15 +63,17 @@ const generateTool = {
   },
   execute: async (input, ctx) => {
     const pipelineOptions = {
-      length: input.length || 60,
-      keywordData: input.keyword_data,
-      sycmAuto: input.sycm_auto,
-      research: input.research || false,
-      useImageSearch: input.use_image_search || false,
+      maxLength: input.length || 60,
+      sycmData: input.keyword_data,
+      sycmAuto: Boolean(input.sycm_auto),
+      research: Boolean(input.research),
+      useImageSearch: Boolean(input.use_image_search),
       minPrice: input.min_price || 0,
       maxPrice: input.max_price || 0,
       count: input.count || 3,
       leaseManager: ctx.leaseManager,
+      searchProducts: defaultSearchProductsAdapter,
+      fetchKeywordData: input.sycm_auto ? (args) => defaultFetchSycmKeywordDataAdapter({ ...args, leaseManager: ctx.leaseManager }) : undefined,
       onProgress: (msg) => {
         if (ctx.logger && typeof ctx.logger.info === 'function') {
           ctx.logger.info(`[title.generate] ${msg}`);
@@ -58,5 +86,7 @@ const generateTool = {
 };
 
 module.exports = {
-  generateTool
+  generateTool,
+  defaultSearchProductsAdapter,
+  defaultFetchSycmKeywordDataAdapter
 };

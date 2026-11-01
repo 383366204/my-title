@@ -88,7 +88,7 @@ function createToolExecutor(deps = {}) {
     // 1. 参数校验与归一化
     const normalizedInput = validateInput(tool, rawInput);
 
-    // 2. 幂等性受理
+    // 2. 幂等性受理与原子声明 (基于 claimOrGet 排他创建)
     const requestId = options.requestId || (crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex'));
     const caller = options.caller || 'unknown';
     const inputDigest = operationStore.computeInputDigest(tool.id, normalizedInput);
@@ -103,6 +103,12 @@ function createToolExecutor(deps = {}) {
           const prevErr = new Error(existing.error?.message || '操作此前已失败');
           prevErr.code = existing.error?.code || 'OPERATION_FAILED';
           throw prevErr;
+        }
+        if (existing.status === 'unknown_interrupted') {
+          const interruptedErr = new Error(existing.error?.message || '操作因原进程退出已中断，状态未知，禁止自动重跑');
+          interruptedErr.code = 'OPERATION_INTERRUPTED';
+          interruptedErr.status = 409;
+          throw interruptedErr;
         }
         if (existing.status === 'running') {
           return {
@@ -123,7 +129,7 @@ function createToolExecutor(deps = {}) {
 
     const operationId = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex');
     const now = new Date().toISOString();
-    const opRecord = {
+    const candidateRecord = {
       requestId,
       operationId,
       toolId: tool.id,
@@ -136,7 +142,38 @@ function createToolExecutor(deps = {}) {
       createdAt: now,
       updatedAt: now
     };
-    operationStore.save(opRecord);
+
+    // 原子声明请求，防止并发离线客户端同时写入
+    const { claimed, record: opRecord } = operationStore.claimOrGet(requestId, candidateRecord);
+    if (!claimed) {
+      if (opRecord.inputDigest === inputDigest) {
+        if (opRecord.status === 'completed') return opRecord.result;
+        if (opRecord.status === 'failed') {
+          const err = new Error(opRecord.error?.message || '操作此前已失败');
+          err.code = opRecord.error?.code || 'OPERATION_FAILED';
+          throw err;
+        }
+        if (opRecord.status === 'unknown_interrupted') {
+          const err = new Error(opRecord.error?.message || '操作因原进程退出已中断，状态未知，禁止自动重跑');
+          err.code = 'OPERATION_INTERRUPTED';
+          err.status = 409;
+          throw err;
+        }
+        if (opRecord.status === 'running') {
+          return {
+            operationId: opRecord.operationId,
+            status: 'running',
+            duplicate: true,
+            message: '操作正在执行中'
+          };
+        }
+      } else {
+        const conflictErr = new Error(`请求 ID 冲突: 相同 requestId [${requestId}] 提交了不同的参数摘要`);
+        conflictErr.code = 'IDEMPOTENCY_CONFLICT';
+        conflictErr.status = 409;
+        throw conflictErr;
+      }
+    }
 
     // 3. 构建执行上下文
     const ctx = {
@@ -148,40 +185,35 @@ function createToolExecutor(deps = {}) {
       leaseManager
     };
 
-    // 4. 执行函数（若声明了静态 resourceKeys，统一在外层持租约）
-    const runBusinessLogic = async () => {
-      try {
-        const result = await tool.execute(normalizedInput, ctx);
-        opRecord.status = 'completed';
-        opRecord.result = result;
-        opRecord.updatedAt = new Date().toISOString();
-        operationStore.save(opRecord);
-        return result;
-      } catch (err) {
-        opRecord.status = 'failed';
-        opRecord.error = {
-          message: err.message,
-          code: err.code,
-          stack: err.stack
-        };
-        opRecord.updatedAt = new Date().toISOString();
-        operationStore.save(opRecord);
-        throw err;
-      }
-    };
-
+    // 4. 执行函数（包含物理资源租约获取生命周期，并在异常时确保 opRecord 落盘）
     const declaredResourceKeys = tool.policy?.resourceKeys || [];
+    let runner = () => tool.execute(normalizedInput, ctx);
     if (declaredResourceKeys.length > 0) {
-      // 串行获取声明的物理资源锁（如 cdp:9222）
-      let runner = runBusinessLogic;
+      const leaseTimeoutMs = options.acquireTimeoutMs;
       for (const resKey of declaredResourceKeys) {
         const currentRunner = runner;
-        runner = () => leaseManager.withLease(resKey, { purpose: tool.id }, currentRunner);
+        runner = () => leaseManager.withLease(resKey, { purpose: tool.id, timeoutMs: leaseTimeoutMs }, currentRunner);
       }
-      return await runner();
     }
 
-    return await runBusinessLogic();
+    try {
+      const result = await runner();
+      opRecord.status = 'completed';
+      opRecord.result = result;
+      opRecord.updatedAt = new Date().toISOString();
+      operationStore.save(opRecord);
+      return result;
+    } catch (err) {
+      opRecord.status = 'failed';
+      opRecord.error = {
+        message: err.message,
+        code: err.code,
+        stack: err.stack
+      };
+      opRecord.updatedAt = new Date().toISOString();
+      operationStore.save(opRecord);
+      throw err;
+    }
   }
 
   return {

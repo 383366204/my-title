@@ -32,7 +32,10 @@ const suggestTool = {
     platforms: []
   },
   execute: async (input, ctx) => {
-    const options = {
+    return await suggestAndVerify({
+      strategy: input.strategy,
+      input: input.input || '',
+      maxCandidates: input.max_candidates || 5,
       port: input.port || 9222,
       skipSycm: !input.sycm_verify,
       leaseManager: ctx.leaseManager,
@@ -41,14 +44,7 @@ const suggestTool = {
           ctx.logger.info(`[keyword.suggest] ${msg}`);
         }
       }
-    };
-
-    return await suggestAndVerify(
-      input.strategy,
-      input.input || '',
-      input.max_candidates || 5,
-      options
-    );
+    });
   }
 };
 

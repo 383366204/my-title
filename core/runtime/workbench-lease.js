@@ -197,11 +197,23 @@ function createWorkbenchLeaseManager(options = {}) {
         if (existing) {
           const alive = isProcessAlive(existing.pid);
           if (!alive) {
-            // 确认原进程已经死亡 (ESRCH)，属于僵尸锁，允许安全回收清理
+            // 确认原进程已经死亡 (ESRCH)，属于僵尸锁，通过互斥回收锁防止多个等待者竞态删除新锁
+            const reclaimLockPath = `${leasePath}.reclaim`;
+            let reclaimFd = null;
             try {
-              fs.unlinkSync(leasePath);
+              reclaimFd = fs.openSync(reclaimLockPath, 'wx');
+              // 获取到回收锁后，再次核验 leasePath 的持有者 token 依然等于刚才确认死亡的 token
+              const recheck = readLeaseFile(leasePath);
+              if (recheck && recheck.ownerToken === existing.ownerToken && !isProcessAlive(recheck.pid)) {
+                fs.unlinkSync(leasePath);
+              }
             } catch {
-              // 忽略其他并发回收者的竞态 unlink 失败
+              // 忽略其他并发回收者的处理
+            } finally {
+              if (reclaimFd !== null) {
+                try { fs.closeSync(reclaimFd); } catch {}
+                try { fs.unlinkSync(reclaimLockPath); } catch {}
+              }
             }
           }
           // 注意：如果原进程依然存活 (alive === true)，即使心跳超时也绝不抢占（由上层决定排队等待）

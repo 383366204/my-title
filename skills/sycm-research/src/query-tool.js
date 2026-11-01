@@ -32,7 +32,7 @@ const queryTool = {
     risk: 'medium',
     approval: 'never',
     sideEffect: 'read',
-    resourceKeys: ['cdp:9222'],
+    resourceKeys: [], // 由底层 extractor 根据实际选定的 port 动态持有 cdp:<port> 租约，避免双重获取导致死锁
     platforms: ['sycm']
   },
   execute: async (input, ctx) => {

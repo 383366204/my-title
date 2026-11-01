@@ -166,4 +166,71 @@ describe('core/runtime/tool-executor', () => {
     const leasePath = leaseManager.getLeasePath(resourceKey);
     assert.equal(fs.existsSync(leasePath), false);
   });
+
+  it('遇到中断留下的 unknown_interrupted 记录时，再次请求应当明确抛错拒绝而不是自动重跑', async () => {
+    const registry = createToolRegistry();
+    let callCount = 0;
+    registry.register({
+      id: 'interrupted.action',
+      execute: async () => {
+        callCount++;
+        return { ok: true };
+      }
+    });
+
+    const opStore = createOperationStore({ operationsDir });
+    const reqId = 'interrupted-req-1';
+    // 手工模拟一条因崩溃中断的记录
+    opStore.save({
+      requestId: reqId,
+      operationId: 'op-interrupted',
+      toolId: 'interrupted.action',
+      inputDigest: opStore.computeInputDigest('interrupted.action', {}),
+      status: 'unknown_interrupted',
+      error: { message: '服务进程意外中断，操作状态未知，禁止自动重跑' }
+    });
+
+    const executor = createToolExecutor({ registry, operationStore: opStore });
+    await assert.rejects(
+      async () => executor.execute('interrupted.action', {}, { requestId: reqId }),
+      (err) => {
+        assert.equal(err.code, 'OPERATION_INTERRUPTED');
+        assert.equal(err.status, 409);
+        return true;
+      }
+    );
+    assert.equal(callCount, 0, '绝不能自动重跑中断的任务');
+  });
+
+  it('租约获取失败超时时，应当将 operation 记录状态标记为 failed 并落盘', async () => {
+    const registry = createToolRegistry();
+    const leaseManager = createWorkbenchLeaseManager({ runtimeDir: leasesDir });
+    const resourceKey = 'cdp:9228';
+
+    // 预先占住锁
+    const blocker = await leaseManager.acquire(resourceKey);
+
+    registry.register({
+      id: 'blocked.tool',
+      policy: {
+        resourceKeys: [resourceKey]
+      },
+      execute: async () => ({ shouldNotRun: true })
+    });
+
+    const opStore = createOperationStore({ operationsDir });
+    const executor = createToolExecutor({ registry, leaseManager, operationStore: opStore });
+    const reqId = 'lease-fail-req-1';
+
+    await assert.rejects(
+      async () => executor.execute('blocked.tool', {}, { requestId: reqId, acquireTimeoutMs: 150 }),
+      /占用中/
+    );
+
+    const record = opStore.get(reqId);
+    assert.equal(record.status, 'failed');
+    assert.ok(record.error);
+
+    blocker.release();
+  });
 });
