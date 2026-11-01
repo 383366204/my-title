@@ -72,7 +72,13 @@ async function searchTaobaoWebImage(source, options = {}) {
   return guard('taobao', { ...options.guardOptions, cache: false,
     shouldStop: () => signal?.aborted, staleLockMs: 300000, lockTimeoutMs: 300000,
   }, async () => {
-    let browser, home, result, success = false;
+    const leaseManager = options.leaseManager || require('../../../core/runtime/workbench-lease').getLeaseManager();
+    return leaseManager.withLease(`cdp:${port}`, {
+      purpose: 'peer-discovery:taobao-image',
+      signal,
+      shouldStop: () => signal?.aborted
+    }, async () => {
+      let browser, home, result, success = false;
     const targets = new Set();
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'peer-taobao-image-'));
     const check = async page => {
@@ -173,6 +179,7 @@ async function searchTaobaoWebImage(source, options = {}) {
       browser?.close();
       await fs.rm(dir, { recursive: true, force: true });
     }
+    });
   });
 }
 

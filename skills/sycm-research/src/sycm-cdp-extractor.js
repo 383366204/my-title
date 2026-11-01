@@ -583,6 +583,38 @@ function _formatDate(date) {
 async function _rawExtractSycmData(keyword, options) {
   options = options || {};
   var port = options.port || DEFAULT_PORT;
+  var leaseManager = options.leaseManager;
+  if (!leaseManager) {
+    try {
+      leaseManager = require('../../../core/runtime/workbench-lease').getLeaseManager();
+    } catch (err) {
+      const leaseInitErr = new Error(`初始化 CDP 租约管理器失败: ${err.message}`);
+      leaseInitErr.code = 'LEASE_INIT_FAILED';
+      leaseInitErr.nonPlatform = true;
+      throw leaseInitErr;
+    }
+  }
+  var resourceKey = 'cdp:' + port;
+  if (!leaseManager || typeof leaseManager.withLease !== 'function') {
+    const unavailableErr = new Error('CDP 租约管理器不可用，禁止无租约访问浏览器');
+    unavailableErr.code = 'LEASE_MANAGER_UNAVAILABLE';
+    unavailableErr.nonPlatform = true;
+    throw unavailableErr;
+  }
+  return leaseManager.withLease(resourceKey, { purpose: 'sycm.cdp:' + keyword, shouldStop: options.shouldStop }, function() {
+    if (typeof options.shouldStop === 'function' && options.shouldStop()) {
+      const abortErr = new Error('操作已在等待租约期间被中止');
+      abortErr.code = 'OPERATION_ABORTED';
+      abortErr.nonPlatform = true;
+      throw abortErr;
+    }
+    return _executeRawExtractSycmData(keyword, options);
+  });
+}
+
+async function _executeRawExtractSycmData(keyword, options) {
+  options = options || {};
+  var port = options.port || DEFAULT_PORT;
   var maxPages = options.maxPages || DEFAULT_MAX_PAGES;
   var mode = options.mode || 'blue';
   var onProgress = options.onProgress || function() {};
@@ -960,6 +992,9 @@ function classifySycmError(err) {
   if (/未开通|无权限|permission|forbidden|feature/.test(raw)) {
     return { status: 'sycm_feature_required', userMessage: '当前账号没有该生意参谋功能权限。' };
   }
+  if (err && (err.code === 'LEASE_BUSY' || err.code === 'LEASE_TIMEOUT' || err.name === 'LeaseBusyError')) {
+    return { status: 'lease_busy', userMessage: err.message, nonPlatform: true };
+  }
   return { status: 'transient_failure', userMessage: '生意参谋暂时访问失败，可稍后重试。' };
 }
 
@@ -967,6 +1002,7 @@ async function extractSycmData(keyword, options) {
   options = options || {};
   if (options.filterConditions) options = Object.assign({}, options, { filterConditions: normalizeSycmFilterConditions(options.filterConditions) });
   var pageFilters = options.pageFilters || DEFAULT_PAGE_FILTERS;
+
   return runWithPlatformGuard('sycm', {
     cacheKey: {
       periodVersion: SEARCH_PERIOD_VERSION,
@@ -999,6 +1035,7 @@ async function extractSycmData(keyword, options) {
       var classified = classifySycmError(err);
       err.status = err.status || classified.status;
       err.details = Object.assign({}, err.details || {}, classified);
+      if (classified.nonPlatform) err.nonPlatform = true;
       throw err;
     });
   });

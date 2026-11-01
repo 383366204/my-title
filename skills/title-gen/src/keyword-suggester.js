@@ -438,7 +438,8 @@ async function verifyKeywordsWithSycm(candidates, options = {}) {
     delay = 5000,
     maxCandidates,
     onProgress = (msg) => console.log(`[SYCM] ${msg}`),
-    verifyFn
+    verifyFn,
+    leaseManager
   } = options;
 
   // 如果未提供验证回调，跳过 SYCM 验证
@@ -455,7 +456,7 @@ async function verifyKeywordsWithSycm(candidates, options = {}) {
 
   // 使用外部验证回调
   try {
-    const result = await verifyFn(candidates, { port, delay, maxCandidates, onProgress });
+    const result = await verifyFn(candidates, { port, delay, maxCandidates, onProgress, leaseManager });
     // 确保返回格式兼容
     if (result && typeof result.ok === 'boolean') {
       return result;
@@ -472,6 +473,9 @@ async function verifyKeywordsWithSycm(candidates, options = {}) {
     }
     throw new Error('验证回调返回格式无效');
   } catch (error) {
+    if (error.code === 'OPERATION_ABORTED' || error.name === 'AbortError') {
+      throw error;
+    }
     return {
       ok: false,
       error: error.message,
@@ -604,8 +608,12 @@ async function verifyKeywordsWithSycm(candidates, options = {}) {
  * @returns {Promise<Object>} SYCM验证结果
  */
 async function suggestAndVerify(options) {
-  // 调用推荐函数获取候选词
-  const candidates = await suggestKeywords(options);
+  options = options || {};
+  // 调用推荐函数获取候选词（支持注入，便于单元测试与确定性验证）
+  const getCandidates = typeof options.suggestKeywordsFn === 'function'
+    ? options.suggestKeywordsFn
+    : suggestKeywords;
+  const candidates = await getCandidates(options);
   
   if (!candidates || candidates.length === 0) {
     return {
@@ -645,7 +653,10 @@ async function suggestAndVerify(options) {
     port: options.port,
     delay: options.delay,
     filterCriteria: options.filterCriteria,
-    onProgress: options.onProgress
+    onProgress: options.onProgress,
+    maxCandidates: options.maxCandidates,
+    verifyFn: options.verifyFn,
+    leaseManager: options.leaseManager
   };
 
   return verifyKeywordsWithSycm(candidates, verifyOptions);

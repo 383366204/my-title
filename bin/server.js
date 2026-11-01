@@ -1,4 +1,6 @@
 'use strict';
+require('dotenv').config();
+
 const { createRuntimeView } = require('../core/server/runtime-view');
 const { createSycmAccessRecovery } = require('../core/server/sycm-access-recovery');
 
@@ -23,13 +25,15 @@ const { registerWorkbenchRoutes } = require('../core/server/workbench-routes');
 const { registerSeedRoutes } = require('../core/server/seed-routes');
 const { registerResearchRoutes } = require('../core/server/research-routes');
 const { registerPlatformRoutes } = require('../core/server/platform-routes');
+const { createDefaultToolExecutor } = require('../core/runtime/bootstrap');
+const { registerRuntimeRoutes } = require('../core/server/runtime-routes');
+const { createOperationStore } = require('../core/runtime/operation-store');
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const net = require('net');
 const { spawn } = require('child_process');
 const { AsyncLocalStorage } = require('async_hooks');
-require('dotenv').config();
 
 const {
   listSeeds,
@@ -626,6 +630,16 @@ function isValidWorkflowRunIdParam(runId) {
   return Boolean(value) && value !== 'null' && value !== 'undefined' && /^[A-Za-z0-9_-]+$/.test(value);
 }
 
+// 统一运行时路由装配 (PR-03)
+const runtimeInstanceId = require('crypto').randomUUID ? require('crypto').randomUUID() : require('crypto').randomBytes(16).toString('hex');
+const runtimeOperationStore = createOperationStore();
+const runtimeToolExecutor = createDefaultToolExecutor({ operationStore: runtimeOperationStore });
+registerRuntimeRoutes(app, {
+  toolExecutor: runtimeToolExecutor,
+  operationStore: runtimeOperationStore,
+  instanceId: runtimeInstanceId
+});
+
 registerHttpFallbacks(app, { reactWebPath, jsonBodyLimit: JSON_BODY_LIMIT });
 
 // Boot Server (Explicitly bind to localhost 127.0.0.1 for local boundaries security P2)
@@ -638,6 +652,39 @@ if (process.env.NODE_ENV !== 'test' && !runningUnderNodeTest) {
       console.log(`🌟 电商选品可视化工具 (Local Web UI) 服务已启动`);
       console.log(`🔗 本地安全链接: http://127.0.0.1:${port}`);
       console.log(`======================================================\n`);
+
+      // 写入 server.json 供 CLI / MCP 客户端进行单服务发现与转发 (ADR D5)
+      const runtimeDir = path.resolve(__dirname, '../data/runtime');
+      fs.mkdirSync(runtimeDir, { recursive: true });
+      const serverDescriptorPath = path.join(runtimeDir, 'server.json');
+      fs.writeFileSync(
+        serverDescriptorPath,
+        JSON.stringify({
+          pid: process.pid,
+          port,
+          instanceId: runtimeInstanceId,
+          protocolVersion: '1.0',
+          workspaceRoot: path.resolve(__dirname, '..'),
+          startedAt: new Date().toISOString()
+        }, null, 2),
+        'utf8'
+      );
+
+      const cleanupServerDescriptor = () => {
+        try {
+          if (fs.existsSync(serverDescriptorPath)) {
+            const current = JSON.parse(fs.readFileSync(serverDescriptorPath, 'utf8'));
+            if (current.instanceId === runtimeInstanceId) {
+              fs.unlinkSync(serverDescriptorPath);
+            }
+          }
+        } catch {}
+      };
+
+      process.once('exit', cleanupServerDescriptor);
+      process.once('SIGINT', () => { cleanupServerDescriptor(); process.exit(130); });
+      process.once('SIGTERM', () => { cleanupServerDescriptor(); process.exit(143); });
+
       if (process.send) process.send({ type: 'server-ready', port });
     });
   }).catch(err => {

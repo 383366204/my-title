@@ -447,6 +447,8 @@ async function runWithPlatformGuard(platform, options, operation) {
       return value;
     } catch (err) {
       if (err && err.code === 'PLATFORM_ACCESS_INTERRUPTED') throw err;
+      // 本地资源租约争用（如 CDP 浏览器端口占用）不是远端平台拒绝，严禁计入平台熔断器
+      if (err && (err.code === 'LEASE_BUSY' || err.code === 'LEASE_TIMEOUT' || err.nonPlatform)) throw err;
       // 本地上传面板识别超时不是平台拒绝；验证码和限流仍走原有熔断。
       if (err && err.code === 'IMAGE_UPLOAD_STATE_TIMEOUT' && classifyPlatformError(err) === 'transient_failure') throw err;
       recordFailure(platform, guardOptions, err);
