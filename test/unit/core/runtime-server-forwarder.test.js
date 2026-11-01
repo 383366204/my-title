@@ -320,4 +320,57 @@ describe('core/runtime/server-forwarder', () => {
       try { fs.unlinkSync(serverJsonPath); } catch {}
     }
   });
+
+  it('execute 应当在 abortSignal 中止时抛出 OPERATION_ABORTED，绝不启动已取消的远程请求', async () => {
+    const serverJsonPath = path.join(TEST_RUNTIME_DIR, 'server.json');
+    fs.writeFileSync(serverJsonPath, JSON.stringify({
+      port: 9879,
+      instanceId: 'abort-server-inst',
+      pid: process.pid
+    }));
+
+    let requestCalled = false;
+    const mockHttpClient = {
+      get: (url, opts, cb) => {
+        const req = new EventEmitter();
+        process.nextTick(() => {
+          const res = new EventEmitter();
+          res.statusCode = 200;
+          cb(res);
+          res.emit('data', Buffer.from(JSON.stringify({ ok: true, instanceId: 'abort-server-inst' })));
+          res.emit('end');
+        });
+        return req;
+      },
+      request: () => {
+        requestCalled = true;
+        const req = new EventEmitter();
+        req.write = () => {};
+        req.end = () => {};
+        return req;
+      }
+    };
+
+    const forwarder = createClientForwarder({
+      runtimeDir: TEST_RUNTIME_DIR,
+      httpClient: mockHttpClient
+    });
+
+    try {
+      const controller = new AbortController();
+      controller.abort();
+
+      await assert.rejects(
+        async () => forwarder.execute('test.tool', {}, { abortSignal: controller.signal }),
+        (err) => {
+          assert.equal(err.code, 'OPERATION_ABORTED');
+          return true;
+        }
+      );
+
+      assert.equal(requestCalled, false, '已取消请求绝不发起远程 HTTP 调用');
+    } finally {
+      try { fs.unlinkSync(serverJsonPath); } catch {}
+    }
+  });
 });

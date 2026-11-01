@@ -123,8 +123,22 @@ function createClientForwarder(deps = {}) {
    * @returns {Promise<any>}
    */
   async function execute(idOrName, input = {}, options = {}) {
+    if (options.abortSignal?.aborted) {
+      const abortErr = new Error(`工具 [${idOrName}] 执行已在启动前被取消`);
+      abortErr.code = 'OPERATION_ABORTED';
+      abortErr.nonPlatform = true;
+      throw abortErr;
+    }
+
     const requestId = options.requestId || (crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex'));
     const { online, serverInfo } = await checkServerOnline();
+
+    if (options.abortSignal?.aborted) {
+      const abortErr = new Error(`工具 [${idOrName}] 执行已在连接服务端前被取消`);
+      abortErr.code = 'OPERATION_ABORTED';
+      abortErr.nonPlatform = true;
+      throw abortErr;
+    }
 
     if (online && serverInfo) {
       // 远程转发给已运行的 Runtime Server
@@ -135,6 +149,29 @@ function createClientForwarder(deps = {}) {
       });
 
       return await new Promise((resolve, reject) => {
+        let onAbort = null;
+        let settled = false;
+
+        const safeResolve = (val) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          resolve(val);
+        };
+
+        const safeReject = (err) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(err);
+        };
+
+        const cleanup = () => {
+          if (options.abortSignal && onAbort) {
+            options.abortSignal.removeEventListener('abort', onAbort);
+          }
+        };
+
         const req = httpClient.request(
           `http://127.0.0.1:${serverInfo.port}/api/runtime/tools/${encodeURIComponent(idOrName)}/execute`,
           {
@@ -156,15 +193,15 @@ function createClientForwarder(deps = {}) {
               try {
                 const responseJson = JSON.parse(body);
                 if (res.statusCode >= 200 && res.statusCode < 300 && responseJson.ok) {
-                  resolve(responseJson.result);
+                  safeResolve(responseJson.result);
                 } else {
                   const err = new Error(responseJson.error || `HTTP 错误: ${res.statusCode}`);
                   err.status = res.statusCode;
                   err.code = responseJson.code || 'REMOTE_EXECUTION_ERROR';
-                  reject(err);
+                  safeReject(err);
                 }
               } catch (parseErr) {
-                reject(
+                safeReject(
                   new ServerForwardingError(
                     `解析服务端响应失败: ${parseErr.message}, body: ${body}。请核查 operation 状态: ${queryUrl}`,
                     requestId,
@@ -176,7 +213,7 @@ function createClientForwarder(deps = {}) {
             });
 
             res.on('error', (resErr) => {
-              reject(
+              safeReject(
                 new ServerForwardingError(
                   `读取服务端响应流异常 (${resErr.message})。若请求已被服务端接收，请查询 operation 状态: ${queryUrl}`,
                   requestId,
@@ -188,7 +225,7 @@ function createClientForwarder(deps = {}) {
 
             res.on('close', () => {
               if (!ended) {
-                reject(
+                safeReject(
                   new ServerForwardingError(
                     `服务端响应流过早关闭 (premature close)。若请求已被服务端接收，请查询 operation 状态: ${queryUrl}`,
                     requestId,
@@ -200,11 +237,26 @@ function createClientForwarder(deps = {}) {
           }
         );
 
+        if (options.abortSignal) {
+          onAbort = () => {
+            const abortErr = new Error(`工具 [${idOrName}] 执行已被取消`);
+            abortErr.code = 'OPERATION_ABORTED';
+            abortErr.nonPlatform = true;
+            try { req.destroy(abortErr); } catch {}
+            safeReject(abortErr);
+          };
+          if (options.abortSignal.aborted) {
+            onAbort();
+            return;
+          }
+          options.abortSignal.addEventListener('abort', onAbort, { once: true });
+        }
+
         req.on('timeout', () => {
           req.destroy();
           // ADR D5 严格决议：禁止超时后静默在本地重跑！
           const queryUrl = `http://127.0.0.1:${serverInfo.port}/api/runtime/operations/${requestId}`;
-          reject(
+          safeReject(
             new ServerExecutionTimeoutError(
               `转发至本地 Server 执行超时。禁止静默在本地重跑以防止产生重复副作用。请查询 operation 状态: ${queryUrl}`,
               requestId,
@@ -214,8 +266,15 @@ function createClientForwarder(deps = {}) {
         });
 
         req.on('error', (err) => {
+          if (options.abortSignal?.aborted) {
+            const abortErr = new Error(`工具 [${idOrName}] 执行已被取消`);
+            abortErr.code = 'OPERATION_ABORTED';
+            abortErr.nonPlatform = true;
+            safeReject(abortErr);
+            return;
+          }
           const queryUrl = `http://127.0.0.1:${serverInfo.port}/api/runtime/operations/${requestId}`;
-          reject(
+          safeReject(
             new ServerForwardingError(
               `连接本地 Runtime Server 失败 (${err.message})。若请求已被服务端接收，请查询 operation 状态: ${queryUrl}`,
               requestId,

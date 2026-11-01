@@ -129,6 +129,14 @@ function createToolExecutor(deps = {}) {
       }
     }
 
+    // 检查取消信号：若启动前已取消，直接拒绝且无需抢占或创建任何操作记录
+    if (options.abortSignal?.aborted) {
+      const abortErr = new Error(`工具 [${tool.id}] 执行已在启动前被取消`);
+      abortErr.code = 'OPERATION_ABORTED';
+      abortErr.nonPlatform = true;
+      throw abortErr;
+    }
+
     const operationId = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex');
     const now = new Date().toISOString();
     const candidateRecord = {
@@ -189,13 +197,6 @@ function createToolExecutor(deps = {}) {
       leaseManager
     };
 
-    if (options.abortSignal?.aborted) {
-      const abortErr = new Error(`工具 [${tool.id}] 执行已在启动前被取消`);
-      abortErr.code = 'OPERATION_ABORTED';
-      abortErr.nonPlatform = true;
-      throw abortErr;
-    }
-
     // 4. 执行函数（包含物理资源租约获取生命周期，并在异常时确保 opRecord 落盘）
     const declaredResourceKeys = tool.policy?.resourceKeys || [];
     let runner = () => {
@@ -222,6 +223,12 @@ function createToolExecutor(deps = {}) {
     }
 
     try {
+      if (options.abortSignal?.aborted) {
+        const abortErr = new Error(`工具 [${tool.id}] 执行已在抢占操作后被取消`);
+        abortErr.code = 'OPERATION_ABORTED';
+        abortErr.nonPlatform = true;
+        throw abortErr;
+      }
       const result = await runner();
       opRecord.status = 'completed';
       opRecord.result = result;

@@ -372,4 +372,38 @@ describe('core/runtime/tool-executor', () => {
     assert.equal(opRecord.status, 'failed');
     assert.equal(opRecord.error.code, 'OPERATION_ABORTED');
   });
+
+  it('在启动前已中止的请求应当直接被拒绝，绝不在操作记录中留下永久 running 记录', async () => {
+    const registry = createToolRegistry();
+    let ran = false;
+    registry.register({
+      id: 'tool.pre.abort',
+      execute: async () => {
+        ran = true;
+        return 'executed';
+      }
+    });
+
+    const opStore = createOperationStore({ operationsDir });
+    const executor = createToolExecutor({ registry, operationStore: opStore });
+
+    const controller = new AbortController();
+    controller.abort();
+
+    await assert.rejects(
+      async () => executor.execute('tool.pre.abort', {}, {
+        requestId: 'req-pre-abort-1',
+        abortSignal: controller.signal
+      }),
+      (err) => {
+        assert.equal(err.code, 'OPERATION_ABORTED');
+        return true;
+      }
+    );
+
+    assert.equal(ran, false);
+    // 操作记录不应遗留为 running 状态
+    const record = opStore.get('req-pre-abort-1');
+    assert.equal(record, null, '事前已中止的请求不应留下孤儿 running 记录');
+  });
 });
