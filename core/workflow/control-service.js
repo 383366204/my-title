@@ -275,7 +275,7 @@ function createWorkflowControlService(dependencies = {}) {
     const logLabel = source === 'pipeline' ? 'Pipeline Resume' : 'Workflow Resume';
     const modeTag = source === 'pipeline' ? 'resume' : 'workflow-resume';
     try {
-      const runtime = readRuntimeState({ runId });
+      const runtime = readRuntimeState({ runId, autoRecover: true });
       if (runtime) {
         if (workbench.current) {
           return {
@@ -371,7 +371,7 @@ function createWorkflowControlService(dependencies = {}) {
         };
       }
       try {
-        const runtime = readRuntimeState({ runId });
+        const runtime = readRuntimeState({ runId, autoRecover: true });
         if (!runtime) {
           return { httpStatus: 404, body: { ok: false, error: '未找到该流程运行记录' } };
         }
@@ -404,7 +404,7 @@ function createWorkflowControlService(dependencies = {}) {
       if (!nodeId) {
         return { httpStatus: 400, body: { ok: false, error: 'nodeId is required' } };
       }
-      const runtime = readRuntimeState({ runId });
+      const runtime = readRuntimeState({ runId, autoRecover: true });
       if (runtime) {
         if (!isWorkflowRetryNodeAllowed(runtime, nodeId)) {
           return { httpStatus: 400, body: { ok: false, error: '不支持的流程步骤。' } };

@@ -1,5 +1,6 @@
 'use strict';
 
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
@@ -31,9 +32,33 @@ function readJson(file, fallback) {
   return JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
 }
 
-function writeJson(file, value) {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify(value, null, 2) + '\n', 'utf8');
+/**
+ * Write JSON atomically using temp file + rename to prevent half-written corruption.
+ * @param {string} file Target destination file.
+ * @param {*} value Data payload.
+ */
+function writeJsonAtomic(file, value) {
+  const dir = path.dirname(file);
+  fs.mkdirSync(dir, { recursive: true });
+  const tmpFile = `${file}.tmp.${process.pid}.${Date.now()}.${crypto.randomBytes(4).toString('hex')}`;
+  try {
+    fs.writeFileSync(tmpFile, JSON.stringify(value, null, 2) + '\n', 'utf8');
+    try {
+      fs.renameSync(tmpFile, file);
+    } catch (renameErr) {
+      if (renameErr.code === 'EEXIST' || renameErr.code === 'EPERM') {
+        fs.unlinkSync(file);
+        fs.renameSync(tmpFile, file);
+      } else {
+        throw renameErr;
+      }
+    }
+  } catch (err) {
+    try {
+      if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
+    } catch (_unlinkErr) {}
+    throw err;
+  }
 }
 
 function runtimeFile(dataDir, runId) {
@@ -56,18 +81,23 @@ function createProgress(steps = []) {
 }
 
 /**
- * Initialize runtime state files for a workflow run.
+ * Initialize runtime state files for a workflow run with atomic snapshot and revision tracking.
  * @param {object} options Runtime options.
  * @param {string} [options.dataDir] Pipeline data directory.
  * @param {string} options.runId Runtime run id.
  * @param {string[]} options.steps Ordered runtime steps.
  * @param {string} [options.mode] Runtime mode.
  * @param {object} [options.params] Runtime step parameters.
+ * @param {number} [options.attempt=1] Execution attempt counter.
  * @returns {object} Runtime state.
  */
-function initRuntimeState({ dataDir, runId, steps = [], mode = '', params = {} }) {
+function initRuntimeState({ dataDir, runId, steps = [], mode = '', params = {}, attempt = 1 }) {
+  assertRuntimeRunId(runId);
   const now = new Date().toISOString();
   const runtime = {
+    revision: 1,
+    attempt: Number.isInteger(attempt) && attempt > 0 ? attempt : 1,
+    pid: process.pid,
     status: 'running',
     activeStep: steps[0] || '',
     requestedAction: null,
@@ -79,8 +109,8 @@ function initRuntimeState({ dataDir, runId, steps = [], mode = '', params = {} }
     updatedAt: now
   };
 
-  writeJson(runtimeFile(dataDir, runId), runtime);
-  writeJson(controlFile(dataDir, runId), { requestedAction: null, updatedAt: now });
+  writeJsonAtomic(runtimeFile(dataDir, runId), runtime);
+  writeJsonAtomic(controlFile(dataDir, runId), { revision: 1, requestedAction: null, updatedAt: now });
   return runtime;
 }
 
@@ -89,33 +119,60 @@ function initRuntimeState({ dataDir, runId, steps = [], mode = '', params = {} }
  * @param {object} options Runtime options.
  * @param {string} [options.dataDir] Pipeline data directory.
  * @param {string} options.runId Runtime run id.
+ * @param {boolean} [options.autoRecover=false] Auto-recover if process terminated unexpectedly.
  * @returns {object|null} Runtime state when present.
  */
-function readRuntimeState({ dataDir, runId }) {
+function readRuntimeState({ dataDir, runId, autoRecover = false }) {
+  if (autoRecover) {
+    const recoveryResult = recoverRuntimeState({ dataDir, runId });
+    if (recoveryResult.recovered) {
+      return recoveryResult.runtime;
+    }
+  }
   return readJson(runtimeFile(dataDir, runId), null);
 }
 
 /**
- * Merge a runtime state patch into the current runtime state.
+ * Merge a runtime state patch into the current runtime state atomically with revision increment.
  * @param {object} options Runtime options.
  * @param {string} [options.dataDir] Pipeline data directory.
  * @param {string} options.runId Runtime run id.
  * @param {object} options.patch Runtime state patch.
+ * @param {number} [options.expectedRevision] Expected revision for optimistic locking.
  * @returns {object} Updated runtime state.
  */
-function updateRuntimeState({ dataDir, runId, patch = {} }) {
+function updateRuntimeState({ dataDir, runId, patch = {}, expectedRevision }) {
+  assertRuntimeRunId(runId);
   const current = readRuntimeState({ dataDir, runId }) || {};
+  const curRev = Number.isInteger(current.revision) ? current.revision : 0;
+  if (expectedRevision !== undefined && curRev !== expectedRevision) {
+    const err = new Error(`Runtime revision conflict for run ${runId}: expected revision ${expectedRevision}, found ${curRev}`);
+    err.code = 'REVISION_CONFLICT';
+    err.expectedRevision = expectedRevision;
+    err.actualRevision = curRev;
+    throw err;
+  }
+
+  const nextRevision = curRev + 1;
+  const nextAttempt = patch.attempt !== undefined
+    ? patch.attempt
+    : (patch.incrementAttempt ? (current.attempt || 1) + 1 : (current.attempt || 1));
+
   const next = {
     ...current,
     ...patch,
+    revision: nextRevision,
+    attempt: nextAttempt,
+    pid: process.pid,
     progress: {
       ...(current.progress || {}),
       ...(patch.progress || {})
     },
     updatedAt: new Date().toISOString()
   };
+  delete next.incrementAttempt;
 
-  writeJson(runtimeFile(dataDir, runId), next);
+  writeJsonAtomic(runtimeFile(dataDir, runId), next);
   return next;
 }
 
@@ -136,13 +193,17 @@ function requestRuntimeCancel({ dataDir, runId, reason = 'user_cancelled' }) {
 }
 
 function writeRuntimeControl({ dataDir, runId, control = {} }) {
+  assertRuntimeRunId(runId);
+  const current = readRuntimeControl({ dataDir, runId }) || {};
+  const curRev = Number.isInteger(current.revision) ? current.revision : 0;
   const next = {
+    revision: curRev + 1,
     requestedAction: control.requestedAction || null,
     updatedAt: new Date().toISOString()
   };
   if (control.reason) next.reason = control.reason;
   if (control.step) next.step = control.step;
-  writeJson(controlFile(dataDir, runId), next);
+  writeJsonAtomic(controlFile(dataDir, runId), next);
   return next;
 }
 
@@ -200,12 +261,16 @@ function readRuntimeControl({ dataDir, runId }) {
  */
 function appendRuntimeEvent({ dataDir, runId, event = {} }) {
   assertRuntimeRunId(runId);
+  const current = readRuntimeState({ dataDir, runId });
   const file = eventsFile(dataDir, runId);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const payload = {
-    ...event,
+    eventId: event.eventId || `${Date.now()}-${crypto.randomBytes(3).toString('hex')}`,
     timestamp: event.timestamp || new Date().toISOString(),
-    runId
+    runId,
+    revision: event.revision !== undefined ? event.revision : (current?.revision ?? null),
+    attempt: event.attempt !== undefined ? event.attempt : (current?.attempt ?? null),
+    ...event
   };
 
   fs.appendFileSync(file, JSON.stringify(payload) + '\n', 'utf8');
@@ -237,6 +302,135 @@ function readRuntimeEvents({ dataDir, runId }) {
   return events;
 }
 
+/**
+ * Test whether a process ID is currently running on the host.
+ * @param {number} pid Process ID.
+ * @returns {boolean} True if process exists.
+ */
+function isPidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err.code === 'EPERM';
+  }
+}
+
+/**
+ * Safely recover runtime state if the recording execution process terminated unexpectedly.
+ * @param {object} options Recovery options.
+ * @param {string} [options.dataDir] Pipeline data directory.
+ * @param {string} options.runId Runtime run id.
+ * @param {function} [options.isAliveFn=isPidAlive] Process liveness tester.
+ * @param {function} [options.now] Timestamp provider.
+ * @returns {{ recovered: boolean, runtime: object|null, reason: string }} Recovery result.
+ */
+function recoverRuntimeState({
+  dataDir,
+  runId,
+  isAliveFn = isPidAlive,
+  now = () => new Date().toISOString()
+} = {}) {
+  assertRuntimeRunId(runId);
+  const current = readRuntimeState({ dataDir, runId });
+  if (!current) return { recovered: false, runtime: null, reason: 'not_found' };
+
+  const activeStatuses = ['running', 'resuming', 'retrying'];
+  if (!activeStatuses.includes(current.status)) {
+    return { recovered: false, runtime: current, reason: 'not_active' };
+  }
+
+  const recordedPid = current.pid;
+  const alive = isAliveFn(recordedPid);
+  if (alive) {
+    return { recovered: false, runtime: current, reason: 'process_alive' };
+  }
+
+  // Process is dead, perform crash recovery transition
+  const activeStep = current.activeStep || (current.steps && current.steps[0]) || '';
+  const updatedProgress = { ...(current.progress || {}) };
+  if (activeStep && updatedProgress[activeStep]) {
+    updatedProgress[activeStep] = {
+      ...updatedProgress[activeStep],
+      status: 'interrupted',
+      message: '执行进程异常中断'
+    };
+  }
+
+  const recoveredTime = now();
+  const nextRevision = (Number.isInteger(current.revision) ? current.revision : 0) + 1;
+  const recoveredRuntime = {
+    ...current,
+    status: 'interrupted',
+    interruptedAt: recoveredTime,
+    interruptedReason: 'process_terminated_unexpectedly',
+    error: current.error || '流程执行进程异常退出，状态已安全恢复，可手动点击恢复继续执行。',
+    progress: updatedProgress,
+    revision: nextRevision,
+    updatedAt: recoveredTime
+  };
+
+  writeJsonAtomic(runtimeFile(dataDir, runId), recoveredRuntime);
+
+  appendRuntimeEvent({
+    dataDir,
+    runId,
+    event: {
+      event: 'interrupted',
+      step: activeStep,
+      previousStatus: current.status,
+      reason: 'process_terminated_unexpectedly',
+      deadPid: recordedPid,
+      revision: nextRevision,
+      attempt: current.attempt || 1,
+      timestamp: recoveredTime
+    }
+  });
+
+  return { recovered: true, runtime: recoveredRuntime, reason: 'recovered_from_crash' };
+}
+
+/**
+ * Verify event log consistency against runtime state.
+ * @param {object} options Verification options.
+ * @param {string} [options.dataDir] Pipeline data directory.
+ * @param {string} options.runId Runtime run id.
+ * @returns {{ ok: boolean, eventCount: number, issues: string[] }} Consistency report.
+ */
+function verifyEventConsistency({ dataDir, runId }) {
+  assertRuntimeRunId(runId);
+  const events = readRuntimeEvents({ dataDir, runId });
+  const runtime = readRuntimeState({ dataDir, runId });
+  const issues = [];
+
+  if (!events.length) {
+    if (runtime) issues.push('No events found for existing runtime');
+    return { ok: issues.length === 0, eventCount: 0, issues };
+  }
+
+  let prevTime = 0;
+  for (let i = 0; i < events.length; i++) {
+    const ev = events[i];
+    if (ev.runId && ev.runId !== runId) {
+      issues.push(`Event at index ${i} has mismatched runId: expected ${runId}, found ${ev.runId}`);
+    }
+    const timeMs = new Date(ev.timestamp || 0).getTime();
+    if (isNaN(timeMs)) {
+      issues.push(`Event at index ${i} has invalid timestamp: ${ev.timestamp}`);
+    } else if (prevTime > 0 && timeMs < prevTime - 1000) {
+      issues.push(`Event timestamp regression at index ${i}: ${ev.timestamp} < previous ${new Date(prevTime).toISOString()}`);
+    }
+    if (timeMs > prevTime) prevTime = timeMs;
+  }
+
+  return {
+    ok: issues.length === 0,
+    eventCount: events.length,
+    issues
+  };
+}
+
 module.exports = {
   initRuntimeState,
   readRuntimeState,
@@ -249,5 +443,9 @@ module.exports = {
   readRuntimeControl,
   appendRuntimeEvent,
   readRuntimeEvents,
-  assertRuntimeRunId
+  assertRuntimeRunId,
+  writeJsonAtomic,
+  isPidAlive,
+  recoverRuntimeState,
+  verifyEventConsistency
 };

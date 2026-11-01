@@ -33,6 +33,7 @@ const STATUS_STAGE = {
   competitor_analyzed: 'review',
   generate_failed: 'generated',
   needs_review: 'review',
+  interrupted: 'review',
   ready_to_distribute: 'ready',
   export_empty: 'review',
   awaiting_user_confirmation: 'ready',
@@ -266,6 +267,7 @@ function buildNextCommand(status, runId, files) {
       : '';
   }
   if (status === 'awaiting_user_confirmation') return 'node bin/cli.js workflow resume --confirm-submit --json';
+  if (status === 'interrupted') return `node bin/cli.js workflow resume${runPart} --json`;
   return '';
 }
 
@@ -335,6 +337,7 @@ function summarizePipelineRun({ dataDir = DEFAULT_PIPELINE_DIR, runId, previewLi
   if (status === 'awaiting_keyword_review') blockers.push('keyword_review_required');
   if (status === 'keyword_review_empty') blockers.push('no_keyword_review_approved');
   if (status === 'select_failed') blockers.push('no_selected_products');
+  if (status === 'interrupted') blockers.push('process_interrupted');
 
   const nextCommand = run.nextCommand || buildNextCommand(status, targetRunId, files);
   const payload = withAgentResponseFields({
