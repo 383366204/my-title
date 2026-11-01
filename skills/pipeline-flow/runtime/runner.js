@@ -17,7 +17,7 @@ const fs = require('fs');
 const path = require('path');
 const { normalizeExactKeywords } = require('../../../core/exact-keywords');
 const { normalizeRootKeywords } = require('../../../core/root-keywords');
-const { DEFAULT_FLOW_DIR, createRunId, getRun, readJsonl } = require('../src/run-store');
+const { DEFAULT_FLOW_DIR, createRunId, getRun, initRun, readJsonl } = require('../src/run-store');
 const { flowMine } = require('../src/keyword-mining-flow');
 const { flowDiscoverInspirations } = require('../src/inspiration-flow');
 const { flowExpandRootKeywords } = require('../src/root-keyword-expansion-flow');
@@ -227,7 +227,10 @@ function createDefaultStepFns({ dataDir, runId, params, mode = 'daily', steps = 
     start: async ({ reportProgress }) => {
       reportProgress({ current: 0, total: keywordCount, message: keywordMode ? `准备 ${keywordCount} 个精确关键词` : '准备流程' });
       if (manualMode) return flowManualStart({ ...params, dataDir, runId });
-      if (!keywordMode) return { runId, status: 'browser_ready' };
+      if (!keywordMode) {
+        initRun({ dataDir, runId, options: { ...params, mode } });
+        return { runId, status: 'browser_ready' };
+      }
       return flowKeywordStart({ ...params, dataDir, runId, keywords: exactKeywords });
     },
     mine: async ({ reportProgress }) => {

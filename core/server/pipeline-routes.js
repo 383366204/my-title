@@ -55,6 +55,7 @@ function registerPipelineRoutes(app, dependencies = {}) {
   app.post('/api/pipeline/runs/:runId/resume', async (req, res) => {
     const result = await controlService.resumeRun({
       runId: req.params.runId,
+      stopAfterStep: req.body?.stopAfterStep,
       validateRunId: true,
       allowLegacyFallback: false,
       source: 'pipeline'

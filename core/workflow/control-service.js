@@ -283,11 +283,21 @@ function createWorkflowControlService(dependencies = {}) {
             body: { ok: false, error: '已有工作流正在运行，请等待完成后再继续。' }
           };
         }
+        const runMode = runtime.mode || (runtime.steps?.includes('keyword') ? 'keyword' : 'daily');
+        if (stopAfterStep && !defaultIsValidStepForMode(runMode, stopAfterStep, { discoveryBranch: runtime.params?.discoveryBranch })) {
+          return {
+            httpStatus: 400,
+            body: {
+              ok: false,
+              error: `指定的 stopAfterStep '${stopAfterStep}' 不是 ${runMode} 模式的有效步骤。`
+            }
+          };
+        }
         const control = requestRuntimeResume({ runId });
         const runState = { runId, mode: modeTag };
         const promise = workbench.run(runState, () => getPipelineRuntimeRunner()({
           runId,
-          mode: runtime.mode || (runtime.steps?.includes('keyword') ? 'keyword' : 'daily'),
+          mode: runMode,
           params: runtime.params || {},
           preserveRuntime: true,
           resumeFromStep: runtime.activeStep,

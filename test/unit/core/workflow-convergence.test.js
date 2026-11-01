@@ -22,6 +22,7 @@ const { readRuntimeState } = require('../../../skills/pipeline-flow/runtime/stor
 const { createWorkflowControlService } = require('../../../core/workflow/control-service');
 const { buildNodeStates } = require('../../../core/workflow/pipeline-node-state');
 const { pipelineSummaryToWorkflowRun } = require('../../../core/workflow/pipeline-runs');
+const { summarizePipelineRun, listPipelineRuns } = require('../../../core/pipeline-run-summary');
 
 function createTempDir(prefix = 'workflow-convergence-') {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -427,6 +428,30 @@ describe('PR-04 Workflow Convergence & StopAfterStep Suite', () => {
       const finalState = readRuntimeState({ dataDir, runId });
       assert.equal(finalState.params.stopAfterStep, undefined, 'params.stopAfterStep should be cleared on resume');
     });
+
+    it('persists a discoverable run when stopping after start in daily mode', async () => {
+      const dataDir = createTempDir();
+      const runId = 'run_daily_stop_start';
+
+      const result = await runPipelineRuntime({
+        dataDir,
+        runId,
+        mode: 'daily',
+        stopAfterStep: 'start',
+        prepareBrowser: async () => ({ status: 'browser_ready' })
+      });
+
+      assert.equal(result.runtimeStatus, 'completed');
+      assert.equal(result.stoppedAfterStep, 'start');
+
+      const summary = summarizePipelineRun({ dataDir, runId });
+      assert.ok(summary, 'Run should have a valid summary after stopping at start');
+      assert.equal(summary.runId, runId);
+
+      const history = listPipelineRuns({ dataDir });
+      assert.equal(history.runs.length, 1);
+      assert.equal(history.runs[0].runId, runId);
+    });
   });
 
   describe('ControlService Validation & stopAfterStep Handling', () => {
@@ -482,6 +507,64 @@ describe('PR-04 Workflow Convergence & StopAfterStep Suite', () => {
       assert.equal(response.body.ok, true);
       assert.equal(runnerArgs.stopAfterStep, 'keywordReview');
       assert.equal(runnerArgs.params.stopAfterStep, 'keywordReview');
+    });
+
+    it('validates and rejects invalid stopAfterStep on resumeRun with HTTP 400', async () => {
+      const workbench = createMockWorkbench();
+      const mockRuntime = {
+        runId: 'test-resume-run',
+        mode: 'daily',
+        activeStep: 'keywordReview',
+        steps: ['inspire', 'mine', 'keywordReview', 'select', 'generate', 'export']
+      };
+
+      const service = createWorkflowControlService({
+        workbench,
+        readRuntimeState: () => mockRuntime,
+        requestRuntimeResume: () => ({ status: 'resuming' }),
+        getPipelineRuntimeRunner: () => async () => ({ status: 'completed' })
+      });
+
+      const response = await service.resumeRun({
+        runId: 'test-resume-run',
+        stopAfterStep: 'invalid_step'
+      });
+
+      assert.equal(response.httpStatus, 400);
+      assert.equal(response.body.ok, false);
+      assert.match(response.body.error, /指定的 stopAfterStep 'invalid_step' 不是 daily 模式的有效步骤/);
+    });
+
+    it('passes valid stopAfterStep through resumeRun to runner', async () => {
+      const workbench = createMockWorkbench();
+      let runnerArgs = null;
+      const mockRuntime = {
+        runId: 'test-resume-run-valid',
+        mode: 'daily',
+        activeStep: 'select',
+        steps: ['inspire', 'mine', 'keywordReview', 'select', 'generate', 'export'],
+        params: {}
+      };
+
+      const service = createWorkflowControlService({
+        workbench,
+        readRuntimeState: () => mockRuntime,
+        requestRuntimeResume: () => ({ status: 'resuming' }),
+        pipelineRunResponse: (id, extra) => ({ runId: id, ...extra }),
+        getPipelineRuntimeRunner: () => async (args) => {
+          runnerArgs = args;
+          return { runId: args.runId, status: 'completed' };
+        }
+      });
+
+      const response = await service.resumeRun({
+        runId: 'test-resume-run-valid',
+        stopAfterStep: 'generate'
+      });
+
+      assert.equal(response.httpStatus, 200);
+      assert.equal(response.body.ok, true);
+      assert.equal(runnerArgs.stopAfterStep, 'generate');
     });
   });
 
