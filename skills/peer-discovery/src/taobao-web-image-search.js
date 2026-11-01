@@ -69,11 +69,11 @@ async function searchTaobaoWebImage(source, options = {}) {
       platform: 'taobao', status: 'image_format_unsupported',
     });
   }
-  return guard('taobao', { ...options.guardOptions, cache: false,
-    shouldStop: () => signal?.aborted, staleLockMs: 300000, lockTimeoutMs: 300000,
-  }, async () => {
-    const leaseManager = options.leaseManager || require('../../../core/runtime/workbench-lease').getLeaseManager();
-    return leaseManager.withLease(`cdp:${port}`, { purpose: 'peer-discovery:taobao-image' }, async () => {
+  const leaseManager = options.leaseManager || require('../../../core/runtime/workbench-lease').getLeaseManager();
+  return leaseManager.withLease(`cdp:${port}`, { purpose: 'peer-discovery:taobao-image' }, async () => {
+    return guard('taobao', { ...options.guardOptions, cache: false,
+      shouldStop: () => signal?.aborted, staleLockMs: 300000, lockTimeoutMs: 300000,
+    }, async () => {
       let browser, home, result, success = false;
     const targets = new Set();
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'peer-taobao-image-'));

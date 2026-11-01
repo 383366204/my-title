@@ -581,6 +581,20 @@ function _formatDate(date) {
  * @returns {Promise<Object>} 提取结果 { keyword, data[], totalCount, totalPages, currentPage, headers, extractedAt, pageFiltersApplied }
  */
 async function _rawExtractSycmData(keyword, options) {
+  options = options || {};
+  var port = options.port || DEFAULT_PORT;
+  var leaseManager = options.leaseManager;
+  if (!leaseManager) {
+    try {
+      leaseManager = require('../../../core/runtime/workbench-lease').getLeaseManager();
+    } catch {}
+  }
+  var resourceKey = 'cdp:' + port;
+  if (leaseManager && typeof leaseManager.withLease === 'function') {
+    return leaseManager.withLease(resourceKey, { purpose: 'sycm.cdp:' + keyword }, function() {
+      return _executeRawExtractSycmData(keyword, options);
+    });
+  }
   return _executeRawExtractSycmData(keyword, options);
 }
 
@@ -965,7 +979,7 @@ function classifySycmError(err) {
     return { status: 'sycm_feature_required', userMessage: '当前账号没有该生意参谋功能权限。' };
   }
   if (err && (err.code === 'LEASE_BUSY' || err.code === 'LEASE_TIMEOUT' || err.name === 'LeaseBusyError')) {
-    return { status: 'lease_busy', userMessage: err.message };
+    return { status: 'lease_busy', userMessage: err.message, nonPlatform: true };
   }
   return { status: 'transient_failure', userMessage: '生意参谋暂时访问失败，可稍后重试。' };
 }
@@ -973,60 +987,44 @@ function classifySycmError(err) {
 async function extractSycmData(keyword, options) {
   options = options || {};
   if (options.filterConditions) options = Object.assign({}, options, { filterConditions: normalizeSycmFilterConditions(options.filterConditions) });
-  var port = options.port || DEFAULT_PORT;
-  var leaseManager = options.leaseManager;
-  if (!leaseManager) {
-    try {
-      leaseManager = require('../../../core/runtime/workbench-lease').getLeaseManager();
-    } catch {}
-  }
-  var resourceKey = 'cdp:' + port;
+  var pageFilters = options.pageFilters || DEFAULT_PAGE_FILTERS;
 
-  function doGuardedExtraction() {
-    var pageFilters = options.pageFilters || DEFAULT_PAGE_FILTERS;
-    return runWithPlatformGuard('sycm', {
-      cacheKey: {
-        periodVersion: SEARCH_PERIOD_VERSION,
-        dateRange: (pageFilters.timePeriod || DEFAULT_PAGE_FILTERS.timePeriod) === '7d' ? recentSevenDayRange() : undefined,
-        keyword: keyword,
-        mode: options.mode || 'blue',
-        maxPages: options.maxPages || DEFAULT_MAX_PAGES,
-        filterConditions: (options.mode || 'blue') === 'blue' ? options.filterConditions || null : null,
-        compareType: pageFilters.compareType || DEFAULT_PAGE_FILTERS.compareType,
-        timePeriod: pageFilters.timePeriod || DEFAULT_PAGE_FILTERS.timePeriod
-      },
-      dataDir: options.guardDataDir,
-      cache: options.guardCache === false ? false : undefined,
-      cacheTtlMs: options.guardCacheTtlMs,
-      minCooldownMs: options.guardMinCooldownMs,
-      maxCooldownMs: options.guardMaxCooldownMs,
-      batchSize: options.guardBatchSize,
-      minBatchCooldownMs: options.guardMinBatchCooldownMs,
-      maxBatchCooldownMs: options.guardMaxBatchCooldownMs,
-      breakerCooldownMs: options.guardBreakerCooldownMs,
-      random: options.random,
-      shouldStop: options.shouldStop,
-      onCooldown: function(state) {
-        if (typeof options.onProgress !== 'function') return;
-        var seconds = Math.max(1, Math.ceil(Number(state.remainingMs || 0) / 1000));
-        options.onProgress('[RATE_LIMIT] 生意参谋访问冷却，约 ' + seconds + ' 秒后继续');
-      }
-    }, function() {
-      return _rawExtractSycmData(keyword, options).catch(function(err) {
-        var classified = classifySycmError(err);
-        err.status = err.status || classified.status;
-        err.details = Object.assign({}, err.details || {}, classified);
-        throw err;
-      });
+  return runWithPlatformGuard('sycm', {
+    cacheKey: {
+      periodVersion: SEARCH_PERIOD_VERSION,
+      dateRange: (pageFilters.timePeriod || DEFAULT_PAGE_FILTERS.timePeriod) === '7d' ? recentSevenDayRange() : undefined,
+      keyword: keyword,
+      mode: options.mode || 'blue',
+      maxPages: options.maxPages || DEFAULT_MAX_PAGES,
+      filterConditions: (options.mode || 'blue') === 'blue' ? options.filterConditions || null : null,
+      compareType: pageFilters.compareType || DEFAULT_PAGE_FILTERS.compareType,
+      timePeriod: pageFilters.timePeriod || DEFAULT_PAGE_FILTERS.timePeriod
+    },
+    dataDir: options.guardDataDir,
+    cache: options.guardCache === false ? false : undefined,
+    cacheTtlMs: options.guardCacheTtlMs,
+    minCooldownMs: options.guardMinCooldownMs,
+    maxCooldownMs: options.guardMaxCooldownMs,
+    batchSize: options.guardBatchSize,
+    minBatchCooldownMs: options.guardMinBatchCooldownMs,
+    maxBatchCooldownMs: options.guardMaxBatchCooldownMs,
+    breakerCooldownMs: options.guardBreakerCooldownMs,
+    random: options.random,
+    shouldStop: options.shouldStop,
+    onCooldown: function(state) {
+      if (typeof options.onProgress !== 'function') return;
+      var seconds = Math.max(1, Math.ceil(Number(state.remainingMs || 0) / 1000));
+      options.onProgress('[RATE_LIMIT] 生意参谋访问冷却，约 ' + seconds + ' 秒后继续');
+    }
+  }, function() {
+    return _rawExtractSycmData(keyword, options).catch(function(err) {
+      var classified = classifySycmError(err);
+      err.status = err.status || classified.status;
+      err.details = Object.assign({}, err.details || {}, classified);
+      if (classified.nonPlatform) err.nonPlatform = true;
+      throw err;
     });
-  }
-
-  // 核心约束：在进入平台熔断器 (runWithPlatformGuard) 前获取跨进程浏览器租约，
-  // 杜绝因本地浏览器并发争用抛出 LEASE_BUSY 时被误计入远端平台熔断器导致 15 分钟熔断
-  if (leaseManager && typeof leaseManager.withLease === 'function') {
-    return leaseManager.withLease(resourceKey, { purpose: 'sycm.cdp:' + keyword }, doGuardedExtraction);
-  }
-  return doGuardedExtraction();
+  });
 }
 
 function _normalizeLoginMode(mode) {
