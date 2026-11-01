@@ -373,4 +373,59 @@ describe('core/runtime/server-forwarder', () => {
       try { fs.unlinkSync(serverJsonPath); } catch {}
     }
   });
+
+  it('HTTP 执行端点正常接收 POST 请求体后不应触发 abortSignal，仅在客户端提前断开连接时才触发中止', async () => {
+    const { registerRuntimeRoutes } = require('../../../core/server/runtime-routes');
+    const express = require('express');
+    const http = require('http');
+    const { Duplex } = require('stream');
+
+    const app = express();
+    app.use(express.json());
+
+    let observedSignal = null;
+    let executorRan = false;
+
+    registerRuntimeRoutes(app, {
+      toolExecutor: {
+        execute: async (toolId, input, ctx) => {
+          executorRan = true;
+          observedSignal = ctx.abortSignal;
+          // 模拟稍微耗时的异步任务
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          return { done: true, wasAborted: ctx.abortSignal.aborted };
+        }
+      },
+      operationStore: {}
+    });
+
+    // 构造模拟连接测试正常请求
+    const server = http.createServer(app);
+    let responseData = '';
+    const socket = new Duplex({
+      read() {},
+      write(chunk, enc, cb) {
+        responseData += chunk.toString();
+        cb();
+      }
+    });
+
+    server.emit('connection', socket);
+    const postBody = JSON.stringify({ input: { test: true } });
+    socket.push(
+      `POST /api/runtime/tools/test.tool/execute HTTP/1.1\r\n` +
+      `Host: 127.0.0.1\r\n` +
+      `Content-Type: application/json\r\n` +
+      `Content-Length: ${Buffer.byteLength(postBody)}\r\n` +
+      `Connection: close\r\n\r\n` +
+      postBody
+    );
+
+    // 等待响应生成
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    assert.equal(executorRan, true);
+    assert.ok(observedSignal);
+    assert.equal(observedSignal.aborted, false, '正常请求结束时不应将异步操作误当作客户端中断而取消');
+    assert.ok(responseData.includes('"done":true'));
+  });
 });

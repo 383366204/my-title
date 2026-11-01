@@ -55,7 +55,13 @@ function registerRuntimeRoutes(app, deps = {}) {
     const { input = {}, requestId, caller = 'remote-forward' } = req.body || {};
 
     const abortController = new AbortController();
-    req.on('close', () => {
+    // 在 HTTP 响应对象上监听连接提前关闭（客户端中断），而不是在 req 上监听（req 会在请求体读取完后触发 close）
+    res.on('close', () => {
+      if (!res.writableEnded) {
+        abortController.abort();
+      }
+    });
+    req.on('aborted', () => {
       if (!res.writableEnded) {
         abortController.abort();
       }
