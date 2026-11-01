@@ -367,36 +367,45 @@ function recoverRuntimeState({
   }
 
   const recoveredTime = now();
-  const nextRevision = (Number.isInteger(current.revision) ? current.revision : 0) + 1;
-  const recoveredRuntime = {
-    ...current,
-    status: 'interrupted',
-    interruptedAt: recoveredTime,
-    interruptedReason: 'process_terminated_unexpectedly',
-    error: current.error || '流程执行进程异常退出，状态已安全恢复，可手动点击恢复继续执行。',
-    progress: updatedProgress,
-    revision: nextRevision,
-    updatedAt: recoveredTime
-  };
+  try {
+    const recoveredRuntime = updateRuntimeState({
+      dataDir,
+      runId,
+      expectedRevision: current.revision,
+      patch: {
+        status: 'interrupted',
+        interruptedAt: recoveredTime,
+        interruptedReason: 'process_terminated_unexpectedly',
+        error: current.error || '流程执行进程异常退出，状态已安全恢复，可手动点击恢复继续执行。',
+        progress: updatedProgress,
+        pid: recordedPid,
+        updatedAt: recoveredTime
+      }
+    });
 
-  writeJsonAtomic(runtimeFile(dataDir, runId), recoveredRuntime);
+    appendRuntimeEvent({
+      dataDir,
+      runId,
+      event: {
+        event: 'interrupted',
+        step: activeStep,
+        previousStatus: current.status,
+        reason: 'process_terminated_unexpectedly',
+        deadPid: recordedPid,
+        revision: recoveredRuntime.revision,
+        attempt: recoveredRuntime.attempt || 1,
+        timestamp: recoveredTime
+      }
+    });
 
-  appendRuntimeEvent({
-    dataDir,
-    runId,
-    event: {
-      event: 'interrupted',
-      step: activeStep,
-      previousStatus: current.status,
-      reason: 'process_terminated_unexpectedly',
-      deadPid: recordedPid,
-      revision: nextRevision,
-      attempt: current.attempt || 1,
-      timestamp: recoveredTime
+    return { recovered: true, runtime: recoveredRuntime, reason: 'recovered_from_crash' };
+  } catch (err) {
+    if (err.code === 'REVISION_CONFLICT') {
+      const fresh = readRuntimeState({ dataDir, runId, autoRecover: false });
+      return { recovered: false, runtime: fresh, reason: 'concurrent_modification' };
     }
-  });
-
-  return { recovered: true, runtime: recoveredRuntime, reason: 'recovered_from_crash' };
+    throw err;
+  }
 }
 
 /**

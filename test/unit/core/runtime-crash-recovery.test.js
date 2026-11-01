@@ -358,6 +358,35 @@ describe('PR-05 Runtime Crash Recovery & Atomic Snapshot Suite', () => {
       assert.equal(summary.runId, runId);
       assert.equal(summary.status, 'created');
     });
+
+    it('aborts crash recovery without overwriting when run was concurrently resumed', () => {
+      const dataDir = createTempDir();
+      const runId = 'run_concurrent_resume_race';
+      initRuntimeState({ dataDir, runId, steps: ['mine'] });
+      updateRuntimeState({ dataDir, runId, patch: { pid: 99999999 } });
+
+      const recovery = recoverRuntimeState({
+        dataDir,
+        runId,
+        isAliveFn: () => {
+          // Concurrently update/resume the run in another process
+          updateRuntimeState({
+            dataDir,
+            runId,
+            patch: { status: 'running', activeStep: 'select', pid: 12345 }
+          });
+          return false;
+        }
+      });
+
+      assert.equal(recovery.recovered, false);
+      assert.equal(recovery.reason, 'concurrent_modification');
+
+      const fresh = readRuntimeState({ dataDir, runId, autoRecover: false });
+      assert.equal(fresh.status, 'running');
+      assert.equal(fresh.activeStep, 'select');
+      assert.equal(fresh.pid, 12345);
+    });
   });
 
   describe('Resuming an Interrupted Run (Runner & ControlService)', () => {
@@ -582,6 +611,55 @@ describe('PR-05 Runtime Crash Recovery & Atomic Snapshot Suite', () => {
       } finally {
         lease.release();
       }
+    });
+
+    it('successfully resumes even if previous crashed process left a zombie lease file', () => {
+      const dataDir = createTempDir();
+      const runId = 'cli_resume_zombie_lease';
+      const cliPath = path.join(__dirname, '../../../bin/cli.js');
+
+      const { run } = initRun({ dataDir, runId });
+      initRuntimeState({ dataDir, runId, steps: ['export'] });
+      updateRuntimeState({
+        dataDir,
+        runId,
+        patch: {
+          activeStep: 'export',
+          pid: 99999999, // dead pid
+          status: 'running'
+        }
+      });
+
+      appendJsonl(run.files.generatedProducts, [{
+        status: 'generated',
+        keyword: '纯银项链',
+        sycmCategoryEvidence: {
+          source: 'sycm',
+          queryWord: '纯银项链',
+          recommended: '饰品 > 项链',
+          candidates: [{ category: '饰品 > 项链', clickRatio: 0.8 }]
+        },
+        url: 'https://detail.1688.com/offer/1234567890.html',
+        title: '纯银项链女锁骨链高级感百搭小众设计吊坠时尚轻奢气质颈链送女友生日礼物',
+        product: { categoryName: '饰品 > 项链' }
+      }]);
+
+      // Manually leave a stale/zombie lease file from a crashed process
+      const leaseManager = createWorkbenchLeaseManager({ runtimeDir: path.join(dataDir, 'leases') });
+      const leaseFile = leaseManager.getLeasePath(`run:${runId}`);
+      fs.mkdirSync(path.dirname(leaseFile), { recursive: true });
+      fs.writeFileSync(leaseFile, JSON.stringify({ pid: 99999999, ownerToken: 'dead_token_crashed' }));
+
+      const output = execFileSync(
+        process.execPath,
+        [cliPath, 'workflow', 'resume', '--run', runId, '--data-dir', dataDir, '--json'],
+        { encoding: 'utf8' }
+      );
+
+      const parsed = JSON.parse(output);
+      assert.equal(parsed.ok, true);
+      assert.equal(parsed.runId, runId);
+      assert.equal(parsed.status, 'needs_review');
     });
   });
 

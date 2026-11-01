@@ -262,14 +262,19 @@ function createWorkbenchLeaseManager(options = {}) {
             const reclaimLockPath = `${leasePath}.reclaim`;
             const reclaimLock = tryAcquireReclaimLock(reclaimLockPath);
             if (reclaimLock) {
+              let reclaimed = false;
               try {
                 // 获取到回收锁后，再次核验 leasePath 的持有者 token 依然等于刚才确认死亡的 token
                 const recheck = readLeaseFile(leasePath);
                 if (recheck && recheck.ownerToken === existing.ownerToken && !isProcessAlive(recheck.pid)) {
                   fs.unlinkSync(leasePath);
+                  reclaimed = true;
                 }
               } finally {
                 reclaimLock.release();
+              }
+              if (reclaimed) {
+                return tryAcquireOnce(resourceKey, options);
               }
             }
           }
@@ -282,16 +287,21 @@ function createWorkbenchLeaseManager(options = {}) {
               const reclaimLockPath = `${leasePath}.reclaim`;
               const reclaimLock = tryAcquireReclaimLock(reclaimLockPath);
               if (reclaimLock) {
+                let reclaimed = false;
                 try {
                   const recheck = readLeaseFile(leasePath);
                   if (recheck === null && fs.existsSync(leasePath)) {
                     const recheckStat = fs.statSync(leasePath);
                     if (Date.now() - recheckStat.mtimeMs > defaultTtlMs) {
                       fs.unlinkSync(leasePath);
+                      reclaimed = true;
                     }
                   }
                 } finally {
                   reclaimLock.release();
+                }
+                if (reclaimed) {
+                  return tryAcquireOnce(resourceKey, options);
                 }
               }
             }
