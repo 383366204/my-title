@@ -80,7 +80,7 @@ my-title/
 }
 ```
 
-暴露工具：`generate_title`, `generate_title_from_image`, `batch_generate_titles`, `opportunities`, `trend`, `sycm_query`, `sycm_status`, `suggest_keywords`, `discover_peers`, `get_peer_discovery_status`, `cancel_peer_discovery`
+暴露工具：`taobao_opc_list_tools`, `taobao_opc_call`, `generate_title`, `batch_generate_titles`, `opportunities`, `trend`, `sycm_query`, `sycm_status`, `suggest_keywords`, `discover_peers`, `get_peer_discovery_status`, `cancel_peer_discovery`
 
 ---
 
@@ -88,8 +88,11 @@ my-title/
 
 | 任务 | 位置 | 备注 |
 |------|------|------|
+| 架构决议 (ADR v1.0) | `docs/architecture/agent-platform-adr-v1.md` | Agent 平台改造架构决议、入口与存储清单 |
 | 添加 CLI 命令 | `bin/cli.js` | 使用 commander, 编排各 skill |
-| MCP Server | `bin/mcp-server.mjs` | ESM，注册 8 个工具 |
+| Web / Runtime 服务入口 | `bin/server.js` + `core/server/` | Express 路由与本地工作台服务 |
+| Workflow 控制服务 | `core/workflow/control-service.js` | 统一收拢 start / pause / resume / retry / cancel 控制流 |
+| MCP Server | `bin/mcp-server.mjs` | ESM，注册 12 个工具 |
 | 修改标题逻辑 | `skills/title-gen/src/generate-title.js` | LLM 参考同行标题生成 |
 | 修改 1688 搜索 | `skills/alibaba1688/src/search-1688.js` | 搜索 + 评分 + 过滤 |
 | 修改淘宝搜索 | `skills/title-gen/src/search-taobao.js` | taobao-native CLI 集成 |
