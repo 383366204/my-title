@@ -5,7 +5,9 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { execFileSync } = require('child_process');
 
+const { initRun, appendJsonl } = require('../../../skills/pipeline-flow/src/run-store');
 const {
   initRuntimeState,
   readRuntimeState,
@@ -283,6 +285,34 @@ describe('PR-05 Runtime Crash Recovery & Atomic Snapshot Suite', () => {
       assert.equal(autoState.status, 'interrupted');
     });
 
+    it('triggers recovery during normal readRuntimeState and summarizePipelineRun when PID is dead', () => {
+      const dataDir = createTempDir();
+      const runId = 'run_auto_heal_on_read';
+      initRuntimeState({ dataDir, runId, steps: ['mine', 'select'] });
+      // Set an invalid dead PID (e.g. 99999999)
+      updateRuntimeState({
+        dataDir,
+        runId,
+        patch: {
+          pid: 99999999,
+          activeStep: 'mine',
+          status: 'running'
+        }
+      });
+
+      // Normal user-facing load without explicit recovery call
+      const loaded = readRuntimeState({ dataDir, runId });
+      assert.equal(loaded.status, 'interrupted', 'readRuntimeState should auto-recover crashed run');
+      assert.equal(loaded.interruptedReason, 'process_terminated_unexpectedly');
+
+      // Normal summary load also reflects interrupted status and blocker
+      const summary = summarizePipelineRun({ dataDir, runId });
+      assert.ok(summary);
+      assert.equal(summary.status, 'interrupted');
+      assert.ok(summary.blockers.includes('process_interrupted'));
+      assert.match(summary.nextCommand, /workflow resume --run run_auto_heal_on_read --json/);
+    });
+
     it('projects interrupted run onto summary and canvas cleanly', () => {
       const summary = {
         runId: 'run_interrupted_proj',
@@ -406,6 +436,73 @@ describe('PR-05 Runtime Crash Recovery & Atomic Snapshot Suite', () => {
       assert.equal(finalRuntime.status, 'completed');
       assert.equal(finalRuntime.attempt, 2, 'Attempt should be bumped to 2 on resumption');
       assert.ok(finalRuntime.revision > 5, 'Revision should increase monotonically');
+    });
+  });
+
+  describe('CLI Workflow Resume Command Integration', () => {
+    it('returns error JSON when resuming a non-existent runId', () => {
+      const cliPath = path.join(__dirname, '../../../bin/cli.js');
+      try {
+        execFileSync(process.execPath, [cliPath, 'workflow', 'resume', '--run', 'missing_run_xyz', '--json'], {
+          encoding: 'utf8'
+        });
+        assert.fail('Expected CLI to exit with non-zero code');
+      } catch (err) {
+        assert.equal(err.status, 1);
+        const stdout = JSON.parse(err.stdout);
+        assert.equal(stdout.ok, false);
+        assert.equal(stdout.runId, 'missing_run_xyz');
+        assert.equal(stdout.status, 'workflow_resume_failed');
+        assert.match(stdout.error, /未找到运行记录/);
+      }
+    });
+
+    it('successfully resumes interrupted run from active step via CLI command', () => {
+      const dataDir = createTempDir();
+      const runId = 'cli_resume_export_run';
+      const cliPath = path.join(__dirname, '../../../bin/cli.js');
+
+      // Initialize run and runtime state stopped at export
+      const { run } = initRun({ dataDir, runId });
+      initRuntimeState({ dataDir, runId, steps: ['export'] });
+      updateRuntimeState({
+        dataDir,
+        runId,
+        patch: {
+          activeStep: 'export',
+          pid: 99999999, // dead pid
+          status: 'running'
+        }
+      });
+
+      appendJsonl(run.files.generatedProducts, [{
+        status: 'generated',
+        keyword: '纯银项链',
+        sycmCategoryEvidence: {
+          source: 'sycm',
+          queryWord: '纯银项链',
+          recommended: '饰品 > 项链',
+          candidates: [{ category: '饰品 > 项链', clickRatio: 0.8 }]
+        },
+        url: 'https://detail.1688.com/offer/1234567890.html',
+        title: '纯银项链女锁骨链高级感百搭小众设计吊坠时尚轻奢气质颈链送女友生日礼物',
+        product: { categoryName: '饰品 > 项链' }
+      }]);
+
+      const output = execFileSync(
+        process.execPath,
+        [cliPath, 'workflow', 'resume', '--run', runId, '--data-dir', dataDir, '--json'],
+        { encoding: 'utf8' }
+      );
+
+      const parsed = JSON.parse(output);
+      assert.equal(parsed.ok, true);
+      assert.equal(parsed.runId, runId);
+      assert.equal(parsed.status, 'needs_review');
+
+      const resumedRuntime = readRuntimeState({ dataDir, runId });
+      assert.equal(resumedRuntime.status, 'needs_review');
+      assert.equal(resumedRuntime.progress.export.status, 'completed');
     });
   });
 

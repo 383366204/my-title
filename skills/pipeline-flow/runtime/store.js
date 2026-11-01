@@ -119,12 +119,13 @@ function initRuntimeState({ dataDir, runId, steps = [], mode = '', params = {}, 
  * @param {object} options Runtime options.
  * @param {string} [options.dataDir] Pipeline data directory.
  * @param {string} options.runId Runtime run id.
- * @param {boolean} [options.autoRecover=false] Auto-recover if process terminated unexpectedly.
+ * @param {boolean} [options.autoRecover=true] Auto-recover if process terminated unexpectedly.
+ * @param {function} [options.isAliveFn=isPidAlive] Process liveness tester.
  * @returns {object|null} Runtime state when present.
  */
-function readRuntimeState({ dataDir, runId, autoRecover = false }) {
+function readRuntimeState({ dataDir, runId, autoRecover = true, isAliveFn = isPidAlive } = {}) {
   if (autoRecover) {
-    const recoveryResult = recoverRuntimeState({ dataDir, runId });
+    const recoveryResult = recoverRuntimeState({ dataDir, runId, isAliveFn });
     if (recoveryResult.recovered) {
       return recoveryResult.runtime;
     }
@@ -143,7 +144,7 @@ function readRuntimeState({ dataDir, runId, autoRecover = false }) {
  */
 function updateRuntimeState({ dataDir, runId, patch = {}, expectedRevision }) {
   assertRuntimeRunId(runId);
-  const current = readRuntimeState({ dataDir, runId }) || {};
+  const current = readRuntimeState({ dataDir, runId, autoRecover: false }) || {};
   const curRev = Number.isInteger(current.revision) ? current.revision : 0;
   if (expectedRevision !== undefined && curRev !== expectedRevision) {
     const err = new Error(`Runtime revision conflict for run ${runId}: expected revision ${expectedRevision}, found ${curRev}`);
@@ -160,10 +161,10 @@ function updateRuntimeState({ dataDir, runId, patch = {}, expectedRevision }) {
 
   const next = {
     ...current,
+    pid: process.pid,
     ...patch,
     revision: nextRevision,
     attempt: nextAttempt,
-    pid: process.pid,
     progress: {
       ...(current.progress || {}),
       ...(patch.progress || {})
@@ -261,7 +262,7 @@ function readRuntimeControl({ dataDir, runId }) {
  */
 function appendRuntimeEvent({ dataDir, runId, event = {} }) {
   assertRuntimeRunId(runId);
-  const current = readRuntimeState({ dataDir, runId });
+  const current = readRuntimeState({ dataDir, runId, autoRecover: false });
   const file = eventsFile(dataDir, runId);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const payload = {
@@ -333,7 +334,7 @@ function recoverRuntimeState({
   now = () => new Date().toISOString()
 } = {}) {
   assertRuntimeRunId(runId);
-  const current = readRuntimeState({ dataDir, runId });
+  const current = readRuntimeState({ dataDir, runId, autoRecover: false });
   if (!current) return { recovered: false, runtime: null, reason: 'not_found' };
 
   const activeStatuses = ['running', 'resuming', 'retrying'];
@@ -342,6 +343,9 @@ function recoverRuntimeState({
   }
 
   const recordedPid = current.pid;
+  if (!Number.isInteger(recordedPid) || recordedPid <= 0) {
+    return { recovered: false, runtime: current, reason: 'no_pid' };
+  }
   const alive = isAliveFn(recordedPid);
   if (alive) {
     return { recovered: false, runtime: current, reason: 'process_alive' };
@@ -401,7 +405,7 @@ function recoverRuntimeState({
 function verifyEventConsistency({ dataDir, runId }) {
   assertRuntimeRunId(runId);
   const events = readRuntimeEvents({ dataDir, runId });
-  const runtime = readRuntimeState({ dataDir, runId });
+  const runtime = readRuntimeState({ dataDir, runId, autoRecover: false });
   const issues = [];
 
   if (!events.length) {
