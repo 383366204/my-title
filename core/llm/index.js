@@ -1,4 +1,12 @@
 const LLMClient = require('../llm-client');
+const {
+  getActiveSettings,
+  getPublicSettings,
+  readDynamicSettings,
+  writeDynamicSettings,
+  resetDynamicSettings,
+  testConnectivity
+} = require('./settings-manager');
 
 const DEFAULTS = {
   glm: {
@@ -17,6 +25,10 @@ const DEFAULTS = {
     apiBase: 'https://api.minimaxi.com/v1',
     model: 'MiniMax-M3'
   },
+  dashscope: {
+    apiBase: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    model: 'qwen-plus'
+  },
   'openai-compatible': {
     apiBase: 'https://api.openai.com/v1',
     model: 'gpt-4o-mini'
@@ -28,37 +40,44 @@ const PROVIDER_LABELS = {
   volc: '火山引擎 (Doubao)',
   deepseek: 'DeepSeek',
   minimax: 'MiniMax',
+  dashscope: '阿里云百炼 (DashScope)',
   'openai-compatible': '兼容 OpenAI 的模型服务'
 };
 
 function normalizeProvider(provider) {
-  return String(provider || process.env.LLM_PROVIDER || 'glm')
+  const norm = String(provider || process.env.LLM_PROVIDER || 'glm')
     .trim()
     .toLowerCase()
     .replace(/_/g, '-');
+  if (norm === 'qwen' || norm === 'bailian') return 'dashscope';
+  return norm;
 }
 
 /**
  * 解析指定 provider 的配置。
- * 所有服务商统一使用 LLM_* 环境变量，显式配置优先。
+ * 优先级：显式配置 > 动态运行时配置 (data/runtime/llm-settings.json) > LLM_* 环境变量 > 内置预设。
  *
  * @param {string} provider - 已标准化的 provider 名称
  * @param {object} [config] - 调用方显式传入的配置
  * @returns {object} 解析后的完整配置
  */
 function readProviderConfig(provider, config = {}) {
-  const preset = DEFAULTS[provider];
+  const normProvider = normalizeProvider(provider);
+  const preset = DEFAULTS[normProvider];
   if (!preset) {
-    throw new Error(`Unsupported LLM provider: ${provider}`);
+    throw new Error(`Unsupported LLM provider: ${normProvider}`);
   }
 
+  // 通过 getActiveSettings 统一合并 显式 > 动态配置 > .env
+  const active = getActiveSettings({ provider: normProvider, ...config });
+
   return {
-    provider,
-    apiKey: config.apiKey || process.env.LLM_API_KEY,
-    apiBase: config.apiBase || process.env.LLM_API_BASE || preset.apiBase,
-    model: config.model || process.env.LLM_MODEL || preset.model,
-    timeout: config.timeout || process.env.LLM_TIMEOUT,
-    longTimeout: config.longTimeout || process.env.LLM_LONG_TIMEOUT
+    provider: normProvider,
+    apiKey: active.apiKey,
+    apiBase: active.apiBase || preset.apiBase,
+    model: active.model || preset.model,
+    timeout: active.timeout,
+    longTimeout: active.longTimeout
   };
 }
 
@@ -150,5 +169,11 @@ module.exports = {
   createLLMClient,
   getLLMCacheVersion,
   getLLMProviderInfo,
-  normalizeProvider
+  normalizeProvider,
+  getActiveSettings,
+  getPublicSettings,
+  readDynamicSettings,
+  writeDynamicSettings,
+  resetDynamicSettings,
+  testConnectivity
 };

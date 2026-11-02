@@ -627,6 +627,183 @@ ${sycmLines}
       relatedMaterials: result.relatedMaterials
     };
   }
+
+  /**
+   * 通用 Tool Calling 会话接口
+   * 自动归一化入参工具契约、支持流式或非流式大模型调用、抽取深度思考标签、清洗异构参数
+   *
+   * @param {object} options
+   * @param {Array<object>} options.messages 消息历史
+   * @param {Array<object>} [options.tools] 工具列表 (支持 ToolDefinition 或标准 function 定义)
+   * @param {string|object} [options.toolChoice='auto']
+   * @param {number} [options.temperature=0.2]
+   * @param {number} [options.maxTokens]
+   * @param {AbortSignal} [options.signal] 中止信号
+   * @returns {Promise<{
+   *   message: { role: 'assistant', content: string|null, reasoning_content?: string|null, tool_calls?: Array<object> },
+   *   usage: { prompt_tokens: number, completion_tokens: number, total_tokens: number },
+   *   finishReason: string
+   * }>}
+   */
+  async chatWithTools({
+    messages,
+    tools = [],
+    toolChoice = 'auto',
+    temperature = 0.2,
+    maxTokens,
+    signal
+  }) {
+    const normalizedTools = normalizeToolDefinitions(tools);
+    const payload = {
+      messages,
+      temperature
+    };
+
+    if (maxTokens) {
+      payload.max_tokens = maxTokens;
+    }
+
+    if (normalizedTools.length > 0) {
+      payload.tools = normalizedTools;
+      payload.tool_choice = toolChoice;
+    }
+
+    const response = await axios.post(
+      `${this.apiBase}/chat/completions`,
+      this._buildChatPayload(payload),
+      {
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: this._longTimeout,
+        signal
+      }
+    );
+
+    const choice = response.data?.choices?.[0] || {};
+    const rawMessage = choice.message || {};
+    let content = rawMessage.content !== undefined ? rawMessage.content : null;
+    let reasoningContent = rawMessage.reasoning_content || null;
+
+    // 清洗并提取 <think>...</think>（针对 DeepSeek R1 / Qwen 等模型的思考内容）
+    if (typeof content === 'string' && content.includes('<think>')) {
+      const thinkMatch = content.match(/<think>([\s\S]*?)<\/think>/);
+      if (thinkMatch) {
+        if (!reasoningContent) {
+          reasoningContent = thinkMatch[1].trim();
+        }
+        content = content.replace(/<think>[\s\S]*?<\/think>/, '').trim();
+        if (!content) content = null;
+      }
+    }
+
+    const normalizedToolCalls = rawMessage.tool_calls && rawMessage.tool_calls.length > 0
+      ? normalizeToolCalls(rawMessage.tool_calls)
+      : undefined;
+
+    return {
+      message: {
+        role: 'assistant',
+        content,
+        reasoning_content: reasoningContent,
+        ...(normalizedToolCalls ? { tool_calls: normalizedToolCalls } : {})
+      },
+      usage: response.data?.usage || {
+        prompt_tokens: 0,
+        completion_tokens: 0,
+        total_tokens: 0
+      },
+      finishReason: choice.finish_reason || (normalizedToolCalls ? 'tool_calls' : 'stop')
+    };
+  }
+}
+
+/**
+ * 将各类工具定义（ToolDefinition、Zod Schema 或原始结构）归一化为 OpenAI 标准 tools: [{ type: 'function', function: { name, description, parameters } }]
+ * @param {Array<object>} tools
+ * @returns {Array<object>}
+ */
+function normalizeToolDefinitions(tools) {
+  if (!Array.isArray(tools)) return [];
+  return tools.map(tool => {
+    if (!tool || typeof tool !== 'object') return null;
+
+    // 已经符合 OpenAI 结构
+    if (tool.type === 'function' && tool.function && tool.function.name) {
+      return tool;
+    }
+
+    const name = tool.mcpName || (tool.id ? tool.id.replace(/\./g, '_') : tool.name);
+    const description = tool.description || '';
+    let parameters = { type: 'object', properties: {} };
+
+    if (tool.inputSchema) {
+      if (typeof tool.inputSchema.toJSONSchema === 'function') {
+        const jsonSchema = tool.inputSchema.toJSONSchema();
+        const { $schema, ...cleanSchema } = jsonSchema;
+        parameters = cleanSchema;
+      } else if (typeof tool.inputSchema === 'object') {
+        const { $schema, ...cleanSchema } = tool.inputSchema;
+        parameters = cleanSchema;
+      }
+    }
+
+    return {
+      type: 'function',
+      function: {
+        name,
+        description,
+        parameters
+      }
+    };
+  }).filter(Boolean);
+}
+
+/**
+ * 容错清洗大模型返回的 tool_calls
+ * 兼容 arguments 为 Object、JSON 损坏 (jsonrepair 修复)、缺少 id 等异构情况
+ * @param {Array<object>} toolCalls
+ * @returns {Array<object>}
+ */
+function normalizeToolCalls(toolCalls) {
+  if (!Array.isArray(toolCalls)) return [];
+  const { jsonrepair } = require('jsonrepair');
+
+  return toolCalls.map((call, idx) => {
+    if (!call || typeof call !== 'object') return null;
+
+    const id = call.id || `call_${Date.now()}_${idx}`;
+    const type = call.type || 'function';
+    const fn = call.function || {};
+    const name = fn.name || call.name || '';
+    let args = fn.arguments !== undefined ? fn.arguments : (call.arguments !== undefined ? call.arguments : '{}');
+
+    if (typeof args === 'object' && args !== null) {
+      args = JSON.stringify(args);
+    } else if (typeof args === 'string') {
+      try {
+        JSON.parse(args);
+      } catch (_) {
+        try {
+          args = jsonrepair(args);
+        } catch (__restoreErr) {
+          // 保持原样以供上层捕获报错进行模型自愈
+        }
+      }
+    } else {
+      args = '{}';
+    }
+
+    return {
+      id,
+      type,
+      function: {
+        name,
+        arguments: args
+      }
+    };
+  }).filter(Boolean);
 }
 
 module.exports = LLMClient;
@@ -634,3 +811,5 @@ module.exports = LLMClient;
 module.exports.GLMClient = LLMClient;
 module.exports.LLMClient = LLMClient;
 module.exports.PROMPT_VERSION = PROMPT_VERSION;
+module.exports.normalizeToolDefinitions = normalizeToolDefinitions;
+module.exports.normalizeToolCalls = normalizeToolCalls;
