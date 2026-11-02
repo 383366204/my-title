@@ -21,6 +21,11 @@ const activeSessions = new Map();
 const DEFAULT_SYSTEM_PROMPT = `你是一个专业的电商选品与标题生成 AI 助手。
 你可以通过调用工具协助用户完成词根挖掘、选词分析、1688以图找货与标题生成。
 
+【语言与输出规范 - 最高优先级】
+1. 默认且必须始终使用简体中文与用户交流。无论是中间的思考推理（thought）、工具调用前后说明、还是最终输出给用户的总结与建议，必须全量使用简体中文，严禁输出英文段落！
+2. 即使部分工具定义、技能文档、API 字段或平台数据包含英文，向用户解释时也必须全部翻译和转述为中文。
+3. 保持回答专业、精炼、条理清晰，合理利用 Markdown 粗体（**核心词**）与列表清晰组织内容。
+
 【刚性规则与安全边界】
 1. 当工作流执行到业务复核阶段（如 inspirationReview、keywordReview、selectionReview）并返回 needs_review 时，必须停止调用并向用户报告待复核卡片，绝不能伪造确认或跳过复核。
 2. 你可以协助用户提出复核初筛建议草稿（调用 workflow_submit_review 时 action 必须设为 'draft'），但严禁自行执行最终确认批准（action 严禁设为 'confirm'）。
@@ -88,7 +93,7 @@ class AgentRunner extends EventEmitter {
     // 2. 组装初始 System Prompt (合并 Skill Catalog 索引)
     const catalogPrompt = this.skillLoader.formatCatalogPrompt();
     const fullSystemPrompt = catalogPrompt
-      ? `${this.systemPrompt}\n\n${catalogPrompt}`
+      ? `${this.systemPrompt}\n\n${catalogPrompt}\n\n【重要提示】所有面向用户的回复与思考总结，必须严格使用简体中文输出。`
       : this.systemPrompt;
 
     const session = {
@@ -243,10 +248,16 @@ class AgentRunner extends EventEmitter {
 
         // 发送思考与文本流式事件
         if (assistantMsg.reasoning_content) {
-          this.emit('thinking:chunk', { chunk: assistantMsg.reasoning_content });
+          this.emit('thinking:chunk', {
+            chunk: assistantMsg.reasoning_content,
+            text: assistantMsg.reasoning_content
+          });
         }
         if (assistantMsg.content) {
-          this.emit('content:chunk', { chunk: assistantMsg.content });
+          this.emit('content:chunk', {
+            chunk: assistantMsg.content,
+            text: assistantMsg.content
+          });
         }
 
         // 4. 若模型未调用任何工具，代表思考已收敛或向用户发问，循环正常结束
@@ -365,6 +376,22 @@ class AgentRunner extends EventEmitter {
                   summary: result.summary || result.message || '选品阶段数据已产出，等待人工复核确认',
                   candidateCount: result.candidateCount || 0,
                   actionUrl: `/pipeline/review?runId=${runId}&stepId=${stepId}`
+                }
+              };
+            } else if (result && (result.status === 'needs_approval' || result.pendingApproval || result.approvalRequired)) {
+              const runId = result.runId || result.run?.id || 'unknown_run';
+              suspendTriggered = {
+                reason: 'needs_approval',
+                card: {
+                  type: 'ApprovalCard',
+                  runId,
+                  approvalId: result.approvalId || result.approval?.id || `app_${Date.now()}`,
+                  grantToken: result.grantToken || result.approval?.grantToken,
+                  actionType: result.actionType || 'distribution.publish',
+                  inputDigest: result.inputDigest || result.approval?.inputDigest,
+                  title: result.title || '外部写操作高危授权确认',
+                  summary: result.summary || result.message || '即将向外部店铺提交铺货发布，需人工签署授权。',
+                  productCount: result.productCount || result.itemCount || 0
                 }
               };
             }

@@ -412,4 +412,63 @@ describe('AgentRunner Unit Tests', () => {
     assert.equal(resumedSession.turnCount, 2);
     assert.equal(resumedSession.suspension, null);
   });
+
+  it('should suspend and emit ApprovalCard when operation requires high-risk execution approval (ADR D8)', async () => {
+    registry.register({
+      id: 'distribution.publish',
+      mcpName: 'distribution_publish',
+      version: '1.0.0',
+      description: '批量铺货上架',
+      inputSchema: z.object({ runId: z.string() }),
+      policy: { risk: 'high', approval: 'always', sideEffect: 'write', resourceKeys: [], platforms: [] },
+      execute: async () => ({
+        status: 'needs_approval',
+        runId: 'run_publish_88',
+        approvalId: 'app_pub_88',
+        grantToken: 'tok_grant_88',
+        actionType: 'distribution.publish',
+        inputDigest: 'sha256:digest88',
+        productCount: 10,
+        title: '外部写操作高危授权确认'
+      })
+    });
+
+    const mockLlm = {
+      chatWithTools: async () => ({
+        message: {
+          role: 'assistant',
+          content: '正在提交外部铺货...',
+          tool_calls: [{
+            id: 'call_pub_1',
+            type: 'function',
+            function: { name: 'distribution_publish', arguments: '{"runId":"run_publish_88"}' }
+          }]
+        }
+      })
+    };
+
+    const runner = new AgentRunner({
+      toolExecutor: executor,
+      registry,
+      llmClient: mockLlm,
+      sessionStore
+    });
+
+    let suspendedEvent = null;
+    runner.on('suspended', e => { suspendedEvent = e; });
+
+    const session = await runner.start({
+      sessionId: 'test_session_approval',
+      userPrompt: '发布商品到店铺'
+    });
+
+    assert.equal(session.status, 'suspended');
+    assert.ok(suspendedEvent);
+    assert.equal(suspendedEvent.card.type, 'ApprovalCard');
+    assert.equal(suspendedEvent.card.runId, 'run_publish_88');
+    assert.equal(suspendedEvent.card.approvalId, 'app_pub_88');
+    assert.equal(suspendedEvent.card.grantToken, 'tok_grant_88');
+    assert.equal(suspendedEvent.card.inputDigest, 'sha256:digest88');
+    assert.equal(suspendedEvent.card.productCount, 10);
+  });
 });
