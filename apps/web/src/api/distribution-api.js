@@ -12,3 +12,9 @@ export const startDistributionChrome = (input = {}) => requestJson('/api/distrib
 export const listDistributionShops = () => requestJson('/api/distribution/shops');
 export const saveDistributionShop = input => requestJson('/api/distribution/shops', { method: 'POST', body: input });
 export const deleteDistributionShop = id => requestJson(`/api/distribution/shops/${encodeURIComponent(id)}`, { method: 'DELETE' });
+
+export const requestDistributionApproval = input => requestJson('/api/distribution/approval/request', { method: 'POST', body: input });
+export const grantDistributionApproval = input => requestJson('/api/distribution/approval/grant', { method: 'POST', body: input });
+export const rejectDistributionApproval = input => requestJson('/api/distribution/approval/reject', { method: 'POST', body: input });
+export const getDistributionApproval = runId => requestJson(`/api/distribution/approval?runId=${encodeURIComponent(runId)}`);
+export const getDistributionLedger = runId => requestJson(`/api/distribution/ledger?runId=${encodeURIComponent(runId)}`);

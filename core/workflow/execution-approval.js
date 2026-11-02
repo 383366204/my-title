@@ -38,19 +38,42 @@ class ApprovalConflictError extends Error {
 }
 
 /**
- * 递归键排序规范化序列化，确保即使对象字段顺序不同也产生完全一致的 JSON 字符串
+ * 递归键排序规范化序列化，确保即使对象字段顺序不同也产生完全一致的 JSON 字符串。
+ * 遵循 JSON 标准，自动忽略值为 undefined 的对象属性，确保前后端序列化一致。
  * @param {*} value
- * @returns {string}
+ * @returns {string|undefined}
  */
 function canonicalStringify(value) {
+  if (value === undefined) {
+    return undefined;
+  }
   if (value === null || typeof value !== 'object') {
     return JSON.stringify(value);
   }
   if (Array.isArray(value)) {
-    return '[' + value.map(canonicalStringify).join(',') + ']';
+    return '[' + value.map(v => canonicalStringify(v) ?? 'null').join(',') + ']';
   }
-  const keys = Object.keys(value).sort();
+  const keys = Object.keys(value).filter(k => value[k] !== undefined).sort();
   return '{' + keys.map(k => JSON.stringify(k) + ':' + canonicalStringify(value[k])).join(',') + '}';
+}
+
+/**
+ * 规范化铺货发布入参载荷，消除缺省字段与未定义属性在计算 SHA-256 摘要时的差异
+ * @param {object} raw
+ * @returns {{input: string, shopIds: string[], distributionMode: string}}
+ */
+function normalizeDistributionPayload(raw = {}) {
+  const input = String(raw.input || '').trim();
+  const rawShopIds = Array.isArray(raw.shopIds)
+    ? raw.shopIds
+    : (raw.shopId ? [raw.shopId] : []);
+  const shopIds = [...new Set(rawShopIds.map(s => String(s || '').trim()).filter(Boolean))].sort();
+  const distributionMode = raw.distributionMode ? String(raw.distributionMode) : 'sequential-average';
+  return {
+    input,
+    shopIds,
+    distributionMode
+  };
 }
 
 /**
@@ -111,12 +134,14 @@ function requestExecutionApproval({
   const revision = runRevision !== undefined ? Number(runRevision) : (Number(runtime?.revision) || 0);
   const inputDigest = computeInputDigest(inputPayload);
   const approvalId = `appr_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+  const grantToken = crypto.randomBytes(24).toString('hex');
 
   const approval = {
     id: approvalId,
     runId,
     actionType,
     inputDigest,
+    grantToken,
     runRevision: revision,
     status: 'pending',
     requestedBy,
@@ -155,6 +180,7 @@ function grantExecutionApproval({
   approvalId,
   actionType = 'distribution.publish',
   approvedBy,
+  grantToken,
   expectedInputDigest
 }) {
   if (!approvedBy || typeof approvedBy !== 'string' || isAgentIdentity(approvedBy)) {
@@ -171,6 +197,10 @@ function grantExecutionApproval({
   const approval = readJsonFile(approvalPath, null);
   if (!approval) {
     throw new ApprovalConflictError(`未找到对应的执行授权申请 (${approvalId || actionType})`, 'APPROVAL_NOT_FOUND');
+  }
+
+  if (approval.grantToken && grantToken && approval.grantToken !== grantToken) {
+    throw new ApprovalForbiddenError('执行授权凭据 grantToken 无效', 'APPROVAL_TOKEN_INVALID');
   }
 
   if (approval.status === 'consumed') {
@@ -423,6 +453,7 @@ module.exports = {
   ApprovalConflictError,
   canonicalStringify,
   computeInputDigest,
+  normalizeDistributionPayload,
   requestExecutionApproval,
   grantExecutionApproval,
   rejectExecutionApproval,

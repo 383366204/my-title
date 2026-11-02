@@ -97,7 +97,7 @@ function saveReviewDraft({
     );
   }
 
-  if (current && current.status === 'confirmed' && updatedBy === 'agent_draft') {
+  if (current && current.status === 'confirmed' && (updatedBy === 'agent_draft' || isAgentIdentity(updatedBy))) {
     throw new ReviewConflictError(
       `步骤 [${stepId}] 已经由人工最终确认，Agent 无法覆盖已确认的决策结果`,
       'REVIEW_ALREADY_CONFIRMED'
@@ -109,12 +109,12 @@ function saveReviewDraft({
     runId,
     stepId,
     version: nextVersion,
-    status: current?.status === 'confirmed' && updatedBy === 'user' ? 'confirmed' : 'draft',
+    status: 'draft',
     decisions: decisions || current?.decisions || {},
     updatedBy,
     updatedAt: new Date().toISOString(),
-    confirmedBy: current?.status === 'confirmed' && updatedBy === 'user' ? current.confirmedBy : null,
-    confirmedAt: current?.status === 'confirmed' && updatedBy === 'user' ? current.confirmedAt : null
+    confirmedBy: null,
+    confirmedAt: null
   };
 
   const filePath = getReviewDraftPath(dataDir, runId, stepId);

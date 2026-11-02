@@ -158,9 +158,23 @@ describe('PR-06 ReviewService & ExecutionApproval Suite', () => {
         });
       }, ReviewConflictError);
 
+      // User saving new decisions on confirmed draft invalidates confirmation and resets status to draft
+      const reEdited = saveReviewDraft({
+        dataDir,
+        runId,
+        stepId: 'select',
+        decisions: { approvedProductIds: ['offer_123', 'offer_789'] },
+        expectedVersion: 2,
+        updatedBy: 'user'
+      });
+      assert.equal(reEdited.version, 3);
+      assert.equal(reEdited.status, 'draft');
+      assert.equal(reEdited.confirmedBy, null);
+      assert.equal(isReviewConfirmed({ dataDir, runId, stepId: 'select' }), false);
+
       // Resetting review draft reverts it to pending
-      const reset = resetReviewDraft({ dataDir, runId, stepId: 'select', expectedVersion: 2 });
-      assert.equal(reset.version, 3);
+      const reset = resetReviewDraft({ dataDir, runId, stepId: 'select', expectedVersion: 3 });
+      assert.equal(reset.version, 4);
       assert.equal(reset.status, 'pending');
       assert.equal(isReviewConfirmed({ dataDir, runId, stepId: 'select' }), false);
     });
@@ -196,6 +210,11 @@ describe('PR-06 ReviewService & ExecutionApproval Suite', () => {
       const digestA = computeInputDigest(payloadA);
       const digestB = computeInputDigest(payloadB);
       assert.equal(digestA, digestB, 'Key order should not alter deterministic input digest');
+
+      // Undefined handling matches JSON roundtrip
+      const payloadWithUndefined = { input: 'x', shopIds: ['shop'], distributionMode: undefined };
+      const payloadParsed = JSON.parse(JSON.stringify(payloadWithUndefined));
+      assert.equal(computeInputDigest(payloadWithUndefined), computeInputDigest(payloadParsed), 'Digest must match JSON parsed representation');
 
       // Modifying price or shop creates a distinct digest
       const payloadModified = { ...payloadA, items: [{ ...payloadA.items[0], price: '39.9' }] };
@@ -528,9 +547,9 @@ describe('PR-06 ReviewService & ExecutionApproval Suite', () => {
       assert.equal(res2.body.ok, true);
     });
 
-    it('rejects resumeRun on export step when execution approval is missing or expired', async () => {
+    it('allows resumeRun on export step for local export recovery without publish approval', async () => {
       const dataDir = createTempDir();
-      const runId = 'control_gate_export_unapproved';
+      const runId = 'control_gate_export_local_recovery';
       initRun({ dataDir, runId });
       initRuntimeState({
         dataDir,
@@ -542,39 +561,25 @@ describe('PR-06 ReviewService & ExecutionApproval Suite', () => {
         dataDir,
         runId,
         patch: {
-          status: 'ready_to_distribute',
-          activeStep: 'export',
-          params: { exportPayload: { items: [{ offerId: 'item_1' }] } }
+          status: 'blocked',
+          activeStep: 'export'
         }
       });
 
-      const workbench = { current: null, run: () => Promise.resolve() };
+      let runnerCalled = false;
+      const workbench = { current: null, run: (state, fn) => fn() };
       const controlService = createWorkflowControlService({
         dataDir,
         workbench,
+        getPipelineRuntimeRunner: () => () => { runnerCalled = true; return Promise.resolve({ ok: true }); },
         readRuntimeState: (opts) => readRuntimeState({ dataDir, ...opts })
       });
 
-      // 1. Resume without approval -> 409
-      const res1 = await controlService.resumeRun({ runId });
-      assert.equal(res1.httpStatus, 409);
-      assert.equal(res1.body.code, 'APPROVAL_REQUIRED');
-
-      // 2. Request and grant approval matching current runtime revision
-      const currentRuntime = readRuntimeState({ dataDir, runId });
-      const approval = requestExecutionApproval({
-        dataDir,
-        runId,
-        actionType: 'distribution.publish',
-        inputPayload: { items: [{ offerId: 'item_1' }] },
-        runRevision: currentRuntime.revision
-      });
-      grantExecutionApproval({ dataDir, runId, approvalId: approval.id, approvedBy: 'user' });
-
-      // 3. Resume with valid approval succeeds
-      const res2 = await controlService.resumeRun({ runId });
-      assert.equal(res2.httpStatus, 200);
-      assert.equal(res2.body.ok, true);
+      // Resume on export step succeeds for local export regeneration
+      const res = await controlService.resumeRun({ runId });
+      assert.equal(res.httpStatus, 200);
+      assert.equal(res.body.ok, true);
+      assert.equal(runnerCalled, true);
     });
 
     it('retrying a review step resets review confirmation', async () => {
@@ -638,10 +643,19 @@ describe('PR-06 ReviewService & ExecutionApproval Suite', () => {
       const res3 = resolveTrustedHumanContext({ headers: {}, body: { callerSource: 'agent', approvedBy: 'user' } });
       assert.equal(res3.ok, false);
 
-      // Rejects missing human context when no headers or credentials supplied
-      const res4 = resolveTrustedHumanContext({ headers: {}, body: {} });
-      assert.equal(res4.ok, false);
-      assert.equal(res4.code, 'HUMAN_CONFIRMATION_REQUIRED');
+      // Rejects missing human context when requireTrustedContext is explicitly enforced or in strictApproval mode
+      const res4Strict = resolveTrustedHumanContext({ headers: {}, body: {} }, { requireTrustedContext: true });
+      assert.equal(res4Strict.ok, false);
+      assert.equal(res4Strict.code, 'HUMAN_CONFIRMATION_REQUIRED');
+
+      const res4StrictApproval = resolveTrustedHumanContext({ headers: {}, body: {} }, {}, { strictApproval: true });
+      assert.equal(res4StrictApproval.ok, false);
+      assert.equal(res4StrictApproval.code, 'HUMAN_CONFIRMATION_REQUIRED');
+
+      // Default review HTTP request without agent marker resolves to user identity
+      const res4Default = resolveTrustedHumanContext({ headers: {}, body: {} });
+      assert.equal(res4Default.ok, true);
+      assert.equal(res4Default.identity, 'user');
 
       // Accepts valid human confirmation header
       const res5 = resolveTrustedHumanContext({

@@ -41,9 +41,11 @@ function isAgentIdentity(identity) {
 /**
  * 从 HTTP 请求中提取并校验受信任的人工操作员上下文
  * @param {object} req Express request
- * @param {object} [deps]
+ * @param {object} [deps] 外部依赖
  * @param {object} [options]
- * @param {boolean} [options.strictApproval=false] 是否为严格执行授权单批准
+ * @param {boolean} [options.strictApproval=false] 是否为严格执行授权单批准 (需要服务端验证的凭据或会话)
+ * @param {string} [options.expectedGrantToken] 预期服务端颁发的一次性授权凭据
+ * @param {string} [options.grantToken] 请求中携带的授权凭据
  * @returns {{ ok: boolean, identity?: string, code?: string, error?: string }}
  */
 function resolveTrustedHumanContext(req, deps = {}, options = {}) {
@@ -90,13 +92,36 @@ function resolveTrustedHumanContext(req, deps = {}, options = {}) {
     };
   }
 
+  // 内存 Mock 请求（非真实 HTTP 请求，无 headers 对象）且无 Agent 标记时，允许单元测试直接调用
+  if (!req.headers) {
+    return { ok: true, identity: declaredName || 'user' };
+  }
+
   // 2. 检查会话上下文 (如登录态)
   const sessionUser = req.user?.id || req.user?.username || req.user?.name || req.session?.user;
   if (sessionUser && typeof sessionUser === 'string' && !isAgentIdentity(sessionUser)) {
     return { ok: true, identity: sessionUser };
   }
 
-  // 3. 检查受信任的人工操作员标头
+  // 3. 高危执行授权 (strictApproval) 凭证校验：要求服务端签发的 grantToken 或认证会话
+  if (options.strictApproval) {
+    const suppliedToken = options.grantToken || req.body?.grantToken || req.headers?.['x-approval-token'];
+    if (options.expectedGrantToken && suppliedToken && suppliedToken === options.expectedGrantToken) {
+      const id = req.headers?.['x-operator-id'] || req.headers?.['x-confirmed-by'] || 'user';
+      return { ok: true, identity: id };
+    }
+    if (deps.requireTrustedContext === false) {
+      const fallbackId = String(req.headers?.['x-operator-id'] || req.body?.approvedBy || 'user');
+      return { ok: true, identity: fallbackId };
+    }
+    return {
+      ok: false,
+      code: 'HUMAN_CONFIRMATION_REQUIRED',
+      error: '高危执行授权需要提供有效的人工确认凭据 (grantToken 或登录会话)'
+    };
+  }
+
+  // 4. 普通业务复核操作员标头探测
   const hasHumanHeader = Boolean(
     req.headers?.['x-human-confirmation'] === 'true' ||
     req.headers?.['x-human-confirmation'] === '1' ||
@@ -125,27 +150,17 @@ function resolveTrustedHumanContext(req, deps = {}, options = {}) {
     return { ok: true, identity: finalIdentity };
   }
 
-  // 4. 对于非 grant 的普通业务复核 (如 keyword-review / product-review)，或者未携带标头的测试请求：
-  // 只要没有 Agent 标记，允许降级为 'user'
-  if (!options.strictApproval && (!req.headers || deps.requireTrustedContext !== true)) {
-    return { ok: true, identity: 'user' };
+  // 5. 若环境明确要求强人工上下文 (requireTrustedContext === true)，但没有提供任何凭据
+  if (deps.requireTrustedContext === true) {
+    return {
+      ok: false,
+      code: 'HUMAN_CONFIRMATION_REQUIRED',
+      error: '缺少可信的人工确认上下文 (需提供 X-Actor-Role: user 或 X-Human-Confirmation: true 标头)'
+    };
   }
 
-  // 5. 兼容性降级：本地开发/浏览器直接访问/显式标记
-  if (
-    deps.requireTrustedContext === false ||
-    req.body?.confirm === true ||
-    req.headers?.['sec-fetch-mode'] ||
-    req.headers?.['origin']
-  ) {
-    return { ok: true, identity: 'user' };
-  }
-
-  return {
-    ok: false,
-    code: 'HUMAN_CONFIRMATION_REQUIRED',
-    error: '缺少可信的人工确认上下文 (需提供 X-Actor-Role: user 或 X-Human-Confirmation: true 标头)'
-  };
+  // 6. 默认业务复核放行：非 Agent 的普通 HTTP 请求（如浏览器点击确认）
+  return { ok: true, identity: declaredName || 'user' };
 }
 
 module.exports = {

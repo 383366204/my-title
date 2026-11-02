@@ -274,6 +274,9 @@ function registerSelectionReviewRoutes(app, deps) {
         });
         return res.json({ ok: true, data: draft });
       }
+      const humanContext = resolveTrustedHumanContext(req, deps);
+      const callerIsAgent = !humanContext.ok || req.body?.updatedBy === 'agent_draft';
+      const updatedBy = callerIsAgent ? 'agent_draft' : (humanContext.identity || 'user');
       const saver = deps.saveReviewDraft || saveReviewDraft;
       const draft = saver({
         dataDir: deps.dataDir,
@@ -281,7 +284,7 @@ function registerSelectionReviewRoutes(app, deps) {
         stepId,
         decisions: req.body?.decisions || req.body || {},
         expectedVersion: req.body?.version ?? req.body?.expectedVersion,
-        updatedBy: req.body?.updatedBy || 'user'
+        updatedBy
       });
       return res.json({ ok: true, data: draft });
     } catch (err) {

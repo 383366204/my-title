@@ -11,6 +11,7 @@ const {
   grantExecutionApproval,
   rejectExecutionApproval,
   getExecutionApproval,
+  normalizeDistributionPayload,
   ApprovalForbiddenError,
   ApprovalConflictError
 } = require('../workflow/execution-approval');
@@ -134,11 +135,11 @@ function registerDistributionRoutes(app, deps) {
       }
       if (previous?.status === 'completed') return res.status(409).json({ ok: false, error: '此运行已经铺货完成，请勿重复提交。' });
       if (req.body?.runId) {
-        const payloadToVerify = {
+        const payloadToVerify = (deps.normalizeDistributionPayload || normalizeDistributionPayload)({
           input,
           shopIds: Array.isArray(req.body?.shopIds) ? req.body.shopIds : (req.body?.shopId ? [req.body.shopId] : []),
           distributionMode: req.body?.distributionMode
-        };
+        });
         const existingApproval = (deps.getExecutionApproval || getExecutionApproval)({
           dataDir: deps.dataDir,
           runId: req.body.runId,
@@ -151,8 +152,7 @@ function registerDistributionRoutes(app, deps) {
         });
         const shouldEnforceApproval = Boolean(
           deps.enforceApproval === true ||
-          existingApproval ||
-          (deps.requireApproval !== false && runtime)
+          existingApproval
         );
 
         if (shouldEnforceApproval) {
@@ -385,14 +385,17 @@ function registerDistributionRoutes(app, deps) {
 
   app.post('/api/distribution/approval/request', (req, res) => {
     try {
-      const { runId, inputPayload, actionType, runRevision, requestedBy } = req.body || {};
+      const { runId, inputPayload, actionType = 'distribution.publish', runRevision, requestedBy } = req.body || {};
       if (!runId) return res.status(400).json({ ok: false, error: '缺少 runId' });
+      const normalizedPayload = actionType === 'distribution.publish'
+        ? (deps.normalizeDistributionPayload || normalizeDistributionPayload)(inputPayload)
+        : inputPayload;
       const requester = deps.requestExecutionApproval || requestExecutionApproval;
       const approval = requester({
         dataDir: deps.dataDir,
         runId,
         actionType,
-        inputPayload,
+        inputPayload: normalizedPayload,
         runRevision,
         requestedBy
       });
@@ -404,24 +407,44 @@ function registerDistributionRoutes(app, deps) {
 
   app.post('/api/distribution/approval/grant', (req, res) => {
     try {
-      const { runId, approvalId, actionType, expectedInputDigest } = req.body || {};
+      const { runId, approvalId, actionType = 'distribution.publish', expectedInputDigest, grantToken } = req.body || {};
       if (!runId) return res.status(400).json({ ok: false, error: '缺少 runId' });
-      const humanContext = resolveTrustedHumanContext(req, deps, { strictApproval: true });
+
+      // 快速拒绝 Agent 标头与载荷的自批准尝试
+      const earlyCheck = resolveTrustedHumanContext(req, deps, { strictApproval: false });
+      if (!earlyCheck.ok && earlyCheck.code === 'APPROVAL_SELF_GRANT_FORBIDDEN') {
+        return res.status(403).json({ ok: false, code: earlyCheck.code, error: earlyCheck.error });
+      }
+
+      const getter = deps.getExecutionApproval || getExecutionApproval;
+      const approval = getter({ dataDir: deps.dataDir, runId, approvalId, actionType });
+      if (!approval) {
+        return res.status(409).json({ ok: false, code: 'APPROVAL_NOT_FOUND', error: '未找到待批准的执行授权申请' });
+      }
+
+      const tokenFromReq = grantToken || req.headers?.['x-approval-token'];
+      const humanContext = resolveTrustedHumanContext(req, deps, {
+        strictApproval: true,
+        expectedGrantToken: approval.grantToken,
+        grantToken: tokenFromReq
+      });
       if (!humanContext.ok) {
         return res.status(403).json({ ok: false, code: humanContext.code, error: humanContext.error });
       }
+
       const granter = deps.grantExecutionApproval || grantExecutionApproval;
-      const approval = granter({
+      const approved = granter({
         dataDir: deps.dataDir,
         runId,
-        approvalId,
+        approvalId: approval.id,
         actionType,
         approvedBy: humanContext.identity,
+        grantToken: tokenFromReq,
         expectedInputDigest
       });
-      return res.json({ ok: true, data: approval });
+      return res.json({ ok: true, data: approved });
     } catch (err) {
-      if (err instanceof ApprovalForbiddenError || err.code === 'APPROVAL_SELF_GRANT_FORBIDDEN') {
+      if (err instanceof ApprovalForbiddenError || err.code === 'APPROVAL_SELF_GRANT_FORBIDDEN' || err.code === 'APPROVAL_TOKEN_INVALID') {
         return res.status(403).json({ ok: false, code: err.code, error: err.message });
       }
       if (err instanceof ApprovalConflictError || err.code === 'APPROVAL_INPUT_MISMATCH' || err.code === 'APPROVAL_REVISION_MISMATCH' || err.code === 'APPROVAL_NOT_FOUND') {

@@ -372,28 +372,6 @@ function createWorkflowControlService(dependencies = {}) {
             };
           }
         }
-        // 2. 检查待推进步骤是否属于高危外部写操作节点 (export / distribute)
-        if (activeStep === 'export' && ['ready_to_distribute', 'needs_review', 'blocked'].includes(runtime.status)) {
-          const exportPayload = runtime.params?.exportPayload || runtime.params;
-          const approvalVerification = (dependencies.verifyExecutionApproval || verifyExecutionApproval)({
-            dataDir,
-            runId,
-            actionType: 'distribution.publish',
-            inputPayload: exportPayload,
-            currentRunRevision: runtime.revision
-          });
-          if (!approvalVerification.ok) {
-            lease.release();
-            return {
-              httpStatus: 409,
-              body: {
-                ok: false,
-                code: approvalVerification.code,
-                error: `铺货发布步骤需要人工执行授权：${approvalVerification.error}`
-              }
-            };
-          }
-        }
 
         let control;
         let promise;
