@@ -609,4 +609,215 @@ describe('PR-06 ReviewService & ExecutionApproval Suite', () => {
       assert.equal(isReviewConfirmed({ dataDir, runId, stepId: 'keywordReview' }), false);
     });
   });
+
+  describe('Human Context & Server Integration Boundary (Codex Review Fixes)', () => {
+    const { resolveTrustedHumanContext, isAgentIdentity } = require('../../../core/workflow/human-context');
+    const { registerDistributionRoutes } = require('../../../core/server/distribution-routes');
+    const { registerSelectionReviewRoutes } = require('../../../core/server/selection-review-routes');
+    const express = require('express');
+
+    it('detects agent identities and rejects agent self-approval in trusted human context', () => {
+      assert.equal(isAgentIdentity('agent'), true);
+      assert.equal(isAgentIdentity('agent_draft'), true);
+      assert.equal(isAgentIdentity('agent:planner'), true);
+      assert.equal(isAgentIdentity('bot_review'), true);
+      assert.equal(isAgentIdentity('llm'), true);
+      assert.equal(isAgentIdentity('user'), false);
+      assert.equal(isAgentIdentity('operator-alice'), false);
+
+      // Rejects agent role header
+      const res1 = resolveTrustedHumanContext({ headers: { 'x-actor-role': 'agent' }, body: {} });
+      assert.equal(res1.ok, false);
+      assert.equal(res1.code, 'APPROVAL_SELF_GRANT_FORBIDDEN');
+
+      // Rejects agent ID header
+      const res2 = resolveTrustedHumanContext({ headers: { 'x-agent-id': 'subagent-1' }, body: {} });
+      assert.equal(res2.ok, false);
+
+      // Rejects callerSource: agent in body
+      const res3 = resolveTrustedHumanContext({ headers: {}, body: { callerSource: 'agent', approvedBy: 'user' } });
+      assert.equal(res3.ok, false);
+
+      // Rejects missing human context when no headers or credentials supplied
+      const res4 = resolveTrustedHumanContext({ headers: {}, body: {} });
+      assert.equal(res4.ok, false);
+      assert.equal(res4.code, 'HUMAN_CONFIRMATION_REQUIRED');
+
+      // Accepts valid human confirmation header
+      const res5 = resolveTrustedHumanContext({
+        headers: { 'x-human-confirmation': 'true', 'x-operator-id': 'operator-42' },
+        body: {}
+      });
+      assert.equal(res5.ok, true);
+      assert.equal(res5.identity, 'operator-42');
+    });
+
+    it('enforces execution approval at distribution submission boundary independently of caller flags', async () => {
+      const dataDir = createTempDir();
+      const runId = 'dist_approval_boundary_test';
+      initRun({ dataDir, runId });
+      initRuntimeState({ dataDir, runId, steps: ['export'], mode: 'daily' });
+
+      const { createDistributionShopStore } = require('../../../core/distribution-shops');
+      const shopStore = createDistributionShopStore(path.join(dataDir, 'distribution-shops.json'));
+      const shopA = shopStore.save({ name: 'ShopA', platformShopName: 'PSA', port: 9222, enabled: true, isDefault: true });
+
+      // Create an approval and reject it
+      const appr = requestExecutionApproval({
+        dataDir,
+        runId,
+        actionType: 'distribution.publish',
+        inputPayload: { input: 'item1', shopIds: [shopA.id], distributionMode: 'random' },
+        runRevision: 0
+      });
+      rejectExecutionApproval({ dataDir, runId, approvalId: appr.id, reason: '风险过高' });
+
+      const app = express();
+      app.use(express.json());
+      const mockJobs = {
+        activeDistributionJobs: new Map(),
+        readDistributionJob: () => null,
+        writeDistributionJob: (j) => j
+      };
+      registerDistributionRoutes(app, {
+        jobs: mockJobs,
+        shops: shopStore,
+        dataDir,
+        validateDistributionCategories: () => {},
+        parseItems: () => [{ offerId: '1', title: 't', category: 'c' }],
+        checkDistributionReadiness: async () => ({ canSubmit: true }),
+        distributeProducts: async () => ({ ok: true }),
+        parsePositiveNumber: (v, f) => Number(v) || f,
+        createRunId: () => runId,
+        summarizePipelineRun: () => ({}),
+        originalError: () => {}
+      });
+
+      const server = await new Promise(r => { const l = app.listen(0, '127.0.0.1', () => r(l)); });
+      try {
+        // Caller tries to submit WITHOUT checkApproval / approvalRequired flags
+        const res = await fetch(`http://127.0.0.1:${server.address().port}/api/distribution/submit`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            runId,
+            confirm: true,
+            input: 'item1',
+            shopIds: [shopA.id],
+            distributionMode: 'random'
+            // Notice: checkApproval and approvalRequired are omitted!
+          })
+        });
+        // Must still be blocked with 409 because approval is rejected!
+        assert.equal(res.status, 409);
+        const data = await res.json();
+        assert.equal(data.code, 'APPROVAL_REJECTED');
+      } finally {
+        await new Promise(r => server.close(r));
+      }
+    });
+
+    it('persists review confirmation under default server configuration and only after acceptance', async () => {
+      const dataDir = createTempDir();
+      const runId = 'review_default_config_test';
+      initRun({ dataDir, runId });
+      initRuntimeState({ dataDir, runId, steps: ['select', 'generate'], mode: 'manual' });
+
+      const app = express();
+      app.use(express.json());
+
+      let flowCallCount = 0;
+      registerSelectionReviewRoutes(app, {
+        dataDir,
+        isValidWorkflowRunIdParam: () => true,
+        flowReviewCandidates: () => ({ status: 'keywords_reviewed', approved: ['k1'], rejected: [] }),
+        flowReviewProducts: (opts) => {
+          flowCallCount++;
+          if (opts.approvedProductIds?.includes('invalid_id')) {
+            throw new Error('未选中有效货源');
+          }
+          if (!opts.approvedProductIds?.length && !opts.approveAll) {
+            return { ok: true, status: 'awaiting_product_review', products: [] };
+          }
+          return { ok: true, status: 'products_selected', selected: [{ id: 'p1' }] };
+        },
+        readRuntimeState: () => ({ status: 'paused', steps: ['select', 'generate'] }),
+        updateRuntimeState: () => {},
+        withPipelineRuntimeFields: (v) => v,
+        summarizePipelineRun: () => ({})
+      });
+
+      const server = await new Promise(r => { const l = app.listen(0, '127.0.0.1', () => r(l)); });
+      try {
+        const url = `http://127.0.0.1:${server.address().port}/api/workflows/runs/${runId}/product-review`;
+
+        // 1. Invalid product selection throws -> draft MUST NOT be confirmed!
+        const res1 = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Human-Confirmation': 'true' },
+          body: JSON.stringify({ approvedProductIds: ['invalid_id'] })
+        });
+        assert.equal(res1.status, 500);
+        assert.equal(isReviewConfirmed({ dataDir, runId, stepId: 'select' }), false);
+
+        // 2. Empty selection returns awaiting_product_review -> draft MUST NOT be confirmed!
+        const res2 = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Human-Confirmation': 'true' },
+          body: JSON.stringify({ approvedProductIds: [] })
+        });
+        assert.equal(res2.status, 200);
+        assert.equal(isReviewConfirmed({ dataDir, runId, stepId: 'select' }), false);
+
+        // 3. Successful selection -> draft IS persisted as confirmed!
+        const res3 = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Human-Confirmation': 'true' },
+          body: JSON.stringify({ approvedProductIds: ['p1'] })
+        });
+        assert.equal(res3.status, 200);
+        assert.equal(isReviewConfirmed({ dataDir, runId, stepId: 'select' }), true);
+      } finally {
+        await new Promise(r => server.close(r));
+      }
+    });
+
+    it('rejects agent attempt to grant approval or confirm review draft', async () => {
+      const dataDir = createTempDir();
+      const runId = 'agent_grant_reject_test';
+      initRun({ dataDir, runId });
+
+      const app = express();
+      app.use(express.json());
+      registerDistributionRoutes(app, {
+        dataDir,
+        jobs: { activeDistributionJobs: new Map(), readDistributionJob: () => null }
+      });
+      registerSelectionReviewRoutes(app, {
+        dataDir,
+        isValidWorkflowRunIdParam: () => true
+      });
+
+      const server = await new Promise(r => { const l = app.listen(0, '127.0.0.1', () => r(l)); });
+      try {
+        // Agent calls grant endpoint with X-Actor-Role: agent
+        const res1 = await fetch(`http://127.0.0.1:${server.address().port}/api/distribution/approval/grant`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Actor-Role': 'agent' },
+          body: JSON.stringify({ runId, approvalId: 'any', approvedBy: 'user' })
+        });
+        assert.equal(res1.status, 403);
+
+        // Agent calls review draft confirm with body callerSource: agent
+        const res2 = await fetch(`http://127.0.0.1:${server.address().port}/api/workflows/runs/${runId}/review-drafts/keywordReview`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'confirm', callerSource: 'agent' })
+        });
+        assert.equal(res2.status, 403);
+      } finally {
+        await new Promise(r => server.close(r));
+      }
+    });
+  });
 });

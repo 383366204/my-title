@@ -15,6 +15,7 @@ const {
   writeJsonAtomic,
   assertRuntimeRunId
 } = require('../../skills/pipeline-flow/runtime/store');
+const { isAgentIdentity } = require('./human-context');
 
 class ReviewConflictError extends Error {
   constructor(message, code = 'REVIEW_VERSION_CONFLICT') {
@@ -140,12 +141,7 @@ function confirmReviewDraft({
   expectedVersion,
   confirmedBy = 'user'
 }) {
-  if (
-    !confirmedBy ||
-    confirmedBy === 'agent' ||
-    confirmedBy === 'agent_draft' ||
-    String(confirmedBy).startsWith('agent:')
-  ) {
+  if (!confirmedBy || typeof confirmedBy !== 'string' || isAgentIdentity(confirmedBy)) {
     throw new ReviewForbiddenError(
       '复核确认必须由可信人工用户完成，严禁自动化 Agent 自行批准',
       'REVIEW_CONFIRM_FORBIDDEN'

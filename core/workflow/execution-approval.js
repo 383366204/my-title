@@ -17,6 +17,7 @@ const {
   assertRuntimeRunId,
   readRuntimeState
 } = require('../../skills/pipeline-flow/runtime/store');
+const { isAgentIdentity } = require('./human-context');
 
 class ApprovalForbiddenError extends Error {
   constructor(message, code = 'APPROVAL_SELF_GRANT_FORBIDDEN') {
@@ -156,12 +157,7 @@ function grantExecutionApproval({
   approvedBy,
   expectedInputDigest
 }) {
-  if (
-    !approvedBy ||
-    approvedBy === 'agent' ||
-    approvedBy === 'agent_draft' ||
-    String(approvedBy).startsWith('agent:')
-  ) {
+  if (!approvedBy || typeof approvedBy !== 'string' || isAgentIdentity(approvedBy)) {
     throw new ApprovalForbiddenError(
       '高危副作用执行授权必须由可信人工用户签署，严禁自动化 Agent 自行批准',
       'APPROVAL_SELF_GRANT_FORBIDDEN'

@@ -2,6 +2,8 @@
 const { createDistributionShopStore } = require('../distribution-shops');
 const { distributionMode, distributionTargetKey, distributionTargets } = require('../distribution-targets');
 const { validateDistributionCategories } = require('./distribution-category-validation');
+const { readRuntimeState } = require('../../skills/pipeline-flow/runtime/store');
+const { resolveTrustedHumanContext } = require('../workflow/human-context');
 const {
   verifyExecutionApproval,
   consumeExecutionApproval,
@@ -131,20 +133,39 @@ function registerDistributionRoutes(app, deps) {
         return res.status(409).json({ ok: false, error: '此运行已有铺货记录，不能切换目标店铺或商品分配方式。请新建运行。' });
       }
       if (previous?.status === 'completed') return res.status(409).json({ ok: false, error: '此运行已经铺货完成，请勿重复提交。' });
-      if (req.body?.runId && (req.body?.checkApproval === true || req.body?.approvalRequired === true)) {
+      if (req.body?.runId) {
         const payloadToVerify = {
           input,
           shopIds: Array.isArray(req.body?.shopIds) ? req.body.shopIds : (req.body?.shopId ? [req.body.shopId] : []),
           distributionMode: req.body?.distributionMode
         };
-        const verification = (deps.verifyExecutionApproval || verifyExecutionApproval)({
+        const existingApproval = (deps.getExecutionApproval || getExecutionApproval)({
           dataDir: deps.dataDir,
           runId: req.body.runId,
-          actionType: 'distribution.publish',
-          inputPayload: payloadToVerify
+          actionType: 'distribution.publish'
         });
-        if (!verification.ok) {
-          return res.status(409).json({ ok: false, code: verification.code, error: verification.error });
+        const runtime = (deps.readRuntimeState || readRuntimeState)({
+          dataDir: deps.dataDir,
+          runId: req.body.runId,
+          autoRecover: false
+        });
+        const shouldEnforceApproval = Boolean(
+          deps.enforceApproval === true ||
+          existingApproval ||
+          (deps.requireApproval !== false && runtime)
+        );
+
+        if (shouldEnforceApproval) {
+          const verification = (deps.verifyExecutionApproval || verifyExecutionApproval)({
+            dataDir: deps.dataDir,
+            runId: req.body.runId,
+            actionType: 'distribution.publish',
+            inputPayload: payloadToVerify,
+            currentRunRevision: runtime?.revision
+          });
+          if (!verification.ok) {
+            return res.status(409).json({ ok: false, code: verification.code, error: verification.error });
+          }
         }
       }
       const readiness = await checkDistributionReadiness({
@@ -383,15 +404,19 @@ function registerDistributionRoutes(app, deps) {
 
   app.post('/api/distribution/approval/grant', (req, res) => {
     try {
-      const { runId, approvalId, actionType, approvedBy, expectedInputDigest } = req.body || {};
+      const { runId, approvalId, actionType, expectedInputDigest } = req.body || {};
       if (!runId) return res.status(400).json({ ok: false, error: '缺少 runId' });
+      const humanContext = resolveTrustedHumanContext(req, deps, { strictApproval: true });
+      if (!humanContext.ok) {
+        return res.status(403).json({ ok: false, code: humanContext.code, error: humanContext.error });
+      }
       const granter = deps.grantExecutionApproval || grantExecutionApproval;
       const approval = granter({
         dataDir: deps.dataDir,
         runId,
         approvalId,
         actionType,
-        approvedBy: approvedBy || 'user',
+        approvedBy: humanContext.identity,
         expectedInputDigest
       });
       return res.json({ ok: true, data: approval });
