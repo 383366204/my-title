@@ -422,7 +422,10 @@ describe('core/runtime/server-forwarder', () => {
     );
 
     // 等待响应生成
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    const startWait = Date.now();
+    while (!responseData.includes('"done":true') && Date.now() - startWait < 800) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
     assert.equal(executorRan, true);
     assert.ok(observedSignal);
     assert.equal(observedSignal.aborted, false, '正常请求结束时不应将异步操作误当作客户端中断而取消');

@@ -136,3 +136,9 @@ const result = await run("戒指女款2026新款", {
 ```
 
 Use CLI or MCP when possible; API is for internal orchestration.
+
+## Unified MCP Tools (PR-07)
+
+- `generate_title`: Generate SEO titles, product sourcing, and pricing advice from keyword. Supports `keyword`, `length`, `count`, `keyword_data`, `research`, `use_image_search`.
+- `batch_generate_titles`: Batch generation for multiple keywords. Supports `keywords[]`, `length`.
+- `suggest_keywords`: AI keyword discovery with 13 strategies (crowd, scene, season, etc.) and optional SYCM verification (`sycm_verify: true`).

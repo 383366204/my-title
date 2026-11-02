@@ -69,8 +69,7 @@ const {
 const { writeWorkflowDefinition, deleteWorkflowRun } = require('../core/workflow/pipeline-storage');
 const { listWorkflowRuns, getWorkflowRun } = require('../core/workflow/pipeline-runs');
 const { readWorkflowNodeArtifact } = require('../core/workflow/pipeline-artifacts');
-const { resumeWorkflow, retryWorkflowNode } = require('../core/workflow/scheduler');
-const { markRunPaused, getRun } = require('../core/workflow/run-store');
+const { getRun } = require('../core/workflow/run-store');
 const { createRunId, markRunDistributionComplete } = require('../skills/pipeline-flow/src/run-store');
 const { flowMine, appendRunCandidates } = require('../skills/pipeline-flow/src/keyword-mining-flow');
 const { flowReviewCandidates } = require('../skills/pipeline-flow/src/keyword-review-flow');
@@ -255,12 +254,9 @@ const workflowControlService = createWorkflowControlService({
   recoverSycmAccessAfterChrome,
   requestRuntimeRetryStep,
   pipelineRunResponse,
-  retryWorkflowNode,
   getRun,
   requestRuntimeResume,
-  resumeWorkflow,
   requestRuntimePause,
-  markRunPaused,
   resolveProductionWorkflowLaunch,
   resolveManualShareParams,
   sanitizeWorkflowParams,

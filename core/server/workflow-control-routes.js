@@ -70,8 +70,7 @@ function registerWorkflowControlRoutes(app, dependencies = {}) {
     const result = await controlService.retryStep({
       runId: req.params.runId,
       stepId: req.body?.nodeId,
-      source: 'workflow',
-      allowLegacyFallback: true
+      source: 'workflow'
     });
     return sendServiceResult(res, result);
   });
@@ -81,8 +80,7 @@ function registerWorkflowControlRoutes(app, dependencies = {}) {
     const result = await controlService.resumeRun({
       runId: req.params.runId,
       stopAfterStep: req.body?.stopAfterStep,
-      source: 'workflow',
-      allowLegacyFallback: true
+      source: 'workflow'
     });
     return sendServiceResult(res, result);
   });
@@ -91,8 +89,7 @@ function registerWorkflowControlRoutes(app, dependencies = {}) {
   app.post('/api/workflows/runs/:runId/pause', (req, res) => {
     const result = controlService.pauseRun({
       runId: req.params.runId,
-      reason: req.body?.reason,
-      allowLegacyFallback: true
+      reason: req.body?.reason
     });
     return sendServiceResult(res, result);
   });

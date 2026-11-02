@@ -14,6 +14,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 require('../core/env').loadEnv({ projectRoot: path.resolve(__dirname, '..') });
 
+const { createClientForwarder } = require('../core/runtime/server-forwarder');
+const forwarder = createClientForwarder();
+
 const { generateTitlePipeline } = require('../skills/title-gen/src/pipeline');
 const { searchAll } = require('../skills/alibaba1688/src/search-1688');
 const { getRateLimiter, RateLimitError } = require('../skills/alibaba1688/src/rate-limiter');
@@ -1451,6 +1454,157 @@ server.tool(
         content: [{
           type: 'text',
           text: JSON.stringify({ ok: false, error: err.message, code: err.code || 'TASK_CANCEL_FAILED' }, null, 2)
+        }],
+        isError: true
+      };
+    }
+  }
+);
+
+server.tool(
+  'workflow_start',
+  '启动固定选品工作流（支持 daily、keyword、root-keyword、peer-discovery 模式，支持 stopAfterStep 局部阶段运行）。',
+  {
+    mode: z.enum(['daily', 'keyword', 'root-keyword', 'order-sheet', 'peer-discovery']).optional().default('daily').describe('工作流运行模式'),
+    keyword: z.string().optional().describe('选品主词或词根（keyword/root-keyword 模式必填）'),
+    count: z.number().int().positive().optional().default(3).describe('期望生成的标题或选品数量'),
+    stopAfterStep: z.string().optional().describe('局部执行检查点：运行到指定步骤后自动暂停（如 mine, keywordReview, verify, select, generate, export）'),
+    params: z.record(z.string(), z.any()).optional().default({}).describe('附加运行参数')
+  },
+  async (args) => {
+    try {
+      const result = await forwarder.execute('workflow.start', args, { caller: 'mcp' });
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify(result, null, 2)
+        }]
+      };
+    } catch (err) {
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({ ok: false, error: err.message, code: err.code || 'WORKFLOW_START_FAILED' }, null, 2)
+        }],
+        isError: true
+      };
+    }
+  }
+);
+
+server.tool(
+  'workflow_status',
+  '查询工作流当前运行状态、活动步骤、阻塞/人工复核提示及节点产物预览。',
+  {
+    runId: z.string().describe('工作流运行 ID')
+  },
+  async ({ runId }) => {
+    try {
+      const result = await forwarder.execute('workflow.status', { runId }, { caller: 'mcp' });
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify(result, null, 2)
+        }]
+      };
+    } catch (err) {
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({ ok: false, error: err.message, code: err.code || 'WORKFLOW_STATUS_FAILED' }, null, 2)
+        }],
+        isError: true
+      };
+    }
+  }
+);
+
+server.tool(
+  'workflow_submit_review',
+  '提交业务复核（选词/选品/同行复核），支持 Agent 辅助提出草稿 (action=draft) 或人工确认 (action=confirm)。',
+  {
+    runId: z.string().describe('工作流运行 ID'),
+    stepId: z.string().describe('复核步骤 ID，如 keywordReview、select、peer-review'),
+    decisions: z.record(z.string(), z.any()).describe('复核决策数据（如勾选的词或商品）'),
+    action: z.enum(['draft', 'confirm', 'reject']).optional().default('confirm').describe('动作类型：draft(Agent草稿)、confirm(确认通过)、reject(拒绝打回)'),
+    version: z.number().int().nonnegative().optional().describe('预期版本号（乐观锁）')
+  },
+  async ({ runId, stepId, decisions, action, version }) => {
+    try {
+      const result = await forwarder.execute('workflow.submit_review', {
+        runId,
+        stepId,
+        decisions,
+        action,
+        version
+      }, { caller: action === 'draft' ? 'agent_draft' : 'user' });
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify(result, null, 2)
+        }]
+      };
+    } catch (err) {
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({ ok: false, error: err.message, code: err.code || 'WORKFLOW_REVIEW_FAILED' }, null, 2)
+        }],
+        isError: true
+      };
+    }
+  }
+);
+
+server.tool(
+  'workflow_resume',
+  '恢复处于暂停或待复核状态的工作流继续执行（可选指定 stopAfterStep 继续运行到下一阶段）。',
+  {
+    runId: z.string().describe('工作流运行 ID'),
+    stopAfterStep: z.string().optional().describe('指定恢复运行至何步骤再次暂停')
+  },
+  async ({ runId, stopAfterStep }) => {
+    try {
+      const result = await forwarder.execute('workflow.resume', { runId, stopAfterStep }, { caller: 'mcp' });
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify(result, null, 2)
+        }]
+      };
+    } catch (err) {
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({ ok: false, error: err.message, code: err.code || 'WORKFLOW_RESUME_FAILED' }, null, 2)
+        }],
+        isError: true
+      };
+    }
+  }
+);
+
+server.tool(
+  'workflow_cancel',
+  '在安全步骤边界请求取消运行中的工作流并释放占用资源。',
+  {
+    runId: z.string().describe('要取消的工作流运行 ID'),
+    reason: z.string().optional().default('user_cancelled').describe('取消原因')
+  },
+  async ({ runId, reason }) => {
+    try {
+      const result = await forwarder.execute('workflow.cancel', { runId, reason }, { caller: 'mcp' });
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify(result, null, 2)
+        }]
+      };
+    } catch (err) {
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({ ok: false, error: err.message, code: err.code || 'WORKFLOW_CANCEL_FAILED' }, null, 2)
         }],
         isError: true
       };

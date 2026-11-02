@@ -182,3 +182,8 @@ const result = await extractSycmData("戒指", {
   loginMode: "manual"
 });
 ```
+
+## Unified MCP Tools (PR-07)
+
+- `sycm_query`: Query SYCM search analysis data. Supports `keyword`, `mode`, `port`, `maxPages`, `filterConditions`. Automatically acquires CDP atomic lease.
+- `sycm_status`: Query SYCM readiness, Chrome CDP availability, and cache state without running queries.
