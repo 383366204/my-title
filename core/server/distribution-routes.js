@@ -2,6 +2,24 @@
 const { createDistributionShopStore } = require('../distribution-shops');
 const { distributionMode, distributionTargetKey, distributionTargets } = require('../distribution-targets');
 const { validateDistributionCategories } = require('./distribution-category-validation');
+const {
+  verifyExecutionApproval,
+  consumeExecutionApproval,
+  requestExecutionApproval,
+  grantExecutionApproval,
+  rejectExecutionApproval,
+  getExecutionApproval,
+  ApprovalForbiddenError,
+  ApprovalConflictError
+} = require('../workflow/execution-approval');
+const {
+  getSubmissionLedger,
+  recordSubmissionAttempt,
+  recordSubmissionSuccess,
+  recordSubmissionFailure,
+  isBatchSubmitted,
+  computeBatchFingerprint
+} = require('../workflow/submission-ledger');
 
 /**
  * 注册铺货预检、提交、人工确认及任务控制接口。
@@ -113,6 +131,22 @@ function registerDistributionRoutes(app, deps) {
         return res.status(409).json({ ok: false, error: '此运行已有铺货记录，不能切换目标店铺或商品分配方式。请新建运行。' });
       }
       if (previous?.status === 'completed') return res.status(409).json({ ok: false, error: '此运行已经铺货完成，请勿重复提交。' });
+      if (req.body?.runId && (req.body?.checkApproval === true || req.body?.approvalRequired === true)) {
+        const payloadToVerify = {
+          input,
+          shopIds: Array.isArray(req.body?.shopIds) ? req.body.shopIds : (req.body?.shopId ? [req.body.shopId] : []),
+          distributionMode: req.body?.distributionMode
+        };
+        const verification = (deps.verifyExecutionApproval || verifyExecutionApproval)({
+          dataDir: deps.dataDir,
+          runId: req.body.runId,
+          actionType: 'distribution.publish',
+          inputPayload: payloadToVerify
+        });
+        if (!verification.ok) {
+          return res.status(409).json({ ok: false, code: verification.code, error: verification.error });
+        }
+      }
       const readiness = await checkDistributionReadiness({
         ...selection,
         input,
@@ -169,6 +203,13 @@ function registerDistributionRoutes(app, deps) {
               ? 'completed'
               : 'completed_with_issues';
         if (finalStatus === 'completed' && job.workflowRunId) {
+          try {
+            (deps.consumeExecutionApproval || consumeExecutionApproval)({
+              dataDir: deps.dataDir,
+              runId: job.workflowRunId,
+              actionType: 'distribution.publish'
+            });
+          } catch (_) {}
           try {
             syncCompletedDistributionWorkflow({ ...job, status: finalStatus, result });
           } catch (workflowError) {
@@ -318,6 +359,93 @@ function registerDistributionRoutes(app, deps) {
       return res.json({ ok: true, data: next });
     } catch (err) {
       return res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
+  app.post('/api/distribution/approval/request', (req, res) => {
+    try {
+      const { runId, inputPayload, actionType, runRevision, requestedBy } = req.body || {};
+      if (!runId) return res.status(400).json({ ok: false, error: '缺少 runId' });
+      const requester = deps.requestExecutionApproval || requestExecutionApproval;
+      const approval = requester({
+        dataDir: deps.dataDir,
+        runId,
+        actionType,
+        inputPayload,
+        runRevision,
+        requestedBy
+      });
+      return res.json({ ok: true, data: approval });
+    } catch (err) {
+      return res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  app.post('/api/distribution/approval/grant', (req, res) => {
+    try {
+      const { runId, approvalId, actionType, approvedBy, expectedInputDigest } = req.body || {};
+      if (!runId) return res.status(400).json({ ok: false, error: '缺少 runId' });
+      const granter = deps.grantExecutionApproval || grantExecutionApproval;
+      const approval = granter({
+        dataDir: deps.dataDir,
+        runId,
+        approvalId,
+        actionType,
+        approvedBy: approvedBy || 'user',
+        expectedInputDigest
+      });
+      return res.json({ ok: true, data: approval });
+    } catch (err) {
+      if (err instanceof ApprovalForbiddenError || err.code === 'APPROVAL_SELF_GRANT_FORBIDDEN') {
+        return res.status(403).json({ ok: false, code: err.code, error: err.message });
+      }
+      if (err instanceof ApprovalConflictError || err.code === 'APPROVAL_INPUT_MISMATCH' || err.code === 'APPROVAL_REVISION_MISMATCH' || err.code === 'APPROVAL_NOT_FOUND') {
+        return res.status(409).json({ ok: false, code: err.code, error: err.message });
+      }
+      return res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  app.post('/api/distribution/approval/reject', (req, res) => {
+    try {
+      const { runId, approvalId, actionType, rejectedBy, reason } = req.body || {};
+      if (!runId) return res.status(400).json({ ok: false, error: '缺少 runId' });
+      const rejecter = deps.rejectExecutionApproval || rejectExecutionApproval;
+      const approval = rejecter({
+        dataDir: deps.dataDir,
+        runId,
+        approvalId,
+        actionType,
+        rejectedBy: rejectedBy || 'user',
+        reason
+      });
+      return res.json({ ok: true, data: approval });
+    } catch (err) {
+      return res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
+  app.get('/api/distribution/approval', (req, res) => {
+    try {
+      const { runId, approvalId, actionType } = req.query || {};
+      if (!runId) return res.status(400).json({ ok: false, error: '缺少 runId' });
+      const getter = deps.getExecutionApproval || getExecutionApproval;
+      const approval = getter({ dataDir: deps.dataDir, runId, approvalId, actionType });
+      return res.json({ ok: true, data: approval });
+    } catch (err) {
+      return res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  app.get('/api/distribution/ledger', (req, res) => {
+    try {
+      const { runId } = req.query || {};
+      if (!runId) return res.status(400).json({ ok: false, error: '缺少 runId' });
+      const getter = deps.getSubmissionLedger || getSubmissionLedger;
+      const ledger = getter({ dataDir: deps.dataDir, runId });
+      return res.json({ ok: true, data: ledger });
+    } catch (err) {
+      return res.status(500).json({ ok: false, error: err.message });
     }
   });
 }

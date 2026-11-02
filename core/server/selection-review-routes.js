@@ -1,6 +1,13 @@
 'use strict';
 const { registerKeywordFilterRoutes } = require('./keyword-filter-routes');
 const { getRun } = require('../../skills/pipeline-flow/src/run-store');
+const {
+  confirmReviewDraft,
+  saveReviewDraft,
+  getReviewDraft,
+  ReviewConflictError,
+  ReviewForbiddenError
+} = require('../workflow/review-service');
 
 /**
  * 注册人工筛词、货源选品复核；确认后等待显式继续。
@@ -39,6 +46,22 @@ function registerSelectionReviewRoutes(app, deps) {
       const selectionMode = ['daily', 'keyword', 'root-keyword'].includes(previousRuntime?.mode);
       if (selectionMode && previousRuntime.activeStep !== 'keywordReview') {
         return res.status(409).json({ ok: false, error: '当前已进入后续步骤，请先重跑关键词机会复核节点再修改选词。' });
+      }
+      const doConfirm = deps.confirmReviewDraft || confirmReviewDraft;
+      if (deps.dataDir || deps.confirmReviewDraft || req.body?.version !== undefined || req.body?.expectedVersion !== undefined) {
+        doConfirm({
+          dataDir: deps.dataDir,
+          runId,
+          stepId: 'keywordReview',
+          decisions: {
+            approvedKeywords: Array.isArray(req.body?.approvedKeywords) ? req.body.approvedKeywords : [],
+            rejectedKeywords: Array.isArray(req.body?.rejectedKeywords) ? req.body.rejectedKeywords : [],
+            manualKeywords: Array.isArray(req.body?.manualKeywords) ? req.body.manualKeywords : [],
+            approveAll: req.body?.approveAll === true
+          },
+          expectedVersion: req.body?.version ?? req.body?.expectedVersion,
+          confirmedBy: req.body?.confirmedBy || 'user'
+        });
       }
       const result = flowReviewCandidates({
         runId,
@@ -97,6 +120,12 @@ function registerSelectionReviewRoutes(app, deps) {
         }
       });
     } catch (err) {
+      if (err instanceof ReviewConflictError || err.code === 'REVIEW_VERSION_CONFLICT') {
+        return res.status(409).json({ ok: false, code: err.code, error: err.message });
+      }
+      if (err instanceof ReviewForbiddenError || err.code === 'REVIEW_CONFIRM_FORBIDDEN') {
+        return res.status(403).json({ ok: false, code: err.code, error: err.message });
+      }
       res.status(500).json({ ok: false, error: err.message });
     }
   });
@@ -107,6 +136,21 @@ function registerSelectionReviewRoutes(app, deps) {
       return res.status(400).json({ ok: false, error: '无效的运行 ID。' });
     }
     try {
+      const doConfirm = deps.confirmReviewDraft || confirmReviewDraft;
+      if (deps.dataDir || deps.confirmReviewDraft || req.body?.version !== undefined || req.body?.expectedVersion !== undefined) {
+        doConfirm({
+          dataDir: deps.dataDir,
+          runId,
+          stepId: 'select',
+          decisions: {
+            approvedProductIds: Array.isArray(req.body?.approvedProductIds) ? req.body.approvedProductIds : [],
+            manualProducts: Array.isArray(req.body?.manualProducts) ? req.body.manualProducts : [],
+            approveAll: req.body?.approveAll === true
+          },
+          expectedVersion: req.body?.version ?? req.body?.expectedVersion,
+          confirmedBy: req.body?.confirmedBy || 'user'
+        });
+      }
       const result = flowReviewProducts({
         runId,
         approvedProductIds: Array.isArray(req.body?.approvedProductIds) ? req.body.approvedProductIds : [],
@@ -131,6 +175,50 @@ function registerSelectionReviewRoutes(app, deps) {
       }
       return res.json({ ok: true, data: { result, currentRun: withPipelineRuntimeFields(summarizePipelineRun({ runId })) } });
     } catch (err) {
+      if (err instanceof ReviewConflictError || err.code === 'REVIEW_VERSION_CONFLICT') {
+        return res.status(409).json({ ok: false, code: err.code, error: err.message });
+      }
+      if (err instanceof ReviewForbiddenError || err.code === 'REVIEW_CONFIRM_FORBIDDEN') {
+        return res.status(403).json({ ok: false, code: err.code, error: err.message });
+      }
+      return res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  app.get('/api/workflows/runs/:runId/review-drafts/:stepId', (req, res) => {
+    const { runId, stepId } = req.params;
+    if (!isValidWorkflowRunIdParam(runId)) {
+      return res.status(400).json({ ok: false, error: '无效的运行 ID。' });
+    }
+    try {
+      const getter = deps.getReviewDraft || getReviewDraft;
+      const draft = getter({ dataDir: deps.dataDir, runId, stepId });
+      return res.json({ ok: true, data: draft });
+    } catch (err) {
+      return res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  app.post('/api/workflows/runs/:runId/review-drafts/:stepId', (req, res) => {
+    const { runId, stepId } = req.params;
+    if (!isValidWorkflowRunIdParam(runId)) {
+      return res.status(400).json({ ok: false, error: '无效的运行 ID。' });
+    }
+    try {
+      const saver = deps.saveReviewDraft || saveReviewDraft;
+      const draft = saver({
+        dataDir: deps.dataDir,
+        runId,
+        stepId,
+        decisions: req.body?.decisions || req.body || {},
+        expectedVersion: req.body?.version ?? req.body?.expectedVersion,
+        updatedBy: req.body?.updatedBy || 'user'
+      });
+      return res.json({ ok: true, data: draft });
+    } catch (err) {
+      if (err instanceof ReviewConflictError || err.code === 'REVIEW_VERSION_CONFLICT' || err.code === 'REVIEW_ALREADY_CONFIRMED') {
+        return res.status(409).json({ ok: false, code: err.code, error: err.message });
+      }
       return res.status(500).json({ ok: false, error: err.message });
     }
   });

@@ -11,6 +11,31 @@ const { saveInspirationRoots } = require('../../skills/pipeline-flow/src/inspira
 const { isValidStepForMode } = require('./pipeline-definition-common');
 const { isPidAlive, resolvePipelineLeaseDir } = require('../../skills/pipeline-flow/runtime/store');
 const { createWorkbenchLeaseManager } = require('../runtime/workbench-lease');
+const {
+  getReviewDraft,
+  saveReviewDraft,
+  confirmReviewDraft,
+  isReviewConfirmed,
+  resetReviewDraft,
+  listReviewDrafts
+} = require('./review-service');
+const {
+  requestExecutionApproval,
+  grantExecutionApproval,
+  rejectExecutionApproval,
+  verifyExecutionApproval,
+  consumeExecutionApproval,
+  getExecutionApproval,
+  listExecutionApprovals,
+  computeInputDigest
+} = require('./execution-approval');
+const {
+  getSubmissionLedger,
+  recordSubmissionAttempt,
+  recordSubmissionSuccess,
+  recordSubmissionFailure,
+  isBatchSubmitted
+} = require('./submission-ledger');
 
 const LAUNCH_VALIDATION_PATTERN = /未知 workflow mode|未知 workflow template|工作流定义|工作流必须匹配|关键词不能为空|词根不能为空|1688 商品链接|同行链接|商品缺少关键词|商品重复/;
 
@@ -85,7 +110,7 @@ function createWorkflowControlService(dependencies = {}) {
     isValidWorkflowRunIdParam = (value) => Boolean(value) && /^[A-Za-z0-9_-]+$/.test(String(value).trim()),
     requestRuntimeCancel,
     readRuntimeState,
-    getPipelineRuntimeRunner,
+    getPipelineRuntimeRunner = dependencies.getPipelineRuntimeRunner || (() => require('../../skills/pipeline-flow/runtime/runner').runPipelineRuntime),
     prepareSupplement = prepareKeywordSupplement,
     parsePositiveNumber = (value, fallback) => {
       const num = Number(value);
@@ -93,11 +118,11 @@ function createWorkflowControlService(dependencies = {}) {
     },
     getSycmChromeAvailabilityChecker,
     recoverSycmAccessAfterChrome,
-    requestRuntimeRetryStep,
-    pipelineRunResponse,
+    requestRuntimeRetryStep = dependencies.requestRuntimeRetryStep || require('../../skills/pipeline-flow/runtime/store').requestRuntimeRetryStep,
+    pipelineRunResponse = dependencies.pipelineRunResponse || ((id, extra = {}) => ({ runId: id, ...extra })),
     retryWorkflowNode,
     getRun,
-    requestRuntimeResume,
+    requestRuntimeResume = dependencies.requestRuntimeResume || require('../../skills/pipeline-flow/runtime/store').requestRuntimeResume,
     resumeWorkflow,
     requestRuntimePause,
     markRunPaused,
@@ -328,6 +353,48 @@ function createWorkflowControlService(dependencies = {}) {
             };
           }
         }
+
+        // PR-06 人机协同门禁校验：
+        // 1. 检查待推进步骤是否属于需要人工复核的节点 (keywordReview / select / peer-review)
+        const activeStep = runtime.activeStep;
+        const reviewSteps = new Set(['keywordReview', 'select', 'peer-review']);
+        if (['needs_review', 'blocked'].includes(runtime.status) && reviewSteps.has(activeStep)) {
+          const isConfirmed = (dependencies.isReviewConfirmed || isReviewConfirmed)({ dataDir, runId, stepId: activeStep });
+          if (!isConfirmed) {
+            lease.release();
+            return {
+              httpStatus: 409,
+              body: {
+                ok: false,
+                code: 'REVIEW_NOT_CONFIRMED',
+                error: `步骤 [${activeStep}] 尚未完成人工复核确认，无法继续执行。`
+              }
+            };
+          }
+        }
+        // 2. 检查待推进步骤是否属于高危外部写操作节点 (export / distribute)
+        if (activeStep === 'export' && ['ready_to_distribute', 'needs_review', 'blocked'].includes(runtime.status)) {
+          const exportPayload = runtime.params?.exportPayload || runtime.params;
+          const approvalVerification = (dependencies.verifyExecutionApproval || verifyExecutionApproval)({
+            dataDir,
+            runId,
+            actionType: 'distribution.publish',
+            inputPayload: exportPayload,
+            currentRunRevision: runtime.revision
+          });
+          if (!approvalVerification.ok) {
+            lease.release();
+            return {
+              httpStatus: 409,
+              body: {
+                ok: false,
+                code: approvalVerification.code,
+                error: `铺货发布步骤需要人工执行授权：${approvalVerification.error}`
+              }
+            };
+          }
+        }
+
         let control;
         let promise;
         try {
@@ -425,6 +492,10 @@ function createWorkflowControlService(dependencies = {}) {
         let control;
         let promise;
         try {
+          const reviewSteps = new Set(['keywordReview', 'select', 'peer-review']);
+          if (reviewSteps.has(step)) {
+            (dependencies.resetReviewDraft || resetReviewDraft)({ dataDir, runId, stepId: step });
+          }
           control = requestRuntimeRetryStep({ runId, step });
           const runState = { runId, mode: 'retry-step' };
           promise = workbench.run(runState, () => getPipelineRuntimeRunner()({
@@ -521,6 +592,10 @@ function createWorkflowControlService(dependencies = {}) {
         let control;
         let promise;
         try {
+          const reviewSteps = new Set(['keywordReview', 'select', 'peer-review']);
+          if (reviewSteps.has(nodeId)) {
+            (dependencies.resetReviewDraft || resetReviewDraft)({ dataDir, runId, stepId: nodeId });
+          }
           control = requestRuntimeRetryStep({ runId, step: nodeId });
           const runState = { runId, mode: 'workflow-retry-step' };
           promise = workbench.run(runState, () => getPipelineRuntimeRunner()({
@@ -913,7 +988,32 @@ function createWorkflowControlService(dependencies = {}) {
     getCurrentPipelineRuns,
     getPipelineRunSummary,
     appendCandidates,
-    executeSingleStep
+    executeSingleStep,
+
+    // PR-06 业务复核 (ReviewService) 统一方法
+    getReviewDraft: (opts) => (dependencies.getReviewDraft || getReviewDraft)({ dataDir, ...opts }),
+    saveReviewDraft: (opts) => (dependencies.saveReviewDraft || saveReviewDraft)({ dataDir, ...opts }),
+    confirmReviewDraft: (opts) => (dependencies.confirmReviewDraft || confirmReviewDraft)({ dataDir, ...opts }),
+    isReviewConfirmed: (opts) => (dependencies.isReviewConfirmed || isReviewConfirmed)({ dataDir, ...opts }),
+    resetReviewDraft: (opts) => (dependencies.resetReviewDraft || resetReviewDraft)({ dataDir, ...opts }),
+    listReviewDrafts: (opts) => (dependencies.listReviewDrafts || listReviewDrafts)({ dataDir, ...opts }),
+
+    // PR-06 高危副作用执行授权 (ExecutionApproval) 统一方法
+    requestExecutionApproval: (opts) => (dependencies.requestExecutionApproval || requestExecutionApproval)({ dataDir, ...opts }),
+    grantExecutionApproval: (opts) => (dependencies.grantExecutionApproval || grantExecutionApproval)({ dataDir, ...opts }),
+    rejectExecutionApproval: (opts) => (dependencies.rejectExecutionApproval || rejectExecutionApproval)({ dataDir, ...opts }),
+    verifyExecutionApproval: (opts) => (dependencies.verifyExecutionApproval || verifyExecutionApproval)({ dataDir, ...opts }),
+    consumeExecutionApproval: (opts) => (dependencies.consumeExecutionApproval || consumeExecutionApproval)({ dataDir, ...opts }),
+    getExecutionApproval: (opts) => (dependencies.getExecutionApproval || getExecutionApproval)({ dataDir, ...opts }),
+    listExecutionApprovals: (opts) => (dependencies.listExecutionApprovals || listExecutionApprovals)({ dataDir, ...opts }),
+    computeInputDigest,
+
+    // PR-06 提交幂等账本 (SubmissionLedger) 统一方法
+    getSubmissionLedger: (opts) => (dependencies.getSubmissionLedger || getSubmissionLedger)({ dataDir, ...opts }),
+    recordSubmissionAttempt: (opts) => (dependencies.recordSubmissionAttempt || recordSubmissionAttempt)({ dataDir, ...opts }),
+    recordSubmissionSuccess: (opts) => (dependencies.recordSubmissionSuccess || recordSubmissionSuccess)({ dataDir, ...opts }),
+    recordSubmissionFailure: (opts) => (dependencies.recordSubmissionFailure || recordSubmissionFailure)({ dataDir, ...opts }),
+    isBatchSubmitted: (opts) => (dependencies.isBatchSubmitted || isBatchSubmitted)({ dataDir, ...opts })
   };
 }
 
