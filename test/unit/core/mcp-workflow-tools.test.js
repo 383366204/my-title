@@ -446,7 +446,10 @@ describe('PR-07: 统一 ToolRegistry 与 Workflow MCP 工具', () => {
     });
 
     it('通过 createClientForwarder 在离线状态下透明调用 workflow_status', async () => {
-      const forwarder = createClientForwarder({ projectRoot: path.resolve(__dirname, '../../../') });
+      const forwarder = createClientForwarder({
+        projectRoot: path.resolve(__dirname, '../../../'),
+        runtimeDir: path.join(tmpDir, 'isolated_runtime')
+      });
       const runId = 'forwarder_test_run';
 
       initRuntimeState({

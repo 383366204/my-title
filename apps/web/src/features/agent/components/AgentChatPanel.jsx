@@ -13,6 +13,7 @@ import {
 import { useAgentChat } from '../hooks/use-agent-chat.js';
 import { ThinkingBlock } from './ThinkingBlock.jsx';
 import { ToolBadge } from './ToolBadge.jsx';
+import { MarkdownContent } from './MarkdownContent.jsx';
 import { WorkflowCard } from './cards/WorkflowCard.jsx';
 import { ReviewCard } from './cards/ReviewCard.jsx';
 import { ApprovalCard } from './cards/ApprovalCard.jsx';
@@ -213,8 +214,11 @@ export function AgentChatPanel({
 
                   {/* 回复文本内容 */}
                   {Boolean(msg.content) && (
-                    <div className="rounded-xl bg-slate-900/80 border border-slate-800 p-3 text-slate-200 leading-relaxed whitespace-pre-wrap select-text">
-                      {msg.content}
+                    <div className="rounded-xl bg-slate-900/80 border border-slate-800 p-3 text-slate-200 leading-relaxed select-text">
+                      <MarkdownContent content={msg.content} />
+                      {isStreaming && msg.id === messages[messages.length - 1]?.id && (
+                        <span className="inline-block w-1.5 h-3.5 ml-1 bg-sky-400 animate-pulse align-middle" />
+                      )}
                     </div>
                   )}
 
@@ -253,6 +257,24 @@ export function AgentChatPanel({
                       }
                       return null;
                     })}
+
+                  {/* 正在运行中的实时动态 Loading 指示器 (让用户直观看到正在运行中) */}
+                  {isStreaming && msg.id === messages[messages.length - 1]?.id && (
+                    <div className="flex items-center gap-2 py-1.5 px-3 rounded-lg bg-sky-950/20 border border-sky-900/30 text-xs text-sky-400 select-none">
+                      <span className="flex gap-1 items-center">
+                        <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-bounce" style={{ animationDelay: '0ms' }} />
+                        <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-bounce" style={{ animationDelay: '150ms' }} />
+                        <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-bounce" style={{ animationDelay: '300ms' }} />
+                      </span>
+                      <span className="text-[11px] text-slate-300 font-mono">
+                        {(msg.toolCalls || []).some((tc) => tc.status === 'running')
+                          ? `正在执行 ${(msg.toolCalls || []).find((tc) => tc.status === 'running')?.name}...`
+                          : msg.isThinking
+                          ? 'AI 正在深度思考中...'
+                          : 'AI 正在分析并组织回复...'}
+                      </span>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

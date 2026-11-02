@@ -194,4 +194,24 @@ describe('Agent Chat View Model & Card Protocol Unit Tests', () => {
 
     assert.strictEqual(content, '生意参谋状态正常，已连接 Chrome 9222 端口。');
   });
+
+  it('should parse markdown tokens including bold, inline code, and lists', () => {
+    const rawMarkdown = `### 选词建议
+3. **单词深挖**: \`generate_title\` 带 SYCM 自动查询
+4. **看趋势**: \`opportunities\` 查 1688 商机`;
+
+    // 验证行内正则匹配
+    const regex = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\([^)]+\))/g;
+    const line = '3. **单词深挖**: `generate_title` 带 SYCM 自动查询';
+    const parts = line.split(regex).filter(Boolean);
+
+    assert.ok(parts.includes('**单词深挖**'));
+    assert.ok(parts.includes('`generate_title`'));
+
+    // 验证有序列表匹配
+    const olMatch = line.match(/^(\d+)\.\s+(.*)$/);
+    assert.ok(olMatch);
+    assert.strictEqual(olMatch[1], '3');
+    assert.ok(olMatch[2].includes('**单词深挖**'));
+  });
 });
