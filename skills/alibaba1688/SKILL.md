@@ -420,3 +420,8 @@ Important implementation details:
   in addition to the existing API sliding-window limiter. A 429, login page, or
   captcha page opens the platform breaker, so agents must stop and wait instead
   of immediately retrying.
+
+## Unified MCP Tools (PR-07)
+
+- `opportunities`: Fetch trending product and search opportunities across 1688, Taobao, and social channels.
+- `trend`: Category trend and demand volume insights. Supports `{ query }`.

@@ -64,58 +64,18 @@ test('Workflow Run Store - should create, read and update runs', (t) => {
   if (fs.existsSync(logFile)) fs.unlinkSync(logFile);
 });
 
-test('Workflow Scheduler - should run standard demo chain', async (t) => {
+test('Workflow Scheduler - legacy DAG execution is retired per ADR v1.0', async () => {
   const demoWorkflow = {
     nodes: [
-      { id: 'node_1', type: 'keyword-input', data: { keyword: '纯银耳环', maxLength: 60, label: '输入节点' } },
-      { id: 'node_2', type: 'keyword-mining', data: { count: 3, label: '挖掘节点' } },
-      { id: 'node_3', type: 'title-generator', data: { label: '标题节点' } }
+      { id: 'node_1', type: 'keyword-input', data: { keyword: '纯银耳环', maxLength: 60, label: '输入节点' } }
     ],
-    edges: [
-      { id: 'e1', source: 'node_1', target: 'node_2' },
-      { id: 'e2', source: 'node_2', target: 'node_3' }
-    ]
+    edges: []
   };
 
   const run = createRun(demoWorkflow);
-
-  const events = [];
-  const unsubscribe = subscribeRun(run.runId, (evt) => {
-    events.push(evt);
+  await assert.rejects(async () => startWorkflow(run.runId), {
+    code: 'SCHEDULER_RETIRED'
   });
-
-  // Start executing
-  await startWorkflow(run.runId);
-
-  unsubscribe();
-
-  const finalRun = getRun(run.runId);
-  assert.strictEqual(finalRun.status, 'completed');
-  assert.strictEqual(finalRun.nodeStates['node_1'].status, 'completed');
-  assert.strictEqual(finalRun.nodeStates['node_2'].status, 'completed');
-  assert.strictEqual(finalRun.nodeStates['node_3'].status, 'completed');
-
-  // Check inputs/outputs pass through
-  const node2Output = finalRun.nodeStates['node_2'].output;
-  assert.ok(node2Output.keywords);
-  assert.ok(Array.isArray(node2Output.keywords));
-
-  const node3Output = finalRun.nodeStates['node_3'].output;
-  assert.ok(node3Output.titles);
-  assert.ok(Array.isArray(node3Output.titles));
-
-  // Verify that events were dispatched
-  assert.ok(events.length > 0);
-  assert.ok(events.some(e => e.event === 'status_change'));
-  assert.ok(events.some(e => e.event === 'node_change'));
-  assert.ok(events.some(e => e.event === 'log'));
-
-  // Clean up
-  const runFile = path.join(workflowDataDir, `${run.runId}.json`);
-  const logFile = path.join(workflowDataDir, `${run.runId}.log`);
-  // Temporarily keep files if they fail, delete only if succeed
-  if (fs.existsSync(runFile)) fs.unlinkSync(runFile);
-  if (fs.existsSync(logFile)) fs.unlinkSync(logFile);
 });
 
 test('Workflow Run Store - rejects unsafe run ids', () => {
@@ -258,54 +218,17 @@ test('Workflow Run Store - can pause and reset a failed node for retry', () => {
   if (fs.existsSync(logFile)) fs.unlinkSync(logFile);
 });
 
-test('Workflow Scheduler - resumes from first non-completed node after retry reset', async () => {
-  let failingCalls = 0;
-  const { registerNode } = require('../../core/workflow/registry');
+test('Workflow Scheduler - legacy retry is retired per ADR v1.0', async () => {
   const { retryWorkflowNode } = require('../../core/workflow/scheduler');
-  registerNode('test-flaky-recovery-node', {
-    execute: async (inputs) => {
-      failingCalls += 1;
-      if (failingCalls === 1) {
-        const err = new Error('temporary timeout');
-        err.status = 'transient_failure';
-        err.retryable = true;
-        throw err;
-      }
-      return { ...inputs, recovered: true };
-    }
-  });
-
   const workflow = {
     nodes: [
-      { id: 'start', type: 'keyword-input', data: { keyword: '珍珠耳环' } },
-      { id: 'flaky', type: 'test-flaky-recovery-node', data: { label: '临时失败节点' } },
-      { id: 'title', type: 'title-generator', data: { label: '标题节点' } }
+      { id: 'start', type: 'keyword-input', data: { keyword: '珍珠耳环' } }
     ],
-    edges: [
-      { id: 'e1', source: 'start', target: 'flaky' },
-      { id: 'e2', source: 'flaky', target: 'title' }
-    ]
+    edges: []
   };
 
   const run = createRun(workflow);
-  await startWorkflow(run.runId);
-
-  let failed = getRun(run.runId);
-  assert.strictEqual(failed.status, 'retryable');
-  assert.strictEqual(failed.nodeStates.start.status, 'completed');
-  assert.strictEqual(failed.nodeStates.flaky.status, 'retryable');
-
-  await retryWorkflowNode(run.runId, 'flaky');
-
-  const finalRun = getRun(run.runId);
-  assert.strictEqual(finalRun.status, 'completed');
-  assert.strictEqual(finalRun.nodeStates.start.status, 'completed');
-  assert.strictEqual(finalRun.nodeStates.flaky.status, 'completed');
-  assert.strictEqual(finalRun.nodeStates.title.status, 'completed');
-  assert.strictEqual(failingCalls, 2);
-
-  const runFile = path.join(workflowDataDir, `${run.runId}.json`);
-  const logFile = path.join(workflowDataDir, `${run.runId}.log`);
-  if (fs.existsSync(runFile)) fs.unlinkSync(runFile);
-  if (fs.existsSync(logFile)) fs.unlinkSync(logFile);
+  await assert.rejects(async () => retryWorkflowNode(run.runId, 'start'), {
+    code: 'SCHEDULER_RETIRED'
+  });
 });

@@ -11,6 +11,7 @@ const { saveInspirationRoots } = require('../../skills/pipeline-flow/src/inspira
 const { isValidStepForMode } = require('./pipeline-definition-common');
 const { isPidAlive, resolvePipelineLeaseDir } = require('../../skills/pipeline-flow/runtime/store');
 const { createWorkbenchLeaseManager } = require('../runtime/workbench-lease');
+const { createWorkbenchCoordinator } = require('../server/workbench-coordinator');
 const {
   getReviewDraft,
   saveReviewDraft,
@@ -105,11 +106,11 @@ function isWorkflowRetryNodeAllowed(runtime, nodeId) {
  */
 function createWorkflowControlService(dependencies = {}) {
   const {
-    validateProductionWorkflow,
-    workbench,
+    validateProductionWorkflow = dependencies.validateProductionWorkflow || require('./pipeline-params').validateProductionWorkflow,
+    workbench = dependencies.workbench || createWorkbenchCoordinator(),
     isValidWorkflowRunIdParam = (value) => Boolean(value) && /^[A-Za-z0-9_-]+$/.test(String(value).trim()),
-    requestRuntimeCancel,
-    readRuntimeState,
+    requestRuntimeCancel = dependencies.requestRuntimeCancel || require('../../skills/pipeline-flow/runtime/store').requestRuntimeCancel,
+    readRuntimeState = dependencies.readRuntimeState || require('../../skills/pipeline-flow/runtime/store').readRuntimeState,
     getPipelineRuntimeRunner = dependencies.getPipelineRuntimeRunner || (() => require('../../skills/pipeline-flow/runtime/runner').runPipelineRuntime),
     prepareSupplement = prepareKeywordSupplement,
     parsePositiveNumber = (value, fallback) => {
@@ -120,20 +121,17 @@ function createWorkflowControlService(dependencies = {}) {
     recoverSycmAccessAfterChrome,
     requestRuntimeRetryStep = dependencies.requestRuntimeRetryStep || require('../../skills/pipeline-flow/runtime/store').requestRuntimeRetryStep,
     pipelineRunResponse = dependencies.pipelineRunResponse || ((id, extra = {}) => ({ runId: id, ...extra })),
-    retryWorkflowNode,
-    getRun,
+    getRun = dependencies.getRun || require('../../skills/pipeline-flow/src/run-store').getRun,
     requestRuntimeResume = dependencies.requestRuntimeResume || require('../../skills/pipeline-flow/runtime/store').requestRuntimeResume,
-    resumeWorkflow,
-    requestRuntimePause,
-    markRunPaused,
-    resolveProductionWorkflowLaunch,
+    requestRuntimePause = dependencies.requestRuntimePause || require('../../skills/pipeline-flow/runtime/store').requestRuntimePause,
+    resolveProductionWorkflowLaunch = dependencies.resolveProductionWorkflowLaunch || require('./pipeline-params').resolveProductionWorkflowLaunch,
     resolveManualShareParams = async (_mode, params) => params,
-    sanitizeWorkflowParams,
-    createRunId,
-    resolveProductionWorkflowDefinition,
-    writeWorkflowDefinition,
-    listPipelineRuns,
-    summarizePipelineRun,
+    sanitizeWorkflowParams = dependencies.sanitizeWorkflowParams || require('./pipeline-params').sanitizeWorkflowParams,
+    createRunId = dependencies.createRunId || require('../../skills/pipeline-flow/src/run-store').createRunId,
+    resolveProductionWorkflowDefinition = dependencies.resolveProductionWorkflowDefinition || require('./pipeline-params').resolveProductionWorkflowDefinition,
+    writeWorkflowDefinition = dependencies.writeWorkflowDefinition || require('./pipeline-storage').writeWorkflowDefinition,
+    listPipelineRuns = dependencies.listPipelineRuns || require('../../skills/pipeline-flow/src/run-store').listPipelineRuns,
+    summarizePipelineRun = dependencies.summarizePipelineRun || require('../pipeline-run-summary').summarizePipelineRun,
     withPipelineRuntimeFields = (value) => value,
     appendRunCandidates,
     runPipelineStep,
@@ -186,12 +184,13 @@ function createWorkflowControlService(dependencies = {}) {
       if (stopAfterStep) params.stopAfterStep = stopAfterStep;
       const runId = createRunId();
       const definition = resolveProductionWorkflowDefinition(body || {}, launch);
-      writeWorkflowDefinition({ runId, definition });
+      writeWorkflowDefinition({ dataDir, runId, definition });
       Object.assign(runState, { runId, mode: launch.mode });
       const promise = workbench.runReserved(runState, () => getPipelineRuntimeRunner()({
         runId,
         mode: launch.mode,
         params,
+        ...(dataDir ? { dataDir } : {}),
         ...(stopAfterStep ? { stopAfterStep } : {})
       }));
 
@@ -248,10 +247,9 @@ function createWorkflowControlService(dependencies = {}) {
    * @param {string} options.runId 运行 ID。
    * @param {string} [options.reason] 暂停原因。
    * @param {boolean} [options.validateRunId=false] 是否校验 runId 格式。
-   * @param {boolean} [options.allowLegacyFallback=false] 是否回退旧 run-store。
    * @returns {{httpStatus:number, body:object}}
    */
-  function pauseRun({ runId, reason, validateRunId = false, allowLegacyFallback = false }) {
+  function pauseRun({ runId, reason, validateRunId = false }) {
     if (validateRunId && !isValidWorkflowRunIdParam(runId)) {
       return { httpStatus: 400, body: { ok: false, error: '无效的运行 ID。' } };
     }
@@ -267,17 +265,10 @@ function createWorkflowControlService(dependencies = {}) {
           body: { ok: true, data: pipelineRunResponse(runId, { control }) }
         };
       }
-      if (allowLegacyFallback) {
-        const run = markRunPaused(runId);
-        if (!run) {
-          return { httpStatus: 404, body: { ok: false, error: '工作流运行不存在' } };
-        }
-        return { httpStatus: 200, body: { ok: true, run } };
-      }
       return { httpStatus: 404, body: { ok: false, error: '未找到该流程运行记录' } };
     } catch (err) {
       return {
-        httpStatus: allowLegacyFallback ? 400 : 500,
+        httpStatus: 500,
         body: { ok: false, error: err.message }
       };
     }
@@ -288,15 +279,14 @@ function createWorkflowControlService(dependencies = {}) {
    * @param {object} options 恢复参数。
    * @param {string} options.runId 运行 ID。
    * @param {boolean} [options.validateRunId=false] 是否先校验 runId 格式。
-   * @param {boolean} [options.allowLegacyFallback=false] 是否允许回退旧 scheduler。
    * @param {'workflow'|'pipeline'} [options.source='workflow'] 调用来源。
    * @returns {Promise<{httpStatus:number, body:object}>}
    */
-  async function resumeRun({ runId, validateRunId = false, allowLegacyFallback = false, source = 'workflow', stopAfterStep = null }) {
+  async function resumeRun({ runId, validateRunId = false, source = 'workflow', stopAfterStep = null }) {
     if (validateRunId && !isValidWorkflowRunIdParam(runId)) {
       return { httpStatus: 400, body: { ok: false, error: '无效的运行 ID。' } };
     }
-    if (source === 'pipeline' && workbench.current) {
+    if (workbench.current) {
       return {
         httpStatus: 409,
         body: { ok: false, error: '已有工作流正在运行，请等待完成后再继续。' }
@@ -404,20 +394,10 @@ function createWorkflowControlService(dependencies = {}) {
           body: { ok: true, data: pipelineRunResponse(runId, { control }) }
         };
       }
-      if (allowLegacyFallback) {
-        if (workbench.current) {
-          return {
-            httpStatus: 409,
-            body: { ok: false, error: '已有工作流正在运行，请等待完成后再继续。' }
-          };
-        }
-        await workbench.run({ runId, mode: 'legacy-resume' }, () => resumeWorkflow(runId));
-        return { httpStatus: 200, body: { ok: true, run: getRun(runId) } };
-      }
       return { httpStatus: 404, body: { ok: false, error: '未找到该流程运行记录' } };
     } catch (err) {
       return {
-        httpStatus: allowLegacyFallback ? 400 : 500,
+        httpStatus: 500,
         body: { ok: false, error: err.message }
       };
     }
@@ -429,10 +409,15 @@ function createWorkflowControlService(dependencies = {}) {
    * @param {string} options.runId 运行 ID。
    * @param {string} options.stepId 步骤或节点 ID。
    * @param {'workflow'|'pipeline'} [options.source='workflow'] 调用来源。
-   * @param {boolean} [options.allowLegacyFallback=false] 是否允许回退旧 scheduler。
    * @returns {Promise<{httpStatus:number, body:object}>}
    */
-  async function retryStep({ runId, stepId, source = 'workflow', allowLegacyFallback = false }) {
+  async function retryStep({ runId, stepId, source = 'workflow' }) {
+    if (workbench.current) {
+      return {
+        httpStatus: 409,
+        body: { ok: false, error: '已有工作流正在运行，请等待完成后再重试。' }
+      };
+    }
     if (source === 'pipeline') {
       if (!isValidWorkflowRunIdParam(runId)) {
         return { httpStatus: 400, body: { ok: false, error: '无效的运行 ID。' } };
@@ -600,16 +585,6 @@ function createWorkflowControlService(dependencies = {}) {
           httpStatus: 200,
           body: { ok: true, data: pipelineRunResponse(runId, { control }) }
         };
-      }
-      if (allowLegacyFallback) {
-        if (workbench.current) {
-          return {
-            httpStatus: 409,
-            body: { ok: false, error: '已有工作流正在运行，请等待完成后再重试。' }
-          };
-        }
-        await workbench.run({ runId, mode: 'legacy-retry' }, () => retryWorkflowNode(runId, nodeId));
-        return { httpStatus: 200, body: { ok: true, run: getRun(runId) } };
       }
       return { httpStatus: 404, body: { ok: false, error: '未找到该流程运行记录' } };
     } catch (err) {

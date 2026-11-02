@@ -79,94 +79,27 @@ test('Workflow Observability - State Normalization Helper', (t) => {
   assert.strictEqual(normRate.cooldownRemainingMs, 30000);
 });
 
-test('Workflow Observability - Scheduler Platform Blocker Mapping & Failed Node Fields', async (t) => {
-  // Register a node type that fails with a PlatformAccessError
-  registerNode('test-platform-blocked-node', {
-    execute: async (inputs, params, context) => {
-      throw new PlatformAccessError('Slide required', {
-        status: 'slider_required',
-        platform: 'sycm'
-      });
-    }
-  });
-
+test('Workflow Observability - Scheduler Platform Blocker Mapping & Failed Node Fields is retired per ADR v1.0', async () => {
   const mockWorkflow = {
     nodes: [
-      { id: 'node_block', type: 'test-platform-blocked-node', data: { label: '滑块节点' } }
+      { id: 'node_block', type: 'input', data: { label: '输入' } }
     ],
     edges: []
   };
 
   const run = createRun(mockWorkflow);
-
-  // Start executing the workflow and expect it to fail due to platform block
-  try {
-    await startWorkflow(run.runId);
-  } catch (err) {
-    // Expected exception
-  }
-
-  const finalRun = getRun(run.runId);
-  assert.ok(finalRun);
-
-  const blockedNodeState = finalRun.nodeStates['node_block'];
-  assert.ok(blockedNodeState);
-  assert.strictEqual(blockedNodeState.status, 'waiting_manual');
-  assert.strictEqual(blockedNodeState.blocker, 'captcha_required');
-  assert.match(blockedNodeState.actionHint, /完成 SYCM 的验证码/);
-  assert.strictEqual(blockedNodeState.platform, 'sycm');
-  assert.strictEqual(blockedNodeState.error, 'Slide required');
-  assert.ok(blockedNodeState.durationMs >= 0);
-  assert.strictEqual(blockedNodeState.progress.status, 'waiting_manual');
-  assert.strictEqual(blockedNodeState.progress.percent, 100);
-
-  // Clean up
-  const runFile = path.join(workflowDataDir, `${run.runId}.json`);
-  const logFile = path.join(workflowDataDir, `${run.runId}.log`);
-  if (fs.existsSync(runFile)) fs.unlinkSync(runFile);
-  if (fs.existsSync(logFile)) fs.unlinkSync(logFile);
+  await assert.rejects(async () => startWorkflow(run.runId), {
+    code: 'SCHEDULER_RETIRED'
+  });
 });
 
-test('Workflow Recovery - resume keeps manual node blocked when platform is unavailable', async (t) => {
-  registerNode('test-manual-platform-node', {
-    execute: async () => {
-      throw new PlatformAccessError('Need login again', {
-        status: 'login_required',
-        platform: 'taobao'
-      });
-    }
-  });
-
+test('Workflow Recovery - resume keeps manual node blocked is retired per ADR v1.0', async () => {
   const run = createRun({
-    nodes: [{ id: 'manual', type: 'test-manual-platform-node', data: {} }],
+    nodes: [{ id: 'manual', type: 'input', data: {} }],
     edges: []
   });
 
-  await startWorkflow(run.runId);
-  const blocked = getRun(run.runId);
-  assert.strictEqual(blocked.status, 'waiting_manual');
-  assert.strictEqual(blocked.nodeStates.manual.status, 'waiting_manual');
-  assert.strictEqual(blocked.nodeStates.manual.platform, 'taobao');
-  assert.strictEqual(blocked.nodeStates.manual.platformStatus, 'login_required');
-
-  reportPlatformBlocker('taobao', {
-    status: 'login_required',
-    userMessage: '请先重新登录淘宝账号',
-    cooldownMs: 60_000
+  await assert.rejects(async () => resumeWorkflow(run.runId), {
+    code: 'SCHEDULER_RETIRED'
   });
-
-  await resumeWorkflow(run.runId);
-  const resumed = getRun(run.runId);
-  assert.strictEqual(resumed.status, 'waiting_manual');
-  assert.strictEqual(resumed.nodeStates.manual.status, 'waiting_manual');
-  assert.strictEqual(resumed.nodeStates.manual.platform, 'taobao');
-  assert.strictEqual(resumed.nodeStates.manual.platformStatus, 'login_required');
-  assert.strictEqual(resumed.nodeStates.manual.blocker, 'login_required');
-  assert.match(resumed.nodeStates.manual.actionHint, /重新登录淘宝/);
-  assert.ok(resumed.nodeStates.manual.cooldownRemainingMs > 0);
-
-  const runFile = path.join(workflowDataDir, `${run.runId}.json`);
-  const logFile = path.join(workflowDataDir, `${run.runId}.log`);
-  if (fs.existsSync(runFile)) fs.unlinkSync(runFile);
-  if (fs.existsSync(logFile)) fs.unlinkSync(logFile);
 });

@@ -194,7 +194,10 @@ function createToolExecutor(deps = {}) {
       caller,
       abortSignal: options.abortSignal,
       logger,
-      leaseManager
+      leaseManager,
+      ...(options.context || {}),
+      ...(options.dataDir ? { dataDir: options.dataDir } : {}),
+      ...(options.controlService ? { controlService: options.controlService } : {})
     };
 
     // 4. 执行函数（包含物理资源租约获取生命周期，并在异常时确保 opRecord 落盘）

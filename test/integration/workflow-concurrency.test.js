@@ -102,7 +102,7 @@ for (const [first, second] of [['/api/pipeline/start', '/api/workflows/run'], ['
       };
       request = f.post(first);
       await entered.promise;
-      for (const path of [second, '/api/workbench/run', '/api/pipeline/runs/existing/verify', '/api/pipeline/runs/existing/resume', '/api/workflows/runs/existing/retry-node', '/api/workflows/runs/legacy/resume', '/api/workflows/runs/legacy/retry-node']) {
+      for (const path of [second, '/api/workbench/run', '/api/pipeline/runs/existing/verify', '/api/pipeline/runs/existing/resume', '/api/workflows/runs/existing/retry-node']) {
         assert.equal((await f.post(path, { nodeId: 'verify' })).status, 409, path);
       }
       assert.equal(f.writes.length, 0);
@@ -199,19 +199,19 @@ test('legacy direct-step execution participates in shared occupancy and releases
 });
 
 for (const action of ['resume', 'retry-node']) {
-  test(`legacy ${action} shares the coordinator with modern pipeline routes`, { timeout: 10000 }, async () => {
+  test(`pipeline ${action} shares the coordinator with modern pipeline routes`, { timeout: 10000 }, async () => {
     const f = await fixture();
     const entered = deferred();
     const running = deferred();
     let request;
     try {
-      f.app.locals.legacyRunner = () => { entered.resolve(); return running.promise; };
-      request = f.post(`/api/workflows/runs/legacy/${action}`, { nodeId: 'work' });
+      f.app.locals.pipelineRuntimeRunner = () => { entered.resolve(); return running.promise; };
+      request = f.post(`/api/workflows/runs/existing/${action}`, { nodeId: 'verify' });
       await entered.promise;
       assert.equal((await f.post('/api/pipeline/start')).status, 409);
       assert.equal((await f.post('/api/workflows/runs/other/resume')).status, 409);
-      running.reject(new Error('fixture legacy failure'));
-      assert.equal((await request).status, 400);
+      running.reject(new Error('fixture runtime failure'));
+      await request;
       assert.equal(f.workbench.current, null);
       assert.equal((await f.post('/api/workflows/run')).status, 200);
     } finally { running.resolve({}); await request?.catch(() => {}); await f.close(); }

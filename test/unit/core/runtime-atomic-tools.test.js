@@ -13,7 +13,7 @@ const { queryTool } = require('../../../skills/sycm-research/src/query-tool');
 const { generateTool } = require('../../../skills/title-gen/src/generate-tool');
 
 describe('core/runtime/atomic-tools', () => {
-  it('应当能正常装配 3 个首批原子工具且名称与别名正确', () => {
+  it('应当能正常装配全量 17 个工具且包含首批原子工具与名称别名', () => {
     const registry = createDefaultToolRegistry();
 
     assert.ok(registry.has('sycm.query'));
@@ -24,7 +24,7 @@ describe('core/runtime/atomic-tools', () => {
     assert.ok(registry.has('generate_title'));
 
     const list = registry.list();
-    assert.equal(list.length, 3);
+    assert.equal(list.length, 17);
   });
 
   it('keyword.suggest 工具应当能正常透传策略参数，不应报无效策略 undefined', async () => {

@@ -161,3 +161,16 @@ Only `decision: "continue"` should move forward automatically.
 - `sycm-research` can still be used alone.
 - `title-gen` can still be used alone.
 - `1688-distribution` is separate and must only run after export plus human confirmation.
+
+## Standard Agent MCP Workflow Tools (PR-07)
+
+External harnesses (Codex, Antigravity, dsh) interact with workflows via unified MCP tools in `bin/mcp-server.mjs`:
+
+1. `workflow_start`: Launch pipeline with optional `stopAfterStep` (e.g. `stopAfterStep: 'keywordReview'`). Returns `{ runId, status: 'started', mode }`.
+2. `workflow_status`: Query run state, active step, and review hints with `{ runId }`.
+3. `workflow_submit_review`:
+   - `action='draft'`: Agent submits review drafts with `{ runId, stepId, decisions, action: 'draft', version }`.
+   - `action='confirm'`: Requires human context. **Model/Agent self-confirmation is strictly forbidden** per ADR v1.0 (D8).
+   - Optimistic locking: Returns `409 REVIEW_VERSION_CONFLICT` if `version` does not match current draft version.
+4. `workflow_resume`: Resume paused or reviewed run with `{ runId, stopAfterStep }`.
+5. `workflow_cancel`: Safely request cancellation at step boundaries with `{ runId, reason }`.

@@ -80,7 +80,7 @@ my-title/
 }
 ```
 
-暴露工具：`taobao_opc_list_tools`, `taobao_opc_call`, `generate_title`, `batch_generate_titles`, `opportunities`, `trend`, `sycm_query`, `sycm_status`, `suggest_keywords`, `discover_peers`, `get_peer_discovery_status`, `cancel_peer_discovery`
+暴露工具：`taobao_opc_list_tools`, `taobao_opc_call`, `generate_title`, `batch_generate_titles`, `opportunities`, `trend`, `sycm_query`, `sycm_status`, `suggest_keywords`, `discover_peers`, `get_peer_discovery_status`, `cancel_peer_discovery`, `workflow_start`, `workflow_status`, `workflow_submit_review`, `workflow_resume`, `workflow_cancel`
 
 ---
 
@@ -202,6 +202,11 @@ cp .env.example .env
 | `discover_peers` | 以货找店与图搜选货铺货 | `links`, `discoveryBranch`, `imagePriceRatioThreshold`, `port` |
 | `get_peer_discovery_status` | 同行发现任务状态与进度查询 | `taskId` |
 | `cancel_peer_discovery` | 取消进行中的同行发现任务 | `taskId` |
+| `workflow_start` | 启动选品工作流（支持局部阶段 `stopAfterStep`） | `mode`, `keyword`, `count`, `stopAfterStep`, `params` |
+| `workflow_status` | 查询工作流运行状态与复核提示 | `runId` |
+| `workflow_submit_review` | 提交业务复核（Agent 草稿或人工确认，支持乐观锁） | `runId`, `stepId`, `decisions`, `action`, `version` |
+| `workflow_resume` | 恢复暂停或待复核的工作流 | `runId`, `stopAfterStep` |
+| `workflow_cancel` | 安全边界取消运行中的工作流 | `runId`, `reason` |
 
 ### generate_title 返回结构
 

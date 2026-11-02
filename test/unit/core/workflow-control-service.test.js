@@ -115,19 +115,16 @@ test('createWorkflowControlService unifies start, pause, resume, retry and cance
   assert.equal(missingPipelinePause.httpStatus, 404);
 
   const legacyPause = service.pauseRun({
-    runId: 'legacy-1',
-    allowLegacyFallback: true
+    runId: 'legacy-1'
   });
-  assert.equal(legacyPause.httpStatus, 200);
-  assert.equal(legacyPause.body.run.runId, 'legacy-1');
+  assert.equal(legacyPause.httpStatus, 404);
 
   // 4. Retry step checks Chrome preflight for verify
   chromeReady = false;
   const blockedRetry = await service.retryStep({
     runId,
     stepId: 'verify',
-    source: 'workflow',
-    allowLegacyFallback: true
+    source: 'workflow'
   });
   assert.equal(blockedRetry.httpStatus, 409);
   assert.equal(blockedRetry.body.code, 'SYCM_CHROME_REQUIRED');
@@ -136,14 +133,13 @@ test('createWorkflowControlService unifies start, pause, resume, retry and cance
   const okRetry = await service.retryStep({
     runId,
     stepId: 'verify',
-    source: 'workflow',
-    allowLegacyFallback: true
+    source: 'workflow'
   });
   assert.equal(okRetry.httpStatus, 200);
   assert.equal(okRetry.body.data.control.step, 'verify');
   await new Promise((resolve) => setImmediate(resolve));
 
-  // 5. Resume runtime & legacy fallback
+  // 5. Resume runtime & non-existent run returns 404
   const resumed = await service.resumeRun({
     runId,
     source: 'pipeline',
@@ -155,11 +151,9 @@ test('createWorkflowControlService unifies start, pause, resume, retry and cance
 
   const legacyResumed = await service.resumeRun({
     runId: 'legacy-1',
-    source: 'workflow',
-    allowLegacyFallback: true
+    source: 'workflow'
   });
-  assert.equal(legacyResumed.httpStatus, 200);
-  assert.equal(legacyResumed.body.run.status, 'completed');
+  assert.equal(legacyResumed.httpStatus, 404);
 
   // 6. Cancel validation & execution
   assert.equal(service.cancelRun({ runId: 'bad id!' }).httpStatus, 400);

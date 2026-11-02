@@ -53,3 +53,8 @@ Tool names may change. Always trust `listTools()` over this list.
 - Do not guess tool arguments.
 - Do not call a remote tool before reading its schema.
 - Do not store auth tokens in source files.
+
+## Unified MCP Tools (PR-07)
+
+- `taobao_opc_list_tools`: Inspect tools exposed by the remote Taobao OPC/OPT gateway.
+- `taobao_opc_call`: Execute a remote Taobao OPC/OPT tool with `{ toolName, arguments }`.
