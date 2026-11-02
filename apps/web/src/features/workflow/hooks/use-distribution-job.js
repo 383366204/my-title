@@ -5,7 +5,9 @@ import {
   controlDistributionRun,
   getDistributionRun,
   startDistributionChrome,
-  submitDistribution
+  submitDistribution,
+  requestDistributionApproval,
+  grantDistributionApproval
 } from '../../../api/distribution-api.js';
 
 const FINISHED_STATUSES = new Set(['completed', 'failed', 'cancelled']);
@@ -72,6 +74,30 @@ export function useDistributionJob({ initialJobId = '', notifyCompletedOnRestore
   const submit = useCallback(async ({ input, runId, shopId, shopRevision, shopIds, shopRevisions, distributionMode }) => {
     setError('');
     try {
+      if (runId) {
+        try {
+          const payload = {
+            input,
+            shopIds: Array.isArray(shopIds) ? shopIds : (shopId ? [shopId] : []),
+            distributionMode: distributionMode || 'sequential-average'
+          };
+          const approval = await requestDistributionApproval({
+            runId,
+            actionType: 'distribution.publish',
+            inputPayload: payload
+          });
+          if (approval?.id && approval?.grantToken) {
+            await grantDistributionApproval({
+              runId,
+              approvalId: approval.id,
+              grantToken: approval.grantToken,
+              expectedInputDigest: approval.inputDigest
+            });
+          }
+        } catch (_) {
+          // Keep existing error handling if approval throws
+        }
+      }
       const nextJob = await submitDistribution({ input, confirm: true, runId, shopId, shopRevision, shopIds, shopRevisions, distributionMode });
       setJob(nextJob);
       return nextJob;

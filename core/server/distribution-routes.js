@@ -2,6 +2,27 @@
 const { createDistributionShopStore } = require('../distribution-shops');
 const { distributionMode, distributionTargetKey, distributionTargets } = require('../distribution-targets');
 const { validateDistributionCategories } = require('./distribution-category-validation');
+const { readRuntimeState } = require('../../skills/pipeline-flow/runtime/store');
+const { resolveTrustedHumanContext } = require('../workflow/human-context');
+const {
+  verifyExecutionApproval,
+  consumeExecutionApproval,
+  requestExecutionApproval,
+  grantExecutionApproval,
+  rejectExecutionApproval,
+  getExecutionApproval,
+  normalizeDistributionPayload,
+  ApprovalForbiddenError,
+  ApprovalConflictError
+} = require('../workflow/execution-approval');
+const {
+  getSubmissionLedger,
+  recordSubmissionAttempt,
+  recordSubmissionSuccess,
+  recordSubmissionFailure,
+  isBatchSubmitted,
+  computeBatchFingerprint
+} = require('../workflow/submission-ledger');
 
 /**
  * 注册铺货预检、提交、人工确认及任务控制接口。
@@ -113,6 +134,40 @@ function registerDistributionRoutes(app, deps) {
         return res.status(409).json({ ok: false, error: '此运行已有铺货记录，不能切换目标店铺或商品分配方式。请新建运行。' });
       }
       if (previous?.status === 'completed') return res.status(409).json({ ok: false, error: '此运行已经铺货完成，请勿重复提交。' });
+      if (req.body?.runId) {
+        const payloadToVerify = (deps.normalizeDistributionPayload || normalizeDistributionPayload)({
+          input,
+          shopIds: Array.isArray(req.body?.shopIds) ? req.body.shopIds : (req.body?.shopId ? [req.body.shopId] : []),
+          distributionMode: req.body?.distributionMode
+        });
+        const existingApproval = (deps.getExecutionApproval || getExecutionApproval)({
+          dataDir: deps.dataDir,
+          runId: req.body.runId,
+          actionType: 'distribution.publish'
+        });
+        const runtime = (deps.readRuntimeState || readRuntimeState)({
+          dataDir: deps.dataDir,
+          runId: req.body.runId,
+          autoRecover: false
+        });
+        const shouldEnforceApproval = Boolean(
+          deps.enforceApproval === true ||
+          existingApproval
+        );
+
+        if (shouldEnforceApproval) {
+          const verification = (deps.verifyExecutionApproval || verifyExecutionApproval)({
+            dataDir: deps.dataDir,
+            runId: req.body.runId,
+            actionType: 'distribution.publish',
+            inputPayload: payloadToVerify,
+            currentRunRevision: runtime?.revision
+          });
+          if (!verification.ok) {
+            return res.status(409).json({ ok: false, code: verification.code, error: verification.error });
+          }
+        }
+      }
       const readiness = await checkDistributionReadiness({
         ...selection,
         input,
@@ -169,6 +224,13 @@ function registerDistributionRoutes(app, deps) {
               ? 'completed'
               : 'completed_with_issues';
         if (finalStatus === 'completed' && job.workflowRunId) {
+          try {
+            (deps.consumeExecutionApproval || consumeExecutionApproval)({
+              dataDir: deps.dataDir,
+              runId: job.workflowRunId,
+              actionType: 'distribution.publish'
+            });
+          } catch (_) {}
           try {
             syncCompletedDistributionWorkflow({ ...job, status: finalStatus, result });
           } catch (workflowError) {
@@ -318,6 +380,120 @@ function registerDistributionRoutes(app, deps) {
       return res.json({ ok: true, data: next });
     } catch (err) {
       return res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
+  app.post('/api/distribution/approval/request', (req, res) => {
+    try {
+      const { runId, inputPayload, actionType = 'distribution.publish', runRevision, requestedBy } = req.body || {};
+      if (!runId) return res.status(400).json({ ok: false, error: '缺少 runId' });
+      const normalizedPayload = actionType === 'distribution.publish'
+        ? (deps.normalizeDistributionPayload || normalizeDistributionPayload)(inputPayload)
+        : inputPayload;
+      const requester = deps.requestExecutionApproval || requestExecutionApproval;
+      const approval = requester({
+        dataDir: deps.dataDir,
+        runId,
+        actionType,
+        inputPayload: normalizedPayload,
+        runRevision,
+        requestedBy
+      });
+      return res.json({ ok: true, data: approval });
+    } catch (err) {
+      return res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  app.post('/api/distribution/approval/grant', (req, res) => {
+    try {
+      const { runId, approvalId, actionType = 'distribution.publish', expectedInputDigest, grantToken } = req.body || {};
+      if (!runId) return res.status(400).json({ ok: false, error: '缺少 runId' });
+
+      // 快速拒绝 Agent 标头与载荷的自批准尝试
+      const earlyCheck = resolveTrustedHumanContext(req, deps, { strictApproval: false });
+      if (!earlyCheck.ok && earlyCheck.code === 'APPROVAL_SELF_GRANT_FORBIDDEN') {
+        return res.status(403).json({ ok: false, code: earlyCheck.code, error: earlyCheck.error });
+      }
+
+      const getter = deps.getExecutionApproval || getExecutionApproval;
+      const approval = getter({ dataDir: deps.dataDir, runId, approvalId, actionType });
+      if (!approval) {
+        return res.status(409).json({ ok: false, code: 'APPROVAL_NOT_FOUND', error: '未找到待批准的执行授权申请' });
+      }
+
+      const tokenFromReq = grantToken || req.headers?.['x-approval-token'];
+      const humanContext = resolveTrustedHumanContext(req, deps, {
+        strictApproval: true,
+        expectedGrantToken: approval.grantToken,
+        grantToken: tokenFromReq
+      });
+      if (!humanContext.ok) {
+        return res.status(403).json({ ok: false, code: humanContext.code, error: humanContext.error });
+      }
+
+      const granter = deps.grantExecutionApproval || grantExecutionApproval;
+      const approved = granter({
+        dataDir: deps.dataDir,
+        runId,
+        approvalId: approval.id,
+        actionType,
+        approvedBy: humanContext.identity,
+        grantToken: tokenFromReq,
+        expectedInputDigest
+      });
+      return res.json({ ok: true, data: approved });
+    } catch (err) {
+      if (err instanceof ApprovalForbiddenError || err.code === 'APPROVAL_SELF_GRANT_FORBIDDEN' || err.code === 'APPROVAL_TOKEN_INVALID') {
+        return res.status(403).json({ ok: false, code: err.code, error: err.message });
+      }
+      if (err instanceof ApprovalConflictError || err.code === 'APPROVAL_INPUT_MISMATCH' || err.code === 'APPROVAL_REVISION_MISMATCH' || err.code === 'APPROVAL_NOT_FOUND') {
+        return res.status(409).json({ ok: false, code: err.code, error: err.message });
+      }
+      return res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  app.post('/api/distribution/approval/reject', (req, res) => {
+    try {
+      const { runId, approvalId, actionType, rejectedBy, reason } = req.body || {};
+      if (!runId) return res.status(400).json({ ok: false, error: '缺少 runId' });
+      const rejecter = deps.rejectExecutionApproval || rejectExecutionApproval;
+      const approval = rejecter({
+        dataDir: deps.dataDir,
+        runId,
+        approvalId,
+        actionType,
+        rejectedBy: rejectedBy || 'user',
+        reason
+      });
+      return res.json({ ok: true, data: approval });
+    } catch (err) {
+      return res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
+  app.get('/api/distribution/approval', (req, res) => {
+    try {
+      const { runId, approvalId, actionType } = req.query || {};
+      if (!runId) return res.status(400).json({ ok: false, error: '缺少 runId' });
+      const getter = deps.getExecutionApproval || getExecutionApproval;
+      const approval = getter({ dataDir: deps.dataDir, runId, approvalId, actionType });
+      return res.json({ ok: true, data: approval });
+    } catch (err) {
+      return res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  app.get('/api/distribution/ledger', (req, res) => {
+    try {
+      const { runId } = req.query || {};
+      if (!runId) return res.status(400).json({ ok: false, error: '缺少 runId' });
+      const getter = deps.getSubmissionLedger || getSubmissionLedger;
+      const ledger = getter({ dataDir: deps.dataDir, runId });
+      return res.json({ ok: true, data: ledger });
+    } catch (err) {
+      return res.status(500).json({ ok: false, error: err.message });
     }
   });
 }

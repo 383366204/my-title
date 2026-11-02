@@ -358,6 +358,7 @@ const distributionJobs = createDistributionJobs({
 });
 registerDistributionRoutes(app, {
   jobs: distributionJobs,
+  dataDir: DEFAULT_DATA_DIR,
   parseItems,
   checkDistributionReadiness,
   parsePositiveNumber,
@@ -616,6 +617,7 @@ registerWorkflowControlRoutes(app, { controlService: workflowControlService });
 
 // 人工筛词确认后暂停在下一步骤，等待用户继续。
 registerSelectionReviewRoutes(app, {
+  dataDir: DEFAULT_DATA_DIR,
   isValidWorkflowRunIdParam,
   flowReviewCandidates,
   flowReviewProducts,
