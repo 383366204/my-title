@@ -89,6 +89,11 @@ my-title/
 | 任务 | 位置 | 备注 |
 |------|------|------|
 | 架构决议 (ADR v1.0) | `docs/architecture/agent-platform-adr-v1.md` | Agent 平台改造架构决议、入口与存储清单 |
+| Agent 引擎核心 (PR-08) | `core/agent/agent-runner.js` | 受限 AgentRunner (EventEmitter、自愈、冲突感知分桶、HITL 挂起) |
+| 文件级 Skill 加载器 (D10) | `core/agent/skill-loader.js` | `skills/*/SKILL.md` 索引与按需装载 |
+| 会话持久化与崩溃自愈 | `core/agent/session-store.js` | 原子落盘与 PID 僵尸会话自愈 (Zombie Sweep) |
+| 上下文截断卫士 | `core/agent/tool-compactor.js` | 提炼紧凑摘要并硬顶截断 (Hard Cap 2048 chars) |
+| 动态多模型配置中心 | `core/llm/settings-manager.js` | 动态覆盖优先 + .env 兜底 + 脱敏与连通性探针 |
 | 添加 CLI 命令 | `bin/cli.js` | 使用 commander, 编排各 skill |
 | Web / Runtime 服务入口 | `bin/server.js` + `core/server/` | Express 路由与本地工作台服务 |
 | Workflow 控制服务 | `core/workflow/control-service.js` | 统一收拢 start / pause / resume / retry / cancel 控制流 |

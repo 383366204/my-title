@@ -42,6 +42,15 @@ test('server retains all pre-refactor paths, HTTP methods and route middleware c
     { method: 'post', path: '/api/distribution/approval/grant', handlers: 1 },
     { method: 'post', path: '/api/distribution/approval/reject', handlers: 1 }
   );
+  filteredExpected.push(
+    { method: 'get', path: '/api/runtime/llm/settings', handlers: 1 },
+    { method: 'post', path: '/api/runtime/llm/settings', handlers: 1 },
+    { method: 'post', path: '/api/runtime/llm/test', handlers: 1 },
+    { method: 'post', path: '/api/runtime/agent/chat', handlers: 1 },
+    { method: 'get', path: '/api/runtime/agent/sessions', handlers: 1 },
+    { method: 'get', path: '/api/runtime/agent/sessions/:id', handlers: 1 },
+    { method: 'post', path: '/api/runtime/agent/sessions/:id/resume', handlers: 1 }
+  );
   filteredExpected.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
   assert.deepEqual(actual, filteredExpected);
   assert.equal(routes.at(-1).path, '*', 'SPA fallback must follow API routes');
