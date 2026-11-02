@@ -243,10 +243,16 @@ class AgentRunner extends EventEmitter {
 
         // 发送思考与文本流式事件
         if (assistantMsg.reasoning_content) {
-          this.emit('thinking:chunk', { chunk: assistantMsg.reasoning_content });
+          this.emit('thinking:chunk', {
+            chunk: assistantMsg.reasoning_content,
+            text: assistantMsg.reasoning_content
+          });
         }
         if (assistantMsg.content) {
-          this.emit('content:chunk', { chunk: assistantMsg.content });
+          this.emit('content:chunk', {
+            chunk: assistantMsg.content,
+            text: assistantMsg.content
+          });
         }
 
         // 4. 若模型未调用任何工具，代表思考已收敛或向用户发问，循环正常结束

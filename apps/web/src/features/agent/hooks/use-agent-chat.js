@@ -128,7 +128,7 @@ export function useAgentChat({ onSelectStep, onHighlightRow } = {}) {
                     ? {
                         ...msg,
                         isThinking: true,
-                        thinking: (msg.thinking || '') + (event.text || '')
+                        thinking: (msg.thinking || '') + (event.text || event.chunk || '')
                       }
                     : msg
                 )
@@ -142,7 +142,7 @@ export function useAgentChat({ onSelectStep, onHighlightRow } = {}) {
                     ? {
                         ...msg,
                         isThinking: false,
-                        content: (msg.content || '') + (event.text || '')
+                        content: (msg.content || '') + (event.text || event.chunk || '')
                       }
                     : msg
                 )
@@ -262,7 +262,8 @@ export function useAgentChat({ onSelectStep, onHighlightRow } = {}) {
                   msg.id === assistantMsgId
                     ? {
                         ...msg,
-                        isThinking: false
+                        isThinking: false,
+                        content: msg.content || event.finalMessage || ''
                       }
                     : msg
                 )

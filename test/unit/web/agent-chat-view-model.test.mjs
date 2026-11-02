@@ -174,4 +174,24 @@ describe('Agent Chat View Model & Card Protocol Unit Tests', () => {
     assert.strictEqual(restored[1].cards[0].type, 'ReviewCard');
     assert.strictEqual(restored[1].cards[0].runId, 'run_restore_1');
   });
+
+  it('should accept either event.chunk or event.text and fallback to event.finalMessage', () => {
+    // 模拟接收到的事件序列，包含 chunk 字段与 completed finalMessage 兜底
+    const events = [
+      { type: 'content:chunk', chunk: '生意参谋状态正常，' },
+      { type: 'content:chunk', text: '已连接 Chrome 9222 端口。' },
+      { type: 'completed', finalMessage: '生意参谋状态正常，已连接 Chrome 9222 端口。' }
+    ];
+
+    let content = '';
+    for (const ev of events) {
+      if (ev.type === 'content:chunk') {
+        content += (ev.text || ev.chunk || '');
+      } else if (ev.type === 'completed') {
+        content = content || ev.finalMessage || '';
+      }
+    }
+
+    assert.strictEqual(content, '生意参谋状态正常，已连接 Chrome 9222 端口。');
+  });
 });
