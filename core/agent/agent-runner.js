@@ -367,6 +367,22 @@ class AgentRunner extends EventEmitter {
                   actionUrl: `/pipeline/review?runId=${runId}&stepId=${stepId}`
                 }
               };
+            } else if (result && (result.status === 'needs_approval' || result.pendingApproval || result.approvalRequired)) {
+              const runId = result.runId || result.run?.id || 'unknown_run';
+              suspendTriggered = {
+                reason: 'needs_approval',
+                card: {
+                  type: 'ApprovalCard',
+                  runId,
+                  approvalId: result.approvalId || result.approval?.id || `app_${Date.now()}`,
+                  grantToken: result.grantToken || result.approval?.grantToken,
+                  actionType: result.actionType || 'distribution.publish',
+                  inputDigest: result.inputDigest || result.approval?.inputDigest,
+                  title: result.title || '外部写操作高危授权确认',
+                  summary: result.summary || result.message || '即将向外部店铺提交铺货发布，需人工签署授权。',
+                  productCount: result.productCount || result.itemCount || 0
+                }
+              };
             }
 
             // 紧凑裁剪入参内容

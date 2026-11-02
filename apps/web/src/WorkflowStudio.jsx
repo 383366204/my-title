@@ -188,7 +188,19 @@ export default function WorkflowStudio({ initialMode: _initialMode }) {
           onSelectNode={setSelectedNodeId} orderedWorkflowNodes={orderedWorkflowNodes} runStatus={runStatus}
           selectedNodeId={selectedNodeId} selectedNodeLabel={selectedNodeLabel}
         />
-        <WorkflowRightSidebar collapsed={rightSidebarCollapsed} isViewingRun={isViewingRun} onToggle={toggleRightSidebar} selectedNode={selectedNode} />
+        <WorkflowRightSidebar
+          collapsed={rightSidebarCollapsed}
+          isViewingRun={isViewingRun}
+          onToggle={toggleRightSidebar}
+          selectedNode={selectedNode}
+          selectedNodeId={selectedNodeId}
+          currentRunId={currentRunId}
+          onSelectStep={(stepId) => setSelectedNodeId(stepId)}
+          onInspectStep={(stepId) => {
+            setSelectedNodeId(stepId);
+            handleNodeAction('inspect', stepId);
+          }}
+        />
       </div>
       <WorkflowOverlayManager
         activeOverlay={activeOverlay} activeTemplateMode={activeTemplateMode} activeTemplateView={activeTemplateView}
